@@ -211,9 +211,10 @@ Red Hat "Zen of Ansible" (playbooks as documentation).
 - **Phase B — stayturgid Phase 1:** move live inventory + operator docs
   here; stayturgid upstream scrubs per its §4.6. `just deploy` runs with
   `ANSIBLE_CONFIG` from this repo.
-- **Phase C — Site contract:** write `SITE-CONTRACT.md` (Entangled) +
-  `site-init`/`site-sync` in stayturgid; site-djbclark becomes the
-  reference consumer.
+- **Phase C — Site contract:** implement per the spec authored 2026-07-18 in
+  stayturgid `docs/architecture/site-contract.md` (CLI surface, lockfile
+  semantics, serverapp adapter interface, acceptance tests); site-djbclark
+  becomes the reference consumer.
 - **Phase D — Shared infra handover:** serverapp adapter roles (§5a:
   caddy_gateway, landing, observability) built in stayturgid; site
   instantiates them; migrate daemon instances to site-owned labels;
