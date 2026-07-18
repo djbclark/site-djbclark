@@ -36,8 +36,16 @@ A session may end only in one of two states:
    discovered, the step's row (difficulty, AI, notes) from the step2 plan.
    If the next step is marked **OPERATOR GATE**, say in the header what the
    human must do or approve before pasting the prompt.
-4. Commit and push everything (this repo: master; stayturgid: branch + PR
-   per its AGENTS.md).
+4. Commit and push everything. This repo: straight to master. stayturgid:
+   branch + PR — and then, **in the same session, once the human has
+   confirmed the checklist (their confirmation IS the review approval):
+   merge the PR (`gh pr merge <n> --merge --delete-branch`), run
+   `git checkout master && git pull --ff-only` in `~/ops/stayturgid`, and
+   verify the repo's check suite is green on merged master.** Never end a
+   session with an open PR, an undeleted step branch, or the stayturgid
+   checkout off master — the next session must start from a master that
+   contains your work. If the human explicitly defers a merge, record the
+   deferral and the open PR number in the ledger line.
 5. Print the new NEXT-PROMPT.md contents in chat, so the human can hand it
    straight to the next AI.
 
