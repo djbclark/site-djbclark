@@ -1,0 +1,52 @@
+# Site path/namespace registry — authority for prefix ownership across the site.
+# See docs/plans/site-djbclark-step1-segmentation-architecture-v1.md §4.
+#
+# Rules:
+#   - Single writer per file. Generated files carry a generated header and are
+#     never hand-edited.
+#   - Shared append-only files (~/.ssh/authorized_keys) are touched only via
+#     per-stack marked blocks; ~/.ssh/config.d/ uses per-stack fragment files.
+#   - Private-inside-public nesting is forbidden (step1 decision 6).
+#
+# Seeded 2026-07-18 (post Big Move to ~/ops).
+
+base_dir:
+  path: ~/ops                # plain directory, never itself a git repo
+  env_var: OPS_ROOT          # contract-level override for other sites
+  checkouts:
+    - ~/ops/stayturgid       # public product (github.com/djbclark/stayturgid)
+    - ~/ops/site-djbclark    # private site repo (github.com/djbclark/site-djbclark)
+  scratch: ~/ops/scratch     # stale checkouts parked here; deletion = operator call
+
+prefixes:
+  stayturgid:
+    - "~/ops/stayturgid/**"
+    - "~/Library/LaunchAgents/com.stayturgid.*"
+    - "~/.config/stayturgid/**"
+    - "~/Library/Logs/stayturgid*"
+    - "~/.ssh/config.d/stayturgid"          # generated SSH fragment
+    - "~/.ssh/authorized_keys"              # marked block only (ET fleet keys)
+  site:
+    - "~/ops/site-djbclark/**"
+    - "~/Library/LaunchAgents/com.djbclark.*"   # de facto since system-state-backup
+    - "~/.config/djbclark/**"                   # reserved; not yet populated
+    - "~/ai-stack/**"                           # AI-stack runtime dir (step0), if kept
+    - "~/.litellm/**"                           # LiteLLM config/cache (step0)
+    - "~/system-state/**"                       # snapshot output; adopt in Phase F
+  brew_services:
+    # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
+    - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal, port 2022"}
+    - {label: homebrew.mxcl.ui-tars,        claimed_by: stayturgid, note: "VLM llama.cpp server, port 8081"}
+    - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "currently exit status 78 (failing)"}
+    - {label: homebrew.mxcl.redis,          claimed_by: unmanaged,  note: "port 6379"}
+    - {label: homebrew.mxcl.herdr,          claimed_by: unmanaged}
+    - {label: homebrew.mxcl.omlx,           claimed_by: unmanaged}
+
+known_gaps:
+  # Observed during the 2026-07-18 survey; resolve during phased work.
+  - "com.stayturgid.landing / landing-discover plists are hand-managed, not
+     Ansible-templated (patched by hand after the Big Move; fold into
+     control_node agents tasks or the Phase D landing adapter role)"
+  - "LaunchDaemons (system domain): com.immich.*, RustDesk, TeamViewer, Zoom,
+     Adobe — all unmanaged; Phase F candidates"
+  - "stayturgid repo-root .env should relocate to ~/.config/stayturgid/"

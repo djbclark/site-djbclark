@@ -1,0 +1,79 @@
+# Site port registry — authority for listen-port allocation across the site.
+# See docs/plans/site-djbclark-step1-segmentation-architecture-v1.md §4.
+#
+# owner: stayturgid | site | brew-services | unmanaged (observed; not yet adopted)
+# status: active (observed listening 2026-07-18) | planned | default-claim
+# Products declare defaults in their role defaults; THIS file is the site
+# authority. Lint: every effective listen port must appear here exactly once
+# per host; collisions fail CI.
+#
+# Seeded 2026-07-18 from netstat, launchd plists, and role defaults on m1-air.
+
+hosts:
+  m1-air:
+    ports:
+      # ── stayturgid (control node) ────────────────────────────────────────
+      - {port: 80,    bind: "*",         owner: stayturgid, service: caddy-http-redirect, status: active}
+      - {port: 443,   bind: "*",         owner: stayturgid, service: caddy-https,         status: active,
+         note: "Tailscale TLS front door mac.greyhound-sidemirror.ts.net; moves to site ownership in Phase D"}
+      - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
+         note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
+      - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
+      - {port: 4097,  bind: "127.0.0.1", owner: stayturgid, service: fleet-dashboard,     status: active,
+         note: "legacy Flask dashboard; retired by O-V-G-O"}
+      - {port: 4317,  bind: "127.0.0.1", owner: stayturgid, service: vector-otlp-grpc,    status: active,
+         note: "moves to site ownership in Phase D"}
+      - {port: 4318,  bind: "0.0.0.0",   owner: stayturgid, service: vector-otlp-http,    status: active,
+         note: "intentionally non-loopback: fleet devices push OTLP; moves to site Phase D"}
+      - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
+      - {port: 5080,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-http,    status: active,
+         note: "moves to site ownership in Phase D"}
+      - {port: 5081,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-grpc,    status: active}
+      - {port: 8080,  bind: "127.0.0.1", owner: stayturgid, service: caddy-health,        status: active,
+         note: "FOOTGUN: landing.py code default is also 8080; plist passes --port 8088"}
+      - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
+         note: "llama.cpp UI-TARS; homebrew.mxcl.ui-tars"}
+      - {port: 8088,  bind: "127.0.0.1", owner: stayturgid, service: landing,             status: active,
+         note: "service directory; moves to site ownership in Phase D"}
+
+      # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
+      - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: planned,
+         note: "brew default; referenced throughout stayturgid docs"}
+      - {port: 8428,  bind: "127.0.0.1", owner: site, service: victoriametrics,  status: planned}
+      - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: planned}
+
+      # ── site: AI stack (step0 plan, revised per step1 §9) ────────────────
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: planned,
+         note: "com.djbclark.litellm; bind widens to Tailscale iff mini consumes it"}
+
+      # ── site: existing com.djbclark.* agents (no listeners) ──────────────
+      # system-state-backup, hibernate-disk-check — no ports.
+
+      # ── brew-services / unmanaged (observed; adopt in Phase F) ───────────
+      - {port: 6379,  bind: "127.0.0.1", owner: unmanaged, service: redis,        status: active}
+      - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
+      - {port: 3283,  bind: "*",         owner: unmanaged, service: apple-remote-desktop, status: active}
+      - {port: 445,   bind: "*",         owner: unmanaged, service: smb,          status: active}
+      - {port: 88,    bind: "*",         owner: unmanaged, service: kerberos-macos, status: active}
+      - {port: 17500, bind: "*",         owner: unmanaged, service: dropbox-lansync, status: active}
+      - {port: 5938,  bind: "*",         owner: unmanaged, service: teamviewer,   status: active}
+      - {port: 8000,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 8021,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9000,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9350,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9999,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 3031,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 15220, bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
+      # postgresql@14 (homebrew.mxcl) currently exit-status 78 — not listening;
+      # mariadb installed but not observed listening. Register when adopted.
+
+  mac-mini-intel:
+    ports: []   # populate when site management reaches the mini
+
+  # vps-*: populate per host when site management reaches the VPSs
+
+# ── Fleet device ports (android; stayturgid product defaults, for reference)
+fleet_defaults:
+  - {port: 5555,  service: adb-wireless}
+  - {port: 8022,  service: termux-sshd}
+  - {port: 65000, service: firerpa}
