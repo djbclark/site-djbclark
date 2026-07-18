@@ -1,124 +1,110 @@
-# NEXT: B5 — Upstream identity scrub and strict validation (difficulty 55/100)
+# NEXT: C1 — Site-contract scaffolding templates (difficulty 40/100)
 
-**Recommended AI:** Anthropic Claude Fable 5, effort Medium
-alt: OpenAI Codex GPT-5.6 Terra, reasoning High
-escalate to: Claude Fable 5, effort High
+**Recommended AI:** Anthropic Claude Sonnet 5, effort Medium
+alt: OpenAI Codex GPT-5.x, reasoning Medium
+escalate to: Claude Fable 5, effort Low
 
 **Working dir:** `/Users/djbclark/ops/stayturgid`
 **Operator gate:** none
 
 ---
 
-You are executing **step B5** of the two-repository Ansible split. The public
+You are executing **step C1** of the two-repository Ansible split. The public
 product repo is `/Users/djbclark/ops/stayturgid`; the private site overlay is
-`/Users/djbclark/ops/site-djbclark`. Complete the upstream production-identity
-scrub required by `multi-site-topology.md` §4.6. Keep real inventory and
-historical operator material private. Do not begin Phase C site-contract work.
+`/Users/djbclark/ops/site-djbclark`. Implement the site-contract **scaffolding
+templates only** (Phase C starts here). Do **not** implement `site-init`,
+`site-sync`, adapters, or Entangled wiring yet (C2–C6).
 
 ## Read first
 
-1. `/Users/djbclark/ops/stayturgid/AGENTS.md` and all applicable
+1. `/Users/djbclark/ops/stayturgid/AGENTS.md` and applicable
    `/Users/djbclark/ops/stayturgid/.cursor/rules/` files.
-2. The step2 execution plan, §§0–3 (including the risk register and B5):
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`.
-3. The topology architecture, §§4.1 and 4.5–4.8 (especially §4.6):
-   `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md`.
-4. The step1 segmentation architecture, §§3–4:
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`.
-5. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`.
-6. Current `control/bin/validate_site_identity.py`,
-   `control/lib/site_identity.py`, `control/lib/ansible_context.py`,
-   `just/tests.just`, CI workflow(s), and the current validator report.
+2. Ground rules + risk register + Phase C row C1:
+   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
+   §§0–2 and §4 (C1 only).
+3. **Authoritative spec** (follow exactly; no architecture improvisation):
+   `/Users/djbclark/ops/stayturgid/docs/architecture/site-contract.md`
+   especially §§1–3 (layout), registry seeding notes, and §8 acceptance
+   items that apply to templates.
+4. ADR + topology context:
+   `/Users/djbclark/ops/stayturgid/docs/architecture/adr/005-two-repo-topology.md`,
+   `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md` §4.
+5. Step1 segmentation (site contract purpose):
+   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` §§5–6.
+6. Relay protocol:
+   `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`.
+7. Existing product defaults you must **derive** registry seeds from (not
+   copy as opaque literals): control-node / landing / observability role
+   defaults and any checked-in port/path claims under
+   `/Users/djbclark/ops/stayturgid/ansible/` and collections. Cross-check
+   `/Users/djbclark/ops/site-djbclark/registry/` for the reference site's
+   current claims shape.
 
-## Context
+## Context (B1–B5 done)
 
-- B1–B4 are complete and merged. B4 is upstream merge commit `d247e8e`
-  (PR #5), with the checkout on pulled `master`.
-- B4 introduced `control/lib/ansible_context.py`: explicit `ANSIBLE_CONFIG`
-  wins; otherwise a site overlay defaults to
-  `${STAYTURGID_SITE_DIR:-~/ops/site-djbclark}/ansible.cfg`; otherwise the
-  upstream configuration is used. Reuse this contract rather than adding a
-  second resolution rule.
-- `just check` is currently green on master, but
-  `validate-identity` is still warn-only and directly looks for the removed
-  `ansible/inventory/hosts.yml`. Supplying the site config does not fix it,
-  because the validator itself hardcodes that old path. This is a B5 tool
-  defect to fix as part of making validation strict.
-- The previous validator report described 193 hard-coded-production-identity
-  violations. Generate the current worklist from the private overlay locally;
-  do not paste real addresses, serials, or other site identity into the public
-  PR, commits, or generic docs.
-- The plan directs B5 to use **2–3 PRs by area**. Keep each focused and
-  reviewable; do not broaden into architecture changes. The phase-end review
-  is Sonnet 5 over the diff series, with `/code-review ultra` if B5 touches
-  more than 40 files.
+- Phase B is complete. stayturgid master includes B5 merges:
+  - PR #6 `a900ee1` — context-aware site identity via `ansible_context`
+  - PR #8 `b1aeb97` — production-identity scrub + hard-fail
+    `just validate-identity` (no `--warn-only` in the check path)
+- Inventory lives in the private site overlay; upstream ships only
+  `ansible/inventory/hosts.yml.example` with §4.1 names + RFC 5737 addresses.
+- B4 contract: explicit `ANSIBLE_CONFIG` wins; else site overlay
+  `${STAYTURGID_SITE_DIR:-~/ops/site-djbclark}/ansible.cfg`; else upstream.
+  Reuse this — do not invent a second resolution rule.
+- C1 is templates only. C2 will consume them via `site-init`.
 
 ## Task
 
-1. In `stayturgid`, inspect status, then run
-   `git fetch origin --prune && git pull --ff-only origin master` before each
-   edit/PR. Preserve the pre-existing untracked `.claude/` directory.
-2. Make `site_identity` and `validate_site_identity` resolve the active
-   inventory through B4's shared Ansible context. An explicit external config
-   and the site-overlay default must work; upstream/fresh-clone validation
-   must use only generic example/ephemeral inventory and never require or
-   recreate production inventory in the public tree. Keep cache freshness
-   correct for the resolved inventory.
-3. Use the validator report as the worklist and scrub upstream tracked
-   user-facing docs, tests, tools, defaults, and fixtures per §4.6:
-
-   - use §4.1 example aliases (`oneui-device`, `stock-android-device`,
-     `fireos-device`) and RFC 5737 example addresses in generic fixtures;
-   - remove production hostnames, IPs, USB serials, operator paths, and
-     site-specific default target names from public-facing content;
-   - retain legitimate generic examples and move/retain historical material
-     only under the private site repo or with the §4.6 historical banner;
-   - do not re-do already merged fixes to `peers.json.j2`, peer bootstrap,
-     `cf-runagent.cf`, and ADB defaults unless the validator identifies a
-     remaining concrete defect.
-
-4. Add/adjust focused tests for context-aware identity loading, example
-   fallback, cache behavior, strict validator errors, and representative
-   scrubbed fixtures. Do not hide violations by broadly expanding scanner
-   skip paths.
-5. Change `just validate-identity`, `just check`, and CI from advisory
-   `--warn-only` behavior to hard failure only after the full report is clean.
-   A fresh upstream clone/CI must remain green without the private overlay;
-   an overlay-backed run must scan real identity locally without publishing it.
+1. In `stayturgid`, inspect status, then
+   `git fetch origin --prune && git pull --ff-only origin master` before
+   edits. Preserve any pre-existing untracked `.claude/` directory.
+2. Create `control/site_contract/templates/` containing the scaffold
+   artifacts defined by site-contract.md §3:
+   - site `README.md` (generated once / user-owned after init — template
+     should say so)
+   - `ansible.cfg` (inventory in site dir; collections/playbooks → product)
+   - thin `justfile` (OPS_ROOT / product path detection; deploy wrappers)
+   - baseline `.gitignore` (secrets patterns; do **not** ignore `generated/`)
+   - `registry/ports.yml` and `registry/paths.yml` **seeds** derived from
+     product role defaults programmatically (script or documented generator
+     under `control/site_contract/`), not hand-copied magic numbers
+   - any other template files §3 requires for a complete empty site dir
+     shape (inventory example pointer, `secretspec.toml` site profile stub
+     if specified)
+3. Prefer Jinja2 or clearly marked placeholders consistent with the rest of
+   the product. Templates must not embed live site identity (real host
+   aliases, production IPs, serials, operator home paths).
+4. Add focused unit tests that:
+   - render or load each template without error
+   - assert registry seeds contain expected product-owned claims sourced
+     from role defaults (not empty stubs)
+   - assert `.gitignore` ignores secrets patterns and does not ignore
+     `generated/`
+5. Do **not** implement `just site-init` / CLI behavior (that is C2). A
+   minimal package `__init__` or README under `control/site_contract/` is
+   fine if needed for import/tests.
 
 ## Verification
 
-- Run the strict validator using the site overlay (keep output containing
-  live identity local) and show a zero-violation summary to the human.
-- Demonstrate explicit external-config precedence, site-overlay default, and
-  generic upstream/fresh-clone fallback.
-- Run focused tests plus `just check`; run the relevant CI-equivalent
-  inventory setup where needed. `just validate-identity` must be strict—no
-  `--warn-only` remains in its check/CI path.
-- `git diff --check` passes and the public diff contains no production
-  inventory, real device identity, secrets, or private documentation.
-- Use 2–3 focused PRs by area. Each PR must have its own human verification
-  before it is merged; after each approved merge, delete its branch, return
-  the checkout to pulled `master`, and re-run the relevant checks. Do not
-  declare B5 complete until the entire strict-validation exit criterion is
-  met.
+- Templates exist at the paths implied by the spec.
+- Registry seeds are explainable from role defaults (show the derivation).
+- Focused tests pass; `just check` remains green; `just validate-identity`
+  still hard-fails clean (0 drift) with overlay and with upstream-only
+  example inventory.
+- `git diff --check` passes; public diff has no production inventory or
+  live identity.
+- Branch + PR; after human confirmation: merge, delete branch, return to
+  pulled master, re-verify checks.
 
 ## Human-verification checklist (present with evidence; wait for confirmation)
 
-- [ ] Strict identity validation is clean with the private overlay, and a
-      fresh upstream checkout validates only generic/example data
-- [ ] Public docs/tests/tools are scrubbed per §4.6 without masking findings
-- [ ] `just check` and CI use hard-fail validation and pass
-- [ ] All B5 PRs are merged, deleted, and verified on pulled master; no
-      unrelated changes remain
+- [ ] `control/site_contract/templates/` matches site-contract.md §3 layout
+- [ ] Registry seeds derive from product defaults (not hand-waved literals)
+- [ ] Focused tests + `just check` + strict `validate-identity` pass
+- [ ] PR merged, branch deleted, checkout on pulled master
 
 ## End of session
 
 Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
-Every B5 PR must use the branch-hygiene rule: after human confirmation, merge
-with `gh pr merge <n> --merge --delete-branch`, then run `git checkout master
-&& git pull --ff-only` in `/Users/djbclark/ops/stayturgid` and verify the
-applicable check suite on merged master. Do not leave an open step PR, deleted
-branch pending locally, or the checkout off `master`. Once B5 as a whole is
-confirmed, append its ledger line, rewrite the baton for C1 from the step2
-plan, commit/push the private site repo, and print the new baton in chat.
+After C1 is fully confirmed, append its ledger entry, prepare the C2 baton,
+commit/push the site repo, and print that baton in chat.
