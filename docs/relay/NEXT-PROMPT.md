@@ -1,92 +1,124 @@
-# NEXT: B4 — Externalize deploy configuration and inventory   (difficulty 55/100)
+# NEXT: B5 — Upstream identity scrub and strict validation (difficulty 55/100)
 
-**Recommended AI:** Anthropic Claude Fable 5, effort Low · alt: OpenAI Codex GPT-5.6 Terra, reasoning High · escalate to: Claude Fable 5, effort Medium
-**Working dir:** `/Users/djbclark/ops/stayturgid` (inspect `/Users/djbclark/ops/site-djbclark` as the private overlay)   **Operator gate:** REQUIRED before any real deploy
+**Recommended AI:** Anthropic Claude Fable 5, effort Medium
+alt: OpenAI Codex GPT-5.6 Terra, reasoning High
+escalate to: Claude Fable 5, effort High
+
+**Working dir:** `/Users/djbclark/ops/stayturgid`
+**Operator gate:** none
 
 ---
 
-You are executing **step B4** of the two-repository Ansible split. The public
-product repo is `/Users/djbclark/ops/stayturgid`; the private site repo is
-`/Users/djbclark/ops/site-djbclark`. Implement only the deploy-tooling
-contract from `multi-site-topology.md` §4.8: upstream tooling must accept an
-external `ANSIBLE_CONFIG` and inventory, retain a safe upstream default, and
-default to the site overlay when present. Do not start B5's identity scrub
-or invent a different architecture.
+You are executing **step B5** of the two-repository Ansible split. The public
+product repo is `/Users/djbclark/ops/stayturgid`; the private site overlay is
+`/Users/djbclark/ops/site-djbclark`. Complete the upstream production-identity
+scrub required by `multi-site-topology.md` §4.6. Keep real inventory and
+historical operator material private. Do not begin Phase C site-contract work.
 
 ## Read first
 
-1. `/Users/djbclark/ops/stayturgid/AGENTS.md` and applicable `.cursor/rules/`.
-2. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md` — §§0–3, especially B4.
-3. `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md` — §§4.5–4.9, especially §4.8.
-4. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` — §§3–4.
-5. Current `control/bin/deploy_fleet.py`, root `justfile`, `just/fleet.just`, the site repo's `ansible.cfg`/`justfile`/`inventory/` (from B1), and `~/Library/LaunchAgents/com.stayturgid.termux-pkg-nightly.plist`.
+1. `/Users/djbclark/ops/stayturgid/AGENTS.md` and all applicable
+   `/Users/djbclark/ops/stayturgid/.cursor/rules/` files.
+2. The step2 execution plan, §§0–3 (including the risk register and B5):
+   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`.
+3. The topology architecture, §§4.1 and 4.5–4.8 (especially §4.6):
+   `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md`.
+4. The step1 segmentation architecture, §§3–4:
+   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`.
+5. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`.
+6. Current `control/bin/validate_site_identity.py`,
+   `control/lib/site_identity.py`, `control/lib/ansible_context.py`,
+   `just/tests.just`, CI workflow(s), and the current validator report.
 
-## Context (updated 2026-07-18 — read carefully, it corrects earlier batons)
+## Context
 
-- B1: site commit `9038c2d` (live inventory + site `ansible.cfg` + wrapper justfile in the site repo).
-- B2 and B3 are **MERGED into stayturgid master** (PR #3 → `6613d2e`, PR #4 → `ed97237`); their branches are deleted. Do not look for open PRs from prior steps — there are none, by design.
-- **Branch hygiene rule (new, in PROTOCOL.md):** every step now ends with its
-  own stayturgid PR *merged* (`gh pr merge <n> --merge --delete-branch`),
-  the local checkout back on a pulled `master`, and no leftover branches.
-  Earlier batons said "do not merge" — that rule is REPLACED.
-- Transitional state you are fixing: upstream has no live inventory anymore
-  (CI uses an ephemeral copy of the example; the live one is in the site
-  repo). Until B4 lands, real deploys only work via the site repo's
-  `just deploy`; launchd-driven ansible on the Mac may fail to resolve hosts.
+- B1–B4 are complete and merged. B4 is upstream merge commit `d247e8e`
+  (PR #5), with the checkout on pulled `master`.
+- B4 introduced `control/lib/ansible_context.py`: explicit `ANSIBLE_CONFIG`
+  wins; otherwise a site overlay defaults to
+  `${STAYTURGID_SITE_DIR:-~/ops/site-djbclark}/ansible.cfg`; otherwise the
+  upstream configuration is used. Reuse this contract rather than adding a
+  second resolution rule.
+- `just check` is currently green on master, but
+  `validate-identity` is still warn-only and directly looks for the removed
+  `ansible/inventory/hosts.yml`. Supplying the site config does not fix it,
+  because the validator itself hardcodes that old path. This is a B5 tool
+  defect to fix as part of making validation strict.
+- The previous validator report described 193 hard-coded-production-identity
+  violations. Generate the current worklist from the private overlay locally;
+  do not paste real addresses, serials, or other site identity into the public
+  PR, commits, or generic docs.
+- The plan directs B5 to use **2–3 PRs by area**. Keep each focused and
+  reviewable; do not broaden into architecture changes. The phase-end review
+  is Sonnet 5 over the diff series, with `/code-review ultra` if B5 touches
+  more than 40 files.
 
 ## Task
 
-1. Inspect both repos (`git status`, current branch). In stayturgid:
-   `git fetch origin --prune && git pull --ff-only origin master`, create a
-   feature branch. Preserve pre-existing untracked `.claude/`.
-2. Update `control/bin/deploy_fleet.py` so a caller-supplied `ANSIBLE_CONFIG`
-   is honored and never overwritten; resolve inventory/collections/playbooks
-   from the active config; when unset, **default to the site overlay if
-   `~/ops/site-djbclark/ansible.cfg` exists** (path discoverable via an env
-   var like `STAYTURGID_SITE_DIR` with that default), else fall back to the
-   upstream example-only behavior with a clear error for real deploys.
-3. Update root `justfile` and `just/fleet.just` so an external
-   `ANSIBLE_CONFIG` survives `just` invocation and the site overlay can call
-   upstream recipes without breaking host/scope/dry-run/check semantics.
-4. **Launchd entry points:** make the Mac launchd-driven ansible jobs
-   (`com.stayturgid.termux-pkg-nightly`, and any other agent that invokes
-   ansible/deploy tooling) resolve the site overlay under the same
-   precedence, and regenerate their plists via the control_node tasks so
-   tonight's nightly run works again.
-5. Add focused tests: config precedence, upstream fallback, external
-   inventory resolution, missing-config failure messages. No B5 edits.
+1. In `stayturgid`, inspect status, then run
+   `git fetch origin --prune && git pull --ff-only origin master` before each
+   edit/PR. Preserve the pre-existing untracked `.claude/` directory.
+2. Make `site_identity` and `validate_site_identity` resolve the active
+   inventory through B4's shared Ansible context. An explicit external config
+   and the site-overlay default must work; upstream/fresh-clone validation
+   must use only generic example/ephemeral inventory and never require or
+   recreate production inventory in the public tree. Keep cache freshness
+   correct for the resolved inventory.
+3. Use the validator report as the worklist and scrub upstream tracked
+   user-facing docs, tests, tools, defaults, and fixtures per §4.6:
 
-## OPERATOR GATE
+   - use §4.1 example aliases (`oneui-device`, `stock-android-device`,
+     `fireos-device`) and RFC 5737 example addresses in generic fixtures;
+   - remove production hostnames, IPs, USB serials, operator paths, and
+     site-specific default target names from public-facing content;
+   - retain legitimate generic examples and move/retain historical material
+     only under the private site repo or with the §4.6 historical banner;
+   - do not re-do already merged fixes to `peers.json.j2`, peer bootstrap,
+     `cf-runagent.cf`, and ADB defaults unless the validator identifies a
+     remaining concrete defect.
 
-Do not perform a real deployment until the human explicitly approves and
-names one currently-online device. Run `just dryrun-termux` (site-config
-path) first. Only after approval, run exactly one
-`just deploy hosts=<online-device>` and record command, target, exit status,
-and health evidence. If approval is not given, stop after the dry run.
+4. Add/adjust focused tests for context-aware identity loading, example
+   fallback, cache behavior, strict validator errors, and representative
+   scrubbed fixtures. Do not hide violations by broadly expanding scanner
+   skip paths.
+5. Change `just validate-identity`, `just check`, and CI from advisory
+   `--warn-only` behavior to hard failure only after the full report is clean.
+   A fresh upstream clone/CI must remain green without the private overlay;
+   an overlay-backed run must scan real identity locally without publishing it.
 
 ## Verification
 
-- Focused tests + relevant `just check` components pass.
-- `ANSIBLE_CONFIG` precedence, site-overlay default, and upstream fallback
-  each demonstrated (paste the resolution evidence).
-- `just dryrun-termux` passes via the site overlay.
-- Nightly-job plist regenerated and its invocation resolves live inventory.
-- `git diff --check` clean in both repos; only intended changes present.
+- Run the strict validator using the site overlay (keep output containing
+  live identity local) and show a zero-violation summary to the human.
+- Demonstrate explicit external-config precedence, site-overlay default, and
+  generic upstream/fresh-clone fallback.
+- Run focused tests plus `just check`; run the relevant CI-equivalent
+  inventory setup where needed. `just validate-identity` must be strict—no
+  `--warn-only` remains in its check/CI path.
+- `git diff --check` passes and the public diff contains no production
+  inventory, real device identity, secrets, or private documentation.
+- Use 2–3 focused PRs by area. Each PR must have its own human verification
+  before it is merged; after each approved merge, delete its branch, return
+  the checkout to pulled `master`, and re-run the relevant checks. Do not
+  declare B5 complete until the entire strict-validation exit criterion is
+  met.
 
 ## Human-verification checklist (present with evidence; wait for confirmation)
 
-- [ ] External `ANSIBLE_CONFIG` honored; site-overlay default works; upstream fallback intact
-- [ ] Dry run green; approved single-device deploy done and verified (or explicitly not attempted)
-- [ ] Launchd ansible jobs resolve the site inventory again
-- [ ] Tests and checks pass; no unrelated changes
+- [ ] Strict identity validation is clean with the private overlay, and a
+      fresh upstream checkout validates only generic/example data
+- [ ] Public docs/tests/tools are scrubbed per §4.6 without masking findings
+- [ ] `just check` and CI use hard-fail validation and pass
+- [ ] All B5 PRs are merged, deleted, and verified on pulled master; no
+      unrelated changes remain
 
 ## End of session
 
-Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly —
-including the branch-hygiene rule: after the human confirms, **merge your PR
-with `gh pr merge <n> --merge --delete-branch`, `git checkout master &&
-git pull --ff-only` in `~/ops/stayturgid`, and re-verify green on master**.
-Then append the B4 ledger line, rewrite this file for B5 from step2 plan §3
-(carrying the branch-hygiene rule forward into every future baton's
-End-of-session section), commit/push the site repo, and print the new prompt
-in chat. If blocked twice on the same error, escalate per header.
+Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
+Every B5 PR must use the branch-hygiene rule: after human confirmation, merge
+with `gh pr merge <n> --merge --delete-branch`, then run `git checkout master
+&& git pull --ff-only` in `/Users/djbclark/ops/stayturgid` and verify the
+applicable check suite on merged master. Do not leave an open step PR, deleted
+branch pending locally, or the checkout off `master`. Once B5 as a whole is
+confirmed, append its ledger line, rewrite the baton for C1 from the step2
+plan, commit/push the private site repo, and print the new baton in chat.
