@@ -157,7 +157,14 @@ Follow step0 **as amended** (header note + risk register above).
 - Anything touching a daemon: health-curl + `launchctl print` evidence pasted
   into the PR.
 
-## 9. Escalation & final review
+## 9. Session chaining
+
+Work proceeds via the relay protocol: `docs/relay/PROTOCOL.md` defines the
+baton (`docs/relay/NEXT-PROMPT.md` — always the next prompt to paste, with
+its recommended AI) and the ledger. Every session ends by regenerating the
+baton for the next step from this plan.
+
+## 10. Escalation & final review
 
 - Two failed attempts at a step → escalate one band; a step that grows beyond
   its listed files → stop and split.
