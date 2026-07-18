@@ -10,6 +10,13 @@ You are a junior developer AI working on a two-repo Ansible system:
 and site config). You are executing **step B1** of a phased plan. Do not make
 architecture decisions; the specs below are authoritative.
 
+> **Consolidation note (2026-07-18):** stayturgid master now contains the
+> merged platform-arch / logging / just-standardization work (identity
+> validator, Ansible-managed vector+openobserve, structured device logging,
+> standardized just recipes). See step2 plan §2.5. This does not change B1's
+> task, but `just validate-identity` now exists — do not "fix" its warnings
+> in this session (that is step B5).
+
 ## Read first (in this order)
 
 1. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
