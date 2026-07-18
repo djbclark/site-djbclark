@@ -200,7 +200,7 @@ Red Hat "Zen of Ansible" (playbooks as documentation).
 | Goose + LiteLLM (step0 plan) | Roles incubate in site-djbclark (decision 5); extract to a public repo only if they mature |
 | hermes-agent, opencode-web | Stay in stayturgid for now (fleet-ops flavored); revisit after Phase C |
 | Unmanaged machine services (immich, postgres, redis, mariadb, system-state-backup, hibernate-disk-check) | Gradually adopt into site-djbclark |
-| `~/stayturgid_work`, `~/stayturgid.d` scratch checkouts | Moved to `~/ops/scratch/` 2026-07-18 (unmodified); deletion is operator's call. Note `stayturgid_work` sits on branch `just-standardization` and contains the old FIRERPA CA key pair |
+| `~/stayturgid_work`, `~/stayturgid.d` scratch checkouts | **Resolved 2026-07-18:** unique WIP recovered (commit `062cfac`), branches merged to master, directories deleted. `~/stayturgid-hermes` verified empty and deleted too |
 
 ## 8. Migration phases
 
