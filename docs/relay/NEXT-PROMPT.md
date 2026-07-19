@@ -12,7 +12,8 @@ escalate to: Fable 5 (medium) if own/inject mode selection or TLS cutover needs 
 You are executing **step D1** of Phase D (shared-infra handover / serverapp
 adapters). Phase C is complete: the reference site at
 `/Users/djbclark/ops/site-djbclark` consumes the site contract
-(`generated/stayturgid/` + lockfile @ product 2.7 / commit `240f7ee`). D1
+(`generated/stayturgid/` + lockfile @ product 2.7 / commit `240f7ee`); a
+post-C review landed site `73b559a` (justfile pins `STAYTURGID_SITE_DIR`). D1
 implements the **first serverapp adapter** — Caddy — per the site contract spec.
 
 Keep the step narrow. Do **not** migrate vector/openobserve/landing (D2–D4),
@@ -38,18 +39,27 @@ a decision not in the specs, stop and report.
 
 ## Current state and carry-forward gotchas
 
-- stayturgid master at `240f7ee` (C1–C5 merged). Site C6 @ `755e5b0`:
-  `generated/stayturgid/` adopted; live inventory/registries untouched.
-- Site `justfile` is site-owned (has `dryrun-termux`, `lint`); does **not**
-  export `STAYTURGID_SITE_DIR` — set explicitly for product tooling:
-  `STAYTURGID_SITE_DIR=/Users/djbclark/ops/site-djbclark`.
+- stayturgid master at `240f7ee` (C1–C5 merged). Site master at `73b559a`
+  (C6 `755e5b0` + review fix): `generated/stayturgid/` adopted; live
+  inventory/registries untouched.
+- Site `justfile` is site-owned (has `dryrun-termux`, `lint`) and now exports
+  `STAYTURGID_SITE_DIR` in every product wrapper and provides
+  `just site-sync [mode=dry-run]` — use those instead of setting env by hand.
+- `~/ops/site-example` **exists**, so product site-* auto-discovery is
+  ambiguous (exit 1). Never rely on discovery for this site: go through the
+  site justfile wrappers or pass `dir=` / `STAYTURGID_SITE_DIR` explicitly.
 - Site `registry/paths.yml` uses step1 architecture schema (`base_dir`,
   `prefixes`); product registry seeds use contract v1 format — site registry
   remains authoritative; do not overwrite with product seeds.
-- There may be a leftover `~/ops/site-example` — prefer explicit
-  `STAYTURGID_SITE_DIR` / `dir=` / `ANSIBLE_CONFIG` for this site.
+- `site-map.yml` support (C4, `control/site_contract/site_map.py`) already
+  validates `serverapps.caddy.{mode,config,fragment_dir}` with modes
+  own/inject/off — D1 must **consume** that existing surface for mode
+  selection, not invent a new config key.
+- Site `bin/registry_lint.py` is a uv script (`#!/usr/bin/env -S uv run`) —
+  run it as `just lint` or `bin/registry_lint.py`, not `python3 bin/...`.
 - Caddy adapter must support **own** and **inject** modes (spec §5.1–5.2):
-  mode selection order is site var → detect existing → own default.
+  mode selection order is site var (`site-map.yml` serverapps.caddy.mode) →
+  detect existing → own default.
 - **inject** mode: verify `import <dir>/*.caddy` exists; exit 2 with
   instructions if missing (spec §5.3).
 - **own** mode: install via brew, render base config, reserve fragment dir,
