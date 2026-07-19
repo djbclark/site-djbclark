@@ -1,178 +1,169 @@
-# NEXT: M1-Q — Phase D code-quality remediation (difficulty 35/100)
+# NEXT: R3 — Phase D close-out review (D5 through M1-Q) (difficulty 55/100)
 
 **Funding plan in force:** FUND-B revised (see
 `docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). Recovery-month
-step 3 of {M1-R ✓, M1-F ✓, M1-Q}; R3 follows this step.
+step 4 of {M1-R ✓, M1-F ✓, M1-Q ✓, R3}. This is the review checkpoint the
+funding plan calls "R3 (After D8): D5–D8 + whole-phase architecture
+close-out", widened by the recovery month to cover everything landed since
+R2 — R1/M1-F/M1-Q already fixed every correctness/safety and cheap-arch
+finding R1/M1-R raised, so R3 is verifying that closure held and catching
+anything new introduced by the recovery-month sessions themselves.
 
-**Recommended AI** (full rows from `docs/reference/available-ai-models.md`):
+**Recommended AI** (full row from `docs/reference/available-ai-models.md`):
 
-- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
-  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
-  Code/API) · _Default for most plans_ — **original account**, default
-  effort. Self-passoff from M1-F: this is code-quality cleanup, not novel
-  design, and fits Sonnet 5's normal band.
-- **Alternate —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
-  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
-  complex coding, computer use, research, cybersecurity_ — effort Medium.
-- **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
-  Auto) · _Next-gen long-running agents_ — **new second-Pro account**, effort
-  Medium, only if a cleanup fights back (two failed attempts) or a proposed
-  change turns out to have behavior implications requiring judgment.
+  Auto) · _Next-gen long-running agents_ — **new second-Pro account**,
+  effort Medium. This is the funding plan's explicit R3 assignment
+  (§Recovery month M1, item 5: "M1-R3 (Fable 5, new account): the R3
+  close-out review"), matching R1/M1-R's review-tier precedent.
+- **Alternate —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
+  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
+  Code/API) · _Default for most plans_ — **original account**, High effort,
+  if the new account's Fable 5 weekly is empty (check CodexBar first).
+- **Escalation —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
+  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
+  complex coding, computer use, research, cybersecurity_ — effort High, only
+  if both Claude accounts are exhausted.
 
-**Working dir:** `/Users/djbclark/ops/stayturgid` (all fixes; branch+PR) and
-`/Users/djbclark/ops/site-djbclark` (docs only; straight to master).
+**Working dir:** `/Users/djbclark/ops/stayturgid` (read/verify; fixes only
+if a must-fix surfaces — branch+PR) and `/Users/djbclark/ops/site-djbclark`
+(review doc + ledger/baton; straight to master).
 `git fetch origin --prune && git pull --ff-only origin master` in both
-before editing.
+before starting.
 
 ---
 
-You are executing **M1-Q**: the code-quality list from M1-R's review
-(`docs/relay/reviews/m1-r-phase-d-design-review.md` §Code quality, plus the
-justified-kept documentation items from §Decision matrix / §Findings). Read
-that file first — it has full refs and rationale for every item below. Also
-read `docs/relay/PROTOCOL.md` and stayturgid `AGENTS.md`.
+You are running **R3**, the phase-close-out review baton described in
+`docs/relay/PROTOCOL.md` §Review batons. Read that section first, then read
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md` §Review checkpoints
+and §Recovery month M1 for why this checkpoint exists and what "must-fix
+vs may-defer" means under the relaxed FUND-B bar.
 
-**Scope discipline: no behavior changes.** This step is cleanup — dead code,
-stale docs/help text, hard-coded defaults, test duplication, refusal-kind
-naming. Every item below must leave `just test` green with no live-daemon
-behavior difference. If an item turns out to need a real behavior change to
-fix properly, stop and note it for R3 rather than improvising scope.
+## Scope
 
-## Code-quality items (stayturgid, one PR)
+Every commit landed since R2 (which reviewed D2–D4) in both repos:
 
-1. **S-1** — `DEFAULT_CADDY_DETECT_PATHS` in `control/site_contract/serverapps.py`
-   (~lines 63-66) is dead: `_caddy_detect_paths` recomputes instead of using
-   it. Delete the dead constant, or wire it in if that's actually cheaper —
-   whichever leaves less code.
-2. **S-3** — Role config-template headers carry placeholder values instead of
-   real ones: `vector.yaml.j2` says `product_version: own-mode site_ns=…`,
-   `Caddyfile.j2` is similar, and `grafana.ini.j2` / `serverapp_olivetin/
-   config.yaml.j2` / `serverapp_victoriametrics/scrape.yml.j2` literally say
-   `product_version: unknown commit: unknown`. Two options: (a) pass the real
-   `product_version` through as an ansible extra-var from `serverapps.py` and
-   render it, or (b) document plainly in each template header why it's a
-   placeholder (own-mode bootstrap configs are ansible-rendered, not
-   site-sync-rendered, so they don't have `product_version`/`product_commit`
-   in scope the way `generated/` fragments do). Prefer (a) if it's a small,
-   low-risk plumbing change; otherwise (b). Either way, drop the stray
-   `commit: unknown` text from the three static-placeholder headers to match
-   A-10's fix (product_version only, no commit, in any generated-marker
-   header) — even though these aren't churning, consistency matters.
-3. **S-4 (grown)** — `_materialize_<app>_own_for_tests` duplication in
-   `control/site_contract/serverapps.py` is now **7 materializers ≈ 430
-   lines** mirroring the real role templates inside the product module —
-   divergence risk grows with every adapter clone. Consolidate: either share
-   one small Jinja-based render helper the tests call with each role's real
-   template, or extract common structure into a single parameterized
-   materializer. Check `tests/python/test_serverapps.py` for every call site
-   before refactoring.
-4. **S-6** — `forced_own_foreign` refusal kind is reused for two different
-   situations: real "own mode forced against foreign config" (caddy/vector/
-   OO/VM) and "inject mode unsupported for this app" (landing, olivetin).
-   Add a distinct `unsupported_mode` kind for the second case; update the
-   refusal-kind switch/tests accordingly (grep `forced_own_foreign` across
-   `control/site_contract/` and `tests/python/`).
-5. **S-7** — Role defaults hard-code `serverapp_*_uid: "501"` across all
-   serverapp roles, but the live path always passes `os.getuid()` as an
-   extra-var (see `serverapps.py`'s `ansible_extra` dicts). Either drop the
-   hard-coded default (fail closed if the caller doesn't pass it) or document
-   why it's a deliberate single-user-Mac fallback. Prefer removing it if
-   nothing relies on the default in tests.
-6. **S-9 — already closed by M1-F.** Olivetin's bootstrap task gained
-   `until`/`retries: 5` as part of MF-3 (`ansible/roles/serverapp_olivetin/
-   tasks/main.yml`). Just confirm it's still there; no action needed.
-7. **S-10** — Edge otelcol's `json_parser` uses `on_error: drop_quiet` in
-   `ansible/roles/serverapp_termux_userland/templates/otel-config.yaml.j2`
-   (or wherever it now lives) — malformed JSONL lines vanish with zero
-   signal. Add a low-cost visible counter or log route (e.g. a vector
-   internal_metrics tap, or route parse failures to a `stayturgid_dropped`
-   sink) so silent data loss becomes observable. If a real fix needs new
-   infrastructure, scope it down to just adding the observability hook, not
-   changing drop behavior.
-8. **S-11** — `serverapps.py --apps` help text says "default: all known —
-   caddy,vector" but it's actually all seven apps. Fix the help string to
-   list them all or say "all known apps" generically so it doesn't need
-   updating again per adapter.
-9. **D6 residual (doc only)** — `olivetin/user-actions.yaml` surface exists
-   (`USER_ACTIONS_RELATIVE` in `control/site_contract/olivetin_projection.py`)
-   but is unused on this site (no site file yet). Document it in the site
-   README (`~/ops/site-djbclark/README.md`) so a future operator knows the
-   mechanism exists — site repo, straight to master, separate tiny commit
-   from the stayturgid PR.
-10. **A-2 (deferred hardening)** — Forced-own + unrelated foreign config
-    currently proceeds to a bind-time failure (exit 1, KeepAlive loop)
-    instead of exit 2, for caddy/vector/OO/VM. Add a port-availability
-    pre-check in own mode (before the ansible role even runs): if the
-    target port is already bound by something that isn't our own label,
-    refuse with a typed refusal (exit 2) instead of letting the daemon fail
-    to bind. Not live-reachable today (no site-map file exists on this
-    site), so this is defense-in-depth, not a live bug.
-11. **A-3 (doc only)** — Inject mode's default `fragment_dir` equals the
-    committed `generated/` dir itself, so inject copies degenerate to
-    no-ops. This is an intentional deviation from design §5.3's
-    auto-detect-on-first-inject behavior. Document it plainly in
-    `docs/design/phase-d-adapter-design-notes.md`'s deviation log (§5) if
-    not already there, and in the relevant role/CLI docstring — no code
-    change; implement real auto-detect only when an actual inject-mode site
-    exists to validate against.
-12. **A-5 (doc only, generic-product note)** — Legacy bootout is gated on
-    "site label unloaded"; a dual-loaded mid-failure state would persist
-    until manual bootout. Superseded in practice by D7 on this site (legacy
-    plists archived+removed), but the product code path still exists for
-    other sites. Add a short comment in the relevant role tasks (e.g.
-    `serverapp_caddy/tasks/main.yml` near the legacy-bootout block) noting
-    the edge case and that D7-style archival is the real fix once a site
-    reaches that stage.
-13. **A-6 (deferred hardening, larger — scope carefully)** — Health
-    URLs/ports (8686/5080/8428/3000/1337/8088) are hard-coded in
-    `serverapps.py` plans and role defaults instead of read from the site's
-    `registry/ports.yml`. This is correct for this single-site setup
-    (multi-site remap risk only). If it's a small, mechanical change
-    (thread the registry-resolved port through the existing `ansible_extra`
-    plumbing that already exists for other per-app values), do it. If it
-    touches many call sites or risks a live port mismatch, defer to R3 and
-    say so in the ledger — don't force it into M1-Q's "no behavior change"
-    budget.
-14. **D7 route scheme — do not implement.** §11 #9 (Caddy route-naming
-    reconsideration; O-V-G-O UIs have no front-door routes) is explicitly an
-    **operator architecture decision**, not a defect. Leave it for R3;
-    mention it in the M1-Q ledger note as still-open, nothing more.
+- **stayturgid:** `d99b507..HEAD` on master — D5 (O-V-G-O adapters, PR #23),
+  D6 (inventory→fragment projections, PR #24), D7 (legacy retirement, PR
+  #25), D8 (edge otelcol, PR #26), M1-F (must-fix remediation, PR #27), and
+  M1-Q (code-quality remediation, PR #28). Run
+  `git log --oneline d99b507..HEAD` to confirm the exact list before
+  starting; do not assume this list is still current if more sessions ran
+  after this baton was written.
+- **site-djbclark:** `fdb827f..HEAD` on master — the matching D5–M1-Q relay
+  commits, registry changes, and the two M1-Q doc commits (20adb4b, 02bc3ee).
+
+Judge against the immutable baseline
+`docs/design/phase-d-adapter-design-notes.md` (incl. its R1 §1.9 amendment
+and the M1-Q §5 deviation-log entry 3 for inject-mode `fragment_dir`),
+stayturgid `docs/architecture/site-contract.md` §5, and every prior review's
+dispositions (R1, R2, M1-R — read
+`docs/relay/reviews/r1-d1-adapter-review.md`,
+`docs/relay/reviews/r2-d2-d4-adapter-review.md`, and
+`docs/relay/reviews/m1-r-phase-d-design-review.md` for what was already
+found and fixed, so you don't re-litigate closed findings without new
+evidence they regressed).
+
+## What to actually check (this is a re-verification review, not a fresh audit)
+
+R1/M1-R already did the deep architectural read of D1–D8. M1-F fixed all
+five must-fix + three cheap-arch findings; M1-Q worked the code-quality
+list. Your job is narrower and should move faster than R1/M1-R did:
+
+1. **Spot-check that M1-F's fixes actually hold on current master** — don't
+   re-derive them from scratch, verify the specific claims: MF-1 (plist
+   mode 0600, live `stat` check), MF-2 (hd8's `stayturgid_otelcol_enabled:
+   false` still present in site inventory), MF-3 (bootout-on-plist-change
+   pattern still in caddy/grafana/olivetin tasks), MF-4 (fragment-checksum
+   reload tasks still present), MF-5 (checksums still set on the OO/OliveTin
+   `get_url` tasks), A-10/A-11/A-12 (header format, services.just fallback
+   removed, Grafana noValue text).
+2. **Spot-check M1-Q's changes for regressions or incompleteness** — the
+   S-1/S-3/S-4/S-6/S-7/S-9/S-10/S-11/A-3/A-5 items closed in PR #28 (ledger
+   `M1-Q` line has full detail); confirm `product_version` actually renders
+   correctly in a real (not test-materializer) own-mode apply if you have
+   live access, and that the `unsupported_mode` refusal kind didn't silently
+   break any refusal-message expectations elsewhere.
+3. **Judge the two items M1-Q explicitly deferred** — A-2 (own-mode
+   port-availability pre-check) and A-6 (registry-sourced health ports).
+   M1-Q's ledger line explains why each was judged too large for a
+   no-behavior-change pass. Decide: still correctly deferred (not a
+   correctness/safety issue, still not live-reachable / still zero live
+   risk), or has something changed that promotes either to a must-fix? If
+   still deferred, that's an acceptable R3 outcome — restate why in your
+   review doc rather than silently dropping it.
+4. **D7 route scheme (§11 #9)** — confirmed still explicitly deferred to the
+   operator across R1→M1-R→M1-Q. Do not implement it. Note it as still-open
+   in your review doc; this is the last checkpoint that should keep
+   forwarding it if no operator decision has landed.
+5. **Fresh read for anything new** — D5–D8 got a full R1-style read from
+   M1-R already (see that review's Findings tables); your fresh-eyes pass
+   should focus on whether M1-F's and M1-Q's *changes themselves*
+   introduced anything new, not re-review D5–D8 line-by-line from zero.
+6. **Whole-phase architecture close-out** — per the funding plan's R3
+   framing, step back from individual findings and assess: does Phase D
+   (D1–D8 + M1 recovery) hang together as a coherent system now? Anything
+   that only becomes visible zoomed-out (e.g. accumulated deviations across
+   D2/D3/D4/D5's "detect-path narrowing" pattern, or the generated-header
+   format's evolution across A-10) belongs in a "whole-phase" section of
+   your review doc, separate from the checkpoint-by-checkpoint spot-checks.
+
+## Verification evidence to gather (same discipline as M1-R)
+
+Re-run and record, on pulled masters of both repos:
+
+- stayturgid `just check` + full `just test` + `pre-commit run --all-files`
+  (compare counts to M1-Q's baseline: 497 passed, 1 skipped, collection
+  suites 43/11/20/7/15/7 — flag any drift).
+- Overlay + upstream-only `just validate-identity`; `just site-contract-check`.
+- Site `bin/registry_lint.py`.
+- Live (read-only): all 9 health endpoints 200
+  (8080/8686/5080/8428/3000/1337/8088/4097 + HTTPS front door); D7 archive
+  state and disabled-DB state still consistent; D8 per-device state
+  unchanged (s24/p7a healthy, hd8 still `pending-incompatible-runtime` and
+  not attempted-and-failing).
+- Hosted CI green on both repos' current master (PR #27 run 29705800898,
+  PR #28 run 29707111881 — confirm these are still the latest and still
+  green, or re-check if newer commits landed).
+- Branch hygiene: both repos master-only, no open PRs, no stale local
+  branches.
+
+## Output
+
+Write `docs/relay/reviews/r3-phase-d-closeout-review.md` (site repo) in the
+same structure as `m1-r-phase-d-design-review.md`: scope/baselines,
+verification evidence table, decision matrix, findings split into
+correctness/safety (must-fix — **fix these yourself in this session**,
+same as R1's MF-1 fix), architecture (cheap-fix or justified-kept), and
+code quality (list only — new M1-Q2 baton if the list is non-trivial,
+otherwise fold into the ledger note). End with a verdict paragraph:
+is Phase D done, or is there a real next step?
 
 ## Constraints
 
-- No live daemon behavior changes. No device contact. No secrets in output
-  or commits. No design-baseline edits except the documented deviation-log
-  addition in item 11 (A-3), which the design doc explicitly allows for
-  recording deviations. Do not touch D7/D8 retirement state.
-- stayturgid: one branch + PR (`fix/m1-q-phase-d-quality`), merge it
-  yourself after evidence per PROTOCOL.md, end on pulled master. Site:
-  straight to master (item 9 doc note only).
-- If any item's "small vs large" judgment call (S-3, A-6) comes out large,
-  defer it explicitly in the ledger rather than quietly skipping it or
-  quietly expanding scope.
-
-## Verification checklist (record evidence in ledger note)
-
-1. stayturgid `just check` + full `just test` + `pre-commit run --all-files`
-   green (record counts; compare to M1-F baseline: 497 passed, 1 skipped,
-   collection suites 43/11/20/7/15/7).
-2. Overlay + upstream-only `just validate-identity` clean;
-   `just site-contract-check`.
-3. Site `bin/registry_lint.py` OK.
-4. Live (read-only unless an item's fix requires an apply — if so, same
-   before/after health-check discipline as M1-F): all 9 health endpoints
-   200; no unexpected daemon reload from a "no behavior change" item.
-5. Hosted CI green on the merged PR and merged master.
+- No device contact unless a must-fix genuinely requires a live check beyond
+  read-only health polling (say so explicitly if so, and use the same
+  before/after health-check + tested-rollback discipline as every prior
+  session).
+- No secrets in output or commits.
+- Design-baseline edits: none beyond what M1-Q's A-3 deviation-log entry
+  already covers, unless you find a genuinely new deviation that needs
+  recording — if so, append to §5, don't rewrite existing entries.
+- If a must-fix surfaces: fix it yourself in stayturgid (branch + PR, merge
+  after evidence, per PROTOCOL.md), not just document it. Architecture and
+  code-style findings may defer to a follow-up ledger note instead of a new
+  baton, at your judgment — Phase D does not require a fourth recovery
+  session if nothing correctness/safety-shaped turns up.
 
 ## End of session
 
-Per `docs/relay/PROTOCOL.md`: append one `M1-Q` ledger line (evidence +
-anything deferred, especially any S-3/A-6 items pushed to R3). Rewrite
-`NEXT-PROMPT.md` for **R3** — read `docs/relay/PROTOCOL.md` §Review batons
-and the funding-plans doc's review-checkpoint section for R3's scope (all
-commits since R2, i.e. D5 onward through M1-Q; correctness/safety findings
-must be fixed, architecture/style may defer). Commit and push site master;
-merge + delete the stayturgid branch; both repos clean on pulled master.
-Print the new NEXT-PROMPT.md in chat and run
-`pbcopy < docs/relay/NEXT-PROMPT.md`.
+Per `docs/relay/PROTOCOL.md`: append one `R3` ledger line (evidence + any
+must-fix commits + anything still deferred). If Phase D is genuinely done
+(no must-fix, nothing left that needs a dedicated next session), rewrite
+`NEXT-PROMPT.md` to reflect that — either a fresh baton for the next real
+piece of work on this fleet (check `docs/plans/` for what comes after Phase
+D), or a short "Phase D closed, nothing queued" placeholder the operator can
+replace. If a must-fix required a same-session fix: merge + delete the
+stayturgid branch, both repos end on pulled master. Print the new
+NEXT-PROMPT.md in chat and run `pbcopy < docs/relay/NEXT-PROMPT.md`.
