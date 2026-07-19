@@ -45,9 +45,9 @@ a decision not in the specs, stop and report.
 - Site `justfile` is site-owned (has `dryrun-termux`, `lint`) and now exports
   `STAYTURGID_SITE_DIR` in every product wrapper and provides
   `just site-sync [mode=dry-run]` — use those instead of setting env by hand.
-- `~/ops/site-example` **exists**, so product site-* auto-discovery is
-  ambiguous (exit 1). Never rely on discovery for this site: go through the
-  site justfile wrappers or pass `dir=` / `STAYTURGID_SITE_DIR` explicitly.
+- `~/ops/site-example` (a C6 test scaffold) was deleted post-review, so
+  product site-* auto-discovery resolves to this site — but still prefer the
+  site justfile wrappers or explicit `dir=` / `STAYTURGID_SITE_DIR`.
 - Site `registry/paths.yml` uses step1 architecture schema (`base_dir`,
   `prefixes`); product registry seeds use contract v1 format — site registry
   remains authoritative; do not overwrite with product seeds.
