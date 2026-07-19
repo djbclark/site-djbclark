@@ -1,168 +1,103 @@
-# NEXT: D1 — Caddy serverapp adapter + label migration (difficulty 60/100)
+# NEXT: D0-design — Phase D architecture front-load (difficulty 55/100)
 
-**Recommended AI** (rows from `docs/reference/available-ai-models.md`; quote the
-whole row, not a bare name):
+**Funding plan in force:** FUND-B revised (see
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). No human gates —
+self-verify per PROTOCOL.md.
 
-- **Primary —** Grok 0.2.103 (grok-web) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5`
-  · Low, Medium, High (default High) · _Flagship for code + agentic work._ Run
-  at **High**. Caveat: same model is also reachable via Cursor (row 22) or
-  OpenRouter/Poe (rows 64, 106) if the grok-web quota is empty.
-- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
-  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
-  computer use, research, cybersecurity._ Run at **High**. Good for the launchd
-  plist / brew adapter work. Caveat (quota, 2026-07-19): pool is at 29% weekly —
-  operator has authorized burning the remainder; when it empties, switch to the
-  same model via OpenRouter (api) · OpenAI · GPT-5.6 Sol · various incl. Pro ·
-  Light…Ultra · _Full family_ ($18.90 balance) until the Codex weekly resets.
-- **Alt (templating subtasks) —** Cursor (web) · Cursor · Composer 2.5 ·
-  Composer 2.5 · Agent Thinking · _Native agentic coding._ Caveats: "Copilot
-  premium" from the old baton is **not** in the catalog — use this row instead.
-  Cursor's **API pool is at 0%** this cycle, so only native Composer/Auto rows
-  (19–21) work; Cursor rows 22–32 are unavailable until it resets.
-- **Escalate to —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
+**Recommended AI** (rows from `docs/reference/available-ai-models.md`; quote
+the whole row, not a bare name):
+
+- **Primary —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Adaptive Thinking (always on) · _Next-gen long-running
-  agents._ Use if own/inject mode selection or the TLS cutover needs judgment.
-  Caveat: the web variant has no separate effort dial (thinking is always on);
-  the Cursor API-pool variant with an Effort dial (row 24) is **unavailable**
-  this cycle (API pool 0%), so accept always-on thinking here.
+  agents._ **Use the ORIGINAL Claude account (djbclark@gmail.com)** — ~60% of
+  its Fable 5 weekly remains and this is its designated spend (highest-leverage
+  session in Phase D; the new second-Pro account's weekly is reserved for R1,
+  D6 escalation, and M1). No effort dial on web — adaptive thinking self-
+  throttles; do not try to force a "Low" setting.
+- **No alt.** If Fable 5 is unavailable on the original account, stop and tell
+  the operator — do not run this design session on a lesser model; the entire
+  point of Plan B is that this one session is Fable-5-authored.
 
-**Working dir:** `/Users/djbclark/ops/stayturgid` (product PR) + `/Users/djbclark/ops/site-djbclark` (site overlay)
-**Operator gate:** **public-facing 443** — operator must approve TLS cutover before retiring `com.stayturgid.caddy`; keep old launchd label until new one serves TLS
+**Working dir:** `/Users/djbclark/ops/site-djbclark` (deliverable lands here) +
+`/Users/djbclark/ops/stayturgid` (read-only this session)
 
 ---
 
-You are executing **step D1** of Phase D (shared-infra handover / serverapp
-adapters). Phase C is complete: the reference site at
-`/Users/djbclark/ops/site-djbclark` consumes the site contract
-(`generated/stayturgid/` + lockfile @ product 2.7 / commit `240f7ee`); a
-post-C review landed site `73b559a` (justfile pins `STAYTURGID_SITE_DIR`). D1
-implements the **first serverapp adapter** — Caddy — per the site contract spec.
-
-Keep the step narrow. Do **not** migrate vector/openobserve/landing (D2–D4),
-implement O-V-G-O (D5), tenant fragments (D6), retire legacy monitors (D7),
-edge otelcol (D8), or re-open Phase C contract work. If adapter design requires
-a decision not in the specs, stop and report.
+You are executing **step D0-design** of Phase D under funding Plan B: a
+design-only session that front-loads all Phase D architecture judgment into
+one Fable 5 sitting, so cheaper models (Grok 4.5, Codex, Composer) can
+implement D1–D8 against a written design. **Write no implementation code and
+make no changes to the stayturgid repo.** Your sole deliverable is one
+committed design document in the site repo.
 
 ## Read first
 
-1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`.
-2. Ground rules, model routing, risk register, and Phase D **D1** row in
+1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (note: human
+   gates removed — self-verify with evidence; self-passoff rule).
+2. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
+   — Plan B sequencing, relaxed quality bar, account split.
+3. Ground rules + Phase D rows (D1–D8) in
    `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
    §§0–2 and §5.
-3. Site contract spec (product):
+4. Site contract spec:
    `/Users/djbclark/ops/stayturgid/docs/architecture/site-contract.md`
-   §§5.1–5.4 (adapter modes, detection, include mechanisms, invariants).
-4. ADR 005 two-repo topology:
-   `/Users/djbclark/ops/stayturgid/docs/architecture/adr/005-two-repo-topology.md`.
-5. Current Caddy state: live Caddyfile location, existing `com.stayturgid.caddy`
-   (or equivalent) launchd label, registry port claims in site
-   `registry/ports.yml`, and any hand-managed route fragments.
-6. Relay ledger C6 line for carry-forward gotchas.
-
-## Current state and carry-forward gotchas
-
-- stayturgid master at `240f7ee` (C1–C5 merged). Site master at `73b559a`
-  (C6 `755e5b0` + review fix): `generated/stayturgid/` adopted; live
-  inventory/registries untouched.
-- Site `justfile` is site-owned (has `dryrun-termux`, `lint`) and now exports
-  `STAYTURGID_SITE_DIR` in every product wrapper and provides
-  `just site-sync [mode=dry-run]` — use those instead of setting env by hand.
-- `~/ops/site-example` (a C6 test scaffold) was deleted post-review, so
-  product site-* auto-discovery resolves to this site — but still prefer the
-  site justfile wrappers or explicit `dir=` / `STAYTURGID_SITE_DIR`.
-- Site `registry/paths.yml` uses step1 architecture schema (`base_dir`,
-  `prefixes`); product registry seeds use contract v1 format — site registry
-  remains authoritative; do not overwrite with product seeds.
-- `site-map.yml` support (C4, `control/site_contract/site_map.py`) already
-  validates `serverapps.caddy.{mode,config,fragment_dir}` with modes
-  own/inject/off — D1 must **consume** that existing surface for mode
-  selection, not invent a new config key.
-- Site `bin/registry_lint.py` is a uv script (`#!/usr/bin/env -S uv run`) —
-  run it as `just lint` or `bin/registry_lint.py`, not `python3 bin/...`.
-- Caddy adapter must support **own** and **inject** modes (spec §5.1–5.2):
-  mode selection order is site var (`site-map.yml` serverapps.caddy.mode) →
-  detect existing → own default.
-- **inject** mode: verify `import <dir>/*.caddy` exists; exit 2 with
-  instructions if missing (spec §5.3).
-- **own** mode: install via brew, render base config, reserve fragment dir,
-  manage launchd under site namespace (`com.<site_ns>.caddy`, e.g.
-  `com.djbclark.caddy`).
-- Port/label values come **only** from site registry/inventory — never hardcode
-  production literals in product code.
-- Product changes: branch + PR on stayturgid; merge per product protocol after
-  human checklist confirmation. Site overlay changes land in site-djbclark.
-- Do not contact fleet devices unless operator asks. Do not rotate secrets.
+   §§5.1–5.4, and ADR 005
+   (`/Users/djbclark/ops/stayturgid/docs/architecture/adr/005-two-repo-topology.md`).
+5. Existing contract code the design must fit:
+   `/Users/djbclark/ops/stayturgid/control/site_contract/site_map.py`
+   (serverapps.{caddy,...}.{mode,config,fragment_dir} already validated,
+   modes own/inject/off — consume this, don't invent new config),
+   `site_sync.py` (manifest/lockfile/plan-then-act pattern adapters must
+   extend), `sync_manifest.yml`.
+6. Live Caddy state on this Mac (read-only discovery): Caddyfile location,
+   `com.stayturgid.caddy` launchd label, ports in site `registry/ports.yml`.
+7. Relay ledger C6 + FUND-B lines.
 
 ## Exact task
 
-1. `git fetch` / pull both repos from clean master.
-2. **Discover** current Caddy deployment on the control node: Caddyfile path,
-   fragment/include dirs, launchd label, listening ports (443/80/8080 health).
-   Cross-check site `registry/ports.yml` — register any gaps before adapter work.
-3. **Implement** the Caddy adapter role in stayturgid (product):
-   - own mode: brew install, base Caddyfile template, fragment dir, site-namespace
-     launchd plist, import line for product fragments under
-     `generated/stayturgid/`.
-   - inject mode: detect existing config; write only fragment files; verify import
-     line (exit 2 if missing per spec).
-   - Rendered files carry generated header (product, template, sync time).
-4. Wire adapter into site-sync manifest / sync templates so Caddy route
-   fragments land under `generated/stayturgid/` (minimal v1 fragment to prove
-   the path; full tenant routes are D6).
-5. **Migrate** this site's Caddy instance to `com.djbclark.caddy` under site
-   ownership — but **keep the old `com.stayturgid.*` label running** until
-   operator confirms the new instance serves TLS on 443 (**OPERATOR GATE**).
-6. Dry-run deploy first (`just dryrun-*` / `--check`). Verify health endpoints
-   after any launchd change (`curl`, `launchctl list`).
-7. Run `just check` / focused tests on the product PR; from product with
-   `STAYTURGID_SITE_DIR=/Users/djbclark/ops/site-djbclark` run
-   `just validate-identity` (strict); site `bin/registry_lint.py` if registry
-   edited.
+Write `/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`
+covering, concretely enough that a mid-tier model can implement without
+re-deciding:
 
-## Verification
+1. **D1 adapter pattern** (this is the template D2–D5 clone): mode-selection
+   order (site-map serverapps var → detect existing → own default), own/inject
+   behavior split, exit-code contract (0/1/2 matching site-sync semantics),
+   launchd namespace rule (`com.<site_ns>.<app>`), fragment dir layout under
+   `generated/stayturgid/`, generated-header format, how the adapter wires
+   into `sync_manifest.yml`, and the no-cutover rule (new label up before old
+   label retired; rollback command documented).
+2. **D6 projection design**: inventory→fragment projection rules and blast-
+   radius limits (what a single inventory edit is allowed to rewrite; how
+   drift/lockfile semantics contain it).
+3. **D8 rollout order**: edge otelcol deploy sequence, one-device-first rule,
+   offline-device handling, verify condition (device logs visible in
+   OpenObserve after an offline/reconnect cycle).
+4. **Deviation protocol**: implementers may deviate where the design proves
+   awkward (relaxed bar), but every deviation gets a ledger note for M1-R to
+   re-judge.
 
-- Caddy adapter role exists with own + inject modes per spec §5.
-- inject against pre-existing Caddyfile without import → exit 2 with instructions.
-- own mode on clean prefix → daemon under `com.<site_ns>.caddy`, fragment dir
-  importable.
-- Site-sync renders at least one Caddy fragment under `generated/stayturgid/`;
-  lockfile updated; second sync no-op.
-- Old label still serves TLS until operator-approved cutover.
-- `just check` green on product PR; strict identity clean with site overlay.
-- No secret values in commits; no live inventory in public product.
+Do not gold-plate: decisions and rationale, not prose. Target ≤300 lines.
 
-## Human-verification checklist
+## Verification (self-verify; no human gate)
 
-- [ ] Caddy adapter own/inject modes match spec §5.1–5.4
-- [ ] Registry updated for any new port/label claims before deploy
-- [ ] Dry-run reviewed; no surprise writes outside generated area + adapter targets
-- [ ] New `com.djbclark.caddy` serves routes; old label retained until operator cutover
-- [ ] `curl` health/TLS spot-check passed on control node
-- [ ] Product PR merged; stayturgid on pulled master; site repo updated if needed
-- [ ] Ledger + next baton updated per PROTOCOL.md
-
-## Funding plan and Fable 5 usage
-
-Before starting, read
-`/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
-and check the ledger for a `FUND-A` / `FUND-B` line; if none exists, ask the
-operator which plan is in force and record it. That document ranks where
-Fable 5 matters most — **D1's adapter architecture is the single
-highest-leverage Fable 5 use in Phase D** (every later adapter clones it).
-Under Plan A, Fable 5 runs this whole step; under Plan B, implement against
-`docs/design/phase-d-adapter-design-notes.md` from the D0-design session (if
-that file is missing, stop — D0-design must run first).
+- Design doc exists, is Prettier-clean (`prettier --check`), ≤~300 lines,
+  and covers all four sections above.
+- No stayturgid working-tree changes (`git -C ~/ops/stayturgid status` clean).
+- No production secrets or fleet-device contact.
+- Design consumes existing `site_map.py` serverapp keys rather than defining
+  new config surface.
 
 ## End of session
 
-Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
-After D1 is human-confirmed and landed, append its ledger entry, then prepare
-the **R1 review baton** (NOT D2 — R1 after D1 is a mandatory review checkpoint
-per PROTOCOL.md § Review batons and the funding-plans doc § Review
-checkpoints). The R1 baton follows the same template: recommended AI quoted as
-full rows from `docs/reference/available-ai-models.md` (R1's reviewer is
-Fable 5 under both funding plans), scope = all commits since the pre-D1
-review, and under Plan B only architecture/correctness findings are must-fix
-(code-style findings are logged as deferred). Commit/push both repos as
-needed, print the new `NEXT-PROMPT.md` contents in chat, and copy the baton to
-the clipboard using pbcopy (`pbcopy < docs/relay/NEXT-PROMPT.md`).
+Follow PROTOCOL.md exactly (self-verified variant). Append a `D0-design`
+ledger line. Rewrite `NEXT-PROMPT.md` as the **D1 implementation baton**:
+carry over the D1 content from the execution-plan row and the C6/FUND-B
+carry-forward gotchas (site justfile wrappers export STAYTURGID_SITE_DIR;
+site-example deleted; registry paths.yml schema mismatch; uv-shebang lint;
+Codex burn authorized then OpenRouter GPT-5.6 Sol fallback), point it at the
+design notes as its spec, recommend **Grok 4.5 High (grok-web, 75% weekly)**
+as primary quoted as a full catalog row (self-passoff applies if Grok is
+already the runner), and route D1's end-of-session to the **R1 review baton**
+(Fable 5, **new second-Pro account**) per the checkpoint table. Commit/push
+this repo, print the new baton in chat, and
+`pbcopy < docs/relay/NEXT-PROMPT.md`.

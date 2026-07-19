@@ -1,4 +1,10 @@
-# Phase D funding & sequencing plans — v1 (2026-07-19)
+# Phase D funding & sequencing plans — v1 (2026-07-19; rev B-final)
+
+**DECIDED: Plan B (revised — second Pro account).** Human gates are removed
+protocol-wide (operator was confirm-stamping; PROTOCOL.md now substitutes
+extra verification + rollback notes for human eyes). Quality bar relaxed for
+BOTH plans: only correctness/safety findings are must-fix; architecture and
+code-style findings may be deferred to the ledger for month M1.
 
 Two ways to fund and sequence D1–D8 plus end-of-stage code reviews. Both
 front-load Claude Fable 5 onto the decisions where it matters most; they differ
@@ -33,6 +39,16 @@ Ranked by leverage — spend Fable 5 here first, cheaper models everywhere else:
 Explicitly _not_ Fable-5-critical: D2–D4 adapter cloning, D5 installs, D7
 retirement mechanics, Grafana YAML drafting (DeepSeek V4 Pro is fine).
 
+**Fable 5 "Low" effort:** on Claude web plans there is no manual effort dial —
+the catalog row is Adaptive Thinking (always on), which already scales
+thinking down on easy turns, so the cheap tier comes for free. A selectable
+Low exists only on API/effort-dial variants (e.g. OpenRouter row 58 with a
+reasoning-effort param). Where a dial exists: Low is acceptable for
+reading-heavy review sessions (R1/R2), NOT for D0-design or D6 judgment —
+those are exactly the sessions bought for deep thinking. Practical rule:
+don't pay API rates to get Low; use subscription Fable 5 and let adaptive
+thinking self-throttle.
+
 ## Review checkpoints (both plans; see PROTOCOL.md § Review batons)
 
 | Id  | After | Scope                                      | Review AI (plan A / plan B)                |
@@ -40,6 +56,9 @@ retirement mechanics, Grafana YAML drafting (DeepSeek V4 Pro is fine).
 | R1  | D1    | First adapter pattern, both repos          | Fable 5 / Fable 5 (this is where B spends) |
 | R2  | D4    | D2–D4 adapter clones + landing fix         | Sonnet 5 / Grok 4.5 High                   |
 | R3  | D8    | D5–D8 + whole-phase architecture close-out | Fable 5 / deferred to recovery month (M1)  |
+
+Under the relaxed quality bar, reviews must-fix **correctness/safety only**;
+architecture and code-style findings are logged to the ledger as deferred.
 
 ## Plan A — "buy the month" (~$100: upgrade Claude Pro → Max 5x)
 
@@ -63,67 +82,80 @@ Downgrade after the month if desired.
 **Outcome:** full D1–D8 + all three reviews at target quality in ~3–5 days.
 No recovery month needed. Extra spend: ~$100 (minus proration).
 
-## Plan B — "$30 ceiling" (OpenRouter top-up only; ≤$30 extra)
+## Plan B — REVISED & CHOSEN: "$20 second Pro" (second Claude Pro account)
 
-Top up OpenRouter by $30 (→ ~$48.90 balance). Reserve it **exclusively** for
-Fable 5 (OpenRouter row 58) at the moments listed below — one heavy agentic
-Fable 5 session via API can run $10–20, so the balance buys roughly 2–3
-Fable 5 sessions and nothing else.
+Original $30-OpenRouter version superseded: API-metered Fable 5 runs ~$1/min
+(operator-measured), so $30 buys ~2 sessions once, while a second $20 Pro
+plan buys a Pro-sized Fable 5 weekly that renews all month (~5–10× more
+Fable 5 per dollar) and also covers recovery month M1 with the same purchase.
+The second account is held by a second human (no ToU exposure). Relay handoff
+makes account switching cheap — every session starts fresh from a committed
+baton, so nothing is lost by switching logins between sessions.
 
-**Key move — architecture front-load (do this first, TODAY, on the Claude Pro
-weekly you already have, before buying anything):** one Fable 5 (web) session
-that does _no implementation_ and instead writes
+**Accounts** (every Claude baton names one):
+
+- **Original** (djbclark@gmail.com): ~60% Fable 5 weekly remaining as of this
+  revision. Spend it NOW on D0-design (highest-leverage session). Afterwards:
+  Sonnet 5 and routine Claude work.
+- **New** (second Pro, second human): all subsequent Fable 5 sessions — R1,
+  D6 escalation, M1-R, M1-R3.
+
+**Key move — architecture front-load (session 1, today, original account):**
+one Fable 5 (web) session that does _no implementation_ and instead writes
 `docs/design/phase-d-adapter-design-notes.md`: the D1 adapter pattern
 (mode-selection order, exit codes, launchd namespace, fragment layout), the
 D6 projection design (blast-radius rules), and the D8 rollout order. Cheaper
-models then execute against a Fable-5-authored design. This is how Plan B
-keeps architecture quality while accepting lower code quality.
+models then execute against a Fable-5-authored design. Design notes are
+guidance, not law, under the relaxed bar — implementers may deviate where the
+design proves awkward, recording the deviation in the ledger for M1-R to
+re-judge.
 
-**Sequencing:**
+**Sequencing** (no human gates; sessions self-verify per PROTOCOL.md):
 
-| Session | Step                                                                                                   | AI                                                                                                                                                               |
-| ------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 (now) | D0-design — architecture front-load (see above)                                                        | Claude 2.1.205 (web) · Anthropic · Claude Fable 5 · `claude-fable-5` · Adaptive Thinking (always on) · Next-gen long-running agents — on the existing Pro weekly |
-| 2       | D1 implementation against the design notes                                                             | Grok 4.5 High (grok-web)                                                                                                                                         |
-| 3       | R1 review — **architecture findings only must-fix**; log code-style findings to the ledger as deferred | Fable 5 via OpenRouter (api) · Anthropic · Claude Fable 5 · Adaptive Thinking (always on) (~$10–15 of the $30)                                                   |
-| 4–6     | D2, D3, D4                                                                                             | Grok 4.5 Medium/High; Codex until empty; Composer 2.5 for templating                                                                                             |
-| 7       | R2 review (light)                                                                                      | Grok 4.5 High — free, quota permitting                                                                                                                           |
-| 8       | D5                                                                                                     | Grok 4.5 High; DeepSeek-V4-Pro for dashboards                                                                                                                    |
-| 9       | D6 against the front-loaded design                                                                     | Grok 4.5 High; **escalate to remaining OpenRouter Fable 5 balance if the projection diverges from the design notes**                                             |
-| 10–11   | D7, D8                                                                                                 | Sonnet 5 (after Pro weekly reset, ~4d22h) / Grok 4.5 High                                                                                                        |
+| Session | Step                                                                    | AI (account)                                                                                                                                               |
+| ------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 (now) | D0-design — architecture front-load                                     | Claude 2.1.205 (web) · Anthropic · Claude Fable 5 · `claude-fable-5` · Adaptive Thinking (always on) · Next-gen long-running agents — **original account** |
+| 2       | D1 implementation against the design notes                              | Grok 4.5 High (grok-web)                                                                                                                                   |
+| 3       | R1 review — must-fix correctness/safety only; defer the rest to ledger  | Fable 5 (web) — **new account**                                                                                                                            |
+| 4–6     | D2, D3, D4 (self-passoff allowed: one Grok session may chain all three) | Grok 4.5 Medium/High; Codex until empty; Composer 2.5 for templating                                                                                       |
+| 7       | R2 review (light)                                                       | Grok 4.5 High — free, quota permitting                                                                                                                     |
+| 8       | D5                                                                      | Grok 4.5 High; DeepSeek-V4-Pro for dashboards                                                                                                              |
+| 9       | D6 against the front-loaded design                                      | Grok 4.5 High; escalate to Fable 5 (web, **new account**) if the projection diverges from the design notes                                                 |
+| 10–11   | D7, D8                                                                  | Sonnet 5 (**original account**, after weekly reset ~4d22h) / Grok 4.5 High                                                                                 |
 
-**Realistic cutoff:** D1–D5 + R1 are achievable now on Grok + Codex + $30.
-**D6–D8 are at risk** if Grok's weekly (75%, resets 3d18h) runs dry or gates
-stall — that is acceptable: they defer cleanly to the recovery month below.
-Completing *all* of D1–D8 at full quality inside the $30 ceiling is **not
-realistic**; the plan's promise is D1–D5 done with sound architecture, and the
-gap to Plan A closed in the recovery month. Absolute floor if everything goes
-badly: D1 + R1 (the pattern is then safe to clone cheaply any time).
+**Realistic cutoff:** with no human gates stalling sessions and a renewing
+Fable 5 weekly on the new account, **D1–D6 + R1 + R2 are achievable this
+cycle**; D7–D8 ride on quota luck and defer cleanly to M1 if Grok runs dry.
+Full D1–D8 at Plan-A quality inside this cycle is still not promised — the
+promise is sound-enough architecture now and convergence in M1. Absolute
+floor: D0-design + D1 + R1.
 
 **Recovery month M1 (after all quotas/monthlies reset) — run these as normal
 batons, in order:**
 
-1. **M1-R (Fable 5, web):** "Review every commit in ~/ops/stayturgid and
-   ~/ops/site-djbclark since ledger entry R1 against
-   docs/design/phase-d-adapter-design-notes.md. Classify findings:
-   architecture (must-fix), correctness (must-fix), code-quality (list).
-   Rewrite NEXT-PROMPT.md as a remediation baton covering the must-fix list."
-2. **M1-F (Sonnet 5):** "Execute the remediation baton from M1-R. Run the full
-   product test suite, strict identity, registry lint. Ledger + baton per
-   PROTOCOL.md."
-3. **M1-Q (Sonnet 5 or Grok 4.5 High):** "Work through the code-quality
+1. **M1-R (Fable 5, web, new account):** "Review every commit in
+   ~/ops/stayturgid and ~/ops/site-djbclark since ledger entry R1 against
+   docs/design/phase-d-adapter-design-notes.md and the deviations logged in
+   LEDGER.md. Classify findings: correctness/safety (must-fix), architecture
+   (fix if cheap, else justify keeping), code-quality (list). Rewrite
+   NEXT-PROMPT.md as a remediation baton covering the must-fix list."
+2. **M1-F (Sonnet 5, original account):** "Execute the remediation baton from
+   M1-R. Run the full product test suite, strict identity, registry lint.
+   Ledger + baton per PROTOCOL.md."
+3. **M1-Q (Sonnet 5 original account, or Grok 4.5 High):** "Work through the
    deferred list in LEDGER.md entries R1..R2: simplify, dedupe, align adapter
    roles D2–D5 with the D1 pattern where they drifted. No behavior changes;
    tests must stay green."
 4. **M1-D6..D8 (only if deferred):** run the deferred step batons exactly as
-   written, primary Fable 5 for D6, per the checkpoint table above.
-5. **M1-R3 (Fable 5):** the R3 close-out review from the checkpoint table.
+   written, primary Fable 5 (new account) for D6.
+5. **M1-R3 (Fable 5, new account):** the R3 close-out review.
 
-Result: within one normal month of reset quota (no extra spend), Plan B
-converges on Plan A's quality — architecture was never allowed to drift, so
-the recovery is code-polish, not redesign.
+Result: within one normal month of reset quota (second Pro still active, no
+further spend), Plan B converges near Plan A's quality — deviations were
+ledgered rather than silent, so M1 recovery is targeted, not archaeology.
 
 ## Decision
 
-Operator has chosen: **A + B hybrid is not defined — pick one.** Record the
-choice as a ledger line (`FUND-A` or `FUND-B`) when the next session starts.
+**FUND-B (revised) chosen by operator 2026-07-19.** Recorded in LEDGER.md.
+Action items: (1) second human purchases the $20 Pro plan and shares session
+access; (2) operator runs D0-design on the original account today.
