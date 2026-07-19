@@ -465,7 +465,7 @@ shizuku_server` alongside port 5555 `ss` check (port alone is not sufficient).
 - Split storage — Termux under `~/.stayturgid/shared`; AutoJs6 under `/sdcard/stayturgid/`.
 - No Termux→localhost:5555 loopback — verify item 4 is an expected informational note, not a failure. Post-UI stays on Mac adb (USB or wireless).
 - Mac adb: Tailscale or USB `GN43T503430603PS`; wireless failover works after one USB bootstrap.
-- **Sideloaded Google Play:** Play Store can auto-update GMS past Fire-compatible builds → GSF/GMS crash loop. Pin via `just fix-hd8-google`; disable Play Store auto-updates. **VLM close-out** (when `just vlm-server` running): `just verify-hd8-google` or auto after `fix-hd8-google`. See [docs/research/fire-os-google-play.md](https://github.com/djbclark/stayturgid/blob/master/docs/research/fire-os-google-play.md) and [docs/architecture/vlm.md](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/vlm.md).
+- **Sideloaded Google Play:** Play Store can auto-update GMS past Fire-compatible builds → GSF/GMS crash loop. Pin via `just fix-fireos-device-google` (recipe renamed from `fix-hd8-google` in the B5 identity scrub); disable Play Store auto-updates. **VLM close-out** (when `just vlm-server` running): `just verify-fireos-device-google` or auto after `fix-fireos-device-google`. See [docs/research/fire-os-google-play.md](https://github.com/djbclark/stayturgid/blob/master/docs/research/fire-os-google-play.md) and [docs/architecture/vlm.md](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/vlm.md).
 
 **Next work:** follow
 [Outstanding Fix Priorities](https://github.com/djbclark/stayturgid/blob/master/docs/operations/plans/outstanding-fix-priorities-2026-07-13.md), with

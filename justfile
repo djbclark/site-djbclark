@@ -10,16 +10,16 @@ stayturgid_root := env_var_or_default("STAYTURGID_ROOT", "/Users/djbclark/ops/st
 hosts := env_var_or_default("hosts", "")
 
 deploy:
-    ANSIBLE_CONFIG="$PWD/ansible.cfg" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy
 
 deploy-check:
-    ANSIBLE_CONFIG="$PWD/ansible.cfg" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy-check
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy-check
 
 dryrun-termux:
-    ANSIBLE_CONFIG="$PWD/ansible.cfg" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" dryrun-termux
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" dryrun-termux
 
 inventory-check:
-    ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-inventory --list | jq -S .
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-inventory --list | jq -S .
 
 lint:
     bin/registry_lint.py
