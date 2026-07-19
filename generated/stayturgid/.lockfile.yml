@@ -1,24 +1,24 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 5cc2cbf185a3826553348ec6689c53347ffa991b
-synced: '2026-07-19T15:48:44Z'
+product_commit: d43a7c5b2d31c6dc533323d55e98d5cd14558e35
+synced: '2026-07-19T16:41:37Z'
 files:
 - path: generated/stayturgid/README.md
-  sha256: 0368321a9253d6d628897eab4a9c41e56e42edf5d716ab8af72dbd7d425aea62
+  sha256: aac386197931441144bcf3332cc3dcd00a457c4283a7ca3133b342777f319c04
 - path: generated/stayturgid/fragments/.keep
-  sha256: a7e2dcc2136521cc74a52a74b74a7edc642748db981a2f74fe5a902b03e205a1
+  sha256: b3b56aec54d88d9c7eaf5e120885cd7c0eb65617f023c9d879a6d62c85a70133
 - path: generated/stayturgid/fragments/caddy/stayturgid.caddy
-  sha256: 47d7a6cf4c9bc8e422a1f737417d1409041d5785e2902aa3038ef0ba53b4ba1f
+  sha256: 229a45b8867250e16342866e89022a91db7cfb59bfcaeed6bef7190c75ce9b67
 - path: generated/stayturgid/fragments/vector/stayturgid_sources.yaml
-  sha256: ca92f6215a267fb5cbb78e474d330f5a88ae4dc05fa29ae6e1f02f4e4a59df2d
+  sha256: 60e39c689ed17474a48d469f55816c8a61ce7c9538de357ea8ee76abcd8ae6bf
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
-  sha256: ad1cdac4f0ad8b3e9284ac1c7739cd6a452a048cffcd6f7b9a8a3998487b6f8c
+  sha256: a01dbd0fd5a3cf40d35c8ebd2ac9ae567d96383183ff2c4edafa28886b3c0bfc
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
-  sha256: e40273766f75f1324a73b0e5460ed85ccaaa84ec1124adfe72049a0ef0593f30
+  sha256: 4f02ca6ef4cbd9247906ebdc060085a7f99f82e0aa1bd44a3ce4d7383a21b80a
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
-  sha256: c7a137869f37d9a0156481b3695ecc1e12bcce7ab325cc7519de85b106832f90
+  sha256: df8820aa48de4e72bfa6dc123b767bea6f7e33ee0d8380f00f264181df6c4ca8
 - path: generated/stayturgid/fragments/grafana/dashboards/json/stayturgid-fleet.json
-  sha256: c5e7f86a49d69ec8500220a3fe1e82ff1b169ada137bac50ed4e87024e961395
+  sha256: dcdd525426db72b3b1eda56a5d9b0023fc9766a3b076064c4c32964a21351fa7
 - path: generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml
-  sha256: 536e243cbdcd311abd631a5fe106ee71ac235fceb158c41ea8357a5cc4a1c695
+  sha256: bf610f482a8e42f3456743efd8d046728c503f031b1689c272c6a9306e1a506d
