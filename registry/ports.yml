@@ -34,11 +34,11 @@ hosts:
       - {port: 5081,  bind: "127.0.0.1", owner: site, service: openobserve-grpc,    status: active,
          note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
       - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
-         note: "Phase D1: com.djbclark.caddy health; FOOTGUN: landing.py code default is also 8080; plist passes --port 8088"}
+         note: "Phase D1: com.djbclark.caddy health; D4 fixed landing.py default 8080→8088 (no longer collides)"}
       - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
          note: "llama.cpp UI-TARS; homebrew.mxcl.ui-tars"}
-      - {port: 8088,  bind: "127.0.0.1", owner: stayturgid, service: landing,             status: active,
-         note: "service directory; moves to site ownership in Phase D"}
+      - {port: 8088,  bind: "127.0.0.1", owner: site, service: landing,             status: active,
+         note: "Phase D4: com.djbclark.landing (was com.stayturgid.landing); discover agent com.djbclark.landing-discover; old plists retained until D7"}
 
       # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
       - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: planned,

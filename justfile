@@ -35,6 +35,14 @@ site-sync *args:
 site-serverapps *args:
     STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" site-serverapps dir="{{ site_dir }}" {{ args }}
 
+# Landing page (Phase D4: com.djbclark.landing). Exports site-namespace labels.
+landing-status:
+    LANDING_LABEL=com.djbclark.landing LANDING_DISCOVER_LABEL=com.djbclark.landing-discover \
+      just --justfile "{{ stayturgid_root }}/justfile" landing-status
+
+landing-discover:
+    STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" landing-discover
+
 inventory-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-inventory --list | jq -S .
 
