@@ -7,21 +7,22 @@ whole row, not a bare name):
   · Low, Medium, High (default High) · _Flagship for code + agentic work._ Run
   at **High**. Caveat: same model is also reachable via Cursor (row 22) or
   OpenRouter/Poe (rows 64, 106) if the grok-web quota is empty.
-- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
-  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
-  computer use, research, cybersecurity._ Run at **High**. Good for the launchd
-  plist / brew adapter work.
+- **Alt —** OpenRouter (api) · OpenAI · GPT-5.6 Sol · various incl. Pro ·
+  Light, Medium, High, Extra High, Max, Ultra · _Full family._ Run at **High**.
+  Good for the launchd plist / brew adapter work. Caveat (quota, 2026-07-19):
+  the native Codex pool (row 1) is at 29% weekly and pacing to empty within
+  hours — use this OpenRouter route ($18.90 balance) until Codex resets.
 - **Alt (templating subtasks) —** Cursor (web) · Cursor · Composer 2.5 ·
-  Composer 2.5 · Agent Thinking · _Native agentic coding._ Caveat: the old
-  baton's "Copilot premium" is **not** in the catalog — use this Cursor row (or
-  a Codex/Grok row above) instead.
+  Composer 2.5 · Agent Thinking · _Native agentic coding._ Caveats: "Copilot
+  premium" from the old baton is **not** in the catalog — use this row instead.
+  Cursor's **API pool is at 0%** this cycle, so only native Composer/Auto rows
+  (19–21) work; Cursor rows 22–32 are unavailable until it resets.
 - **Escalate to —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Adaptive Thinking (always on) · _Next-gen long-running
   agents._ Use if own/inject mode selection or the TLS cutover needs judgment.
   Caveat: the web variant has no separate effort dial (thinking is always on);
-  if you specifically want a **medium**-effort setting, take the Cursor API-pool
-  variant instead — Cursor (web) · Anthropic · Claude Fable 5 · Claude Fable 5 ·
-  Adaptive Thinking + Effort · _Via API pool_ (row 24).
+  the Cursor API-pool variant with an Effort dial (row 24) is **unavailable**
+  this cycle (API pool 0%), so accept always-on thinking here.
 
 **Working dir:** `/Users/djbclark/ops/stayturgid` (product PR) + `/Users/djbclark/ops/site-djbclark` (site overlay)
 **Operator gate:** **public-facing 443** — operator must approve TLS cutover before retiring `com.stayturgid.caddy`; keep old launchd label until new one serves TLS
