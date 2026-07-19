@@ -34,14 +34,14 @@ operator decisions that close stayturgid §11 items #1 and #9 (ownership half).
 
 ## 2. Operator decisions (2026-07-18)
 
-| # | Decision | Choice |
-|---|----------|--------|
-| 1 | Site repo shape | **One private site repo.** `site-djbclark` is the site overlay for stayturgid *and* the home of general machine management. One inventory covers all hosts. |
-| 2 | Shared machine infra (Caddy, landing, O-V-G-O) | **Site owns the instances.** The role *code* ships in stayturgid (see decision 5); products are tenants contributing fragments. Ownership is mediated by the **site contract** (§5) so a stayturgid-only user without Ansible/brew knowledge can still bootstrap and update a site dir with one command. |
-| 3 | New general-machine roles (Goose/LiteLLM) | ~~Public product repo now~~ **Superseded same day (see 5):** incubate as roles in this repo; extract to a public repo only if they mature into something others want. |
-| 4 | Literate programming | **Yes, scoped**: the site contract documents are Entangled literate documents (§6). Product internals stay conventional. |
-| 5 | Repo topology (finalized later 2026-07-18) | **Two repos, no third.** Industry research (Puppet control-repo + roles/profiles, Gruntwork modules/live, Flux/Argo app-vs-config repos, Ansible inventory separation) converges on exactly two repo kinds: public product + private site/control repo. Composition glue ships product-side (serverapp adapters, §5a) or site-side (thin wrappers) — never a middle repo. Shared-infra roles and site-contract tooling stay in stayturgid. |
-| 6 | Base directory | **`~/ops`** — a plain directory (never itself a repo), user-configurable (`OPS_ROOT`), sibling checkouts: `~/ops/stayturgid`, `~/ops/site-djbclark`. **Private-inside-public nesting is forbidden** by the contract: an allowlist-.gitignore mistake, `git add -f`, or `git clean -ffdx` in a public working tree must never be able to touch site data. |
+| #   | Decision                                       | Choice                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Site repo shape                                | **One private site repo.** `site-djbclark` is the site overlay for stayturgid _and_ the home of general machine management. One inventory covers all hosts.                                                                                                                                                                                                                                                                                |
+| 2   | Shared machine infra (Caddy, landing, O-V-G-O) | **Site owns the instances.** The role _code_ ships in stayturgid (see decision 5); products are tenants contributing fragments. Ownership is mediated by the **site contract** (§5) so a stayturgid-only user without Ansible/brew knowledge can still bootstrap and update a site dir with one command.                                                                                                                                   |
+| 3   | New general-machine roles (Goose/LiteLLM)      | ~~Public product repo now~~ **Superseded same day (see 5):** incubate as roles in this repo; extract to a public repo only if they mature into something others want.                                                                                                                                                                                                                                                                      |
+| 4   | Literate programming                           | **Yes, scoped**: the site contract documents are Entangled literate documents (§6). Product internals stay conventional.                                                                                                                                                                                                                                                                                                                   |
+| 5   | Repo topology (finalized later 2026-07-18)     | **Two repos, no third.** Industry research (Puppet control-repo + roles/profiles, Gruntwork modules/live, Flux/Argo app-vs-config repos, Ansible inventory separation) converges on exactly two repo kinds: public product + private site/control repo. Composition glue ships product-side (serverapp adapters, §5a) or site-side (thin wrappers) — never a middle repo. Shared-infra roles and site-contract tooling stay in stayturgid. |
+| 6   | Base directory                                 | **`~/ops`** — a plain directory (never itself a repo), user-configurable (`OPS_ROOT`), sibling checkouts: `~/ops/stayturgid`, `~/ops/site-djbclark`. **Private-inside-public nesting is forbidden** by the contract: an allowlist-.gitignore mistake, `git add -f`, or `git clean -ffdx` in a public working tree must never be able to touch site data.                                                                                   |
 
 ## 3. The three-layer model
 
@@ -84,7 +84,7 @@ owning your general-purpose monitoring) is the creep being reversed.
 
 1. **Port registry** — `registry/ports.yml` (seeded from live state, this
    repo). Authority for every listen port per host: owner, bind, purpose.
-   Products keep *defaults* in role defaults; site inventory overrides; a
+   Products keep _defaults_ in role defaults; site inventory overrides; a
    lint script (pre-commit/CI in every repo) flattens effective config and
    fails on collision. Runtime complement: `landing-discover` diffs its live
    scan against the registry → "listening but unregistered" warnings.
@@ -107,12 +107,12 @@ owning your general-purpose monitoring) is the creep being reversed.
 
 ### Namespaces
 
-| Prefix | Owner |
-|--------|-------|
-| `com.stayturgid.*` launchd, `~/.config/stayturgid/**`, `~/Library/Logs/stayturgid*` | stayturgid |
-| `com.djbclark.*` launchd, `~/.config/djbclark/**` | site (already de facto: system-state-backup, hibernate-disk-check) |
-| `homebrew.mxcl.*` | brew services; each label claimed by exactly one stack in `registry/paths.yml` |
-| `com.<product>.*` (templated `{{ site_ns }}` default) | product roles instantiated by site |
+| Prefix                                                                              | Owner                                                                          |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `com.stayturgid.*` launchd, `~/.config/stayturgid/**`, `~/Library/Logs/stayturgid*` | stayturgid                                                                     |
+| `com.djbclark.*` launchd, `~/.config/djbclark/**`                                   | site (already de facto: system-state-backup, hibernate-disk-check)             |
+| `homebrew.mxcl.*`                                                                   | brew services; each label claimed by exactly one stack in `registry/paths.yml` |
+| `com.<product>.*` (templated `{{ site_ns }}` default)                               | product roles instantiated by site                                             |
 
 ## 5. The site contract (scaffolding + sync)
 
@@ -129,7 +129,7 @@ product ships tooling implementing a common **site contract spec**:
   product's port/path claims, `ansible.cfg` wired to the product checkout,
   justfile wrappers, bootstrap script (installs brew/ansible under the hood),
   README. The tool hides Ansible/brew; it does not avoid them.
-- **`site-sync`** re-renders the *product-facing* portion of an existing site
+- **`site-sync`** re-renders the _product-facing_ portion of an existing site
   dir from the currently installed product version. Generated content lives
   under `generated/<product>/` (or marked blocks), never hand-edited; a
   lockfile records the product version last synced. User-owned areas are
@@ -138,7 +138,7 @@ product ships tooling implementing a common **site contract spec**:
   fragments are part of the contract).
 - **`--docs-only`** emits the human-readable document describing exactly what
   would be created and the manual steps — for users who refuse automation.
-  With Entangled (§6) this is nearly free: the contract *is* a document.
+  With Entangled (§6) this is nearly free: the contract _is_ a document.
 - **`--dry-run`** lists actions without performing them.
 - **`site-map.yml`** — for users with an existing Ansible layout: maps the
   locations the product expects (inventory path, group_vars, config dirs)
@@ -160,7 +160,7 @@ with two modes:
   fragments drop in beside the product's.
 - **Inject-only** (user config exists — the **default** in that case): the
   role leaves the user's daemon alone and injects the product's fragments
-  into the user's config via the app's *native* include mechanism
+  into the user's config via the app's _native_ include mechanism
   (Caddyfile `import`, vector multi-config/conf.d, Grafana provisioning
   dirs, OliveTin config merge projection). `site-map.yml` maps expected
   locations onto non-conventional layouts. Mode is overridable via site vars.
@@ -192,15 +192,15 @@ Red Hat "Zen of Ansible" (playbooks as documentation).
 
 ## 7. What moves where
 
-| Item (today) | Destination |
-|---|---|
-| Live fleet inventory, `group_vars/stayturgid.yml`, `docs/handoff.md`, operator docs | site-djbclark (stayturgid Phase 1, per its §4.2) |
-| Caddy, landing, vector aggregator, openobserve (com.stayturgid.\*) | Site-owned instances from product-repo roles; stayturgid becomes tenant (fragments) |
-| O-V-G-O remaining components (VictoriaMetrics, Grafana, OliveTin — not yet installed) | Land directly under site ownership; never install under stayturgid |
-| Goose + LiteLLM (step0 plan) | Roles incubate in site-djbclark (decision 5); extract to a public repo only if they mature |
-| hermes-agent, opencode-web | Stay in stayturgid for now (fleet-ops flavored); revisit after Phase C |
-| Unmanaged machine services (immich, postgres, redis, mariadb, system-state-backup, hibernate-disk-check) | Gradually adopt into site-djbclark |
-| `~/stayturgid_work`, `~/stayturgid.d` scratch checkouts | **Resolved 2026-07-18:** unique WIP recovered (commit `062cfac`), branches merged to master, directories deleted. `~/stayturgid-hermes` verified empty and deleted too |
+| Item (today)                                                                                             | Destination                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live fleet inventory, `group_vars/stayturgid.yml`, `docs/handoff.md`, operator docs                      | site-djbclark (stayturgid Phase 1, per its §4.2)                                                                                                                       |
+| Caddy, landing, vector aggregator, openobserve (com.stayturgid.\*)                                       | Site-owned instances from product-repo roles; stayturgid becomes tenant (fragments)                                                                                    |
+| O-V-G-O remaining components (VictoriaMetrics, Grafana, OliveTin — not yet installed)                    | Land directly under site ownership; never install under stayturgid                                                                                                     |
+| Goose + LiteLLM (step0 plan)                                                                             | Roles incubate in site-djbclark (decision 5); extract to a public repo only if they mature                                                                             |
+| hermes-agent, opencode-web                                                                               | Stay in stayturgid for now (fleet-ops flavored); revisit after Phase C                                                                                                 |
+| Unmanaged machine services (immich, postgres, redis, mariadb, system-state-backup, hibernate-disk-check) | Gradually adopt into site-djbclark                                                                                                                                     |
+| `~/stayturgid_work`, `~/stayturgid.d` scratch checkouts                                                  | **Resolved 2026-07-18:** unique WIP recovered (commit `062cfac`), branches merged to master, directories deleted. `~/stayturgid-hermes` verified empty and deleted too |
 
 ## 8. Migration phases
 

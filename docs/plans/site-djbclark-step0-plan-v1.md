@@ -10,6 +10,7 @@
 **Target machine:** Apple Silicon Mac (M1 MacBook Air)  
 **Constraint:** Zero Docker / no heavy virtualization  
 **Final desired state:**
+
 - Goose Desktop + CLI installed and configured as the single pane of glass
 - LiteLLM proxy running as a silent user-level `launchd` service
 - LiteLLM configured with Complexity Router, budgets, fallbacks, and local disk cache
@@ -72,8 +73,8 @@ An agent (Grok Build or equivalent) should execute these phases in order:
 - name: Install system packages
   homebrew:
     name:
-      - uv                    # preferred modern Python tool runner
-      - node                  # needed for many npx-based MCP servers
+      - uv # preferred modern Python tool runner
+      - node # needed for many npx-based MCP servers
     state: present
 
 - name: Install Goose Desktop
@@ -132,7 +133,7 @@ An agent (Grok Build or equivalent) should execute these phases in order:
 - name: Load launchd service (idempotent)
   command: launchctl bootstrap gui/$(id -u) {{ ansible_env.HOME }}/Library/LaunchAgents/local.litellm.plist
   register: bootstrap
-  failed_when: bootstrap.rc not in [0, 5]   # 5 = already loaded
+  failed_when: bootstrap.rc not in [0, 5] # 5 = already loaded
   changed_when: bootstrap.rc == 0
 ```
 
@@ -153,7 +154,7 @@ model_list:
   # Strong reasoning tier (adjust model name to whatever you currently use)
   - model_name: claude-sonnet
     litellm_params:
-      model: anthropic/claude-sonnet-4-20250514   # update to current ID
+      model: anthropic/claude-sonnet-4-20250514 # update to current ID
       api_key: os.environ/ANTHROPIC_API_KEY
 
   # Complexity router – this is what Goose will call
@@ -246,7 +247,7 @@ extensions:
     transport:
       type: stdio
       command: npx
-      args: ["-y", "@shortwave/mcp-server"]   # verify exact package
+      args: ["-y", "@shortwave/mcp-server"] # verify exact package
   - name: sanerai
     enabled: true
     transport:
@@ -264,7 +265,12 @@ extensions:
     transport:
       type: stdio
       command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "{{ ansible_env.HOME }}"]
+      args:
+        [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "{{ ansible_env.HOME }}",
+        ]
 ```
 
 ---

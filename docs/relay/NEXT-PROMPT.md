@@ -7,7 +7,7 @@ self-verify per PROTOCOL.md.
 **Recommended AI** (rows from `docs/reference/available-ai-models.md`; quote
 the whole row, not a bare name):
 
-- **Primary —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
   Auto) · _Next-gen long-running agents._ **Use the ORIGINAL Claude account (djbclark@gmail.com)** — ~60% of
   its Fable 5 weekly remains and this is its designated spend (highest-leverage
@@ -97,12 +97,14 @@ carry over the D1 content from the execution-plan row and the C6/FUND-B
 carry-forward gotchas (site justfile wrappers export STAYTURGID_SITE_DIR;
 site-example deleted; registry paths.yml schema mismatch; uv-shebang lint;
 Codex burn authorized then OpenRouter GPT-5.6 Sol fallback), point it at the
-design notes as its spec, recommend **Grok 4.5 High (grok-web, 75% weekly)**
+design notes as its spec, recommend **Grok 4.5 High (TUI, 75% weekly)**
 as primary quoted as a full catalog row (self-passoff applies if Grok is
-already the runner), and route D1's end-of-session to the **R1 review baton**
-(Fable 5 at **Medium** effort, **new second-Pro account**) per the checkpoint
-table — R1's scope must also include the one-time gate-debt remediation
-(funding-plans doc § Gate-debt remediation: re-run the mechanically checkable
-C2–C6 checklist claims and record evidence). Commit/push
+already the runner), and route D1's end-of-session to the **G1 gate-debt
+retro-verification baton** (cheap, mechanical: Sonnet 5, Mac GUI, original
+account, Medium/Low effort — funding-plans doc § Gate-debt remediation;
+scope is ALL ledger stages to date, output
+`docs/relay/reviews/gate-debt-audit.md`), whose end-of-session in turn routes
+to the **R1 review baton** (Fable 5 at **Medium** effort, **new second-Pro
+account**), which judges G1's flags plus the D1 architecture review proper. Commit/push
 this repo, print the new baton in chat, and
 `pbcopy < docs/relay/NEXT-PROMPT.md`.

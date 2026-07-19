@@ -84,7 +84,10 @@ including printing the next baton AND copying it to the clipboard with
 Some steps are followed by a dedicated **review session** before work
 continues. Review checkpoints are listed in
 `docs/plans/site-djbclark-phase-d-funding-plans-v1.md` (§ Review checkpoints)
-— currently **R1 after D1**, **R2 after D4**, **R3 after D8**.
+— currently **R1 after D1**, **R2 after D4**, **R3 after D8**, plus the
+one-time **G1 gate-debt retro-verification** (cheap model, mechanical),
+which runs between D1 and R1 and audits every confirm-stamped checklist
+claim from ALL prior stages (funding-plans doc § Gate-debt remediation).
 
 A review baton is a normal baton in every way: same template, same header
 (recommended AI quoted as full catalog rows), same end-of-session ritual
@@ -115,7 +118,7 @@ session, rather than forcing a switch for its own sake.
 
 **Claude accounts:** two Claude Pro accounts exist under Plan B — the
 **original** (djbclark@gmail.com) and the **new** second Pro (held by a second
-human). Any baton recommending a Claude-web model MUST say which account to
+human). Any baton recommending a Claude model MUST say which account to
 use. Default split: original account for Sonnet 5 and routine Claude work; new
 account's weekly reserved for Fable 5 sessions (reviews, design, escalations).
 
