@@ -29,9 +29,10 @@ hosts:
       - {port: 8686,  bind: "127.0.0.1", owner: site, service: vector-api,          status: active,
          note: "Phase D2: com.djbclark.vector GraphQL/API health (http://127.0.0.1:8686/health); loopback only"}
       - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
-      - {port: 5080,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-http,    status: active,
-         note: "moves to site ownership in Phase D"}
-      - {port: 5081,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-grpc,    status: active}
+      - {port: 5080,  bind: "127.0.0.1", owner: site, service: openobserve-http,    status: active,
+         note: "Phase D3: com.djbclark.openobserve HTTP (was com.stayturgid.openobserve); data dir unchanged ~/.local/share/openobserve/data; old plist retained until D7"}
+      - {port: 5081,  bind: "127.0.0.1", owner: site, service: openobserve-grpc,    status: active,
+         note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
       - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
          note: "Phase D1: com.djbclark.caddy health; FOOTGUN: landing.py code default is also 8080; plist passes --port 8088"}
       - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
