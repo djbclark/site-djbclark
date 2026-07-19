@@ -44,20 +44,36 @@ references; your job is implementation, not architecture.
 | 40–54 | Strong workhorse | Sonnet 5, Codex (medium), Cursor composer, Copilot premium (Sonnet/GPT-5 class), DeepSeek R1 for research-shaped subtasks |
 | 0–39 | Cheap/fast | Haiku 4.5, Codex (low), Copilot chat, Gemini Flash, DeepSeek V3, Cursor auto |
 
-### 1.2 Current-quota snapshot (2026-07-18 — recheck with CodexBar before big runs)
+### 1.2 Current-quota snapshot (2026-07-18, post-B6 recheck — recheck with CodexBar before big runs)
 
-- **Abundant now:** Codex Plus (100% weekly + credits) → default workhorse.
-  Copilot premium (100%) → second workhorse. Grok Supergrok (94%) → good for
-  55–69 band. DeepSeek API ($5) and OpenRouter ($18.90) → cheap overflow +
-  research. Poe (300 pts) → occasional second opinions.
-- **Ration:** Claude Pro (session-limited) → reserve Fable 5/Opus for 65+
-  steps, escalations, and phase-end reviews; use Sonnet 5 sparingly, Haiku
-  freely. Cursor (42%) → UI-adjacent or multi-file refactors only.
-  Antigravity: Gemini pool only (54%); its Claude/GPT pool is empty.
-- **Avoid:** Warp (0 credits), OpenCode weekly pool (exhausted; 5-hour pool
-  only for bursts), Zed (predictions only, not agentic).
+- **Abundant now:** Copilot premium (100%) → primary workhorse for 40–54 band.
+  Grok Supergrok (87% weekly) → primary for 55–69 "thinking" band. DeepSeek
+  API ($4.99) and OpenRouter ($18.90) → cheap overflow + research. Warp
+  (100% credits, resets 3d18h) **flipped from avoid to usable** — treat as
+  cheap agentic overflow. Poe (300 pts) → occasional second opinions.
+- **Throttle (was "abundant"):** Codex Plus — weekly still shows 69% left
+  and 386.54 credits banked, but pace is running a 27% deficit and projects
+  empty in ~14h24m at the current burn rate (resets in 6d17h). Still fine as
+  a default workhorse for one or two sessions; don't run it back-to-back
+  without rechecking CodexBar.
+- **Ration hard (tighter than before):** Claude Pro — session is at 64% but
+  *projected empty in ~1h21m* (resets in 4h15m), and weekly is also pacing a
+  13% deficit with a 2d20h runout despite a 5d6h reset. Reserve Fable
+  5/Opus/Sonnet strictly for 65+ band steps, genuine escalations, and
+  phase-end reviews; avoid spending it on 40–54-band work that Copilot
+  premium or Codex can absorb instead. Haiku 4.5 shares this pool too — treat
+  it as rationed, not free, until a reset lands.
+- Cursor (Total 42%, Auto 49%, API 0%) → UI-adjacent or multi-file refactors
+  only, prefer Auto over API-billed calls. Antigravity: Gemini pool only
+  (53%); its Claude/GPT pool is still empty (<1%) — avoid.
+- **Avoid:** OpenCode weekly pool (exhausted, resets ~20h; monthly also down
+  to 8% so don't lean on it even after weekly resets), Zed (predictions only,
+  not agentic).
 - Rule of thumb: **route by band first, then pick the cheapest tool in that
-  band with quota.** Escalate one band on the second failed attempt.
+  band with quota.** Escalate one band on the second failed attempt. Right
+  now that means: prefer Codex/Copilot/Grok over Claude for anything below
+  the 70+ band, and hold genuine Fable-5-tier escalations until the Claude
+  session or weekly window resets unless truly blocked.
 
 ## 2. Technical risk register (senior findings — do not rediscover these)
 
@@ -125,12 +141,12 @@ Entangled wiring → C6 this repo re-inits as reference consumer.
 
 | # | Step | Difficulty | AI | Notes |
 | --- | --- | --- | --- | --- |
-| C1 | `control/site_contract/templates/` (site README, ansible.cfg, justfile, gitignore, registry seeds from role defaults) | 40 | Sonnet 5 / Codex (medium) | Registry seeds must derive from role defaults programmatically, not copied literals |
-| C2 | `site-init` (apply/dry-run/docs modes, exit codes per spec §2) | 55 | Codex (high) or Fable 5 (low) | Acceptance tests 1, 2, 6 |
-| C3 | `site-sync` + lockfile semantics (spec §4) | 65 | Fable 5 (medium); the drift/hash/delete semantics have sharp edges | Acceptance test 3 |
+| C1 | `control/site_contract/templates/` (site README, ansible.cfg, justfile, gitignore, registry seeds from role defaults) | 40 | Codex (medium) / Copilot premium — Claude quota tight, save Sonnet 5 for after reset | Registry seeds must derive from role defaults programmatically, not copied literals |
+| C2 | `site-init` (apply/dry-run/docs modes, exit codes per spec §2) | 55 | Codex (high) or Grok 4 (thinking) — escalate to Fable 5 (low) only after Claude session/weekly resets | Acceptance tests 1, 2, 6 |
+| C3 | `site-sync` + lockfile semantics (spec §4) | 65 | Grok 4 (thinking) or Codex (high) now; the drift/hash/delete semantics have sharp edges and genuinely want Fable 5 (medium) judgment — schedule this step after the Claude session/weekly reset if not urgent | Acceptance test 3 |
 | C4 | `site-map.yml` support (spec §6, fail-closed unknown keys) | 45 | Codex (medium) | Acceptance test 4 |
-| C5 | Entangled: `SITE-CONTRACT.md` literate doc tangling into C1 templates + CI check | 55 | Grok 4 (thinking) or Gemini 3 Pro — good doc-shaping models; Fable 5 low to wire CI | Keep scope: contract only (step1 §6) |
-| C6 | Re-init this repo via the contract (adopt generated/ area + lockfile without clobbering existing content) | 50 | Sonnet 5 | Dry-run first; diff against current tree must be explainable line-by-line |
+| C5 | Entangled: `SITE-CONTRACT.md` literate doc tangling into C1 templates + CI check | 55 | Grok 4 (thinking) or Gemini 3 Pro — good doc-shaping models, both have quota; wire CI with Codex (low) instead of Fable 5 while Claude is rationed | Keep scope: contract only (step1 §6) |
+| C6 | Re-init this repo via the contract (adopt generated/ area + lockfile without clobbering existing content) | 50 | Copilot premium (Sonnet-class) or Cursor composer — reserve actual Claude Sonnet 5 for after reset | Dry-run first; diff against current tree must be explainable line-by-line |
 
 **Phase-end review:** Fable 5 (Max) or `/code-review ultra` — this is the
 public interface others will depend on.
@@ -144,15 +160,15 @@ verify health, only then remove the old `com.stayturgid.*` label.
 
 | # | Step | Difficulty | AI | Notes |
 | --- | --- | --- | --- | --- |
-| D1 | caddy adapter (own+inject modes, import-line verification) + migrate instance to `com.djbclark.caddy` | 60 | Fable 5 (medium) first adapter sets the pattern | **OPERATOR GATE** (public-facing 443). Keep old label until new one serves TLS |
+| D1 | caddy adapter (own+inject modes, import-line verification) + migrate instance to `com.djbclark.caddy` | 60 | Grok 4 (thinking) or Codex (high) now — first-adapter judgment genuinely wants Fable 5 (medium); schedule after Claude reset if timing allows | **OPERATOR GATE** (public-facing 443). Keep old label until new one serves TLS |
 | D2 | vector adapter: start from the merged `observability.yml` + `vector.yaml.j2` (already Ansible-managed); split into product-prefixed fragment components (`stayturgid_*` ids) and relabel to site namespace | 45 | Codex (high) | 0.0.0.0:4318 stays (fleet ingest) — registry already documents why |
-| D3 | openobserve adapter: start from merged `observability.yml` + `openobserve.plist.j2`; relabel to site namespace (single-owner, §5.3) | 40 | Sonnet 5 / Copilot premium | Data dir migration: verify parquet dir path unchanged; secretspec already declares OPENOBSERVE_ROOT_PASSWORD |
+| D3 | openobserve adapter: start from merged `observability.yml` + `openobserve.plist.j2`; relabel to site namespace (single-owner, §5.3) | 40 | Copilot premium / Codex (medium) — hold Sonnet 5 for after reset | Data dir migration: verify parquet dir path unchanged; secretspec already declares OPENOBSERVE_ROOT_PASSWORD |
 | D4 | landing: code default port 8080→8088; Ansible-manage both landing plists; add registry drift check to `landing-discover` (diff live scan vs `registry/ports.yml`, badge unregistered listeners) | 45 | Codex (medium) | Closes the hand-managed-plist gap and the 8080 footgun |
 | D5 | Complete O-V-G-O (= stayturgid roadmap P3, executed under **site** ownership per ADR 005 — not under stayturgid labels as that roadmap assumed): install VictoriaMetrics (8428), Grafana (3000), OliveTin (1337) via adapters under site labels; Grafana datasources provisioned from registry endpoints; "Fleet Control Room" dashboard | 55 | Codex (high); Grafana provisioning YAML is fiddly — DeepSeek R1 is fine for drafting dashboards | OpenObserve already running/managed (D3). Ports already registered. OliveTin config is a projection (spec §5.3) |
-| D6 | stayturgid tenant fragments: Grafana fleet dashboard, OliveTin actions (`just deploy hosts=X` etc.), Caddy route fragment; generated from inventory via site-sync | 60 | Fable 5 (medium) — inventory→projection templating with real blast radius | OliveTin shell env propagation per ovgo plan §Phase-3 warning |
-| D7 | Retire legacy (= stayturgid roadmap P5): `dashboard.py`, `fleet_health_monitor.py`, `access_monitor.py` + plists once Grafana panels cover them; repoint `just health` at VictoriaMetrics/Grafana; update registry (4097 retired); close §11 #9 (Caddy route naming) with operator | 50 | Sonnet 5 | **OPERATOR GATE** — deletes working monitors; needs operator sign-off that O-V-G-O coverage is adequate |
-| D8 | Edge OTel collector rollout (= roadmap P4, per `docs/operations/plans/logging/` Phase-3 design): `termux_userland` deploys `otelcol-contrib` linux_arm64 via Mac-side download cache; `otel-config.yaml.j2` tails `repair.jsonl`/`watchdog.jsonl` with memory_limiter 100MB, batch 30s, OTLP HTTP to the Mac's Vector (4318); `start-otelcol.sh` boot script | 60 | Fable 5 (medium) for the role work; devices frequently offline — deploy to one reachable device first | **OPERATOR GATE** for fleet-wide deploy. Verify: logs from a device appear in OpenObserve search (5080) after an offline/reconnect cycle |
-| D9 | Logging Phase-2 close-out: verify dual-write (`*.log` + `*.jsonl`) and `state.json` behavior on-device; confirm `scrape_errors` parses both formats; record any Fire OS path deviations | 30 | Haiku 4.5 / Codex (low) | Mostly verification + small fixes; tests already merged |
+| D6 | stayturgid tenant fragments: Grafana fleet dashboard, OliveTin actions (`just deploy hosts=X` etc.), Caddy route fragment; generated from inventory via site-sync | 60 | Grok 4 (thinking) or Codex (high) now; genuinely wants Fable 5 (medium) judgment for the inventory→projection blast radius — schedule after Claude reset if not urgent | OliveTin shell env propagation per ovgo plan §Phase-3 warning |
+| D7 | Retire legacy (= stayturgid roadmap P5): `dashboard.py`, `fleet_health_monitor.py`, `access_monitor.py` + plists once Grafana panels cover them; repoint `just health` at VictoriaMetrics/Grafana; update registry (4097 retired); close §11 #9 (Caddy route naming) with operator | 50 | Copilot premium / Cursor composer — hold Sonnet 5 for after reset | **OPERATOR GATE** — deletes working monitors; needs operator sign-off that O-V-G-O coverage is adequate |
+| D8 | Edge OTel collector rollout (= roadmap P4, per `docs/operations/plans/logging/` Phase-3 design): `termux_userland` deploys `otelcol-contrib` linux_arm64 via Mac-side download cache; `otel-config.yaml.j2` tails `repair.jsonl`/`watchdog.jsonl` with memory_limiter 100MB, batch 30s, OTLP HTTP to the Mac's Vector (4318); `start-otelcol.sh` boot script | 60 | Grok 4 (thinking) or Codex (high) for the role work now; devices frequently offline — deploy to one reachable device first; escalate to Fable 5 (medium) after reset if the fleet rollout gets gnarly | **OPERATOR GATE** for fleet-wide deploy. Verify: logs from a device appear in OpenObserve search (5080) after an offline/reconnect cycle |
+| D9 | Logging Phase-2 close-out: verify dual-write (`*.log` + `*.jsonl`) and `state.json` behavior on-device; confirm `scrape_errors` parses both formats; record any Fire OS path deviations | 30 | Codex (low) / Copilot chat — skip Haiku 4.5 for now, it shares the rationed Claude pool | Mostly verification + small fixes; tests already merged |
 
 **Phase-end review:** `/code-review ultra` on the stayturgid adapter series;
 operator smoke-tests every web UI through Caddy.
@@ -164,18 +180,18 @@ Follow step0 **as amended** (header note + risk register above).
 | # | Step | Difficulty | AI | Notes |
 | --- | --- | --- | --- | --- |
 | E1 | `roles/litellm`: uv tool install (pin ≥1.94), config template (Auto Router v2 syntax verified against docs), `com.djbclark.litellm` plist, secretspec entries, port 4000 | 50 | Codex (high); verify router config against live docs, not memory | Verify: `curl :4000/v1/models`; a SIMPLE and a REASONING prompt route to different tiers (check LiteLLM logs) |
-| E2 | `roles/goose`: brew cask + CLI, provider config pointed at `http://127.0.0.1:4000` model `smart-router` | 40 | Sonnet 5 / Copilot premium | Config path per installed version (risk register) |
+| E2 | `roles/goose`: brew cask + CLI, provider config pointed at `http://127.0.0.1:4000` model `smart-router` | 40 | Copilot premium — hold Sonnet 5 for after reset | Config path per installed version (risk register) |
 | E3 | MCP servers for Goose: research real packages (Shortwave, Saner.ai, Fieldy, filesystem), template extensions config | 55 | Grok 4 (thinking) or DeepSeek R1 for the research; Codex for the templating | Report nonexistent servers to operator; **never install a guessed package name** |
-| E4 | First-run + human steps doc ("API Keys – Human Step" checklist per step0 §5/§7) | 25 | Haiku 4.5 | **OPERATOR GATE**: operator enters keys + MCP auth |
-| E5 | Extend to mac mini (Intel: `/usr/local` prefix — stayturgid's `stayturgid_homebrew_prefix` pattern is the reference) and VPSs (systemd user units instead of launchd) | 60 | Fable 5 (medium) for the cross-platform role refactor; Codex thereafter | New hosts enter `inventory/` + `registry/ports.yml` first |
+| E4 | First-run + human steps doc ("API Keys – Human Step" checklist per step0 §5/§7) | 25 | Copilot chat / Gemini Flash / DeepSeek V3 — Haiku 4.5 shares the rationed Claude pool, skip it for now | **OPERATOR GATE**: operator enters keys + MCP auth |
+| E5 | Extend to mac mini (Intel: `/usr/local` prefix — stayturgid's `stayturgid_homebrew_prefix` pattern is the reference) and VPSs (systemd user units instead of launchd) | 60 | Grok 4 (thinking) or Codex (high) for the cross-platform refactor now; escalate to Fable 5 (medium) after the Claude reset if it needs more judgment | New hosts enter `inventory/` + `registry/ports.yml` first |
 
 ## 7. Phase F — adopt unmanaged machine services
 
 | # | Step | Difficulty | AI | Notes |
 | --- | --- | --- | --- | --- |
-| F1 | `system-state-backup` + `hibernate-disk-check` scripts + plists → site roles (files into this repo, plists templated) | 30 | Haiku 4.5 / Codex (low) | Scripts live in `~/.local/bin` today |
-| F2 | brew-services audit: postgres@14 (currently failing, exit 78), redis, mariadb, herdr, omlx — per service: needed? adopt (registry + role) or remove | 40 | Sonnet 5 for the audit doc; **OPERATOR GATE** for each keep/kill decision | Update `registry/paths.yml` brew_services claims |
-| F3 | Immich LaunchDaemon (system domain, dedicated user at /opt/services/immich) → site role | 55 | Fable 5 (low) — system-domain launchd + service user is unforgiving | Port registration for immich web |
+| F1 | `system-state-backup` + `hibernate-disk-check` scripts + plists → site roles (files into this repo, plists templated) | 30 | Codex (low) / Copilot chat — skip Haiku 4.5, it shares the rationed Claude pool | Scripts live in `~/.local/bin` today |
+| F2 | brew-services audit: postgres@14 (currently failing, exit 78), redis, mariadb, herdr, omlx — per service: needed? adopt (registry + role) or remove | 40 | Copilot premium / Codex (medium) for the audit doc — hold Sonnet 5 for after reset; **OPERATOR GATE** for each keep/kill decision | Update `registry/paths.yml` brew_services claims |
+| F3 | Immich LaunchDaemon (system domain, dedicated user at /opt/services/immich) → site role | 55 | Grok 4 (thinking) or Codex (high) now — system-domain launchd + service user is unforgiving and genuinely wants Fable 5 (low) judgment; do after the Claude reset if timing allows | Port registration for immich web |
 | F4 | Merged-Brewfile projection + `flock` serialization wrapper in the site justfile (step1 §4.3) | 45 | Codex (medium) | Compare against `~/system-state/Brewfile` snapshot |
 
 ## 8. Standing verification (every PR, both repos)

@@ -1,8 +1,11 @@
 # NEXT: C1 — Site-contract scaffolding templates (difficulty 40/100)
 
-**Recommended AI:** Anthropic Claude Sonnet 5, effort Medium
-alt: OpenAI Codex GPT-5.x, reasoning Medium
-escalate to: Claude Fable 5, effort Low
+**Recommended AI:** OpenAI Codex GPT-5.x, reasoning Medium (quota check
+2026-07-18: Claude Pro session projected empty in ~1h21m and weekly is also
+deficit-pacing — hold Sonnet 5/Fable 5 for after a reset)
+alt: Copilot premium (Sonnet/GPT-5 class) or Cursor composer
+escalate to: Claude Fable 5, effort Low — only after Claude session (~4h15m)
+or weekly (~5d6h) resets, unless genuinely blocked
 
 **Working dir:** `/Users/djbclark/ops/stayturgid`
 **Operator gate:** none
