@@ -14,23 +14,23 @@ hosts:
     ports:
       # ── stayturgid (control node) ────────────────────────────────────────
       - {port: 80,    bind: "*",         owner: site, service: caddy-http-redirect, status: active,
-         note: "Phase D1: com.djbclark.caddy (was com.stayturgid.caddy); old plist retained until D7"}
+         note: "Phase D1: com.djbclark.caddy; legacy plist archived and removed in D7"}
       - {port: 443,   bind: "*",         owner: site, service: caddy-https,         status: active,
          note: "Phase D1: site-owned Tailscale TLS front door mac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
       - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
          note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
       - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
       - {port: 4097,  bind: "127.0.0.1", owner: stayturgid, service: fleet-dashboard,     status: active,
-         note: "legacy Flask dashboard; retired by O-V-G-O"}
+         note: "D7 coverage audit: retained until post-D8 telemetry gives Grafana equivalent device signal and replaces dashboard actions/stats/errors"}
       - {port: 4317,  bind: "127.0.0.1", owner: site, service: vector-otlp-grpc,    status: active,
-         note: "Phase D2: com.djbclark.vector OTLP gRPC (was com.stayturgid.vector); old plist retained until D7"}
+         note: "Phase D2: com.djbclark.vector OTLP gRPC; legacy plist archived and removed in D7"}
       - {port: 4318,  bind: "0.0.0.0",   owner: site, service: vector-otlp-http,    status: active,
          note: "Phase D2: com.djbclark.vector OTLP HTTP; intentionally non-loopback — fleet devices push OTLP (registry documents why; 0.0.0.0 stays)"}
       - {port: 8686,  bind: "127.0.0.1", owner: site, service: vector-api,          status: active,
          note: "Phase D2: com.djbclark.vector GraphQL/API health (http://127.0.0.1:8686/health); loopback only"}
       - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
       - {port: 5080,  bind: "127.0.0.1", owner: site, service: openobserve-http,    status: active,
-         note: "Phase D3: com.djbclark.openobserve HTTP (was com.stayturgid.openobserve); data dir unchanged ~/.local/share/openobserve/data; old plist retained until D7"}
+         note: "Phase D3: com.djbclark.openobserve HTTP; data dir unchanged ~/.local/share/openobserve/data; legacy plist archived and removed in D7"}
       - {port: 5081,  bind: "127.0.0.1", owner: site, service: openobserve-grpc,    status: active,
          note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
       - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
@@ -38,7 +38,7 @@ hosts:
       - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
          note: "llama.cpp UI-TARS; homebrew.mxcl.ui-tars"}
       - {port: 8088,  bind: "127.0.0.1", owner: site, service: landing,             status: active,
-         note: "Phase D4: com.djbclark.landing (was com.stayturgid.landing); discover agent com.djbclark.landing-discover; old plists retained until D7"}
+         note: "Phase D4: com.djbclark.landing + landing-discover; legacy plists archived and removed in D7"}
 
       # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
       - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: active,
