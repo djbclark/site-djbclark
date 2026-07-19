@@ -41,10 +41,12 @@ hosts:
          note: "Phase D4: com.djbclark.landing (was com.stayturgid.landing); discover agent com.djbclark.landing-discover; old plists retained until D7"}
 
       # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
-      - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: planned,
-         note: "brew default; referenced throughout stayturgid docs"}
-      - {port: 8428,  bind: "127.0.0.1", owner: site, service: victoriametrics,  status: planned}
-      - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: planned}
+      - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: active,
+         note: "Phase D5: com.djbclark.grafana; provisioning from generated/stayturgid/fragments/grafana; Fleet Control Room dashboard"}
+      - {port: 8428,  bind: "127.0.0.1", owner: site, service: victoriametrics,  status: active,
+         note: "Phase D5: com.djbclark.victoriametrics; data under ~/.config/djbclark/victoriametrics/data"}
+      - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: active,
+         note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
 
       # ── site: AI stack (step0 plan, revised per step1 §9) ────────────────
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: planned,
