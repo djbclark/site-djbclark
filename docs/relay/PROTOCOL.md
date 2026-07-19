@@ -70,6 +70,26 @@ including printing the next baton AND copying it to the clipboard with
 `pbcopy < docs/relay/NEXT-PROMPT.md`>
 ```
 
+## Review batons (end-of-stage code reviews)
+
+Some steps are followed by a dedicated **review session** before work
+continues. Review checkpoints are listed in
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md` (§ Review checkpoints)
+— currently **R1 after D1**, **R2 after D4**, **R3 after D8**.
+
+A review baton is a normal baton in every way: same template, same header
+(recommended AI quoted as full catalog rows), same end-of-session ritual
+(ledger line with step id `R<n>`, rewrite `NEXT-PROMPT.md` for the next step,
+commit/push, print, `pbcopy`). The body differs only in task shape:
+
+- Scope: all commits landed since the previous review checkpoint (both repos).
+- Deliverables: findings fixed or explicitly deferred to the ledger line;
+  architecture-level findings must be fixed, code-style findings may be
+  deferred if the funding plan in force says so.
+- The session that completes the step *before* a checkpoint writes the review
+  baton as its NEXT-PROMPT.md — the operator is thereby prompted to run the
+  review; it is not optional or self-certified.
+
 ## Recommending an AI
 
 When a baton header (or any answer to the operator) names a **recommended

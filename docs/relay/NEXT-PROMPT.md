@@ -141,14 +141,28 @@ a decision not in the specs, stop and report.
 - [ ] Product PR merged; stayturgid on pulled master; site repo updated if needed
 - [ ] Ledger + next baton updated per PROTOCOL.md
 
+## Funding plan and Fable 5 usage
+
+Before starting, read
+`/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
+and check the ledger for a `FUND-A` / `FUND-B` line; if none exists, ask the
+operator which plan is in force and record it. That document ranks where
+Fable 5 matters most — **D1's adapter architecture is the single
+highest-leverage Fable 5 use in Phase D** (every later adapter clones it).
+Under Plan A, Fable 5 runs this whole step; under Plan B, implement against
+`docs/design/phase-d-adapter-design-notes.md` from the D0-design session (if
+that file is missing, stop — D0-design must run first).
+
 ## End of session
 
 Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
-After D1 is human-confirmed and landed, append its ledger entry, prepare the
-**D2** baton from the execution-plan row, commit/push both repos as needed,
-print the new `NEXT-PROMPT.md` contents in chat, and copy the baton to the
-clipboard using pbcopy (`pbcopy < docs/relay/NEXT-PROMPT.md`).
-
-When the D2 baton header names a recommended AI, draw it from
-`docs/reference/available-ai-models.md` and quote each option's full table row
-(source, vendor, model, variant/ID, thinking levels, notes) plus any caveats.
+After D1 is human-confirmed and landed, append its ledger entry, then prepare
+the **R1 review baton** (NOT D2 — R1 after D1 is a mandatory review checkpoint
+per PROTOCOL.md § Review batons and the funding-plans doc § Review
+checkpoints). The R1 baton follows the same template: recommended AI quoted as
+full rows from `docs/reference/available-ai-models.md` (R1's reviewer is
+Fable 5 under both funding plans), scope = all commits since the pre-D1
+review, and under Plan B only architecture/correctness findings are must-fix
+(code-style findings are logged as deferred). Commit/push both repos as
+needed, print the new `NEXT-PROMPT.md` contents in chat, and copy the baton to
+the clipboard using pbcopy (`pbcopy < docs/relay/NEXT-PROMPT.md`).
