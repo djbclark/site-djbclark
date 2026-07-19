@@ -39,8 +39,10 @@ A session may end only in one of two states:
    `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`, using the
    template below. Carry forward: any deferred sub-items, any new gotchas
    discovered, the step's row (difficulty, AI, notes) from the step2 plan.
-   If the next step is marked **OPERATOR GATE**, say in the header what the
-   human must do or approve before pasting the prompt.
+   Steps marked **OPERATOR GATE** in older plan rows are no longer gated
+   (FUND-B decision) — instead, carry the gate's substance into the body as
+   extra self-verification: before/after health checks, a tested rollback
+   command, and old-path retirement deferred to a later session.
 4. Commit and push everything. This repo: straight to master. stayturgid:
    branch + PR — and then, **in the same session, once the checklist
    evidence is recorded: merge the PR
@@ -64,13 +66,15 @@ exact errors). Ledger line gets `ESCALATED`. Commit, push, print.
 # NEXT: <step id> — <title> (difficulty <n>/100)
 
 **Recommended AI:** <primary> · alt: <alternate> · escalate to: <model>
-**Working dir:** <path> **Operator gate:** <none | what the human must approve>
+(full catalog rows; Claude picks name the account; self-passoff allowed)
+**Working dir:** <path>
 
 ---
 
 <self-contained prompt body: role, files to read (absolute paths), exact
-task spec, constraints, verification commands, human-verification checklist,
-and the instruction to follow docs/relay/PROTOCOL.md at session end —
+task spec, constraints, verification commands, self-verification checklist
+with recorded evidence, and the instruction to follow
+docs/relay/PROTOCOL.md at session end —
 including printing the next baton AND copying it to the clipboard with
 `pbcopy < docs/relay/NEXT-PROMPT.md`>
 ```
