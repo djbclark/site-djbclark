@@ -7,11 +7,13 @@ whole row, not a bare name):
   · Low, Medium, High (default High) · _Flagship for code + agentic work._ Run
   at **High**. Caveat: same model is also reachable via Cursor (row 22) or
   OpenRouter/Poe (rows 64, 106) if the grok-web quota is empty.
-- **Alt —** OpenRouter (api) · OpenAI · GPT-5.6 Sol · various incl. Pro ·
-  Light, Medium, High, Extra High, Max, Ultra · _Full family._ Run at **High**.
-  Good for the launchd plist / brew adapter work. Caveat (quota, 2026-07-19):
-  the native Codex pool (row 1) is at 29% weekly and pacing to empty within
-  hours — use this OpenRouter route ($18.90 balance) until Codex resets.
+- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
+  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
+  computer use, research, cybersecurity._ Run at **High**. Good for the launchd
+  plist / brew adapter work. Caveat (quota, 2026-07-19): pool is at 29% weekly —
+  operator has authorized burning the remainder; when it empties, switch to the
+  same model via OpenRouter (api) · OpenAI · GPT-5.6 Sol · various incl. Pro ·
+  Light…Ultra · _Full family_ ($18.90 balance) until the Codex weekly resets.
 - **Alt (templating subtasks) —** Cursor (web) · Cursor · Composer 2.5 ·
   Composer 2.5 · Agent Thinking · _Native agentic coding._ Caveats: "Copilot
   premium" from the old baton is **not** in the catalog — use this row instead.
