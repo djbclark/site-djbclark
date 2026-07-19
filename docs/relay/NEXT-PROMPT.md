@@ -1,110 +1,121 @@
-# NEXT: C1 — Site-contract scaffolding templates (difficulty 40/100)
+# NEXT: B6 — Close the Phase B review findings   (difficulty 60/100)
 
-**Recommended AI:** Anthropic Claude Sonnet 5, effort Medium
-alt: OpenAI Codex GPT-5.x, reasoning Medium
-escalate to: Claude Fable 5, effort Low
-
-**Working dir:** `/Users/djbclark/ops/stayturgid`
-**Operator gate:** none
+**Recommended AI:** Anthropic Claude Fable 5, effort Medium · alt: OpenAI Codex GPT-5.6 Sol, reasoning High · escalate to: Claude Fable 5, effort High
+**Working dir:** `/Users/djbclark/ops/stayturgid`   **Operator gate:** none (no real deploys required; do NOT deploy)
 
 ---
 
-You are executing **step C1** of the two-repository Ansible split. The public
-product repo is `/Users/djbclark/ops/stayturgid`; the private site overlay is
-`/Users/djbclark/ops/site-djbclark`. Implement the site-contract **scaffolding
-templates only** (Phase C starts here). Do **not** implement `site-init`,
-`site-sync`, adapters, or Entangled wiring yet (C2–C6).
+You are executing **step B6** of the two-repository Ansible split: closing the
+findings from two independent Phase B reviews before Phase C may start. The
+reviews are authoritative on WHAT is wrong; this prompt is authoritative on
+HOW to fix it — the design decisions below are already made, do not
+re-litigate them.
 
 ## Read first
 
-1. `/Users/djbclark/ops/stayturgid/AGENTS.md` and applicable
-   `/Users/djbclark/ops/stayturgid/.cursor/rules/` files.
-2. Ground rules + risk register + Phase C row C1:
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-   §§0–2 and §4 (C1 only).
-3. **Authoritative spec** (follow exactly; no architecture improvisation):
-   `/Users/djbclark/ops/stayturgid/docs/architecture/site-contract.md`
-   especially §§1–3 (layout), registry seeding notes, and §8 acceptance
-   items that apply to templates.
-4. ADR + topology context:
-   `/Users/djbclark/ops/stayturgid/docs/architecture/adr/005-two-repo-topology.md`,
-   `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md` §4.
-5. Step1 segmentation (site contract purpose):
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` §§5–6.
-6. Relay protocol:
-   `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`.
-7. Existing product defaults you must **derive** registry seeds from (not
-   copy as opaque literals): control-node / landing / observability role
-   defaults and any checked-in port/path claims under
-   `/Users/djbclark/ops/stayturgid/ansible/` and collections. Cross-check
-   `/Users/djbclark/ops/site-djbclark/registry/` for the reference site's
-   current claims shape.
+1. The two review reports (full text, both):
+   - `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/phase-b-review-codex-sol.md`
+   - `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/phase-b-review-gemini-pro.md`
+2. `/Users/djbclark/ops/stayturgid/AGENTS.md` + applicable `.cursor/rules/`.
+3. `/Users/djbclark/ops/stayturgid/docs/architecture/multi-site-topology.md` §4 (esp. §4.1 fixture names/ranges, §4.8 precedence).
+4. `/Users/djbclark/ops/stayturgid/control/lib/ansible_context.py` and `control/lib/site_identity.py` (the B4/B5 machinery you are amending).
+5. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (branch hygiene: you merge your own PR after operator confirmation).
 
-## Context (B1–B5 done)
+## Already fixed — do not redo (verify only)
 
-- Phase B is complete. stayturgid master includes B5 merges:
-  - PR #6 `a900ee1` — context-aware site identity via `ansible_context`
-  - PR #8 `b1aeb97` — production-identity scrub + hard-fail
-    `just validate-identity` (no `--warn-only` in the check path)
-- Inventory lives in the private site overlay; upstream ships only
-  `ansible/inventory/hosts.yml.example` with §4.1 names + RFC 5737 addresses.
-- B4 contract: explicit `ANSIBLE_CONFIG` wins; else site overlay
-  `${STAYTURGID_SITE_DIR:-~/ops/site-djbclark}/ansible.cfg`; else upstream.
-  Reuse this — do not invent a second resolution rule.
-- C1 is templates only. C2 will consume them via `site-init`.
+- H2 (live address in consumer example) + L2 (stale T3) — stayturgid `d97d726`
+- H4 (site wrapper clobbered explicit `ANSIBLE_CONFIG`) + M4 (stale recipe names in site handoff) — site `b6b82e5`
 
-## Task
+## Task — each finding with its decided fix
 
-1. In `stayturgid`, inspect status, then
-   `git fetch origin --prune && git pull --ff-only origin master` before
-   edits. Preserve any pre-existing untracked `.claude/` directory.
-2. Create `control/site_contract/templates/` containing the scaffold
-   artifacts defined by site-contract.md §3:
-   - site `README.md` (generated once / user-owned after init — template
-     should say so)
-   - `ansible.cfg` (inventory in site dir; collections/playbooks → product)
-   - thin `justfile` (OPS_ROOT / product path detection; deploy wrappers)
-   - baseline `.gitignore` (secrets patterns; do **not** ignore `generated/`)
-   - `registry/ports.yml` and `registry/paths.yml` **seeds** derived from
-     product role defaults programmatically (script or documented generator
-     under `control/site_contract/`), not hand-copied magic numbers
-   - any other template files §3 requires for a complete empty site dir
-     shape (inventory example pointer, `secretspec.toml` site profile stub
-     if specified)
-3. Prefer Jinja2 or clearly marked placeholders consistent with the rest of
-   the product. Templates must not embed live site identity (real host
-   aliases, production IPs, serials, operator home paths).
-4. Add focused unit tests that:
-   - render or load each template without error
-   - assert registry seeds contain expected product-owned claims sourced
-     from role defaults (not empty stubs)
-   - assert `.gitignore` ignores secrets patterns and does not ignore
-     `generated/`
-5. Do **not** implement `just site-init` / CLI behavior (that is C2). A
-   minimal package `__init__` or README under `control/site_contract/` is
-   fine if needed for import/tests.
+**H1 — cf-runagent renders live identity into a tracked public file.**
+`agents.yml` renders the inventory's addresses into tracked
+`control/cfengine/cf-runagent.cf`. Fix: the tracked file becomes a generic
+example (`cf-runagent.cf.example` with §4.1 fixture addresses, or delete it
+if nothing needs a tracked copy); the rendered artifact moves to the runtime
+config home (`~/.config/stayturgid/cfengine/cf-runagent.cf`) — same pattern
+as the FIRERPA CA material. Repoint every consumer (deploy tasks, docs,
+any Termux-side sync) at the runtime path. Add a regression test asserting
+no tracked file is a render target of `agents.yml`.
+
+**H3 — `deploy_termux.py` and `verify_drift.py` bypass the B4 resolver and
+can succeed with zero hosts.** Route both through the same resolution used
+by `deploy_fleet.py` (shared helper in `ansible_context.py` — extract one if
+the logic is currently inline). Then add a guard used by all three: if the
+resolved inventory matches zero hosts for the requested limit, exit nonzero
+with a message naming the config file that was used. Regression tests: the
+explicit-config-ignored scenario from the review (export a site config, run
+with a host limit, assert it is honored) and the zero-host guard.
+
+**M1 — invalid explicit `ANSIBLE_CONFIG` silently falls back.** In
+`site_identity.py::resolve_inventory_path`, an `AnsibleConfigError` arising
+from an *explicitly supplied* config is fatal (clear error, nonzero exit);
+the example fallback remains only for the genuinely-unconfigured case.
+Test both branches.
+
+**M2 + Gemini #1 — RFC1918 fixtures in tests/examples/collection docs.**
+Sweep `192.168.x.x` / `192.168.68.x` fixtures in active tests, examples,
+and collection docs to RFC 5737 ranges (`192.0.2.x`, `198.51.100.x`,
+`203.0.113.x`) or `100.0.0.x` for Tailscale-shaped values, per §4.1/§4.3.
+Historical research docs stay as-is if already bannered (B5 convention).
+
+**M3 — `cf-serverd.cf` hardcodes `djbclark`.** Template the allowed-user
+list from inventory (`ansible_user` of the control peer) the same way
+cf-runagent is templated; keep `root`. The tracked policy file gets the
+generic example treatment consistent with your H1 fix (cfbs builds from the
+templated source — check `device/termux/cfengine/README.md` for the build
+flow before moving files).
+
+**Gemini #2 — hardcoded `~/ops/site-djbclark` fallback in
+`ansible_context.py`.** Replace the operator-specific default with generic
+discovery: `OPS_ROOT` (default `~/ops`) scanned for `site-*` siblings of the
+product checkout — exactly one match → use it; zero or multiple → no silent
+default, fail with a message telling the operator to set
+`STAYTURGID_SITE_DIR` or `ANSIBLE_CONFIG`. Update multi-site-topology §4.8
+and the B4 tests to describe this rule.
+
+**Gemini #3 + H1's scanner gap — validator blind spots.** In
+`validate_site_identity.py`: (a) add `.cf` to `_SCAN_EXTS`; (b) support an
+optional site-overlay file `registry/identity-patterns.yml` (list of
+regexes) merged into the scan patterns when an overlay is active — the
+operator's private subnets belong in the *private* repo, never as literals
+in the public validator; (c) seed that file in `site-djbclark` with the
+operator's known ranges (derive them from the site inventory — e.g. the
+`192.168.68.0/24` LAN and the tailnet range — do not invent). Tests: a
+planted `.cf` leak and a planted denylisted-subnet literal must both fail
+validation with the overlay active.
+
+**L1 — public docs still instruct with private aliases.** In
+`docs/coding-rules.md` and `docs/options.md`, rewrite *current instruction*
+text to §4.1 generic names (`oneui-device`, `stock-android-device`,
+`fireos-device`); genuinely historical entries get the B5 banner instead of
+rewriting.
 
 ## Verification
 
-- Templates exist at the paths implied by the spec.
-- Registry seeds are explainable from role defaults (show the derivation).
-- Focused tests pass; `just check` remains green; `just validate-identity`
-  still hard-fails clean (0 drift) with overlay and with upstream-only
-  example inventory.
-- `git diff --check` passes; public diff has no production inventory or
-  live identity.
-- Branch + PR; after human confirmation: merge, delete branch, return to
-  pulled master, re-verify checks.
+- All new/changed tests pass; full `just check` green.
+- `just validate-identity` hard-fails on a planted `.cf` leak and a planted
+  denylisted literal (demonstrate, then remove the plants); green otherwise
+  in both overlay and upstream-only contexts.
+- Grep evidence: no `100.x` live addresses, no unbannered private aliases,
+  no `djbclark` literals in active product code/policy/examples
+  (`git grep` outputs pasted).
+- `git diff --check` clean in both repos.
 
 ## Human-verification checklist (present with evidence; wait for confirmation)
 
-- [ ] `control/site_contract/templates/` matches site-contract.md §3 layout
-- [ ] Registry seeds derive from product defaults (not hand-waved literals)
-- [ ] Focused tests + `just check` + strict `validate-identity` pass
-- [ ] PR merged, branch deleted, checkout on pulled master
+- [ ] H1/H3/M1/M2/M3 fixed with regression tests
+- [ ] Site-overlay discovery is generic (no `site-djbclark` literal in product code)
+- [ ] Validator catches `.cf` leaks + site-denylisted ranges; still green on clean trees
+- [ ] `just check` green; grep evidence pasted
+- [ ] PR merged (`gh pr merge <n> --merge --delete-branch`), checkout on pulled master
 
 ## End of session
 
-Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
-After C1 is fully confirmed, append its ledger entry, prepare the C2 baton,
-commit/push the site repo, and print that baton in chat.
+Follow PROTOCOL.md exactly (merge your own PR after confirmation; end on
+pulled master). Append the B6 ledger line, note in both review files that
+their findings are dispositioned (one line at the top, do not rewrite them),
+restore the **C1** baton as NEXT-PROMPT.md (C1's text is preserved in git
+history at site commit `4ae3af8` — recover it from there and update its
+"Context" section to mention B6), commit/push the site repo, and print the
+C1 baton in chat. If blocked twice on the same error, escalate per header.
