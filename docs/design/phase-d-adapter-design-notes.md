@@ -264,3 +264,14 @@ to Mac vector 0.0.0.0:4318). Rollout decisions:
 2. site-contract §5.2 "site var `serverapp_<app>_mode`": realized as the
    already-implemented `serverapps.<app>.mode` site-map key (§0); no separate
    variable is introduced.
+3. site-contract §5.3 inject-mode fragment_dir auto-detect: when a site-map
+   `fragment_dir` isn't set, inject mode's default `fragment_dir` is the
+   committed `generated/<product>/fragments/<app>/` directory itself — the
+   same location site-sync already writes into — rather than auto-detecting
+   the foreign config's real include directory (e.g. parsing an existing
+   Caddyfile `import` line for its target dir). Inject copies therefore
+   degenerate to no-ops in the zero-config case; the operator must set
+   `serverapps.<app>.fragment_dir` explicitly in site-map.yml for inject mode
+   to write anywhere. (R1 A-3 / M1-Q.) Accepted because no inject-mode site
+   exists yet to validate real auto-detect against — implement it once one
+   does.
