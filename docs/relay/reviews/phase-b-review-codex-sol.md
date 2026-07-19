@@ -1,7 +1,7 @@
 # Phase B independent review — Codex Sol
 
-**Date:** 2026-07-18  
-**Reviewed ranges:** `site-djbclark 90c2b0f..4ae3af8`; `stayturgid 2617f2b..b1aeb97`  
+**Date:** 2026-07-18
+**Reviewed ranges:** `site-djbclark 90c2b0f..4ae3af8`; `stayturgid 2617f2b..b1aeb97`
 **Post-range hygiene state:** `site-djbclark` and `stayturgid` are both clean,
 pulled `master` checkouts; `master` is the only local and remote branch in each.
 
