@@ -1,126 +1,143 @@
-# NEXT: M1-R — Phase D design/deviation recovery review (difficulty 65/100)
+# NEXT: M1-F — Phase D must-fix remediation (difficulty 55/100)
 
 **Funding plan in force:** FUND-B revised (see
-`docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). This is recovery-month
-step 1. The formal R3 close-out remains deferred until M1-R, M1-F, and M1-Q are
-complete. Quality bar: **correctness/safety findings become must-fix work for
-M1-F**; architecture is fixed if cheap or explicitly justified; code-quality
-items are listed for M1-Q. No human gates.
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). Recovery-month
+step 2 of {M1-R ✓, M1-F, M1-Q}; R3 stays deferred until after M1-Q.
 
-**Recommended AI** (full row from `docs/reference/available-ai-models.md`):
+**Recommended AI** (full rows from `docs/reference/available-ai-models.md`):
 
-- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
-  `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
-  Auto) · _Next-gen long-running agents_ — use the **new second-Pro account**,
-  effort **Medium**, exactly as FUND-B assigns M1-R.
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
+  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
+  Code/API) · _Default for most plans_ — **original account** (per FUND-B
+  M1-F assignment), default effort.
 - **Alternate —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
   `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
-  complex coding, computer use, research, cybersecurity_ — effort **High** if
-  the new-account Fable pool is unavailable.
-- **Escalation —** the primary at effort **High** only if a suspected
-  correctness/safety issue cannot be classified from repository and live
-  read-only evidence at Medium.
+  complex coding, computer use, research, cybersecurity_ — effort High.
+- **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
+  `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
+  Auto) · _Next-gen long-running agents_ — **new second-Pro account**, effort
+  Medium, only if a fix fights back (two failed attempts).
 
-**Working dir:** `/Users/djbclark/ops/stayturgid` +
-`/Users/djbclark/ops/site-djbclark` (review both pulled masters; write the
-review/relay only in the site repo, straight to master).
+**Working dir:** `/Users/djbclark/ops/stayturgid` (product fixes; branch+PR)
+and `/Users/djbclark/ops/site-djbclark` (site fixes + relay; straight to
+master). `git fetch origin --prune && git pull --ff-only origin master` in
+both before editing.
 
 ---
 
-You are executing **M1-R**, recovery-month step 1 from FUND-B. Review every
-Phase D change after the R1 checkpoint against the front-loaded design and all
-accepted/deferred deviations. This is an evidence-based review session, not a
-remediation implementation session: produce a precise M1-F fix baton. Do not
-change public product code or live configuration. Correctness/safety findings
-must not be deferred; put every one into M1-F with acceptance tests and rollback
-notes. Architecture findings may be marked cheap-fix for M1-F or justified as
-kept. List code-quality findings for M1-Q.
+You are executing **M1-F**: the complete remediation of M1-R's must-fix list.
+Read `docs/relay/reviews/m1-r-phase-d-design-review.md` (this repo) first —
+it contains full context, refs, failure scenarios, acceptance tests, and
+rollback notes for every item below. Also read `docs/relay/PROTOCOL.md`,
+step2 plan §§0–2, and stayturgid `AGENTS.md`. Design baseline
+`docs/design/phase-d-adapter-design-notes.md` is read-only.
 
-## Read first (absolute paths)
+## Must-fix items (MF-1..MF-5) — do all, in this order
 
-1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` and
-   `docs/relay/LEDGER.md`, especially R1, R2, D5, D6, D7, and D8.
-2. FUND-B review/recovery sequencing in
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`.
-3. Step2 ground rules/risk register (§§0–2), Phase D rows D2–D9, and Phase-end
-   review text in
-   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`.
-4. The immutable review baseline
-   `/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`,
-   including the R1 §1.9 amendment, D6 projection rules, D8 rollout order, and
-   §4 deviation protocol. Do not edit the design baseline.
-5. Prior reviews:
-   `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/r1-d1-adapter-review.md`,
-   `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/r2-d2-d4-adapter-review.md`,
-   and `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/gate-debt-audit.md`.
-6. `/Users/djbclark/ops/stayturgid/AGENTS.md`, current `docs/handoff.md`, and
-   the implementation/tests changed by the commits in scope.
+1. **MF-1 — secrets out of world-readable plists (live fix; do first).**
+   In `ansible/roles/serverapp_vector/tasks/main.yml` and
+   `ansible/roles/serverapp_openobserve/tasks/main.yml`, change the plist
+   template task `mode:` from `"0644"` to `"0600"`. Because the mode change
+   marks the template task changed, the existing bootout+bootstrap-on-change
+   path re-loads both daemons — that is expected and safe (pre/post health
+   checks below). Acceptance: `stat -f %Lp` on both live
+   `~/Library/LaunchAgents/com.djbclark.{vector,openobserve}.plist` → `600`;
+   both daemons state=running; `curl 127.0.0.1:8686/health` and
+   `127.0.0.1:5080/healthz` → 200; OTLP 4318 listening; second
+   `just site-serverapps apps=vector,openobserve` exit 0. Rollback:
+   `chmod 644 <plist>` (content unchanged; no daemon restart needed).
+   Do not print, echo, or commit any credential value.
 
-## Exact scope
+2. **MF-2 — persist hd8's otelcol incompatibility (site repo).**
+   Add to `inventory/hosts.yml` under host `hd8` (or
+   `inventory/group_vars/model_kindle_hd8.yml`):
+   `stayturgid_otelcol_enabled: false` with comment
+   `# D8: pending-incompatible-runtime — official contrib binary SIGSYS under Fire OS seccomp (cilium/ebpf memcg probe); recovery = minimal OCB build, see m1-r review §D8`.
+   Acceptance: `ansible-inventory --host hd8` (site ANSIBLE_CONFIG) shows the
+   var; s24/p7a unaffected; site registry lint green. No device contact.
+   Rollback: remove the var.
 
-- Product: review `c9e21b7..2784344` on pulled
-  `/Users/djbclark/ops/stayturgid` master. That covers D2–D8, including PRs
-  #20–#26; inspect individual commits and merge diffs, not only the final tree.
-- Site: review changes after R1 relay commit `5171715` through the current
-  pulled master, including D2–D8 registry, generated fragments, relay evidence,
-  and live-ownership documentation. Do not expose private inventory or secrets
-  in the report.
-- Reconcile every R1/R2/D5–D8 deferred item and every deliberate design
-  deviation. Mark each `closed`, `still-valid`, `superseded`, `must-fix`,
-  `cheap-fix`, or `M1-Q`—none may silently disappear.
-- Treat the D8 partial fleet result explicitly: s24 and p7a are verified;
-  hd8 is reachable but `pending-incompatible-runtime` because the official
-  AArch64 contrib binary hits Fire OS seccomp during the cilium/ebpf memcg
-  probe. Determine whether this is a correctness/safety must-fix, an isolated
-  compatibility recovery item, or an accepted limitation, and specify a safe
-  recovery strategy. Do not weaken device security and do not contact devices.
-- Reassess D7 coverage now that D8 transports repair/watchdog logs on two
-  devices. The dashboard, fleet-health monitor, access monitor, port 4097, and
-  `just health` remain live; decide what is still uniquely covered. Do not
-  retire anything in this review.
+3. **MF-3 — plist-change reload semantics (product).** In
+   `serverapp_caddy`, `serverapp_grafana`, `serverapp_olivetin` tasks: clone
+   vector's pattern — `Boot out <label> when its launchd plist changed`
+   (when: loaded AND plist.changed) before the bootstrap task; bootstrap
+   `when: unloaded or reload_bootout.changed` with `until/retries: 5`;
+   restrict the existing kickstart to config-only changes (config.changed AND
+   NOT plist.changed). Olivetin: also add retries to its bootstrap.
+   Acceptance: focused test or assert on rendered task conditions; live: run
+   `just site-serverapps apps=caddy,grafana,olivetin` twice — second run all
+   skip, exit 0, all health 200 (no plist change → no churn).
 
-## Required analysis
+4. **MF-4 — fragment-change reload for caddy + vector (product).** In each
+   role, before the launchd block, stat/checksum the fragment inputs
+   (caddy: files matching `serverapp_caddy_fragment_glob`; vector: the
+   `serverapp_vector_fragment_configs` list) against a recorded state file
+   (e.g. `~/.config/<site_ns>/<app>/.fragments.sha256`, written by the role)
+   and register `_<app>_fragments_changed`; add it to the kickstart
+   condition (kickstart is correct here — fragments are config, not plist).
+   Acceptance: pytest/unit where a fragment byte change flips the reload
+   condition; live: run apply twice, second run no reload, exit 0, health 200. Keep OliveTin (hot-reload) and Grafana (provider updateInterval)
+   unchanged.
 
-1. Build a design-decision matrix: decided rule → implementation evidence →
-   tests/live evidence → disposition. Cover adapter mode ordering/refusals,
-   ownership and legacy-label safety, fragment single-writer/closed-write-set,
-   health/registry coupling, deterministic projections, secret handling,
-   D7 retirement coverage, and D8 cache/ABI/checkpoint/boot/rollback behavior.
-2. Review commit-by-commit for correctness and safety regressions, not only
-   style. Pay special attention to launchd reload semantics, Vector secret-env
-   interpolation, OpenObserve bind/advertise settings, exact-process stop
-   safety, filelog offset/replay behavior, malformed JSON handling, and
-   fail-closed behavior on unsupported runtimes.
-3. Re-run device-free verification on both current masters: focused relevant
-   tests, public `just check`, full `just test`, pre-commit, site registry lint,
-   strict identity, Entangled/site-contract checks, and a site-sync dry-run or
-   second-sync no-op as applicable. Record exact counts and failures.
-4. Use read-only Mac health evidence if useful. No device contact, no live
-   deployments, no daemon retirement, and no secret output.
-5. Search for untested branches and stale docs/config paths. Findings need
-   file/line or commit references, consequence, severity/class, and a concrete
-   acceptance test. Do not list preferences as defects.
+5. **MF-5 — checksum-pin OpenObserve + OliveTin downloads (product).** Add
+   `serverapp_openobserve_archive_sha256` (per `_oo_arch`, version 0.91.1)
+   and `serverapp_olivetin_archive_sha256` (per `_ot_arch`, version
+   3000.17.1) defaults; pass `checksum: "sha256:{{ … }}"` to both `get_url`
+   tasks; fail with a clear message if the var is empty. Obtain the sha256
+   values from the vendors' published checksums where available, else by
+   downloading over HTTPS to a temp dir and hashing (record the method in
+   the PR). Acceptance: role syntax + ansible-lint green; roles still no-op
+   on this machine (binaries present); a deliberately wrong checksum var
+   makes a scratch get_url fail (test in /tmp, not against the live roles).
 
-## Deliverables
+## Cheap architecture fixes (from M1-R; include in the same PR)
 
-1. Create
-   `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/m1-r-phase-d-design-review.md`
-   with: scope/baselines; verification evidence; decision matrix; findings
-   ordered by correctness/safety, architecture, code quality; full deferred
-   item reconciliation; D7 coverage disposition; D8 per-device compatibility
-   disposition; and an explicit verdict.
-2. Do not implement product fixes. If findings exist, make the next baton
-   **M1-F** a complete remediation specification with ordered files, tests,
-   rollback, and public branch/PR/CI/merge hygiene. If there are no must-fix
-   findings, M1-F still records/revalidates the zero-finding result and carries
-   any cheap architecture fixes; it then routes to M1-Q.
-3. Append exactly one `M1-R` ledger line. Preserve every deferred item in the
-   report or next baton. R3 remains after M1-Q.
+6. **A-10 —** remove `commit: {{ product_commit }}` from generated-file
+   headers (keep `product_version`; commit stays in `.lockfile.yml`). Update
+   affected sync templates + role config templates + any tests asserting the
+   header. Then in the site repo run `just site-sync mode=apply`, commit the
+   re-stamped `generated/` (+ live olivetin projection rewrite is expected),
+   and verify a second `just site-sync mode=dry-run` is **all skip** — this
+   restores durable second-sync no-op.
+7. **A-11 —** delete the hard-coded `~/ops/site-djbclark` fallback (and the
+   site-naming comment) from `just/services.just` `landing-discover`;
+   `discover.py` already resolves STAYTURGID_SITE_DIR → OPS_ROOT/site-*.
+   Verify `just landing-discover` from the site wrapper still reports
+   registry drift.
+8. **A-12 —** change the fleet dashboard `noValue` from
+   `no data (pre-D8)` to an honest label (`no metrics pipeline yet`) in
+   `stayturgid-fleet.json.j2` (rides the A-10 re-stamp).
+
+## Constraints
+
+- No device contact (MF-2 is inventory-only). No secrets in output or
+  commits. No design-baseline edits. No monitor retirement. Do not start the
+  hd8 OCB recovery build — that is a separate post-M1-Q step.
+- stayturgid: one branch + PR (`fix/m1-f-phase-d-mustfix`), merge it
+  yourself after evidence per PROTOCOL.md, end on pulled master. Site:
+  straight to master.
+
+## Verification checklist (record evidence in ledger note)
+
+1. stayturgid `just check` + full `just test` + `pre-commit run --all-files`
+   green (record counts).
+2. Overlay + upstream-only `just validate-identity` clean;
+   `just site-contract-check`; `generate_registry_seeds --check`.
+3. Site `bin/registry_lint.py` OK.
+4. Live (read-only + the MF-1/MF-3 applies): all 9 health endpoints 200
+   (8080/health, 8686/health, 5080/healthz, 8428/health, 3000/api/health,
+   1337/, 8088/health, 4097/, HTTPS front door); both secret-bearing plists
+   mode 0600; second site-serverapps apply exit 0.
+5. Post-A-10: second `just site-sync mode=dry-run` all-skip on the
+   re-stamped site.
+6. Hosted CI green on the merged PR and merged master.
 
 ## End of session
 
-Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`: commit and
-push the report, ledger, and rewritten M1-F baton straight to site master;
-leave both repositories clean and on pulled master; print the complete new
-`NEXT-PROMPT.md` in chat; and run
-`pbcopy < docs/relay/NEXT-PROMPT.md`.
+Per `docs/relay/PROTOCOL.md`: append one `M1-F` ledger line (evidence +
+anything deferred); rewrite `NEXT-PROMPT.md` for **M1-Q** (work the M1-Q
+list in `docs/relay/reviews/m1-r-phase-d-design-review.md` §Code quality +
+the justified-kept documentation items; no behavior changes; tests stay
+green; R3 follows M1-Q). Commit and push site master; merge + delete the
+stayturgid branch; both repos clean on pulled master. Print the new
+NEXT-PROMPT.md in chat and run `pbcopy < docs/relay/NEXT-PROMPT.md`.
