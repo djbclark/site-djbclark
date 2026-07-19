@@ -124,4 +124,9 @@ a decision not in the specs, stop and report.
 Follow `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` exactly.
 After D1 is human-confirmed and landed, append its ledger entry, prepare the
 **D2** baton from the execution-plan row, commit/push both repos as needed,
-and print the new `NEXT-PROMPT.md` contents in chat.
+print the new `NEXT-PROMPT.md` contents in chat, and copy the baton to the
+clipboard using pbcopy (`pbcopy < docs/relay/NEXT-PROMPT.md`).
+
+When the D2 baton header names a recommended AI, draw it from
+`docs/reference/available-ai-models.md` and quote each option's full table row
+(source, vendor, model, variant/ID, thinking levels, notes) plus any caveats.

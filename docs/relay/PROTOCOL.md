@@ -47,7 +47,8 @@ A session may end only in one of two states:
    contains your work. If the human explicitly defers a merge, record the
    deferral and the open PR number in the ledger line.
 5. Print the new NEXT-PROMPT.md contents in chat, so the human can hand it
-   straight to the next AI.
+   straight to the next AI, **and copy the baton to the clipboard**:
+   `pbcopy < docs/relay/NEXT-PROMPT.md`.
 
 **B. Blocked / escalating.** Rewrite `NEXT-PROMPT.md` for the **same step**,
 addressed to the escalation model, with a findings section (what was tried,
@@ -64,8 +65,18 @@ exact errors). Ledger line gets `ESCALATED`. Commit, push, print.
 ---
 <self-contained prompt body: role, files to read (absolute paths), exact
 task spec, constraints, verification commands, human-verification checklist,
-and the instruction to follow docs/relay/PROTOCOL.md at session end>
+and the instruction to follow docs/relay/PROTOCOL.md at session end —
+including printing the next baton AND copying it to the clipboard with
+`pbcopy < docs/relay/NEXT-PROMPT.md`>
 ```
+
+## Recommending an AI
+
+When a baton header (or any answer to the operator) names a **recommended
+AI**, draw it from `docs/reference/available-ai-models.md`. Each recommended
+option must be quoted with its full row of information from that table —
+source, vendor/make, model name, variant/ID, thinking levels, and notes — plus
+any caveats or extra guidance worth adding.
 
 ## Invariants
 
