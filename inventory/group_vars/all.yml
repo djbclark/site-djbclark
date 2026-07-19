@@ -9,6 +9,10 @@ site_ns: djbclark
 caddy_public_hostname: mac.greyhound-sidemirror.ts.net
 caddy_short_hostname: mac
 
+# OpenObserve root email for vector→openobserve sink (password via env
+# OPENOBSERVE_ROOT_PASSWORD only — never commit secrets). Matches live OO.
+openobserve_root_email: djbclark@gmail.com
+
 # Generic defaults for any Android/Termux device. Overridden by increasingly
 # specific taxonomy layers (android_* < vendor_* < oneui_* < model_* < host).
 termux_home: /data/data/com.termux/files/home

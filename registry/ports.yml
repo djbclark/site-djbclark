@@ -22,10 +22,12 @@ hosts:
       - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
       - {port: 4097,  bind: "127.0.0.1", owner: stayturgid, service: fleet-dashboard,     status: active,
          note: "legacy Flask dashboard; retired by O-V-G-O"}
-      - {port: 4317,  bind: "127.0.0.1", owner: stayturgid, service: vector-otlp-grpc,    status: active,
-         note: "moves to site ownership in Phase D"}
-      - {port: 4318,  bind: "0.0.0.0",   owner: stayturgid, service: vector-otlp-http,    status: active,
-         note: "intentionally non-loopback: fleet devices push OTLP; moves to site Phase D"}
+      - {port: 4317,  bind: "127.0.0.1", owner: site, service: vector-otlp-grpc,    status: active,
+         note: "Phase D2: com.djbclark.vector OTLP gRPC (was com.stayturgid.vector); old plist retained until D7"}
+      - {port: 4318,  bind: "0.0.0.0",   owner: site, service: vector-otlp-http,    status: active,
+         note: "Phase D2: com.djbclark.vector OTLP HTTP; intentionally non-loopback — fleet devices push OTLP (registry documents why; 0.0.0.0 stays)"}
+      - {port: 8686,  bind: "127.0.0.1", owner: site, service: vector-api,          status: active,
+         note: "Phase D2: com.djbclark.vector GraphQL/API health (http://127.0.0.1:8686/health); loopback only"}
       - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
       - {port: 5080,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-http,    status: active,
          note: "moves to site ownership in Phase D"}
