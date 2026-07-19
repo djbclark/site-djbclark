@@ -13,9 +13,10 @@ hosts:
   m1-air:
     ports:
       # ── stayturgid (control node) ────────────────────────────────────────
-      - {port: 80,    bind: "*",         owner: stayturgid, service: caddy-http-redirect, status: active}
-      - {port: 443,   bind: "*",         owner: stayturgid, service: caddy-https,         status: active,
-         note: "Tailscale TLS front door mac.greyhound-sidemirror.ts.net; moves to site ownership in Phase D"}
+      - {port: 80,    bind: "*",         owner: site, service: caddy-http-redirect, status: active,
+         note: "Phase D1: com.djbclark.caddy (was com.stayturgid.caddy); old plist retained until D7"}
+      - {port: 443,   bind: "*",         owner: site, service: caddy-https,         status: active,
+         note: "Phase D1: site-owned Tailscale TLS front door mac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
       - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
          note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
       - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
@@ -29,8 +30,8 @@ hosts:
       - {port: 5080,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-http,    status: active,
          note: "moves to site ownership in Phase D"}
       - {port: 5081,  bind: "127.0.0.1", owner: stayturgid, service: openobserve-grpc,    status: active}
-      - {port: 8080,  bind: "127.0.0.1", owner: stayturgid, service: caddy-health,        status: active,
-         note: "FOOTGUN: landing.py code default is also 8080; plist passes --port 8088"}
+      - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
+         note: "Phase D1: com.djbclark.caddy health; FOOTGUN: landing.py code default is also 8080; plist passes --port 8088"}
       - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
          note: "llama.cpp UI-TARS; homebrew.mxcl.ui-tars"}
       - {port: 8088,  bind: "127.0.0.1", owner: stayturgid, service: landing,             status: active,

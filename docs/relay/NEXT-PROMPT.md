@@ -1,126 +1,119 @@
-# NEXT: D1 — caddy adapter + migrate to com.djbclark.caddy (difficulty 60/100)
+# NEXT: G1 — gate-debt retro-verification (difficulty 25/100)
 
 **Funding plan in force:** FUND-B revised (see
-`docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). No human gates —
-self-verify per PROTOCOL.md. The former OPERATOR GATE on public-facing 443 is
-replaced by the extra-verification + rollback rules below.
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md` § Gate-debt remediation).
+No human gates — self-verify per PROTOCOL.md. This is mechanical re-running of
+checklist claims, not architecture judgment.
 
 **Recommended AI** (rows from `docs/reference/available-ai-models.md`):
 
-- **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` ·
-  Low, Medium, High (default High) · _Flagship for code + agentic work._ Use
-  **High**; ~75% weekly remaining. Self-passoff applies if Grok is already the
-  runner.
-- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
-  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
-  computer use, research, cybersecurity._ Codex burn is operator-authorized
-  (29% weekly); when it empties, fall back to OpenRouter (api) · OpenAI ·
-  GPT-5.6 Sol · various incl. Pro · Light–Ultra · _Full family_ ($18.90).
-- **Escalation:** implementation trouble → the Codex/OpenRouter alt at higher
-  effort. If the DESIGN itself seems architecturally wrong, do not redesign —
-  stop, ledger `ESCALATED` with findings per PROTOCOL.md §B; R1 (Fable 5) is
-  two sessions away and will judge it.
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
+  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
+  Code/API) · _Default for most plans_ — **original account
+  (djbclark@gmail.com)**, effort **Medium/Low** (mechanical command-running,
+  not judgment). Do not burn Fable 5 quota here.
+- **Alt —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` · Low,
+  Medium, High (default High) · _Flagship for code + agentic work._ Use
+  **Low** if Claude original-account quota is tight.
+- **Escalation:** only if mechanical re-runs hit a systemic tooling break
+  (broken venv, missing master, unreadable logs) that blocks the audit
+  document itself — not for individual failed claims (record them and
+  continue).
 
-**Working dir:** `/Users/djbclark/ops/stayturgid` (implementation; branch +
-PR) + `/Users/djbclark/ops/site-djbclark` (site facts, registry, relay).
+**Working dir:** `/Users/djbclark/ops/site-djbclark` (audit output + relay) +
+`/Users/djbclark/ops/stayturgid` (re-run product checks; stay on master).
 
 ---
 
-You are executing **step D1** of Phase D: implement the caddy serverapp
-adapter and migrate the live instance from `com.stayturgid.caddy` to
-`com.djbclark.caddy`. This is the template adapter D2–D5 will clone.
+You are executing **G1** (gate-debt remediation): re-verify every mechanically
+checkable checklist claim from ALL ledger stages to date, then hand off to R1.
 
-## Your spec (do not re-decide architecture)
+## Why this exists
 
-`/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`
-— Fable-5-authored. Implement §1 (all of it) for caddy. §4 defines what you
-may deviate on: awkward details yes (ledger `DEVIATION: <what> — <why>`),
-but never exit-code meanings, never-touch-user-content, the no-cutover +
-rollback rule (§1.9), or the closed write set.
+Human gates were confirm-stamped without inspection for the entire project.
+Every "human-verified" checklist claim in LEDGER.md (B1–B6, B-review, C1–C6,
+D0-design, D1) is actually unverified. G1 is the cheap mechanical audit so R1
+(Fable 5) only judges failures/flags + D1 architecture — not re-runs checks.
 
 ## Read first (absolute paths)
 
-1. The design notes above — your primary spec.
-2. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (self-verify;
-   merge-your-own-PR rule; end-of-session ritual).
-3. Ground rules + risk register:
+1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (end-of-session;
+   merge-your-own-PR if you touch stayturgid; site repo → master).
+2. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
+   § Gate-debt remediation (G1 scope + output format) and § Review checkpoints
+   (R1 after G1).
+3. `/Users/djbclark/ops/site-djbclark/docs/relay/LEDGER.md` — **walk every row
+   from the first entry**; extract every checklist / verification claim.
+4. Ground rules: step2 plan
    `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-   §§0–2, and the D1 row in §5.
-4. `/Users/djbclark/ops/stayturgid/docs/architecture/site-contract.md` §5 and
-   acceptance test 5 (caddy own + inject behavior — you must ship it).
-5. Existing code to extend:
-   `/Users/djbclark/ops/stayturgid/control/site_contract/site_sync.py`,
-   `site_map.py`, `sync_manifest.yml`;
-   `/Users/djbclark/ops/stayturgid/ansible/roles/control_node/tasks/observability.yml`
-   - `launchd_ensure.yml` (lifecycle pattern to clone);
-     current live config `~/.config/stayturgid/Caddyfile` (no import line today).
-6. Site registry: `/Users/djbclark/ops/site-djbclark/registry/ports.yml`
-   (caddy 80/443/8080 rows; run `bin/registry_lint.py` after edits).
+   §§0–2 (do not rediscover known gotchas; do not redesign).
+5. D1 live state context (for claims about caddy): design notes
+   `/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`
+   §1.9; expect `com.djbclark.caddy` running, old plist retained.
 
-## Task (per design §1; caddy only this session)
+## Task
 
-1. stayturgid: fragment template + `sync_manifest.yml` entry for
-   `generated/stayturgid/fragments/caddy/stayturgid.caddy` (routes for the
-   product UIs currently in the live Caddyfile), generated header per §1.7;
-   extend `_site_render_context` with `ports` + `inventory_hosts` (§1.8).
-2. stayturgid: `control/site_contract/serverapps.py` + `just site-serverapps`
-   (mode resolution §1.2, own/inject/off behavior §1.3, exit codes §1.4,
-   plan-then-act, dry-run). Ansible role `ansible/roles/serverapp_caddy/`
-   (base config with import line at `~/.config/<site_ns>/caddy/Caddyfile`,
-   plist `com.<site_ns>.caddy`, validate-before-activate). Tests: mode
-   resolution, exit-2 paths, idempotent re-run, acceptance test 5.
-3. site repo: add `site_ns: djbclark` to `inventory/group_vars/all.yml`;
-   update `registry/ports.yml` caddy rows' Phase-D notes (owner → site).
-4. Migrate per design §1.9 exactly: validate → pre-health-check → bootout
-   old → bootstrap new → verify (health curl + one real HTTPS request through
-   the Tailscale front door + `launchctl print` state=running; paste all
-   three into ledger/PR). **Old plist and old Caddyfile stay on disk until
-   D7.** Rollback (keep working, record in ledger):
-   `launchctl bootout gui/501/com.djbclark.caddy && launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.stayturgid.caddy.plist`
+1. Parse LEDGER.md for every stage B1–B6, B-review, C1–C6, D0-design, D1 (and
+   any earlier step0/step1 stamps if present). For each verification claim
+   that is **mechanically checkable today**, re-run it.
+2. Typical checkable claims (non-exhaustive — ledger is authoritative):
+   - `just check` / `just test` green in stayturgid (on **pulled master**)
+   - pre-commit / hosted CI green on merged master
+   - `bin/registry_lint.py` in site repo
+   - `just validate-identity` / strict identity clean
+   - site-sync second run no-op; Entangled parity / `just site-contract-check`
+   - registry seeds `--check`; overlay + upstream-only strict identity
+   - health endpoints still up (`curl` caddy 8080, HTTPS front door if claimed)
+   - branch hygiene: stayturgid on master, no leftover step branches for done steps
+   - file existence claims (generated/, site_ns in group_vars, etc.)
+3. **Do not** try to re-prove historical one-shot migration events that cannot
+   be re-run without cutting over again — mark those
+   `not-mechanically-checkable` with a short why.
+4. **Do not** fix failures unless they are trivial and in-scope for a cheap
+   audit (e.g. re-run after stale cache). Real failures go in the audit as
+   `failed` for R1 to judge (correctness/safety must-fix; arch/style defer).
+5. Output: **`docs/relay/reviews/gate-debt-audit.md`**
+   - One row per claim: stage id | claim text (short) | verified-now | failed |
+     not-mechanically-checkable | evidence (command + key output / hash)
+   - Summary counts at top
+   - List of `failed` rows that R1 must treat as must-fix candidates
 
-## Carry-forward gotchas (C6/FUND-B — do not rediscover)
+## Constraints
 
-- Site justfile wrappers must export `STAYTURGID_SITE_DIR`; the C6 session
-  left the site justfile without that helper — add/fix it when you touch the
-  wrappers, don't work around it.
-- `site-example` was deleted upstream; CI creates a generic example inventory
-  itself — don't reference a checked-in example site.
-- Site `registry/paths.yml` still uses the step1 schema, not the product seed
-  format — don't "fix" it drive-by; note it if it blocks you.
-- uv-shebang lint: never hand-edit venv shebangs; broken venv → `rm -rf` +
-  `just test-venv`.
-- Devices frequently offline — D1 needs no device contact; keep it that way.
+- No device contact required; keep it that way.
+- No secrets in any commit.
+- Do not redesign adapters or re-open D1 architecture (R1 owns that).
+- Site `registry/paths.yml` still uses step1 schema — note if it blocks a
+  claim; do not "fix" drive-by.
+- uv-shebang: broken venv → `rm -rf` + `just test-venv`, never hand-edit.
 
-## Verification (self-verify; evidence into ledger + PR)
+## Verification (self-verify)
 
-- `just check` + full `just test` green in stayturgid; focused adapter tests
-  pass; pre-commit clean; overlay + upstream-only strict identity clean.
-- Acceptance test 5 shipped and passing (own on clean prefix; inject exit 2
-  without import line).
-- Second `just site-serverapps` run is a no-op (exit 0, all skip).
-- Live: `com.djbclark.caddy` running, health + TLS verified, old label
-  booted out but plist retained; rollback command recorded.
-- `registry_lint.py` passes; no secrets in any commit.
+- Audit file exists and covers every ledger stage row that made a checklist claim.
+- Every `verified-now` row has re-run evidence from this session (not copied
+  from old ledger prose alone).
+- stayturgid left on pulled master if you checked it out; site commits on master.
+- No open stayturgid PR unless you made a must-fix and merged it (prefer record
+  failure for R1 over drive-by fixes).
 
 ## End of session
 
-Follow PROTOCOL.md exactly: stayturgid branch + PR, record evidence, **merge
-your own PR, delete branch, end on pulled green master**; site repo straight
-to master. Append the `D1` ledger line (including any `DEVIATION:` notes).
-Then rewrite `NEXT-PROMPT.md` as the **G1 gate-debt retro-verification
-baton** (funding-plans doc § Gate-debt remediation): recommended AI = Claude
-2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 · `claude-sonnet-5` ·
-Adaptive Thinking + Effort (default High on Claude Code/API) · _Default for
-most plans_ — **original account (djbclark@gmail.com)**, effort Medium/Low
-(mechanical command-running, not judgment); scope = ALL ledger stages to date
-(B1–B6, B-review, C1–C6, D0-design, D1): re-run every mechanically checkable
-checklist claim, output `docs/relay/reviews/gate-debt-audit.md` (one row per
-claim: verified-now / failed / not-mechanically-checkable). G1's own
-end-of-session must route to the **R1 review baton**: Claude 2.1.205 (Mac
-GUI) · Anthropic · Claude Fable 5 · `claude-fable-5` · Low, Medium, High,
-Extra, Max, Ultra (GUI picker; no Auto) · _Next-gen long-running agents_ —
-**new second-Pro account**, effort **Medium**, judging G1's failures/flags
-plus the D1 architecture review proper against the design notes
-(correctness/safety must-fix; architecture/style deferred to ledger).
-Commit/push, print the new baton in chat, and
-`pbcopy < docs/relay/NEXT-PROMPT.md`.
+Follow PROTOCOL.md exactly:
+
+1. Append ledger line `G1` with path to audit + summary counts + any
+   `DEVIATION:` notes.
+2. Rewrite `NEXT-PROMPT.md` as the **R1 review baton**:
+   - **Recommended AI:** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
+     `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
+     Auto) · _Next-gen long-running agents_ — **new second-Pro account**,
+     effort **Medium**.
+   - **Scope:** (a) G1 failures/flags from `gate-debt-audit.md`; (b) D1
+     architecture review proper against
+     `docs/design/phase-d-adapter-design-notes.md` (correctness/safety
+     must-fix; architecture/style deferred to ledger per FUND-B).
+   - Commits in scope: stayturgid PR #17 / master after D1 merge; site D1
+     commits; G1 audit.
+3. Commit/push site repo (straight to master). If stayturgid changes were
+   needed and PR'd, merge + delete branch + end on pulled master.
+4. Print the new baton in chat and
+   `pbcopy < docs/relay/NEXT-PROMPT.md`.

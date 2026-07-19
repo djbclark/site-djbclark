@@ -1,4 +1,14 @@
 ---
+# Site Contract v1 / Phase D: site namespace for shared serverapp launchd labels
+# (com.<site_ns>.<app>). Product tooling reads this fact — never hard-code it
+# in stayturgid.
+site_ns: djbclark
+
+# Caddy front door (Tailscale MagicDNS). Used by serverapp_caddy own-mode base
+# config; product reverse-proxy routes live in generated fragments.
+caddy_public_hostname: mac.greyhound-sidemirror.ts.net
+caddy_short_hostname: mac
+
 # Generic defaults for any Android/Termux device. Overridden by increasingly
 # specific taxonomy layers (android_* < vendor_* < oneui_* < model_* < host).
 termux_home: /data/data/com.termux/files/home

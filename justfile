@@ -25,8 +25,15 @@ dryrun-termux:
 
 # Re-render generated/stayturgid/ from the product checkout (Site Contract v1).
 # Extra args pass through: just site-sync mode=dry-run
+# Always export STAYTURGID_SITE_DIR so product tooling never falls back to
+# ambiguous site-* discovery under ~/ops.
 site-sync *args:
     STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" site-sync dir="{{ site_dir }}" {{ args }}
+
+# Activate serverapp adapters (Phase D). Exports STAYTURGID_SITE_DIR.
+# Extra args: just site-serverapps mode=dry-run apps=caddy
+site-serverapps *args:
+    STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" site-serverapps dir="{{ site_dir }}" {{ args }}
 
 inventory-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-inventory --list | jq -S .
