@@ -1,3 +1,5 @@
+> **Dispositioned 2026-07-18 (B6):** all findings in this review are closed by stayturgid PR #9 (master 36e4920) + site-repo B6 commits (incl. registry/identity-patterns.yml). Do not rewrite this file.
+
 # Phase B Review: Gemini 3.1 Pro (High)
 
 **Date:** 2026-07-18

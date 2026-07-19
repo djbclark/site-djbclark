@@ -1,3 +1,5 @@
+> **Dispositioned 2026-07-18 (B6):** all findings in this review are closed by stayturgid PR #9 (master 36e4920) + site-repo B6 commits; H2/L2 earlier at d97d726, H4/M4 at site b6b82e5. Do not rewrite this file.
+
 # Phase B independent review — Codex Sol
 
 **Date:** 2026-07-18
