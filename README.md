@@ -14,6 +14,23 @@ stayturgid ADR 005).
 | `docs/plans/site-djbclark-step0-plan-v1.md` | Goose + LiteLLM AI-stack plan (see amendment header) |
 | `registry/ports.yml`, `registry/paths.yml` | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py` |
 
+## OliveTin user actions (unused on this site)
+
+`stayturgid`'s D6 OliveTin projection (`control/site_contract/olivetin_projection.py`,
+`USER_ACTIONS_RELATIVE`) merges an optional site-local action file into the
+live OliveTin config alongside the product's own fragment:
+
+- Product actions: `generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml`
+  (rendered by site-sync, `stayturgid_`-prefixed ids).
+- Site actions (optional, **not present on this site**): `olivetin/user-actions.yaml`
+  at this repo's root, never touched by the product, ids must be `user_`-prefixed.
+
+To add a site-only OliveTin action (e.g. a djbclark-specific button not worth
+upstreaming), create `olivetin/user-actions.yaml` here with `user_`-prefixed
+action ids; the next `just site-sync apply` merges it into the live config.
+No file exists yet because no such action has been needed (D6 residual,
+M1-Q).
+
 ## Caddy route naming
 
 The existing Phase D route scheme is the site convention: the public hostname
