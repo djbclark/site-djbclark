@@ -8,12 +8,14 @@ self-verify per PROTOCOL.md.
 the whole row, not a bare name):
 
 - **Primary —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
-  `claude-fable-5` · Adaptive Thinking (always on) · _Next-gen long-running
-  agents._ **Use the ORIGINAL Claude account (djbclark@gmail.com)** — ~60% of
+  `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
+  Auto) · _Next-gen long-running agents._ **Use the ORIGINAL Claude account (djbclark@gmail.com)** — ~60% of
   its Fable 5 weekly remains and this is its designated spend (highest-leverage
   session in Phase D; the new second-Pro account's weekly is reserved for R1,
-  D6 escalation, and M1). No effort dial on web — adaptive thinking self-
-  throttles; do not try to force a "Low" setting.
+  D6 escalation, and M1). **Set the GUI effort picker to High** (not
+  Extra/Max/Ultra — quota burn; not Low/Medium — this is a judgment session).
+  Leave the lower-left yellow "Auto" control alone (safety/routing, not
+  effort).
 - **No alt.** If Fable 5 is unavailable on the original account, stop and tell
   the operator — do not run this design session on a lesser model; the entire
   point of Plan B is that this one session is Fable-5-authored.
@@ -98,6 +100,9 @@ Codex burn authorized then OpenRouter GPT-5.6 Sol fallback), point it at the
 design notes as its spec, recommend **Grok 4.5 High (grok-web, 75% weekly)**
 as primary quoted as a full catalog row (self-passoff applies if Grok is
 already the runner), and route D1's end-of-session to the **R1 review baton**
-(Fable 5, **new second-Pro account**) per the checkpoint table. Commit/push
+(Fable 5 at **Medium** effort, **new second-Pro account**) per the checkpoint
+table — R1's scope must also include the one-time gate-debt remediation
+(funding-plans doc § Gate-debt remediation: re-run the mechanically checkable
+C2–C6 checklist claims and record evidence). Commit/push
 this repo, print the new baton in chat, and
 `pbcopy < docs/relay/NEXT-PROMPT.md`.

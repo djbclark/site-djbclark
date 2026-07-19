@@ -39,15 +39,30 @@ Ranked by leverage — spend Fable 5 here first, cheaper models everywhere else:
 Explicitly _not_ Fable-5-critical: D2–D4 adapter cloning, D5 installs, D7
 retirement mechanics, Grafana YAML drafting (DeepSeek V4 Pro is fine).
 
-**Fable 5 "Low" effort:** on Claude web plans there is no manual effort dial —
-the catalog row is Adaptive Thinking (always on), which already scales
-thinking down on easy turns, so the cheap tier comes for free. A selectable
-Low exists only on API/effort-dial variants (e.g. OpenRouter row 58 with a
-reasoning-effort param). Where a dial exists: Low is acceptable for
-reading-heavy review sessions (R1/R2), NOT for D0-design or D6 judgment —
-those are exactly the sessions bought for deep thinking. Practical rule:
-don't pay API rates to get Low; use subscription Fable 5 and let adaptive
-thinking self-throttle.
+**Fable 5 effort levels (corrected 2026-07-19 — operator-verified):** the
+Claude GUI on monthly plans has a selectable Low/Medium/High/Extra/Max/Ultra
+picker for Fable 5 (catalog row 10; no Auto for effort — the lower-left
+yellow "Auto" is a separate safety/routing control, don't touch it). Since
+quota burn scales with effort, assign per session:
+
+- **D0-design, D6 escalation: High.** These are the judgment sessions Plan B
+  exists to fund — Low here defeats the purpose. Never Extra/Max/Ultra
+  (diminishing returns on quota) unless a session is genuinely stuck.
+- **R1/R3 reviews, M1-R: Medium.** Reading-heavy verification; Medium is the
+  get-away-with-it tier the operator asked about — yes, for reviews.
+- **Mechanical Fable 5 work (rare; e.g. M1 remediation drafting): Low.**
+
+## Gate-debt remediation (one-time)
+
+Human gates in Phases B–C were confirm-stamped without inspection, so every
+"human-verified" checklist claim in ledger entries through C6 is actually
+unverified. Remediation, folded into **R1's scope** (no extra session):
+R1 re-runs the C2–C6 checklist items that are still mechanically checkable
+(test suites, strict identity, registry lint, second-sync no-op, entangled
+parity, merged-master state) and records the evidence in its ledger line.
+Anything not mechanically checkable is listed in the R1 ledger note as
+permanently unverified-by-human — accepted under FUND-B. Going forward the
+protocol's self-verify rules make this class of debt impossible to re-accrue.
 
 ## Review checkpoints (both plans; see PROTOCOL.md § Review batons)
 

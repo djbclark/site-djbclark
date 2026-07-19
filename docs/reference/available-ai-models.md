@@ -23,7 +23,7 @@ Every distinct model option / variant appears on **exactly one row**.
 | 7   | Codex 0.144.6 (oauth)   | OpenAI                                             | GPT-5.3-codex-spark                                                     | `gpt-5.3-codex-spark`                  | Light, Medium, High, Extra High, Max, Ultra                     | Research preview; ChatGPT Pro only                                  |
 | 8   | Codex 0.144.6 (oauth)   | OpenAI                                             | GPT-5.3-codex                                                           | `gpt-5.3-codex`                        | Light, Medium, High, Extra High, Max, Ultra                     | Legacy coding-focused                                               |
 | 9   | Codex 0.144.6 (oauth)   | OpenAI (third-party)                               | Various (Claude, Gemini, GLM, Kimi, DeepSeek, Ollama, etc.)             | via config.toml                        | Inherits underlying model levels                                | Responses API compatible                                            |
-| 10  | Claude 2.1.205 (web)    | Anthropic                                          | Claude Fable 5                                                          | `claude-fable-5`                       | Adaptive Thinking (always on)                                   | Next-gen long-running agents                                        |
+| 10  | Claude 2.1.205 (web)    | Anthropic                                          | Claude Fable 5                                                          | `claude-fable-5`                       | Low, Medium, High, Extra, Max, Ultra (GUI picker; no Auto)      | Next-gen long-running agents                                        |
 | 11  | Claude 2.1.205 (web)    | Anthropic                                          | Claude Opus 4.8                                                         | `claude-opus-4-8`                      | Adaptive Thinking + Effort (default High; configurable)         | Complex agentic / enterprise                                        |
 | 12  | Claude 2.1.205 (web)    | Anthropic                                          | Claude Sonnet 5                                                         | `claude-sonnet-5`                      | Adaptive Thinking + Effort (default High on Claude Code/API)    | Default for most plans                                              |
 | 13  | Claude 2.1.205 (web)    | Anthropic                                          | Claude Haiku 4.5                                                        | `claude-haiku-4-5-20251001`            | Extended Thinking                                               | Fast near-frontier                                                  |
@@ -158,3 +158,10 @@ Every distinct model option / variant appears on **exactly one row**.
 6. **Verification Date.** All entries reflect publicly documented availability
    as of mid-July 2026. Always confirm in the official product UI or
    documentation for the most current status.
+
+7. **Operator-verified corrections.** 2026-07-19: the Claude GUI exposes a
+   selectable Low/Medium/High/Extra/Max/Ultra effort picker for Fable 5 on
+   monthly plans (row 10 updated; no Auto option for effort). The lower-left
+   yellow "Auto" control in that UI is a separate setting (safety/routing),
+   not the thinking level — leave it alone. Other Claude-web rows may have
+   the same picker; verify in-UI before relying on the listed levels.
