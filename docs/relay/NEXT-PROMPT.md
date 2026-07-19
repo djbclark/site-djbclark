@@ -8,22 +8,27 @@ deferred to the ledger for M1. No human gates — the old plan row's
 (before/after health, tested rollback, never delete old path in the session
 that stood up the new one).
 
-**Recommended AI** (rows from `docs/reference/available-ai-models.md`):
+**Recommended AI** (rows from `docs/reference/available-ai-models.md`;
+quota basis: step2 plan §1.2 snapshot 2026-07-19 post-D6 — operator steer:
+prefer Codex/Cursor/Antigravity, spare Grok, hold Claude for escalations):
 
-- **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` ·
-  Low, Medium, High (default High) · _Flagship for code + agentic work_ —
-  effort **High**. Self-passoff pattern from D2–D5 fits: mechanical
-  retirement with a clear coverage checklist; deletion of working monitors
-  wants High, not Medium.
-- **Alt —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
-  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
-  Code/API) · _Default for most plans_ — **original account
-  (djbclark@gmail.com)**, use if Grok weekly is exhausted.
+- **Primary —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol`
+  · Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
+  computer use, research, cybersecurity_ — effort **High**. Codex weekly has
+  ~29% + 386 banked credits; deletion of working monitors wants a flagship
+  at High, and the coverage checklist keeps it junior-safe.
+- **Alt —** Cursor (GUI) · Cursor / SpaceXAI · Grok 4.5 · Grok 4.5 · High,
+  Medium, Low · _Joint Cursor + SpaceXAI flagship_ — effort **High**; uses
+  the half-full Cursor monthly pool instead of the Grok TUI weekly (Grok
+  direct is already the regular workhorse — spare it). Cursor Composer 2.5
+  (Agent Thinking, _Native agentic coding_) is fine for the mechanical
+  plist/registry edits if preferred.
 - **Escalation:** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
-  Auto) · _Next-gen long-running agents_ — **new second-Pro account**, if
-  coverage adequacy or launchd retirement ordering turns out to need
-  judgment calls beyond the checklist.
+  Auto) · _Next-gen long-running agents_ — **new second-Pro account first**
+  (~70% Fable weekly left; original account's Fable is back but only ~26%
+  left, resets Fri 5:59 AM) — if coverage adequacy or launchd retirement
+  ordering needs judgment beyond the checklist.
 
 **Working dir:** `/Users/djbclark/ops/stayturgid` (implementation; branch +
 PR + merge-your-own per PROTOCOL) + `/Users/djbclark/ops/site-djbclark`

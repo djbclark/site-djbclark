@@ -44,36 +44,41 @@ origin master` before editing; pre-commit hooks must pass (prettier,
 | 40–54  | Strong workhorse                              | Sonnet 5, Codex (medium), Cursor composer, Copilot premium (Sonnet/GPT-5 class), DeepSeek R1 for research-shaped subtasks |
 | 0–39   | Cheap/fast                                    | Haiku 4.5, Codex (low), Copilot chat, Gemini Flash, DeepSeek V3, Cursor auto                                              |
 
-### 1.2 Current-quota snapshot (2026-07-18, post-B6 recheck — recheck with CodexBar before big runs)
+### 1.2 Current-quota snapshot (2026-07-19, post-D6 — regenerate with `codexbar usage --format json --provider all` before big runs; it takes ~90 s, run it to a file in the background, never pipe through `head`)
 
-- **Abundant now:** Copilot premium (100%) → primary workhorse for 40–54 band.
-  Grok Supergrok (87% weekly) → primary for 55–69 "thinking" band. DeepSeek
-  API ($4.99) and OpenRouter ($18.90) → cheap overflow + research. Warp
-  (100% credits, resets 3d18h) **flipped from avoid to usable** — treat as
-  cheap agentic overflow. Poe (300 pts) → occasional second opinions.
-- **Throttle (was "abundant"):** Codex Plus — weekly still shows 69% left
-  and 386.54 credits banked, but pace is running a 27% deficit and projects
-  empty in ~14h24m at the current burn rate (resets in 6d17h). Still fine as
-  a default workhorse for one or two sessions; don't run it back-to-back
-  without rechecking CodexBar.
-- **Ration hard (tighter than before):** Claude Pro — session is at 64% but
-  _projected empty in ~1h21m_ (resets in 4h15m), and weekly is also pacing a
-  13% deficit with a 2d20h runout despite a 5d6h reset. Reserve Fable
-  5/Opus/Sonnet strictly for 65+ band steps, genuine escalations, and
-  phase-end reviews; avoid spending it on 40–54-band work that Copilot
-  premium or Codex can absorb instead. Haiku 4.5 shares this pool too — treat
-  it as rationed, not free, until a reset lands.
-- Cursor (Total 42%, Auto 49%, API 0%) → UI-adjacent or multi-file refactors
-  only, prefer Auto over API-billed calls. Antigravity: Gemini pool only
-  (53%); its Claude/GPT pool is still empty (<1%) — avoid.
-- **Avoid:** OpenCode weekly pool (exhausted, resets ~20h; monthly also down
-  to 8% so don't lean on it even after weekly resets), Zed (predictions only,
-  not agentic).
+Operator-confirmed correction 2026-07-19: codexbar's `claude` row can lag the
+original account — the operator's in-app numbers win when they conflict. New
+second-Pro Claude account does not appear in codexbar yet (it will later).
+
+- **Prefer now (operator steer 2026-07-19):** Codex, Cursor, and Antigravity
+  carry the room; Grok has room too but is already the regular workhorse —
+  spread load off it when Codex/Cursor fit.
+- **Codex Plus** (djbclark@gmail.com): weekly 71% used (resets Jul 25
+  ~5:17 PM), pace warns 59% deficit / "runs out in 8h" at burst rate, BUT
+  386.5 credits banked cushion overruns. Good primary for 40–69 band; don't
+  chain many sessions without a recheck.
+- **Cursor** (monthly, resets Aug 2): two pools roughly half left (58% and
+  51% used); one pool exhausted. Good secondary for agentic/multi-file work
+  (Composer 2.5, Grok 4.5, or API-pool models).
+- **Antigravity:** primary pool 47% used (refreshes ~2 d); secondary pool
+  99.5% used — usable again for the primary-pool models.
+- **Copilot premium:** ~11% used — abundant for 40–54 band.
+- **Grok Supergrok:** 45% used — healthy, but regularly drawn on; treat as
+  alt, not default.
+- **Claude original account** (djbclark@gmail.com, operator-reported
+  2026-07-19, overrides codexbar): session 44% used (resets ~4 h); all
+  models weekly 52% used, **Fable 5 weekly 74% used** — Fable 5 is available
+  on this account again but thin (resets Fri 5:59 AM). **Claude new
+  second-Pro account:** ~70% of Fable weekly left — still the preferred
+  account for Fable sessions (reviews, design, escalations).
+- **Avoid:** OpenCode Go (weekly 100%, monthly 92% used), Warp (0 credits —
+  flipped back to avoid), Zed (predictions only). DeepSeek API ($4.99) and
+  OpenRouter remain cheap overflow; Poe for second opinions.
 - Rule of thumb: **route by band first, then pick the cheapest tool in that
   band with quota.** Escalate one band on the second failed attempt. Right
-  now that means: prefer Codex/Copilot/Grok over Claude for anything below
-  the 70+ band, and hold genuine Fable-5-tier escalations until the Claude
-  session or weekly window resets unless truly blocked.
+  now that means: Codex/Cursor/Copilot for anything below the 70+ band,
+  Grok as alternate, Fable 5 escalations on the new account first (original
+  account's 26% Fable remainder is the backup).
 
 ## 2. Technical risk register (senior findings — do not rediscover these)
 
