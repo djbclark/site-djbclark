@@ -1,8 +1,27 @@
 # NEXT: D1 — Caddy serverapp adapter + label migration (difficulty 60/100)
 
-**Recommended AI:** Grok 4 (thinking) or Codex (high)
-alt: Copilot premium / Cursor composer for templating subtasks
-escalate to: Fable 5 (medium) if own/inject mode selection or TLS cutover needs judgment
+**Recommended AI** (rows from `docs/reference/available-ai-models.md`; quote the
+whole row, not a bare name):
+
+- **Primary —** Grok 0.2.103 (grok-web) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5`
+  · Low, Medium, High (default High) · _Flagship for code + agentic work._ Run
+  at **High**. Caveat: same model is also reachable via Cursor (row 22) or
+  OpenRouter/Poe (rows 64, 106) if the grok-web quota is empty.
+- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
+  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
+  computer use, research, cybersecurity._ Run at **High**. Good for the launchd
+  plist / brew adapter work.
+- **Alt (templating subtasks) —** Cursor (web) · Cursor · Composer 2.5 ·
+  Composer 2.5 · Agent Thinking · _Native agentic coding._ Caveat: the old
+  baton's "Copilot premium" is **not** in the catalog — use this Cursor row (or
+  a Codex/Grok row above) instead.
+- **Escalate to —** Claude 2.1.205 (web) · Anthropic · Claude Fable 5 ·
+  `claude-fable-5` · Adaptive Thinking (always on) · _Next-gen long-running
+  agents._ Use if own/inject mode selection or the TLS cutover needs judgment.
+  Caveat: the web variant has no separate effort dial (thinking is always on);
+  if you specifically want a **medium**-effort setting, take the Cursor API-pool
+  variant instead — Cursor (web) · Anthropic · Claude Fable 5 · Claude Fable 5 ·
+  Adaptive Thinking + Effort · _Via API pool_ (row 24).
 
 **Working dir:** `/Users/djbclark/ops/stayturgid` (product PR) + `/Users/djbclark/ops/site-djbclark` (site overlay)
 **Operator gate:** **public-facing 443** — operator must approve TLS cutover before retiring `com.stayturgid.caddy`; keep old launchd label until new one serves TLS
