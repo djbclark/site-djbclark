@@ -171,13 +171,16 @@ that stands up the new label**, and the rollback is two known commands.
 1. Render new base config (`~/.config/djbclark/caddy/Caddyfile`, with import
    line) + fragments; `caddy validate --config` it. Old daemon untouched.
 2. `curl -fsS http://127.0.0.1:8080/health` (pre-check, old daemon healthy).
-3. `launchctl bootout gui/501/com.stayturgid.caddy` (plist stays on disk).
+3. `launchctl bootout gui/501/com.stayturgid.caddy` (plist stays on disk),
+   then `launchctl disable gui/501/com.stayturgid.caddy` — bootout alone is
+   session-scoped; without the disable, next login re-bootstraps the retained
+   plist and both labels fight for 80/443 (R1 must-fix amendment, 2026-07-19).
 4. `launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.djbclark.caddy.plist`
 5. Verify: health curl again, plus one real HTTPS request through the
    Tailscale front door, plus `launchctl print gui/501/com.djbclark.caddy`
    state = running. Record all three in the ledger.
-6. **Rollback (documented + kept working):**
-   `launchctl bootout gui/501/com.djbclark.caddy && launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.stayturgid.caddy.plist`
+6. **Rollback (documented + kept working; R1-amended for the disable step):**
+   `launchctl bootout gui/501/com.djbclark.caddy && launchctl enable gui/501/com.stayturgid.caddy && launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.stayturgid.caddy.plist`
 7. Retiring the old plist + `~/.config/stayturgid/Caddyfile` happens in a
    _later_ session (D7), after ≥1 day of new-label operation.
 

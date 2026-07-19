@@ -1,132 +1,105 @@
-# NEXT: R1 — first-adapter architecture review (difficulty 55/100)
+# NEXT: D2 — vector adapter (clone the D1 pattern) (difficulty 45/100)
 
 **Funding plan in force:** FUND-B revised (see
-`docs/plans/site-djbclark-phase-d-funding-plans-v1.md` § Review checkpoints +
-§ Gate-debt remediation). Quality bar: **correctness/safety must-fix only**;
-architecture and code-style findings may be deferred to the ledger for M1.
-No human gates — self-verify per PROTOCOL.md.
+`docs/plans/site-djbclark-phase-d-funding-plans-v1.md`). Quality bar:
+**correctness/safety must-fix only**; architecture/style findings may be
+deferred to the ledger for M1. No human gates — self-verify per PROTOCOL.md.
 
 **Recommended AI** (rows from `docs/reference/available-ai-models.md`):
 
-- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
+- **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` ·
+  Low, Medium, High (default High) · _Flagship for code + agentic work_ —
+  effort **Medium/High** (FUND-B Plan B row for D2–D4).
+- **Alt —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol · `gpt-5.6-sol` ·
+  Light, Medium, High, Extra High, Max, Ultra · _Flagship; complex coding,
+  computer use, research, cybersecurity_ — use while Codex quota lasts.
+- **Escalation:** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
   `claude-fable-5` · Low, Medium, High, Extra, Max, Ultra (GUI picker; no
-  Auto) · _Next-gen long-running agents_ — **new second-Pro account**, effort
-  **Medium** (reading-heavy review; Medium is the get-away-with-it tier for
-  reviews per funding plan).
-- **Alt —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
-  `claude-sonnet-5` · Adaptive Thinking + Effort — **original account**, if
-  new-account Fable 5 is unavailable; still Medium effort.
-- **Escalation:** Fable 5 Extra only if correctness findings are ambiguous
-  and block a safe D2 clone pattern — not for style nits.
+  Auto) · _Next-gen long-running agents_ — **new second-Pro account**, only
+  if the vector adapter diverges from the design notes' pattern.
 
-**Working dir:** `/Users/djbclark/ops/site-djbclark` (review write-up + relay)
-+ `/Users/djbclark/ops/stayturgid` (read D1 code on pulled master; PR only if
-you must-fix).
+**Working dir:** `/Users/djbclark/ops/stayturgid` (implementation; branch +
+PR + merge-your-own per PROTOCOL) + `/Users/djbclark/ops/site-djbclark`
+(registry/inventory edits + relay; straight to master).
 
 ---
 
-You are executing **R1** (end-of-D1 review checkpoint): judge G1's residual
-flags + review the D1 caddy adapter architecture so D2–D5 can clone a sound
-pattern.
-
-## Why this exists
-
-G1 already re-ran every mechanically checkable checklist claim across all
-ledger stages. **Do not re-run green suites** unless you change code. Your
-job is judgment: correctness/safety on D1 + G1 flags.
+You are executing **D2**: the vector serverapp adapter, cloning the reviewed
+D1 caddy pattern. Do not re-decide architecture — D0 design notes + the R1
+review already settled the shape.
 
 ## Read first (absolute paths)
 
-1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (end-of-session;
-   merge-your-own-PR if you touch stayturgid; site repo → master).
-2. `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/gate-debt-audit.md`
-   — G1 output: summary counts, **Flags F1–F6**, claim table, R1 handoff notes.
-3. `/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`
-   — D0-design authority for adapter pattern (§1), D6/D8 context, deviation
-   protocol (§4–5).
-4. `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
-   § Review checkpoints (R1 scope + relaxed quality bar).
-5. Ground rules: step2 plan
+1. `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md` (end-of-session
+   ritual; merge your own stayturgid PR; print + `pbcopy` next baton).
+2. `/Users/djbclark/ops/site-djbclark/docs/design/phase-d-adapter-design-notes.md`
+   §§0–1 (adapter pattern; §1.9 now includes the R1-amended persistent-disable
+   step and rollback), §4 (deviation protocol — ledger any deviation).
+3. `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/r1-d1-adapter-review.md`
+   — R1 findings; §"Clone-safety for D2" lists exactly what to copy vs
+   caddy-specific; carry S-2/A-2 notes into your implementation choices.
+4. Step2 plan §§0–2 + Phase D row D2:
    `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-   §§0–2.
-6. Product specs: stayturgid `docs/architecture/site-contract.md` §5;
-   ADR 005; `control/site_contract/{serverapps.py,site_map.py,site_sync.py,sync_manifest.yml}`;
-   role `ansible/roles/serverapp_caddy/`.
-7. Ledger: `/Users/djbclark/ops/site-djbclark/docs/relay/LEDGER.md` D0/D1/G1
-   rows (incl. D1 DEVIATIONs).
+5. stayturgid: `docs/architecture/site-contract.md` §5 (vector row of §5.3);
+   `ansible/roles/control_node/tasks/observability.yml` +
+   `templates/vector.yaml.j2` (current com.stayturgid.vector management —
+   your starting material); `control/site_contract/serverapps.py` +
+   `sync_manifest.yml` + `tests/python/test_serverapps.py` (D1 template);
+   `ansible/roles/serverapp_caddy/` (role shape incl. legacy bootout +
+   persistent-disable tasks — clone both).
+6. Site: `registry/ports.yml` (4318 fleet-ingest note; vector ports),
+   `inventory/group_vars/all.yml` (`site_ns: djbclark`),
+   `docs/relay/LEDGER.md` D1/G1/R1 rows.
 
-## Commits in scope
+## Task (step2 plan row D2)
 
-| Repo       | Ref / commits                                                                 |
-| ---------- | ----------------------------------------------------------------------------- |
-| stayturgid | PR #17 → master `dc9ffaa` (merge); implementation `5055a93`                   |
-| site       | D1 `a6cd64a` (`site_ns`, ports, justfile, caddy migration); G1 audit + baton |
+Vector adapter: start from the merged `observability.yml` + `vector.yaml.j2`
+(already Ansible-managed under `com.stayturgid.vector`); split into
+product-prefixed fragment components (`stayturgid_*` ids) rendered by
+site-sync into `generated/stayturgid/fragments/vector/` (sources/sinks files
+per design §1.6); new role `serverapp_vector` (extracted from
+observability.yml) relabels to `com.<site_ns>.vector`, own-mode unit passes
+extra `--config` args globbing the committed generated fragments (§1.3 — no
+copy step), `vector validate` before activate, legacy
+`com.stayturgid.vector` bootout **+ persistent `launchctl disable`** (R1
+MF-1 pattern — clone it), health check, plist retained until D7. Extend
+`serverapps.py`: add `vector` to `KNOWN_APPS` with per-app dispatch (inject
+mode per §5.3: standalone fragment files + `--config` args; foreign detect =
+existing vector.yaml/vector.toml service config). Site: update
+`registry/ports.yml` vector-port ownership → site (0.0.0.0:4318 binding
+stays — fleet ingest, registry documents why); run `bin/registry_lint.py`.
 
-## Task
+Constraints carried from R1/G1:
 
-### (a) G1 failures/flags
+- Keep the F4-accepted pattern: second own-mode apply re-runs the ansible
+  ensure (file actions skip; ansible no-op) — that is the healing/verify path.
+- If cheap, use a typed refusal kind instead of `"drifted"` substring gating
+  (R1 S-2) in any new refusal paths; otherwise keep the D1 shape and ledger it.
+- Do not touch `com.stayturgid.caddy` / caddy paths; do not set
+  `stayturgid_caddy_enabled: false` (deletes the rollback plist — D7's job).
+- paths.yml stays step1 schema (note only); no secrets in commits; uv-shebang:
+  broken venv → `rm -rf` + `just test-venv`, never hand-edit.
+- Migration is §1.9 steps 1–7 with vector's health check (old/new labels
+  cannot share the 4318 bind): validate → pre-health → bootout+disable old →
+  bootstrap `com.djbclark.vector` → verify (health + `launchctl print`
+  state=running + one fleet-ingest smoke if reachable, else note pending) →
+  rollback documented (`bootout` new + `enable` + `bootstrap` old plist).
 
-- **Failed rows:** G1 reported **0 failed**. Confirm nothing in the audit
-  table is a silent must-fix you disagree with.
-- **Flags F1–F6:** classify each as correctness/safety (must-fix now),
-  architecture (fix if cheap else ledger for M1), or style (ledger). Do not
-  re-open drive-by paths.yml schema migration unless safety requires it.
+## Verification (self-verify, record evidence in ledger)
 
-### (b) D1 architecture review proper
-
-Against design notes §1 (and site-contract §5), review:
-
-1. Mode selection order: site-map → foreign-config detect → own; generated
-   header exclusion; exit 0/1/2.
-2. Two-layer split: site-sync fragments vs `serverapps.py` + `serverapp_caddy`
-   role; import of fragments from committed `generated/` (no copy).
-3. Launchd namespace `com.<site_ns>.caddy`; validate-before-activate; legacy
-   plist retained; documented rollback.
-4. Live residual risks: control_node can re-render `com.stayturgid.caddy`
-   until D7; second own-mode apply still invokes ansible ensure (D1 DEVIATION);
-   bare YAML `off` coercion (D1 DEVIATION); no site-map.yml (source=default).
-5. Clone-safety for D2 vector: what must D2 copy vs what is caddy-specific?
-
-### Deliverables
-
-1. Write review notes to
-   `docs/relay/reviews/r1-d1-adapter-review.md` (findings table:
-   severity, must-fix vs defer, file refs, disposition).
-2. **Must-fix** correctness/safety: implement in the same session if cheap;
-   stayturgid via branch+PR+merge per PROTOCOL; site straight to master.
-   Prefer minimal diffs. Re-run only the checks needed to prove the fix.
-3. Deferred findings: list explicitly in the ledger R1 line (and in the
-   review doc) for M1-R.
-4. If no must-fix: do not churn code; still write the review doc.
-
-## Constraints
-
-- No device contact required; keep it that way unless a safety finding
-  forces a health re-check (curl 8080 / HTTPS / launchctl — read-only).
-- No secrets in any commit.
-- Do not redesign adapters or start D2 implementation (next baton is D2).
-- paths.yml step1 schema: note only unless you classify as must-fix safety.
-- uv-shebang: broken venv → `rm -rf` + `just test-venv`, never hand-edit.
-
-## Verification (self-verify)
-
-- Review file exists with findings + dispositions.
-- Any must-fix merged; stayturgid ends on pulled master, no open PR.
-- If you changed product code: `just check` green on stayturgid; site
-  `bin/registry_lint.py` if you touched registry.
-- Caddy still healthy if you touched launchd/config (curl /health + HTTPS).
+- Focused serverapps/vector tests + `just check` green; full `just test` if
+  Python behavior changed; `bin/registry_lint.py` OK if registry touched.
+- Live: `com.djbclark.vector` running; legacy label booted out **and**
+  `launchctl print-disabled gui/501` shows `com.stayturgid.vector` disabled;
+  legacy plist still on disk; vector health endpoint answering; second
+  `just site-serverapps mode=apply apps=vector` exit 0 all-skip file actions.
+- Caddy untouched: /health 200 + HTTPS front door 200 after your changes.
+- stayturgid PR merged, branch deleted, checkout on pulled master, CI green.
 
 ## End of session
 
-Follow PROTOCOL.md exactly:
-
-1. Append ledger line `R1` with path to review, must-fix count, deferred
-   list, commits/PR.
-2. Rewrite `NEXT-PROMPT.md` as the **D2 baton** (vector adapter per step2
-   plan Phase D row D2 + design notes). Recommended AI per FUND-B Plan B:
-   Grok 4.5 Medium/High primary; carry G1/R1 residual notes that affect D2.
-3. Commit/push site repo (straight to master). If stayturgid changes were
-   needed and PR'd, merge + delete branch + end on pulled master.
-4. Print the new baton in chat and
-   `pbcopy < docs/relay/NEXT-PROMPT.md`.
-)
+Follow PROTOCOL.md exactly: ledger line `D2` (commits/PR, deviations,
+anything deferred); rewrite `NEXT-PROMPT.md` as the **D3 baton** (openobserve
+adapter per step2 row D3; recommended AI per FUND-B — Grok 4.5 or Codex;
+self-passoff allowed if quota holds); commit/push site to master; print the
+new baton and `pbcopy < docs/relay/NEXT-PROMPT.md`.
