@@ -19,14 +19,14 @@ neither has moved, the correct action is to say so and stop; do not invent
 new work.
 
 **Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
-quota snapshot taken 2026-07-20T17:22Z via `cswap list --json` +
+quota snapshot taken 2026-07-20T17:30Z via `cswap list --json` +
 `codexbar usage --format json --provider <name>` — **recheck live**, do not
 trust this snapshot):
 
 - **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
   Code/API) · _Default for most plans_ — use **`cswap` account 2
-  (djbclark@mit.edu)** (active; 5h **49%**, 7d **23%**, 7d reset Jul 25
+  (djbclark@mit.edu)** (active; 5h **51%**, 7d **23%**, 7d reset Jul 25
   ~05:00 local). This is mechanical triage, not judgment — Sonnet 5 at Low
   effort is correctly sized. **Note: Claude Fable 5 is no longer part of the
   monthly plan and is very expensive per-use — do not recommend it for the
