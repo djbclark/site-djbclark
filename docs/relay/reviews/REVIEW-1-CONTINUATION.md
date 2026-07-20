@@ -36,14 +36,36 @@ site repo.
   scratchpad `codexbar/{claude,codex,grok}.json` (NOT committed; re-run if
   lost: `codexbar usage --format json --provider <p>`, background to file,
   never head).
-- Phase 1 (mandated carry-forward deep review): NOT STARTED.
-- Phase 2 (whole-repo sweep): NOT STARTED.
+- Phase 1 (mandated carry-forward deep review): DONE. Reviewed #29
+  (199ea20), #31 (0053f00), #30 (c5e52e1), #32 (ab329a5), AutoJs6
+  4c2c3522..3a0f0696, site D7-ROUTES-E parity. Sticky-a11y state machine
+  agrees end-to-end (comonitor degraded-notify-once; guard hard-notify but
+  with 20s recheck debounce; AutoJs6 isMalfunctioning=hasService&&!hasInstance
+  with privileged rebind). #32 parity: generated caddy/vector fragments match
+  templates + registry ports (3000/5080/1337/8428/8088), /oo prefix correct.
+  stayturgid full suite baseline running in background (scratchpad
+  st-baseline.log).
+- Phase 2 (whole-repo sweep): IN PROGRESS.
 - Phase 3 (fixes): NOT STARTED.
 - Phase 5 (wrap-up): NOT STARTED.
 
 ## Findings log (append as found; mark FIXED(commit) / FLAGGED)
 
-(none yet)
+- FLAGGED R1-1 (consistency, judgment): PR31 softened comonitor sticky
+  detection to degraded/notify-once because auto.service flickers null on
+  s24, but device/autojs6/lib/guard.js enforce() still hard-notifies
+  "a11y-stale" every watchdog cycle on the same flicker-prone check.
+  Mitigation already present: guard re-checks after termux repair + 20s
+  poll before notifying, and notify.show replaces same-tag. No evidence of
+  real-world spam from guard path; do NOT change without device evidence
+  (behavior contract #29/#31).
+- FLAGGED R1-2 (security, operator design): Choice E front door exposes
+  OliveTin (action executor) and VictoriaMetrics (unauth'd admin API incl.
+  /api/v1/admin/tsdb/*) to the whole tailnet with no auth layer at Caddy.
+  Grafana/OO have own logins. Acceptable per D7-ROUTES-E decision
+  (single-user tailnet) — revisit if tailnet gains nodes/users.
+- NIT R1-3: WATCHDOG_FRESH_SEC=1800 duplicated as literal 1800 in
+  device/termux/py/stayturgid_repair.py (comment cross-references; fine).
 
 ## Next actions
 
