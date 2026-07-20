@@ -1,5 +1,5 @@
 ---
-# Site-owned Goose Desktop/CLI entry point (Phase E2).
+# Site-owned Goose Desktop/CLI entry point (Phase E2 provider + E3 MCP extensions).
 - name: Configure Goose against local LiteLLM
   hosts: localhost
   connection: local

@@ -1,4 +1,7 @@
 {{ goose_managed_marker }}
+# E3 managed extensions: filesystem (stdio, verified), fieldy (streamable_http,
+# verified). Shortwave and Saner.ai have no verified Goose-facing MCP server —
+# see roles/goose/README.md research notes. Do not invent package names.
 active_provider: {{ goose_provider_id }}
 providers:
   {{ goose_provider_id }}:
@@ -8,3 +11,41 @@ providers:
 preferences:
   telemetry: false
   permission_mode: prompt
+extensions:
+  # --- verified: official MCP filesystem (stdio via npx) ---
+  filesystem:
+    type: stdio
+    name: filesystem
+    display_name: Filesystem
+    description: "Official MCP filesystem server (@modelcontextprotocol/server-filesystem)"
+    enabled: {{ goose_ext_filesystem_enabled | bool | ternary('true', 'false') }}
+    bundled: false
+    timeout: {{ goose_ext_filesystem_timeout }}
+    cmd: {{ goose_ext_filesystem_cmd }}
+    args:
+      - "-y"
+      - "{{ goose_ext_filesystem_package }}"
+{% for dir in goose_ext_filesystem_allowed_dirs %}
+      - "{{ dir }}"
+{% endfor %}
+    env_keys: []
+    envs: {}
+  # --- verified: Fieldy remote MCP (streamable HTTP; OAuth in E4) ---
+  fieldy:
+    type: streamable_http
+    name: fieldy
+    display_name: Fieldy
+    description: "Fieldy conversation MCP at api.fieldy.ai/mcp (OAuth on first use)"
+    enabled: {{ goose_ext_fieldy_enabled | bool | ternary('true', 'false') }}
+    bundled: false
+    timeout: {{ goose_ext_fieldy_timeout }}
+    uri: "{{ goose_ext_fieldy_uri }}"
+    headers: {}
+    env_keys: []
+    envs: {}
+  # --- NOT AVAILABLE as Goose MCP servers (stubs only; do not enable) ---
+  # shortwave: Shortwave is an MCP *client* only. Docs:
+  #   https://www.shortwave.com/docs/how-tos/using-mcp/
+  #   No @shortwave/mcp-server on npm (404). Cannot attach Shortwave to Goose.
+  # sanerai: No Saner.ai MCP server found (docs/npm/PyPI). Product: https://www.saner.ai/
+  #   No @saner-ai/mcp-server on npm (404). Revisit if vendor ships MCP later.

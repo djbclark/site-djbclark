@@ -72,5 +72,5 @@ goose-check:
 goose-status:
     @test -d /Applications/Goose.app && echo "app: /Applications/Goose.app" || echo "app: missing"
     @goose --version
-    @goose info -v 2>/dev/null | rg -i 'config yaml|goose_provider|goose_model|active_provider|litellm-local|smart-router' || true
+    @goose info -v 2>/dev/null | rg -i 'config yaml|goose_provider|goose_model|active_provider|litellm-local|smart-router|filesystem|fieldy|extensions:' || true
     @stat -f '%Sp %N' ~/.config/goose ~/.config/goose/config.yaml ~/.config/goose/custom_providers/litellm-local.json 2>/dev/null || true

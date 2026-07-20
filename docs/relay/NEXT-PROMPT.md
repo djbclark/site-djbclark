@@ -1,28 +1,33 @@
-# NEXT: E3 — MCP server research + Goose extension config (difficulty 55/100)
+# NEXT: E4 — First-run + SecretSpec / provider keys (difficulty 25/100)
 
 **Funding plan context:** FUND-B Phase D recovery and REVIEW-1 are closed.
-Phase E E1 (LiteLLM loopback proxy) and **E2 (Goose + local provider)** are
-complete on the M1 Air control node. This baton is **Phase E step E3 only** —
-research real MCP vendor offerings and template Goose extension configuration.
-**Do not configure SecretSpec or provider API keys (E4), widen LiteLLM beyond
-loopback (E5), or install guessed MCP package names.**
+Phase E **E1** (LiteLLM loopback), **E2** (Goose + local provider), and
+**E3** (MCP research + Goose extension templates) are complete on the M1 Air
+control node. This baton is **Phase E step E4 only** — first-run human
+checklist plus SecretSpec/provider key wiring so LiteLLM completions and
+Fieldy OAuth can succeed. **Do not start E5 multi-host LiteLLM, invent MCP
+packages, or re-research Shortwave/Saner (already reported: no Goose-facing
+MCP).**
 
 **Recommended AI** (full rows from
 `docs/reference/available-ai-models.md`; quota snapshot taken
-2026-07-20T14:18Z):
+2026-07-20T14:31Z):
 
 - **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
-  agentic work_ — use **Medium** for vendor/MCP research; live CodexBar saw
-  Grok **0.2.106**, **65%** weekly used, reset Jul 23 ~2:41am ET.
-- **Alternate —** DeepSeek (api) · DeepSeek · DeepSeek V3.x / R1 series ·
-  various · Thinking Mode (Enabled/Disabled) + reasoning_effort · _Prior
-  generations_ — use for parallel research if Grok weekly is tight.
+  agentic work_ — use **Medium** (or Low) for checklist + SecretSpec scaffolding;
+  live CodexBar saw Grok **0.2.106**, **66%** weekly used, reset Jul 23
+  ~2:41am ET.
+- **Alternate —** DeepSeek (api) · DeepSeek · DeepSeek-V4-Flash ·
+  `deepseek-v4-flash` · Thinking Mode (Enabled/Disabled) + reasoning_effort ·
+  _Fast high-volume_ — good for doc-heavy E4 if Grok weekly is tight.
+  **Also viable:** Cursor (GUI) · Cursor · Composer 2.5 · Composer 2.5 ·
+  Agent Thinking · _Native agentic coding_ — Cursor Pro ~59% monthly used
+  (provider cost $1.47/$2), resets Aug 2 ~7:22pm.
 - **Escalation —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
   `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
-  complex coding, computer use, research, cybersecurity_ — use **High** only
-  for templating/idempotent Ansible after research is complete. Codex weekly was
-  **100%** used until Jul 25 ~5:17pm ET; avoid unless necessary.
+  complex coding, computer use, research, cybersecurity_ — weekly **100%**
+  used until Jul 25 ~5:17pm ET; **avoid unless necessary**.
 
 **Quota-check procedure — operator update 2026-07-20 (carry forward
 verbatim in substance):**
@@ -37,8 +42,8 @@ verbatim in substance):**
   for both accounts' usage and name the selected account in any recommendation.
 - Recheck live rather than trusting any snapshot.
 
-**Working dir:** `/Users/djbclark/ops/site-djbclark` (extend
-`roles/goose`). Start with:
+**Working dir:** `/Users/djbclark/ops/site-djbclark` (SecretSpec + roles/litellm
++ roles/goose docs). Start with:
 
 ```bash
 cd /Users/djbclark/ops/site-djbclark
@@ -49,87 +54,102 @@ git pull --ff-only origin master
 Required reading:
 
 - `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`
-- step2 ground rules/risk register and §6 Phase E:
+- step2 ground rules/risk register and §6 Phase E (E4 row):
   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-- step0 plan MCP/extension sections:
+- step0 secrets + post-Ansible human steps (§5 / §7):
   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step0-plan-v1.md`
-- completed E2 role and runtime notes:
-  `/Users/djbclark/ops/site-djbclark/roles/goose/README.md`
-- completed E1 role:
+- E1 LiteLLM role:
   `/Users/djbclark/ops/site-djbclark/roles/litellm/README.md`
-- current Goose official docs for the **installed version** (1.43.x as of E2)
+- E2/E3 Goose role (MCP research + Fieldy OAuth notes):
+  `/Users/djbclark/ops/site-djbclark/roles/goose/README.md`
+- Declared secrets (no values in git):
+  `/Users/djbclark/ops/site-djbclark/secretspec.toml`
 
 ---
 
-You are implementing **E3: MCP server research + Goose extension config** on
-the M1 Air control node.
+You are implementing **E4: First-run + SecretSpec / provider keys** on the
+M1 Air control node.
 
-## Live E1/E2 facts (do not re-litigate)
+## Live E1–E3 facts (do not re-litigate)
 
-- LiteLLM `1.94.0rc1` runs as `gui/501/com.djbclark.litellm` on
-  `127.0.0.1:4000`; `/v1/models` returns all tiers + `smart-router`.
-- SecretSpec is declared but **not operational** — provider completions fail
-  until E4. Do not configure SecretSpec or ad-hoc API keys in E3.
-- Goose **1.43.0** installed via Homebrew (`block-goose` cask +
-  `block-goose-cli` formula).
-- Goose config (Goose 1.43 schema — **not** legacy flat keys alone):
-  - `~/.config/goose/config.yaml` — `active_provider: litellm-local`,
-    structured `providers:` block, mode 0600, site-managed marker
-  - `~/.config/goose/custom_providers/litellm-local.json` — OpenAI-compatible
-    endpoint `http://127.0.0.1:4000/v1`, model `smart-router`,
-    `requires_auth: false`, mode 0600
-- `goose info -v` shows `litellm-local` / `smart-router`; `goose run` reaches
-  LiteLLM then hits the expected missing-credential boundary (E4).
-- E2 rollback (do not perform unless reverting E2):
-  remove managed files under `~/.config/goose/` per `roles/goose/README.md`.
+- LiteLLM `1.94.0rc1` as `gui/501/com.djbclark.litellm` on `127.0.0.1:4000`;
+  `/v1/models` returns tiers + `smart-router`. Completions fail with missing
+  credentials until keys are injected (expected).
+- SecretSpec is **declared** (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. in
+  `secretspec.toml`) but **not operational** for LiteLLM launchd — no provider
+  profile/aliases configured for the litellm apply path.
+- Goose **1.43.0** with site-managed:
+  - `~/.config/goose/config.yaml` — provider `litellm-local` / `smart-router`
+    plus E3 `extensions:` (filesystem **enabled**, fieldy **disabled**,
+    Shortwave/Saner **comment stubs only**)
+  - `~/.config/goose/custom_providers/litellm-local.json`
+- E3 research (committed in `roles/goose/README.md`):
+  - **filesystem** — real: `npx -y @modelcontextprotocol/server-filesystem`
+  - **Fieldy** — real remote MCP `https://api.fieldy.ai/mcp` (streamable HTTP;
+    browser OAuth on first use)
+  - **Shortwave** — MCP *client only*; no Goose-facing server (npm 404)
+  - **Saner.ai** — no MCP found (npm 404)
+- D7 front-door routes `/grafana/`, `/oo/`, `/olivetin/`, `/vm/` are live;
+  OliveTin/VictoriaMetrics intentionally unauthenticated on single-user
+  tailnet (REVIEW-1) — revisit before widening services or adding tailnet users.
+- E1–E3 join the **next review slot** scope (not a separate gate in this baton).
 
 ## Decided constraints
 
-- **Scope:** research + template only for MCP extensions in `roles/goose`.
-  Targets from step0/step2: **Shortwave, Saner.ai, Fieldy, filesystem** — but
-  you must **verify each vendor's real MCP offering** (package name, install
-  method, auth requirements) from official docs or the vendor. **Never install
-  a guessed package name.**
-- If a vendor has no MCP server or package cannot be verified, **report to the
-  operator in the ledger** and template a commented stub or doc-only entry — do
-  not invent packages.
-- Preserve E2 provider config and LiteLLM/D7 daemons. Goose still needs no
-  Caddy route.
-- Do not run `secretspec config init`, enter API keys, or claim real provider
-  completions.
+- Scope: SecretSpec configuration path + human checklist so operator can enter
+  provider keys and complete Fieldy OAuth. Prefer `secretspec run -- … just
+  litellm-apply` pattern already documented in `roles/litellm/README.md`.
+- **Never commit API keys or OAuth tokens.** Do not paste secrets into chat,
+  ledger, or git.
+- Do not widen LiteLLM beyond loopback (E5). Do not invent MCP packages.
+- Do not re-template Goose extensions except to flip
+  `goose_ext_fieldy_enabled: true` **after** documenting OAuth first-run, if
+  that is part of the checklist (default remains false until operator is ready).
+- Preserve E1–E3 daemons and managed configs.
 
 ## Task
 
-1. For each target integration (Shortwave, Saner.ai, Fieldy, filesystem):
-   verify whether a real MCP server exists, its official install/run command,
-   and auth expectations. Record sources (URLs) in role docs.
-2. Extend `roles/goose` to template verified extension entries in Goose 1.43
-   `config.yaml` `extensions:` format (stdio/streamable HTTP per vendor docs).
-   Use collision-safe managed markers; refuse to overwrite unrelated user
-   extension config.
-3. Document apply/check/status changes, what remains human/auth-gated for E4,
-   and rollback of managed extension blocks only.
-4. Verify:
-   - `just goose-apply` idempotent (second apply changed=0)
-   - `goose info -v` lists configured extensions (enabled/disabled as templated)
-   - config permissions still 0600/0700
-   - LiteLLM `/v1/models` 200; D7 `/grafana/`, `/oo/`, `/olivetin/`, `/vm/` 200
-   - `just lint`, inventory, ansible syntax/lint, check mode pass
-5. Do **not** start E4 SecretSpec or E5 multi-host LiteLLM in this session.
+1. Document the **API Keys – Human Step** checklist (step0 §5/§7) in an
+   appropriate site doc (role README and/or `human/` handoff) covering at
+   least:
+   - SecretSpec provider init/profile so `OPENAI_API_KEY` and
+     `ANTHROPIC_API_KEY` resolve for LiteLLM apply/restart
+   - `secretspec run --reason "…" -- just litellm-apply` (or equivalent kickstart)
+   - Verify completions: SIMPLE and REASONING prompts route differently
+     (LiteLLM decision log) without inventing keys yourself
+   - Fieldy: enable extension + browser OAuth first connect
+   - Explicit note: Shortwave/Saner have no Goose MCP — out of scope
+2. Make SecretSpec **operational for LiteLLM** in the least-privilege way the
+   local secretspec setup allows (config init / provider / profile as needed).
+   If a step requires the human to paste a key into a secret store UI/CLI,
+   stop at that boundary, leave a clear checklist item, and verify everything
+   that does not need the secret.
+3. After keys are present (operator may complete mid-session if present),
+   restart LiteLLM with injected env and prove:
+   - `/v1/models` still 200
+   - a completion returns 200 (not missing-credential)
+   - Goose `goose run` reaches a real model response (or document remaining
+     hang cause if keys only partial)
+4. Verify standing health: D7 grafana/oo/olivetin/vm 200; goose config still
+   0600/0700; `just lint`, inventory, ansible syntax/lint, check mode as
+   touched by any role/doc changes.
+5. Do **not** start E5 in this session.
 
 ## Carry-forward
 
-- After E3, rewrite `NEXT-PROMPT.md` for **E4 first-run + SecretSpec/provider
-  keys** (difficulty 25).
-- E1–E3 join the next review slot's scope. Preserve REVIEW-1 notes:
-  OliveTin/VictoriaMetrics are intentionally unauthenticated on a single-user
-  tailnet; revisit before widening any service or adding tailnet users.
+- After E4, rewrite `NEXT-PROMPT.md` for **E5 multi-host LiteLLM** (difficulty
+  60) per step2 plan §6.
+- E1–E3 (and E4 when done) join the next review slot's scope.
+- Preserve REVIEW-1: OliveTin/VM unauthenticated on single-user tailnet.
 - Carry the AI quota procedure into every next baton.
+- Note from E3: LiteLLM can become unresponsive under repeated missing-key
+  completion retries (12MB+ stderr); heal with launchd bootout/bootstrap and
+  rotate logs if needed — cold start under launchd can take ~30–60s.
 
 ## End of session
 
 Follow `docs/relay/PROTOCOL.md`: record verification evidence, append exactly
-one `E3` ledger row, rewrite the baton for E4 with full catalog AI rows and
+one `E4` ledger row, rewrite the baton for E5 with full catalog AI rows and
 fresh quota data, commit/push site straight to master, print the new baton,
 and copy it with:
 

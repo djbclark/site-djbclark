@@ -144,7 +144,29 @@
     mode: "0600"
   register: _goose_main_config
 
-- name: Report discovered Goose version and config paths
+- name: Locate npx when filesystem extension is enabled
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/env
+      - which
+      - npx
+  register: _goose_npx
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: goose_ext_filesystem_enabled | bool
+
+- name: Require npx for enabled filesystem MCP extension
+  ansible.builtin.assert:
+    that: (_goose_npx.rc | default(1)) == 0
+    fail_msg: >-
+      goose_ext_filesystem_enabled is true but `npx` is not on PATH.
+      Install Node (e.g. brew install node) or set goose_ext_filesystem_enabled=false.
+  when:
+    - goose_ext_filesystem_enabled | bool
+    - not ansible_check_mode
+
+- name: Report discovered Goose version, provider, and MCP extension flags
   ansible.builtin.debug:
     msg:
       goose_version: "{{ (_goose_version.stdout | default('unknown')) | trim }}"
@@ -154,3 +176,7 @@
       goose_provider_id: "{{ goose_provider_id }}"
       goose_model: "{{ goose_model }}"
       goose_litellm_base_url: "{{ goose_litellm_base_url }}"
+      goose_ext_filesystem_enabled: "{{ goose_ext_filesystem_enabled }}"
+      goose_ext_fieldy_enabled: "{{ goose_ext_fieldy_enabled }}"
+      goose_ext_shortwave_available: "{{ goose_ext_shortwave_available }}"
+      goose_ext_saner_available: "{{ goose_ext_saner_available }}"

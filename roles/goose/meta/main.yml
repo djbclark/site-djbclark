@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: djbclark
-  description: Site-owned Goose Desktop/CLI pointed at loopback LiteLLM
+  description: Site-owned Goose Desktop/CLI pointed at loopback LiteLLM with MCP extension templates
   license: proprietary
   min_ansible_version: "2.16"
   platforms:
