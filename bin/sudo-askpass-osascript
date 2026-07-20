@@ -1,5 +1,5 @@
 #!/bin/bash
-# macOS GUI sudo askpass for non-TTY ansible/system-domain work (Phase F3).
+# macOS GUI sudo askpass for non-TTY ansible/system-domain work.
 # Usage: SUDO_ASKPASS=/path/to/sudo-askpass-osascript sudo -A <cmd>
 #        ANSIBLE_BECOME_PASS is not set — use: sudo -A true then ansible with
 #        a cached credential, or ansible-playbook --ask-become-pass.
@@ -7,7 +7,7 @@ set -euo pipefail
 osascript <<'APPLESCRIPT'
 tell application "System Events"
   activate
-  set theResult to display dialog "site-djbclark needs an administrator password (Immich LaunchDaemon / system domain):" default answer "" with hidden answer with title "site-djbclark become" buttons {"Cancel", "OK"} default button "OK"
+  set theResult to display dialog "site-djbclark needs an administrator password (system domain):" default answer "" with hidden answer with title "site-djbclark become" buttons {"Cancel", "OK"} default button "OK"
   if button returned of theResult is "Cancel" then error number -128
   return text returned of theResult
 end tell
