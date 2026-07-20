@@ -68,6 +68,8 @@ You are running **E1 — `roles/litellm`** per the step2 plan §6:
 
 ## Carry-forward (not E1 work unless free)
 
+- **Next project code review MUST cover (2026-07-19 fleet batch):** stayturgid#29 (sticky a11y detect, catastrophic-alert 2h window, Fire OS skip-catastrophic); AutoJs6#1 sticky rebind + debug17 LeakCanary-off; ASCII-only on-device path policy and retirement of `/sdcard/脚本/stayturgid` + `/sdcard/Scripts/stayturgid` mirrors (p7a SyntaxError Invalid quantifier). Do not drop these from the review scope.
+
 - **OPERATOR decision still open — D7 route scheme (§11 #9):** Caddy route
   naming + whether grafana/OO/olivetin get front-door routes. Forwarded since
   D7 through R3; still operator-owned. If decided mid-session, record
