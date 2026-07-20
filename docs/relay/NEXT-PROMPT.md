@@ -1,46 +1,47 @@
-# NEXT: REVIEW-EF — Phase E + Phase F close-out review (difficulty 55/100)
+# NEXT: RESIDUAL-EF — operator-gated residuals from Phase E/F (difficulty 25/100)
 
-**Funding plan context:** FUND-B Phase D recovery and REVIEW-1 are closed.
-**Phase E (E1–E5)** and **Phase F (F1–F4)** are complete. This baton is the
-**combined Phase E/F code review** before any remaining operator-gated
-residuals or a later project-level final review. Scope is site-djbclark
-commits from E1 through F4 (and linked docs/registry/roles only). Do **not**
-execute F2 keep/kill stops, do **not** reinstall Immich app, do **not** deploy
-to offline mini/VPS. Correctness/safety findings must be fixed in-session;
-architecture/style may be deferred to the ledger (FUND-B quality bar).
+**Funding plan context:** FUND-B Phase D, REVIEW-1, Phase E (E1–E5), Phase F
+(F1–F4), and REVIEW-EF are all closed with zero must-fix findings
+(`docs/relay/reviews/REVIEW-EF-findings.md`). This is **not** a further
+implementation step in the AI relay chain — it is a light triage baton that
+checks whether any of the three known operator-gated residuals have been
+unblocked, and executes the mechanical follow-through if so. If none have
+moved, the correct action is to say so and stop; do not invent new work.
 
-**Recommended AI** (full rows from
-`docs/reference/available-ai-models.md`; quota snapshot taken
-2026-07-20T15:47Z — recheck live):
+**Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
+quota snapshot taken 2026-07-20T15:54Z via `cswap list --json` +
+`codexbar usage --format json --provider <name>` — **recheck live**, do not
+trust this snapshot):
 
-- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
-  `claude-fable-5` · Low/Medium · use **`cswap` account 2 (djbclark@mit.edu)**
-  (active; 5h **23%**, 7d **20%**, 7d reset Jul 25 ~05:00 local). Prefer
-  **Medium** for review (reading-heavy). Original gmail Pro 7d **70%** /
-  5h **2%** — reserve gmail weekly for other work.
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
+  `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
+  Code/API) · _Default for most plans_ — use **`cswap` account 2
+  (djbclark@mit.edu)** (active; 5h **27%**, 7d **21%**, 7d reset Jul 25
+  ~05:00 local). This is mechanical triage, not judgment — Sonnet 5 is
+  correctly sized; save Fable 5 for the eventual project-level final
+  review. Original gmail account: 5h **2%**, 7d **70%** (reset Jul 24
+  ~06:00) — fine as an alternate if the mit.edu account is busy.
 - **Alternate —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
-  agentic work_ — SuperGrok weekly **70%** used, reset Jul 23 ~2:41am ET
-  (`2026-07-23T06:41:20Z`). Prefer **High** if Fable unavailable; self-passoff
-  from F4 is fine if pool allows.
+  agentic work_ — SuperGrok weekly **71%** used, reset Jul 23 ~2:41am ET
+  (`2026-07-23T06:41:20Z`).
 - **Escalation —** Cursor (GUI) · Cursor · Composer 2.5 · Composer 2.5 ·
   Agent Thinking · _Native agentic coding_ — Cursor Pro primary pool
-  ~**59%** monthly used (secondary ~52%; tertiary 100%); provider cost
+  ~**59%** monthly used (secondary ~52%, tertiary 100%); provider cost
   $1.47/$2; resets Aug 2 ~7:22pm. **Codex 0.144.6 (oauth) · GPT-5.6 Sol ·
   weekly 100% used until Jul 25 ~5:17pm ET — avoid.**
 
-**Quota-check procedure — operator update 2026-07-20 (carry forward
-verbatim in substance):**
+**Quota-check procedure (carry forward verbatim in substance):**
 
 - CodexBar does **not** hang; it can take a long time to reply. Give every
   invocation a hard **two-minute timeout**. Query relevant non-Claude
-  providers separately, background output to files, and never pipe it through
-  `head`, for example:
-  `timeout 120 codexbar usage --format json --provider cursor > /tmp/cursor-usage.json`.
-- **Ignore everything CodexBar says about Claude.** There are two Claude
-  accounts managed by `cswap`; use **`cswap list --json`** as the authority
-  for both accounts' usage and name the selected account in any recommendation.
-- Recheck live rather than trusting any snapshot.
+  providers separately, background output to files, and never pipe it
+  through `head`, e.g.:
+  `timeout 120 codexbar usage --format json --provider grok > /tmp/grok-usage.json`.
+- **Ignore everything CodexBar says about Claude.** Two Claude accounts are
+  managed by `cswap`; use **`cswap list --json`** as the authority for both
+  accounts' usage and name the selected account in any recommendation.
+- Recheck live rather than trusting this snapshot.
 
 **Working dir:** `/Users/djbclark/ops/site-djbclark`
 
@@ -52,86 +53,94 @@ git pull --ff-only origin master
 
 Required reading:
 
-- `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`
-- step2 ground rules/risk register + §6 Phase E + §7 Phase F:
-  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-- step1 coordination contracts (ports/paths/brew §4):
-  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`
-- Funding quality bar (correctness/safety must-fix; style deferrable):
-  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
-- Ledger (E1–F4 rows):
-  `/Users/djbclark/ops/site-djbclark/docs/relay/LEDGER.md`
-- Audits:
-  `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F2-brew-services-audit.md`
-  `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F3-immich-adoption.md`
-  `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F4-merged-brewfile.md`
-- Prior review carry-forward (do not re-open resolved items without cause):
-  `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/REVIEW-1-findings.md`
-- Registry:
-  `/Users/djbclark/ops/site-djbclark/registry/ports.yml`
-  `/Users/djbclark/ops/site-djbclark/registry/paths.yml`
+- `docs/relay/PROTOCOL.md`
+- `docs/relay/reviews/REVIEW-EF-findings.md` (what was just verified clean —
+  do not re-review E1–F4, only check the three residuals below)
+- `docs/relay/LEDGER.md` (tail — F2/F3/E5/REVIEW-EF rows)
+- `human/F2-BREW-SERVICES-DECISIONS.md`
+- `docs/relay/audits/F3-immich-adoption.md`
+- `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md` §0 ground
+  rules + §10 (final review is separate and may wait)
 
 ---
 
-You are performing **REVIEW-EF: Phase E + Phase F close-out review**.
+You are triaging **three specific, pre-existing operator-gated residuals**.
+For each: check whether it has moved; if yes, do the mechanical
+follow-through; if no, leave it alone and say so in the ledger note. Do not
+re-open REVIEW-EF's scope (E1–F4 code) — that review is done and clean.
 
-## Live facts (do not re-litigate)
+## 1. F2 brew-services keep/kill sign-off
 
-- **E1–E5:** LiteLLM role (loopback :4000, Auto Router v2, launchd/systemd);
-  Goose + researched MCP (filesystem real; Fieldy disabled pending OAuth;
-  Shortwave/Saner not inventable); SecretSpec dotenv path; multi-host inventory
-  with mini+VPS `offline_unprovisioned`.
-- **F1:** `roles/site_agents` — system-state-backup + hibernate-disk-check.
-- **F2:** brew-services audit only; kills wait on
-  `human/F2-BREW-SERVICES-DECISIONS.md` (do not execute).
-- **F3:** Immich LaunchDaemons site-managed under `com.immich.*`, **disabled**
-  while `/opt/services/immich/app` missing; ports 3001–3003 planned.
-- **F4:** Merged-Brewfile from `brew/fragments` → `generated/Merged-Brewfile`;
-  `bin/brew_flock.py` serializes brew-touching just recipes; no mass cleanup.
-- **REVIEW-1:** OliveTin/VM unauthenticated on single-user tailnet — do not
-  widen unauthenticated surfaces.
-- LiteLLM cold start ~30–90s; missing-key storms can wedge the process.
+Check `human/F2-BREW-SERVICES-DECISIONS.md` — all 9 rows were blank as of
+REVIEW-EF. If the operator has filled in any "Operator decision" cells:
 
-## Review scope
+- For each **Accept**ed or **Override**n row, execute exactly the command(s)
+  the row calls for (the audit doc
+  `docs/relay/audits/F2-brew-services-audit.md` has the suggested commands
+  for the default recommendations; an Override may need a different
+  command — use judgment, but never touch a service whose row is still
+  blank).
+- Re-run `brew services list` before/after each change; update
+  `registry/paths.yml` `brew_services` claims and `registry/ports.yml` to
+  match the new live state (e.g. drop the `redis` port claim if
+  stopped+uninstalled); `bin/registry_lint.py` after every registry edit.
+- If **all** rows are still blank, do nothing here — note it in the ledger
+  and move on.
 
-1. Walk site commits / ledger rows **E1 → F4** (roles, playbooks, justfile,
-   registry, human docs, generated Merged-Brewfile, brew fragments).
-2. Re-run standing checks that are mechanical:
-   - `bin/registry_lint.py`
-   - `just brew-project && just brew-diff` (expect exit 0; read-only)
-   - `just litellm-status` / `just goose-status` / `just site-agents-status` /
-     `just immich-status` (document actual state; Immich may be disabled)
-   - Spot-check D7 health endpoints if still relevant (grafana/oo/olivetin/vm)
-3. Hunt correctness/safety: secrets in git, public binds without auth,
-   destructive brew/uninstall paths without gates, launchd system-domain
-   mistakes, race conditions around brew flock, registry collisions.
-4. Fix must-fix findings in this session with evidence. Defer architecture
-   polish to ledger with `DEFERRED` notes.
-5. Write findings to
-   `docs/relay/reviews/REVIEW-EF-findings.md` (or equivalent under
-   `docs/relay/reviews/`).
+## 2. F3 Immich app restore
 
-## Out of scope
+Check `test -d /opt/services/immich/app` (or re-run `just immich-status`).
+If the app tree is now present (restored out-of-band by the operator/native
+installer):
 
-- F2 redis/pg@14/et-user-agent destructive stops (operator file only).
-- Immich app restore / enable while app missing.
-- E5 deploy to mini/VPS until hosts online + inventory flipped.
-- stayturgid product deep rewrite (site-only unless a site bug requires a
-  tiny product fix — then PR+merge per PROTOCOL).
+- `just immich-apply-sudo` (GUI askpass; needs `become`/root for the
+  system-domain LaunchDaemons).
+- Verify: both `com.immich*` labels bootstrap+enable, `just immich-status`
+  shows them running, `curl -fsS http://127.0.0.1:3001/api/server/ping`
+  succeeds, `registry/ports.yml` 3001/3002/3003 flip `status: planned` →
+  `active`.
+- If the app tree is still absent, do nothing — note it and move on.
+
+## 3. E5 mini/VPS coming online
+
+Check whether `mac-mini-intel` or `vps-primary` are reachable
+(`ping`/`tailscale status`, or just try
+`ANSIBLE_CONFIG=$PWD/ansible.cfg ansible -i inventory/hosts.yml <host> -m ping`).
+If either is now reachable:
+
+- Flip `site_host_status: online` for that host in `inventory/hosts.yml`
+  and fill in the real `ansible_host` (Tailscale IP/MagicDNS).
+- `just litellm-apply-secrets -- --limit <host>` (or `LITELLM_HOSTS=<host>
+  just litellm-apply-secrets`), verify `/v1/models` 200 on that host, and
+  flip its `registry/ports.yml` port-4000 row `status: planned` → `active`.
+- If both hosts are still offline, do nothing — note it and move on.
+
+## Self-verification checklist (record evidence for whatever you touched)
+
+- `bin/registry_lint.py` clean after any registry edit.
+- Any daemon you started/changed: health-curl + `launchctl print` evidence.
+- `git status` clean at session end; nothing left half-applied.
+- If you touched **nothing** (all three residuals still blocked), that is a
+  valid, complete session — do not manufacture work.
 
 ## End of session
 
-Follow `docs/relay/PROTOCOL.md`: record verification evidence, append exactly
-one `REVIEW-EF` ledger row, rewrite the baton for the **next** step:
+Follow `docs/relay/PROTOCOL.md`: append exactly one `RESIDUAL-EF` ledger row
+recording which of the three residuals (if any) moved and what you did.
+Rewrite `NEXT-PROMPT.md`:
 
-- If must-fix work remains unfinished → same REVIEW-EF escalated, or
-- If clean → project-level closeout / residual operator baton (F2 sign-off
-  reminder + F3 restore + E5 host-online) **or** end the chain with an
-  explicit “phases E/F complete; residuals are operator-scheduled” baton
-  per step2 §10 (project-level final review is separate and may wait).
+- If you executed real work (any of the three) → same `RESIDUAL-EF` shape
+  for whatever's still outstanding, OR if all three are now fully resolved,
+  write the **project-level final review** baton (Fable 5 Max, or
+  `/code-review ultra` per repo, reading step1 + step2 + every diff since
+  the last whole-repo review) per step2 §10.
+- If nothing moved (all three still blocked) → re-issue this same
+  `RESIDUAL-EF` baton essentially unchanged (fresh quota snapshot, same
+  three checks) — there is no reason to escalate model tier for a "nothing
+  changed" triage.
 
-Include full catalog AI rows and fresh quota data. Commit/push site straight
-to master, print the new baton, and copy it with:
+Commit/push straight to master, print the new baton in chat, and copy it to
+the clipboard:
 
 ```bash
 pbcopy < docs/relay/NEXT-PROMPT.md
