@@ -70,10 +70,20 @@ You are running **E1 — `roles/litellm`** per the step2 plan §6:
 
 - **Next project code review MUST cover (2026-07-19 fleet batch):** stayturgid#29 (sticky a11y detect, catastrophic-alert 2h window, Fire OS skip-catastrophic); AutoJs6#1 sticky rebind + debug17 LeakCanary-off; ASCII-only on-device path policy and retirement of `/sdcard/脚本/stayturgid` + `/sdcard/Scripts/stayturgid` mirrors (p7a SyntaxError Invalid quantifier). Do not drop these from the review scope.
 
-- **OPERATOR decision still open — D7 route scheme (§11 #9):** Caddy route
-  naming + whether grafana/OO/olivetin get front-door routes. Forwarded since
-  D7 through R3; still operator-owned. If decided mid-session, record
-  accepted-as-is or queue a tiny baton — do not expand E1 into Caddy work.
+- **OPERATOR decision still open — D7 route scheme (§11 #9) — explain only, do not implement without a decision:**
+  This is **not** “finish retiring dashboard.py” alone. Two linked choices:
+  1. **Caddy route naming** for stayturgid-generated fragments (path-prefix
+     scheme already partially adopted vs other naming conventions).
+  2. **Whether O-V-G-O UIs get front-door routes** on the public/Tailscale
+     Caddy (e.g. `/grafana`, `/oo`, `/olivetin`) or stay **localhost-only** /
+     direct ports only.
+  Today the HTTPS front door serves landing; Grafana/OpenObserve/OliveTin may
+  lack named front-door paths. Closing this is an **architecture preference**
+  (security surface vs convenience). Options: (a) accept path-prefix as-is and
+  record “accepted as-is” in the ledger; (b) queue a small baton to add/rename
+  routes. **Do not expand E1 into Caddy work** unless the operator explicitly
+  decides and asks for implementation.
+
 - **D9 fleet notes:** s24/p7a dual-write code is deployed (repair+log.js match
   master); AutoJs6 watchdog still not cycling on s24/p7a (device-ops). p7a
   still has a11y/bootloop flags in fleet-health. hd8 otelcol disabled
