@@ -1,103 +1,126 @@
-# NEXT: D7-ROUTES-E — Caddy Choice E front-door routes (difficulty 35/100)
+# NEXT: E1 — LiteLLM proxy role + launchd (difficulty 50/100)
 
 **Funding plan context:** FUND-B Phase D recovery closed (R3). D9 logging
-close-out done. Operator **decided D7 route scheme §11 #9 = Choice E**
-(2026-07-19; design notes §6 + ledger). This baton is the **small
-implementation** of that decision only — **not** full D7 (do not retire
-dashboard.py / fleet-health / 4097 here).
+close-out done. D7-ROUTES-E Choice E front-door routes shipped (stayturgid
+#32 → master `ab329a5`). This baton is **Phase E step E1 only** — LiteLLM
+proxy under site ownership. **Do not start Goose (E2)** or MCP research (E3).
 
 **Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
 recheck quotas with `codexbar usage --format json --provider all` to a file
 in the background before starting — never pipe through `head`):
 
-- **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` ·
-  Low, Medium, High (default High) · _Flagship for code + agentic work_ —
-  effort **Medium** (Caddy fragment + app root_url + landing links + verify).
-- **Alternate —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
+- **Primary —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
+  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
+  complex coding, computer use, research, cybersecurity_ — effort **High**
+  (verify Auto Router v2 against live LiteLLM docs, not memory; pin ≥1.94).
+- **Alternate —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
+  `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
+  agentic work_ — Medium/High if Codex weekly is exhausted.
+- **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
-  Code/API) · _Default for most plans_ — **original account**, Medium.
-- **Escalation —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
-  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship_ —
-  Medium, after ~Jul 25 weekly reset if stuck on Grafana subpath.
+  Code/API) · _Default for most plans_ — **original account**, Medium, if
+  router config vs docs is ambiguous or secretspec/launchd integration
+  needs judgment.
 
-**Working dir:** `/Users/djbclark/ops/stayturgid` (Caddy fragment template +
-any Grafana provisioning root_url; branch + PR) and
-`/Users/djbclark/ops/site-djbclark` (ledger/baton; landing links if site-owned;
-straight to master). `git fetch origin --prune && git pull --ff-only origin
-master` in both before starting. Required reading:
-`docs/relay/PROTOCOL.md`, step2 plan §0 + §2
-(`docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`), design notes
-§6 Choice E
-(`docs/design/phase-d-adapter-design-notes.md`), live fragment
-`generated/stayturgid/fragments/caddy/stayturgid.caddy` and template
-`control/site_contract/sync_templates/fragments/caddy/stayturgid.caddy.j2`.
+**Working dir:** `/Users/djbclark/ops/site-djbclark` (roles incubate **here**
+per step1 §9 / step2 §6 — `roles/litellm`, not a standalone `~/ai-stack`
+tree; branch optional — site often straight to master for ops) and pull
+stayturgid only if you need port/registry patterns as reference.
+`git fetch origin --prune && git pull --ff-only origin master` before
+starting. Required reading:
+
+- `docs/relay/PROTOCOL.md`
+- step2 plan §6 Phase E (`docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`)
+- step0 plan as **amended** (`docs/plans/site-djbclark-step0-plan-v1.md` —
+  header amendment: label `com.djbclark.litellm`, port 4000 in registry,
+  secretspec, roles in this repo)
+- step1 §9 revisions (`docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`)
+- live `registry/ports.yml` (`litellm-proxy` port 4000, status planned)
+- live `registry/paths.yml` (`~/.litellm/**`)
+- site `secretspec.toml` pattern (declarations only; never commit secrets)
+- existing Phase D adapters in stayturgid for launchd/site_ns patterns
+  (reference only — LiteLLM is a **site** role, not a stayturgid serverapp
+  unless you explicitly decide to promote it later)
 
 ---
 
-You are implementing **Choice E front-door routes** for O-V-G-O UIs.
+You are implementing **E1: LiteLLM proxy** for the site control node.
 
-## Decided scheme (do not re-litigate)
+## Decided constraints (do not re-litigate)
 
-Front door: `https://mac.greyhound-sidemirror.ts.net` (site
-`caddy_public_hostname`). Landing stays at `/`. Keep existing
-`/dashboard/`, `/opencode/`, `/vlm/`, `/stats/`.
-
-**Add** (Caddy `handle_path`, strip prefix, reverse_proxy to registry ports):
-
-| Path | Service | Port key (registry) |
-| --- | --- | --- |
-| `/grafana/` | grafana | 3000 / `grafana` |
-| `/oo/` | openobserve HTTP | 5080 / `openobserve-http` |
-| `/olivetin/` | olivetin | 1337 / `olivetin` |
-| `/vm/` | victoriametrics | 8428 / `victoriametrics` |
-
-Port numbers **only** from site `registry/ports.yml` (StrictUndefined).
+- **Role home:** `site-djbclark/roles/litellm` (or `ansible/roles/litellm`
+  matching this repo’s layout — inspect existing site ansible structure).
+- **Label:** `com.{{ site_ns }}.litellm` → live `com.djbclark.litellm`
+  (not `local.litellm`).
+- **Bind:** `127.0.0.1:4000` (registry `litellm-proxy`). Widen to Tailscale
+  only if mini/other host will consume it later (E5) — default loopback.
+- **Install:** `uv tool install "litellm[proxy]"` with pin **≥1.94** (Auto
+  Router v2 / `auto_router/complexity_router` shipped 2026-07-14). If config
+  is rejected, upgrade LiteLLM — **do not** rewrite config to older syntax.
+- **Config:** `~/.litellm/config.yaml` mode 0600; disk cache under
+  `~/.litellm/cache`; logs under site or `~/Library/Logs/litellm` as
+  patterned in step0.
+- **Secrets:** API keys via secretspec / env (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, etc.) — **never** commit secrets or master keys.
+  Template may reference `os.environ/...`; human fills keys (E4 gate) but
+  E1 must leave secretspec entries declared and document how keys enter.
+- **Router:** model `smart-router` using Auto Router v2 complexity tiers
+  (SIMPLE/MEDIUM/COMPLEX/REASONING) per step0 template, **verified against
+  current docs.litellm.ai** at implement time. Update stale model IDs
+  (step0 still shows `claude-sonnet-4-20250514` — use current IDs).
 
 ## Task
 
-1. Extend `stayturgid.caddy.j2` (and re-render via site-sync) so the live
-   fragment includes the four routes **before** the catch-all landing
-   `handle { … }`.
-2. Fix app base-path / `root_url` as required so UIs work under subpaths
-   (Grafana is the usual offender: `serve_from_sub_path` / `root_url`).
-   OliveTin / OpenObserve / VM: verify; if one app cannot do subpaths,
-   document DEVIATION and either fix config or note subdomain follow-up —
-   do not abandon Choice E for the others.
-3. Update landing / network services directory links to the new HTTPS paths
-   (so operators never need raw ports for these UIs).
-4. Apply: `just site-sync` / `just site-serverapps` as appropriate so Caddy
-   reloads (fragment checksum / M1-F reload paths). **Before/after health:**
-   `curl` caddy `/health`, HTTPS front door, and each new path (expect 200
-   or app login page, not 502).
-5. Rollback note in ledger: revert fragment + re-apply; or bootout/bootstrap
-   caddy label path already documented for D1.
+1. Author Ansible role + playbook/wrapper so the operator can apply
+   LiteLLM idempotently (install if absent, render config + plist, bootstrap
+   launchd, health wait). Prefer patterns already used on this Mac
+   (site just recipes, `site_ns` from `inventory/group_vars/all.yml`).
+2. Render `litellm-config.yaml.j2` with Auto Router v2 + disk cache +
+   sensible fallbacks; no secrets in git.
+3. Render launchd plist `com.djbclark.litellm` (RunAtLoad + KeepAlive),
+   ProgramArguments: litellm binary `--config` `--host 127.0.0.1` `--port 4000`.
+4. Declare secretspec keys needed for provider API keys (values operator-
+   supplied; empty-ok until E4).
+5. Flip registry `litellm-proxy` status from `planned` → `active` when live
+   and healthy (or document why still planned).
+6. **Verify:**
+   - `launchctl print gui/$(id -u)/com.djbclark.litellm` loaded
+   - `curl -sS http://127.0.0.1:4000/v1/models` (auth as configured —
+     master_key local-only or documented)
+   - One **SIMPLE** and one **REASONING** prompt route to different tiers
+     (check LiteLLM logs / response headers / `model` field — record
+     evidence)
+7. Rollback note in ledger: bootout label; keep config on disk for re-bootstrap.
 
 ## Constraints
 
-- **Scope:** routes + app subpath config + landing links + verify. **Not**
-  full D7: do **not** delete `dashboard.py`, fleet-health, access_monitor, or
-  retire 4097.
-- stayturgid: branch + PR, merge same session when CI green (admin only if
-  GitHub 503 flake after local green). site: ledger/baton straight to master.
-- No secrets in commits. Tailscale trust remains the auth model (no new
-  Caddy basic-auth unless trivial and already patterned).
+- **Scope:** LiteLLM only. **Do not** install Goose (E2), MCP servers (E3),
+  or run the human API-key checklist as if E4 is done (you may document it).
+- No Docker. No secrets in commits. Tailscale auth remains the network trust
+  model; LiteLLM stays loopback unless explicitly widened.
+- Do not break D7-ROUTES-E Caddy routes or O-V-G-O daemons.
+- If weekly Codex is reset ~Jul 25 and you are pre-reset, prefer Grok/Claude
+  alternate rather than burning Sol Ultra needlessly.
 
 ## Carry-forward
 
-- **After this baton → E1 LiteLLM** (step2 §6). Rewrite NEXT-PROMPT for E1
-  with full catalog AI rows; do not start Goose (E2).
+- **After this baton → E2 Goose** (step2 §6). Rewrite NEXT-PROMPT for E2
+  with full catalog AI rows; do not start MCP research (E3).
 - **Next project code review MUST include:** stayturgid#29/#30/#31 (sticky
   a11y, catastrophic 2h window, Fire skip-catastrophic, ASCII paths, sticky
-  degraded); AutoJs6#1 + debug17 LeakCanary-off; this D7-ROUTES-E change.
+  degraded); AutoJs6#1 + debug17 LeakCanary-off; D7-ROUTES-E (#32 Choice E
+  routes + Grafana/OO subpath + Vector `/oo` prefix); this E1 LiteLLM role.
 - Operator GUI available for Accessibility OFF→ON / run main.js if fleet
   work blocks.
 - Fleet baseline: health OK on s24/p7a/hd8; main.js auto-running; canonical
   AutoJs6 path only `/sdcard/stayturgid/autojs6`.
+- Front door: `https://mac.greyhound-sidemirror.ts.net/{grafana,oo,olivetin,vm}/`
+  already live — operators need not use raw ports for those UIs.
 
 ## End of session
 
-Per `docs/relay/PROTOCOL.md`: self-verify with recorded evidence (curl
-matrix, site-sync/apply, commits/PR), one ledger line `D7-ROUTES-E`, rewrite
-`NEXT-PROMPT.md` for **E1**, commit/push both repos (stayturgid PR merged +
-master pulled; site on master), print the new baton and
-`pbcopy < docs/relay/NEXT-PROMPT.md`.
+Per `docs/relay/PROTOCOL.md`: self-verify with recorded evidence (uv install
+version ≥1.94, launchctl, curl `/v1/models`, router tier proof, registry
+status), one ledger line `E1`, rewrite `NEXT-PROMPT.md` for **E2**,
+commit/push site (and stayturgid only if you touched product), print the
+new baton and `pbcopy < docs/relay/NEXT-PROMPT.md`.
