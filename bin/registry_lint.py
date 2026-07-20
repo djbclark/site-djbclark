@@ -55,6 +55,18 @@ def lint_ports(findings: list[str]) -> None:
                     f"{host}: port {port} bind {bind} claimed {len(entries)}x "
                     f"(owners: {', '.join(owners)})"
                 )
+        # A wildcard bind covers every address: the same port under both a
+        # wildcard and a specific bind is a real listen conflict even though
+        # the (port, bind) keys differ.
+        by_port: dict[int, set[str]] = defaultdict(set)
+        for port, bind in seen:
+            by_port[port].add(bind)
+        for port, binds in by_port.items():
+            if len(binds) > 1 and binds & {"*", "0.0.0.0", "::"}:
+                findings.append(
+                    f"{host}: port {port} claimed under wildcard and specific binds "
+                    f"({', '.join(sorted(binds))}) — wildcard covers all addresses"
+                )
 
 
 def lint_paths(findings: list[str]) -> None:
