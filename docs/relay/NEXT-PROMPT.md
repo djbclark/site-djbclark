@@ -1,35 +1,33 @@
-# NEXT: F4 — Merged-Brewfile + flock (difficulty 45/100)
+# NEXT: REVIEW-EF — Phase E + Phase F close-out review (difficulty 55/100)
 
 **Funding plan context:** FUND-B Phase D recovery and REVIEW-1 are closed.
-Phase E **E1–E5** are complete (LiteLLM + Goose + MCP research + SecretSpec +
-multi-host inventory). Phase F **F1–F3** are complete (site_agents,
-brew-services audit, Immich LaunchDaemon site role). This baton is **Phase F
-step F4 only** — Merged-Brewfile projection + `flock` serialization wrapper in
-the site justfile (step1 §4.3). **Do not re-open F3 Immich app restore, do not
-execute F2 keep/kill stops** (those wait on operator sign-off in
-`human/F2-BREW-SERVICES-DECISIONS.md`), and do not expand E5 mini/VPS deploy
-until hosts are online. E1–E5 join the **next review slot** when that baton is
-written (not a separate gate here). After F4, either write a Phase E/F review
-baton if the plan calls for one, or end Phase F per step2.
+**Phase E (E1–E5)** and **Phase F (F1–F4)** are complete. This baton is the
+**combined Phase E/F code review** before any remaining operator-gated
+residuals or a later project-level final review. Scope is site-djbclark
+commits from E1 through F4 (and linked docs/registry/roles only). Do **not**
+execute F2 keep/kill stops, do **not** reinstall Immich app, do **not** deploy
+to offline mini/VPS. Correctness/safety findings must be fixed in-session;
+architecture/style may be deferred to the ledger (FUND-B quality bar).
 
 **Recommended AI** (full rows from
 `docs/reference/available-ai-models.md`; quota snapshot taken
-2026-07-20T15:40Z — recheck live):
+2026-07-20T15:47Z — recheck live):
 
-- **Primary —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
+- **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
+  `claude-fable-5` · Low/Medium · use **`cswap` account 2 (djbclark@mit.edu)**
+  (active; 5h **23%**, 7d **20%**, 7d reset Jul 25 ~05:00 local). Prefer
+  **Medium** for review (reading-heavy). Original gmail Pro 7d **70%** /
+  5h **2%** — reserve gmail weekly for other work.
+- **Alternate —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
   agentic work_ — SuperGrok weekly **70%** used, reset Jul 23 ~2:41am ET
-  (`2026-07-23T06:41:20Z`). Prefer **Medium** for difficulty 45 (Brewfile
-  projection + flock). Self-passoff from F3 is fine if pool allows.
-- **Alternate —** Cursor (GUI) · Cursor · Composer 2.5 · Composer 2.5 ·
+  (`2026-07-23T06:41:20Z`). Prefer **High** if Fable unavailable; self-passoff
+  from F4 is fine if pool allows.
+- **Escalation —** Cursor (GUI) · Cursor · Composer 2.5 · Composer 2.5 ·
   Agent Thinking · _Native agentic coding_ — Cursor Pro primary pool
   ~**59%** monthly used (secondary ~52%; tertiary 100%); provider cost
-  $1.47/$2; resets Aug 2 ~7:22pm.
-- **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
-  `claude-fable-5` · Low/Medium · use **`cswap` account 2 (djbclark@mit.edu)**
-  (active; 5h **23%**, 7d **20%**, 7d reset Jul 25 ~05:00 local). Original
-  gmail Pro 7d **70%** — reserve for other work. **Codex 0.144.6 (oauth) ·
-  GPT-5.6 Sol · weekly 100% used until Jul 25 ~5:17pm ET — avoid.**
+  $1.47/$2; resets Aug 2 ~7:22pm. **Codex 0.144.6 (oauth) · GPT-5.6 Sol ·
+  weekly 100% used until Jul 25 ~5:17pm ET — avoid.**
 
 **Quota-check procedure — operator update 2026-07-20 (carry forward
 verbatim in substance):**
@@ -55,79 +53,85 @@ git pull --ff-only origin master
 Required reading:
 
 - `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`
-- step2 ground rules/risk register and §7 Phase F (F4 row):
+- step2 ground rules/risk register + §6 Phase E + §7 Phase F:
   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-- step1 §4.3 (Merged-Brewfile + flock) if present:
+- step1 coordination contracts (ports/paths/brew §4):
   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`
-- F2 audit (do not re-litigate kills):
+- Funding quality bar (correctness/safety must-fix; style deferrable):
+  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-phase-d-funding-plans-v1.md`
+- Ledger (E1–F4 rows):
+  `/Users/djbclark/ops/site-djbclark/docs/relay/LEDGER.md`
+- Audits:
   `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F2-brew-services-audit.md`
-- F3 Immich adoption note (do not re-open app restore):
   `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F3-immich-adoption.md`
-- Live Brewfile snapshot (compare target):
-  `~/system-state/Brewfile` and/or `/opt/homebrew/var/system-state/Brewfile`
+  `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F4-merged-brewfile.md`
+- Prior review carry-forward (do not re-open resolved items without cause):
+  `/Users/djbclark/ops/site-djbclark/docs/relay/reviews/REVIEW-1-findings.md`
 - Registry:
-  `/Users/djbclark/ops/site-djbclark/registry/paths.yml`
   `/Users/djbclark/ops/site-djbclark/registry/ports.yml`
+  `/Users/djbclark/ops/site-djbclark/registry/paths.yml`
 
 ---
 
-You are implementing **F4: Merged-Brewfile projection + flock serialization**
-(difficulty 45).
+You are performing **REVIEW-EF: Phase E + Phase F close-out review**.
 
 ## Live facts (do not re-litigate)
 
-- F1–F3 complete. Immich is site-managed under `com.immich.*` (labels kept;
-  **disabled** while `/opt/services/immich/app` is missing). Ports 3001–3003
-  planned. App restore is out of band.
-- F2 defaults (not executed): remove orphaned `postgresql@14` agent; stop+uninstall
-  redis if unused; leave mariadb stopped; herdr/omlx claimed site; et system keep.
-- E5 mini + `vps-primary` remain `offline_unprovisioned`.
-- REVIEW-1: OliveTin/VM unauthenticated on single-user tailnet — do not widen
-  unauthenticated surfaces.
+- **E1–E5:** LiteLLM role (loopback :4000, Auto Router v2, launchd/systemd);
+  Goose + researched MCP (filesystem real; Fieldy disabled pending OAuth;
+  Shortwave/Saner not inventable); SecretSpec dotenv path; multi-host inventory
+  with mini+VPS `offline_unprovisioned`.
+- **F1:** `roles/site_agents` — system-state-backup + hibernate-disk-check.
+- **F2:** brew-services audit only; kills wait on
+  `human/F2-BREW-SERVICES-DECISIONS.md` (do not execute).
+- **F3:** Immich LaunchDaemons site-managed under `com.immich.*`, **disabled**
+  while `/opt/services/immich/app` missing; ports 3001–3003 planned.
+- **F4:** Merged-Brewfile from `brew/fragments` → `generated/Merged-Brewfile`;
+  `bin/brew_flock.py` serializes brew-touching just recipes; no mass cleanup.
+- **REVIEW-1:** OliveTin/VM unauthenticated on single-user tailnet — do not
+  widen unauthenticated surfaces.
 - LiteLLM cold start ~30–90s; missing-key storms can wedge the process.
-- system-state-backup already captures Brewfile under Homebrew var + `~/system-state`.
 
-## Decided constraints
+## Review scope
 
-- Project a **Merged-Brewfile** (or site-owned Brewfile fragment set) per
-  step1 §4.3 — compare against live `Brewfile` snapshot; do not blindly
-  `brew bundle` destructive uninstalls without operator gates.
-- Serialize concurrent brew operations with **`flock`** in the site justfile
-  (wrapper recipes), so two sessions cannot clobber each other.
-- Prefer idempotent just recipes + docs; lint registry if you touch it.
-- No secrets in git. Do not execute F2 destructive stops. Do not reinstall Immich app.
+1. Walk site commits / ledger rows **E1 → F4** (roles, playbooks, justfile,
+   registry, human docs, generated Merged-Brewfile, brew fragments).
+2. Re-run standing checks that are mechanical:
+   - `bin/registry_lint.py`
+   - `just brew-project && just brew-diff` (expect exit 0; read-only)
+   - `just litellm-status` / `just goose-status` / `just site-agents-status` /
+     `just immich-status` (document actual state; Immich may be disabled)
+   - Spot-check D7 health endpoints if still relevant (grafana/oo/olivetin/vm)
+3. Hunt correctness/safety: secrets in git, public binds without auth,
+   destructive brew/uninstall paths without gates, launchd system-domain
+   mistakes, race conditions around brew flock, registry collisions.
+4. Fix must-fix findings in this session with evidence. Defer architecture
+   polish to ledger with `DEFERRED` notes.
+5. Write findings to
+   `docs/relay/reviews/REVIEW-EF-findings.md` (or equivalent under
+   `docs/relay/reviews/`).
 
-## Task
+## Out of scope
 
-1. Read step1 §4.3 and current system-state Brewfile snapshot; inventory how
-   brew is invoked today (justfile, roles, ad-hoc).
-2. Implement Merged-Brewfile projection (site-owned source of truth for
-   intended formulae/casks the site claims) + just recipes to generate/diff
-   against live snapshot.
-3. Add `flock`-based serialization wrapper for brew-touching just recipes.
-4. Verify: generate/diff exit 0; flock prevents concurrent writers (simple
-   evidence); second run idempotent; document rollback (remove wrapper /
-   generated file path).
-5. Do not run mass `brew bundle cleanup` / uninstall without operator sign-off.
-
-## Carry-forward
-
-- Preserve REVIEW-1 OliveTin/VM note.
-- Carry the AI quota procedure into every next baton.
-- F2 residual: operator sign-off on redis remove, postgres@14 agent bootout,
-  user-domain et agent cleanup (`human/F2-BREW-SERVICES-DECISIONS.md`).
-- F3 residual: Immich app tree missing; labels disabled; re-apply after restore;
-  flip ports planned→active when healthy.
-- E5 residual: mini/VPS LiteLLM planned until hosts join tailnet and operator
-  sets `ansible_host` + `site_host_status: online`.
+- F2 redis/pg@14/et-user-agent destructive stops (operator file only).
+- Immich app restore / enable while app missing.
+- E5 deploy to mini/VPS until hosts online + inventory flipped.
+- stayturgid product deep rewrite (site-only unless a site bug requires a
+  tiny product fix — then PR+merge per PROTOCOL).
 
 ## End of session
 
 Follow `docs/relay/PROTOCOL.md`: record verification evidence, append exactly
-one `F4` ledger row, rewrite the baton for the next step (or Phase E/F review
-if that is the plan's next slot) with full catalog AI rows and fresh quota
-data, commit/push site straight to master, print the new baton, and copy it
-with:
+one `REVIEW-EF` ledger row, rewrite the baton for the **next** step:
+
+- If must-fix work remains unfinished → same REVIEW-EF escalated, or
+- If clean → project-level closeout / residual operator baton (F2 sign-off
+  reminder + F3 restore + E5 host-online) **or** end the chain with an
+  explicit “phases E/F complete; residuals are operator-scheduled” baton
+  per step2 §10 (project-level final review is separate and may wait).
+
+Include full catalog AI rows and fresh quota data. Commit/push site straight
+to master, print the new baton, and copy it with:
 
 ```bash
 pbcopy < docs/relay/NEXT-PROMPT.md

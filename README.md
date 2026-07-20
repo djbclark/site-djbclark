@@ -43,6 +43,23 @@ secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 See `roles/litellm/README.md` for multi-host, routing, verification, rollback.
 Goose against this proxy: `roles/goose/README.md`.
 
+## Merged-Brewfile + brew flock (Phase F4)
+
+Site-owned **package claims** live under `brew/fragments/*.yml`. Projection
+writes `generated/Merged-Brewfile` (annotated, visibility only). Diff against
+the system-state Brewfile snapshot is read-only — never mass-uninstalls.
+
+```bash
+just brew-project              # regenerate Merged-Brewfile
+just brew-diff                 # project + compare to ~/system-state/Brewfile
+just brew-lock -- brew info just   # exclusive lock around brew-touching cmds
+```
+
+Concurrent brew mutations (e.g. `just goose-apply`) take
+`/tmp/site-djbclark-brew.lock` via `bin/brew_flock.py` (`fcntl.flock`; macOS
+has no util-linux `flock(1)` by default). Details and rollback:
+[`brew/README.md`](brew/README.md).
+
 ## Immich (Phase F3 — system-domain LaunchDaemons)
 
 Site-managed Immich under **`com.immich`** / **`com.immich.machine-learning`**

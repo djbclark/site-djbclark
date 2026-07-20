@@ -14,6 +14,10 @@ hosts := env_var_or_default("hosts", "")
 # when more than one site-* dir exists under ~/ops.
 site_dir := justfile_directory()
 
+# F4: exclusive lock for brew-touching operations (see bin/brew_flock.py).
+# Override: SITE_BREW_LOCK=/path/to/lock just brew-lock -- …
+brew_lock := env_var_or_default("SITE_BREW_LOCK", "/tmp/site-djbclark-brew.lock")
+
 deploy:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" STAYTURGID_SITE_DIR="{{ site_dir }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy
 
@@ -80,8 +84,9 @@ litellm-status:
     @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
 
 # Install/configure Goose Desktop + CLI against loopback LiteLLM (Phase E2).
+# Holds the site brew flock (F4) because the role may brew install cask/formula.
 goose-apply *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/goose.yml {{ args }}
+    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py -- env ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/goose.yml {{ args }}
 
 goose-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/goose.yml
@@ -150,6 +155,28 @@ immich-status:
     @bash -c 'for p in 3001 3002 3003; do nc -z -w 1 127.0.0.1 "$p" 2>/dev/null && echo "port $p OPEN" || echo "port $p closed"; done'
     @echo "=== HTTP health ==="
     @curl -fsS --max-time 5 http://127.0.0.1:3001/api/server/ping 2>&1 || echo "health: unreachable (expected if app absent)"
+
+# ---------------------------------------------------------------------------
+# F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)
+# Fragments: brew/fragments/*.yml  Projection: generated/Merged-Brewfile
+# Docs: brew/README.md
+# Never runs brew bundle cleanup / mass uninstall (operator gate only).
+# ---------------------------------------------------------------------------
+
+# Write generated/Merged-Brewfile from brew/fragments/*.yml (idempotent).
+brew-project:
+    bin/project_merged_brewfile.py project
+
+# Project then diff against system-state Brewfile snapshot (read-only).
+# Extra args: just brew-diff -- --strict
+brew-diff *args:
+    bin/project_merged_brewfile.py both {{ args }}
+
+# Run any command while holding the site brew exclusive lock.
+# Example: just brew-lock -- brew install just
+# Example: just brew-lock --nonblock -- true   # exit 75 if busy
+brew-lock *args:
+    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py {{ args }}
 
 # F2: re-survey homebrew.mxcl services (read-only). Audit doc:
 # docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md

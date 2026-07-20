@@ -42,6 +42,9 @@ prefixes:
     - "/opt/homebrew/var/log/system-state-backup.log"
     - "/usr/local/var/system-state/**"          # F1: Intel canonical capture dir
     - "/usr/local/var/log/system-state-backup.log"
+    # F4 Merged-Brewfile (source: brew/fragments; projection under generated/)
+    - "~/ops/site-djbclark/brew/**"
+    - "~/ops/site-djbclark/generated/Merged-Brewfile"
     # F3 Immich (system domain; labels intentionally com.immich.* — see roles/immich)
     - "/opt/services/immich/**"
     - "/var/log/immich/**"
