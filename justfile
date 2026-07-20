@@ -61,3 +61,16 @@ litellm-check:
 litellm-status:
     @launchctl print gui/$(id -u)/com.djbclark.litellm >/dev/null && echo "launchd: loaded"
     @curl -fsS http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
+
+# Install/configure Goose Desktop + CLI against loopback LiteLLM (Phase E2).
+goose-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/goose.yml {{ args }}
+
+goose-check:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/goose.yml
+
+goose-status:
+    @test -d /Applications/Goose.app && echo "app: /Applications/Goose.app" || echo "app: missing"
+    @goose --version
+    @goose info -v 2>/dev/null | rg -i 'config yaml|goose_provider|goose_model|active_provider|litellm-local|smart-router' || true
+    @stat -f '%Sp %N' ~/.config/goose ~/.config/goose/config.yaml ~/.config/goose/custom_providers/litellm-local.json 2>/dev/null || true

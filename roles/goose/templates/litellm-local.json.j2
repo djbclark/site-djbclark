@@ -1,0 +1,15 @@
+{
+  "name": "{{ goose_provider_id }}",
+  "engine": "openai",
+  "display_name": "LiteLLM (local)",
+  "description": "Site-owned loopback LiteLLM proxy (roles/goose)",
+  "base_url": "{{ goose_litellm_base_url }}",
+  "models": [
+    {
+      "name": "{{ goose_model }}",
+      "context_limit": 128000
+    }
+  ],
+  "requires_auth": false,
+  "supports_streaming": true
+}

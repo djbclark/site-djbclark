@@ -1,0 +1,10 @@
+{{ goose_managed_marker }}
+active_provider: {{ goose_provider_id }}
+providers:
+  {{ goose_provider_id }}:
+    enabled: true
+    model: {{ goose_model }}
+    configured: true
+preferences:
+  telemetry: false
+  permission_mode: prompt

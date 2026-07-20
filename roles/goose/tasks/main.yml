@@ -1,0 +1,156 @@
+---
+- name: Assert Goose is being configured on macOS
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Darwin'
+      - site_ns is defined
+      - site_ns | length > 0
+    fail_msg: "E2 supports the macOS control-node deployment only."
+
+- name: Check that Homebrew is installed
+  ansible.builtin.stat:
+    path: /opt/homebrew/bin/brew
+  register: _goose_brew
+
+- name: Require Homebrew for native Goose install
+  ansible.builtin.assert:
+    that: _goose_brew.stat.executable | default(false)
+    fail_msg: "Install Homebrew first; E2 requires brew cask + formula."
+
+- name: Check whether Goose Desktop cask is installed
+  ansible.builtin.command:
+    argv:
+      - /opt/homebrew/bin/brew
+      - list
+      - --cask
+      - "{{ goose_cask_name }}"
+  register: _goose_cask_list
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Goose Desktop cask when absent
+  community.general.homebrew_cask:
+    name: "{{ goose_cask_name }}"
+    state: present
+  when:
+    - not ansible_check_mode
+    - _goose_cask_list.rc != 0
+
+- name: Check whether Goose CLI formula is installed
+  ansible.builtin.command:
+    argv:
+      - /opt/homebrew/bin/brew
+      - list
+      - --formula
+      - "{{ goose_formula_name }}"
+  register: _goose_cli_list
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Goose CLI formula when absent
+  community.general.homebrew:
+    name: "{{ goose_formula_name }}"
+    state: present
+  when:
+    - not ansible_check_mode
+    - _goose_cli_list.rc != 0
+
+- name: Probe installed Goose CLI version
+  ansible.builtin.command:
+    argv:
+      - goose
+      - --version
+  register: _goose_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require Goose CLI after install
+  ansible.builtin.assert:
+    that: _goose_version.rc == 0
+    fail_msg: "Goose CLI is missing after apply; expected `goose --version` to succeed."
+  when: not ansible_check_mode
+
+- name: Stat existing Goose config
+  ansible.builtin.stat:
+    path: "{{ goose_config_path }}"
+  register: _goose_config_stat
+
+- name: Read existing Goose config when present
+  ansible.builtin.slurp:
+    src: "{{ goose_config_path }}"
+  register: _goose_config_slurp
+  when: _goose_config_stat.stat.exists
+
+- name: Refuse unmanaged Goose config collisions
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not _goose_config_stat.stat.exists)
+        or (
+          (_goose_config_slurp.content | b64decode)
+          is search(goose_managed_marker | regex_escape)
+        )
+    fail_msg: >-
+      {{ goose_config_path }} exists without the site-managed marker.
+      Back it up and remove it, or merge manually before re-running apply.
+
+- name: Stat existing custom provider file when present
+  ansible.builtin.stat:
+    path: "{{ goose_custom_provider_path }}"
+  register: _goose_provider_stat
+
+- name: Read existing custom provider file when present
+  ansible.builtin.slurp:
+    src: "{{ goose_custom_provider_path }}"
+  register: _goose_provider_slurp
+  when: _goose_provider_stat.stat.exists
+
+- name: Refuse unmanaged custom provider collisions
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not _goose_provider_stat.stat.exists)
+        or (
+          (_goose_provider_slurp.content | b64decode)
+          is search('Site-owned loopback LiteLLM proxy \\(roles/goose\\)')
+        )
+    fail_msg: >-
+      {{ goose_custom_provider_path }} exists but is not site-managed.
+      Back it up and remove it before re-running apply.
+
+- name: Ensure Goose config directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ goose_config_dir }}", mode: "0700"}
+    - {path: "{{ goose_custom_providers_dir }}", mode: "0700"}
+
+- name: Render site-managed LiteLLM custom provider
+  ansible.builtin.template:
+    src: litellm-local.json.j2
+    dest: "{{ goose_custom_provider_path }}"
+    mode: "0600"
+  register: _goose_provider_config
+
+- name: Render site-managed Goose provider selection
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ goose_config_path }}"
+    mode: "0600"
+  register: _goose_main_config
+
+- name: Report discovered Goose version and config paths
+  ansible.builtin.debug:
+    msg:
+      goose_version: "{{ (_goose_version.stdout | default('unknown')) | trim }}"
+      goose_app_path: "{{ goose_app_path }}"
+      goose_config_path: "{{ goose_config_path }}"
+      goose_custom_provider_path: "{{ goose_custom_provider_path }}"
+      goose_provider_id: "{{ goose_provider_id }}"
+      goose_model: "{{ goose_model }}"
+      goose_litellm_base_url: "{{ goose_litellm_base_url }}"

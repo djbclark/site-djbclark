@@ -1,0 +1,18 @@
+---
+# roles/goose — site-owned Goose Desktop/CLI with local LiteLLM provider (Phase E2).
+
+goose_home: "{{ lookup('env', 'HOME') }}"
+goose_config_dir: "{{ goose_home }}/.config/goose"
+goose_config_path: "{{ goose_config_dir }}/config.yaml"
+goose_custom_providers_dir: "{{ goose_config_dir }}/custom_providers"
+goose_custom_provider_path: "{{ goose_custom_providers_dir }}/litellm-local.json"
+
+goose_cask_name: block-goose
+goose_formula_name: block-goose-cli
+goose_app_path: /Applications/Goose.app
+
+goose_provider_id: litellm-local
+goose_model: smart-router
+goose_litellm_base_url: http://127.0.0.1:4000/v1
+
+goose_managed_marker: "# site-djbclark managed (roles/goose)"
