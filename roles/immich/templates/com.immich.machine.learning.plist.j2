@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+{#
+  Site-managed Immich machine-learning LaunchDaemon (Phase F3).
+  Label kept as com.immich.machine-learning (native-installer contract).
+#}
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{ immich_ml_label }}</string>
+	<key>UserName</key>
+	<string>{{ immich_user }}</string>
+	<key>GroupName</key>
+	<string>{{ immich_group }}</string>
+	<key>WorkingDirectory</key>
+	<string>{{ immich_app }}/machine-learning</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{ immich_ml_start }}</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>{{ immich_home }}</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>MACHINE_LEARNING_HOST</key>
+		<string>{{ immich_ml_bind }}</string>
+		<key>MACHINE_LEARNING_PORT</key>
+		<string>{{ immich_ml_port }}</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>{{ immich_log_dir }}/machine-learning.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{ immich_log_dir }}/machine-learning.stderr.log</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+</dict>
+</plist>

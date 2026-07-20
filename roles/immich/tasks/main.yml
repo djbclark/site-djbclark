@@ -1,0 +1,126 @@
+---
+# Immich system-domain LaunchDaemons (Phase F3). Darwin only; needs become
+# for /Library/LaunchDaemons and launchctl system domain.
+
+- name: Assert Immich role prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Darwin'
+      - immich_enabled | bool
+      - immich_user | length > 0
+      - immich_server_label | length > 0
+      - immich_ml_label | length > 0
+    fail_msg: >-
+      immich role supports macOS only; requires immich_enabled and label/user
+      defaults. System-domain LaunchDaemons need privilege escalation (become).
+
+- name: Probe service user existence
+  ansible.builtin.command:
+    argv:
+      - id
+      - "{{ immich_user }}"
+  register: immich_user_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Warn when service user is missing
+  ansible.builtin.debug:
+    msg: >-
+      Service user '{{ immich_user }}' not found (id rc={{ immich_user_probe.rc }}).
+      Native installer createuser.sh creates uid {{ immich_uid }}. Role will still
+      manage plists; bootstrap will fail until the user exists.
+  when: immich_user_probe.rc != 0
+
+- name: Probe whether Immich app start scripts exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ immich_server_start }}"
+    - "{{ immich_ml_start }}"
+  register: immich_start_stats
+  check_mode: false
+
+- name: Set app-present fact
+  ansible.builtin.set_fact:
+    immich_app_present: >-
+      {{
+        (immich_start_stats.results | map(attribute='stat.exists') | list)
+        is all
+      }}
+
+- name: Report Immich app presence
+  ansible.builtin.debug:
+    msg: >-
+      Immich app scripts present={{ immich_app_present }}
+      (server={{ immich_server_start }}, ml={{ immich_ml_start }}).
+      When false, labels are disabled to stop KeepAlive EX_CONFIG thrash;
+      restoring /opt/services/immich/app is out of band (native pkg / operator).
+
+- name: Ensure Immich log directory exists
+  ansible.builtin.file:
+    path: "{{ immich_log_dir }}"
+    state: directory
+    owner: "{{ immich_user if immich_user_probe.rc == 0 else omit }}"
+    group: "{{ immich_group if immich_user_probe.rc == 0 else omit }}"
+    mode: "0755"
+  become: true
+  register: immich_log_dir_state
+
+- name: Render Immich server LaunchDaemon
+  ansible.builtin.template:
+    src: com.immich.plist.j2
+    dest: "{{ immich_server_plist }}"
+    owner: root
+    group: wheel
+    mode: "0644"
+  become: true
+  register: _immich_server_plist
+
+- name: Render Immich machine-learning LaunchDaemon
+  ansible.builtin.template:
+    src: com.immich.machine.learning.plist.j2
+    dest: "{{ immich_ml_plist }}"
+    owner: root
+    group: wheel
+    mode: "0644"
+  become: true
+  register: _immich_ml_plist
+
+- name: Manage Immich server LaunchDaemon
+  ansible.builtin.include_tasks: launchdaemon.yml
+  vars:
+    _immich_label: "{{ immich_server_label }}"
+    _immich_plist_path: "{{ immich_server_plist }}"
+    _immich_plist: "{{ _immich_server_plist }}"
+    _immich_want_running: "{{ immich_app_present | bool }}"
+
+- name: Manage Immich machine-learning LaunchDaemon
+  ansible.builtin.include_tasks: launchdaemon.yml
+  vars:
+    _immich_label: "{{ immich_ml_label }}"
+    _immich_plist_path: "{{ immich_ml_plist }}"
+    _immich_plist: "{{ _immich_ml_plist }}"
+    _immich_want_running: "{{ immich_app_present | bool }}"
+
+- name: Probe Immich web health when app present
+  ansible.builtin.uri:
+    url: "{{ immich_health_url }}"
+    method: GET
+    status_code: [200]
+    timeout: "{{ immich_health_timeout_sec }}"
+  register: immich_health
+  failed_when: false
+  changed_when: false
+  check_mode: false
+  when: immich_app_present | bool
+
+- name: Summarize Immich role outcome
+  ansible.builtin.debug:
+    msg: >-
+      Immich F3: app_present={{ immich_app_present }};
+      server_plist_changed={{ _immich_server_plist.changed | default(false) }};
+      ml_plist_changed={{ _immich_ml_plist.changed | default(false) }};
+      health={{ (immich_health.status | default('n/a')) if (immich_app_present | bool) else 'skipped-app-absent' }}.
+      Ports {{ immich_web_port }}/{{ immich_microservices_port }}/{{ immich_ml_port }}
+      registered in registry/ports.yml (planned until healthy).

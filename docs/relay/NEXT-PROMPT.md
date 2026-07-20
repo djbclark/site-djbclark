@@ -1,33 +1,35 @@
-# NEXT: F3 — Immich LaunchDaemon → site role (difficulty 55/100)
+# NEXT: F4 — Merged-Brewfile + flock (difficulty 45/100)
 
 **Funding plan context:** FUND-B Phase D recovery and REVIEW-1 are closed.
 Phase E **E1–E5** are complete (LiteLLM + Goose + MCP research + SecretSpec +
-multi-host inventory). Phase F **F1** (site_agents) and **F2** (brew-services
-audit) are complete. This baton is **Phase F step F3 only** — adopt Immich
-system-domain LaunchDaemon into a site role. **Do not start F4 Brewfile flock,
-re-open E5 offline mini/VPS deploy, or execute F2 keep/kill stops** (those wait
-on operator sign-off in `human/F2-BREW-SERVICES-DECISIONS.md`). E1–E5 join the
-**next review slot** when that baton is written (not a separate gate here).
+multi-host inventory). Phase F **F1–F3** are complete (site_agents,
+brew-services audit, Immich LaunchDaemon site role). This baton is **Phase F
+step F4 only** — Merged-Brewfile projection + `flock` serialization wrapper in
+the site justfile (step1 §4.3). **Do not re-open F3 Immich app restore, do not
+execute F2 keep/kill stops** (those wait on operator sign-off in
+`human/F2-BREW-SERVICES-DECISIONS.md`), and do not expand E5 mini/VPS deploy
+until hosts are online. E1–E5 join the **next review slot** when that baton is
+written (not a separate gate here). After F4, either write a Phase E/F review
+baton if the plan calls for one, or end Phase F per step2.
 
 **Recommended AI** (full rows from
 `docs/reference/available-ai-models.md`; quota snapshot taken
-2026-07-20T15:25Z — recheck live):
+2026-07-20T15:40Z — recheck live):
 
 - **Primary —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
-  agentic work_ — SuperGrok weekly **69%** used, reset Jul 23 ~2:41am ET.
-  Prefer **High** for difficulty 55 (system-domain launchd + service user).
-  Self-passoff from F2 is fine if pool allows.
+  agentic work_ — SuperGrok weekly **70%** used, reset Jul 23 ~2:41am ET
+  (`2026-07-23T06:41:20Z`). Prefer **Medium** for difficulty 45 (Brewfile
+  projection + flock). Self-passoff from F3 is fine if pool allows.
 - **Alternate —** Cursor (GUI) · Cursor · Composer 2.5 · Composer 2.5 ·
   Agent Thinking · _Native agentic coding_ — Cursor Pro primary pool
   ~**59%** monthly used (secondary ~52%; tertiary 100%); provider cost
   $1.47/$2; resets Aug 2 ~7:22pm.
 - **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Fable 5 ·
-  `claude-fable-5` · Low/Medium (system launchd judgment) · use **`cswap`
-  account 2 (djbclark@mit.edu)** (active; 5h **23%**, 7d **20%**, 7d reset
-  Jul 25 ~05:00 local). Original gmail Pro 7d **70%** — reserve for other
-  work. **Codex 0.144.6 (oauth) · GPT-5.6 Sol · weekly 100% used until
-  Jul 25 ~5:17pm ET — avoid.**
+  `claude-fable-5` · Low/Medium · use **`cswap` account 2 (djbclark@mit.edu)**
+  (active; 5h **23%**, 7d **20%**, 7d reset Jul 25 ~05:00 local). Original
+  gmail Pro 7d **70%** — reserve for other work. **Codex 0.144.6 (oauth) ·
+  GPT-5.6 Sol · weekly 100% used until Jul 25 ~5:17pm ET — avoid.**
 
 **Quota-check procedure — operator update 2026-07-20 (carry forward
 verbatim in substance):**
@@ -53,83 +55,79 @@ git pull --ff-only origin master
 Required reading:
 
 - `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`
-- step2 ground rules/risk register and §7 Phase F (F3 row):
+- step2 ground rules/risk register and §7 Phase F (F4 row):
   `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
-- F2 audit (do not re-litigate; operator kills still open):
+- step1 §4.3 (Merged-Brewfile + flock) if present:
+  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`
+- F2 audit (do not re-litigate kills):
   `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F2-brew-services-audit.md`
+- F3 Immich adoption note (do not re-open app restore):
+  `/Users/djbclark/ops/site-djbclark/docs/relay/audits/F3-immich-adoption.md`
+- Live Brewfile snapshot (compare target):
+  `~/system-state/Brewfile` and/or `/opt/homebrew/var/system-state/Brewfile`
 - Registry:
   `/Users/djbclark/ops/site-djbclark/registry/paths.yml`
   `/Users/djbclark/ops/site-djbclark/registry/ports.yml`
-- Live Immich state (do not trust from memory):
-  `launchctl print system/com.immich.*` (and any related labels),
-  `/Library/LaunchDaemons/com.immich*`, `/opt/services/immich` if present,
-  listening ports via `lsof`/`nc`
 
 ---
 
-You are implementing **F3: Immich LaunchDaemon → site role** (difficulty 55).
+You are implementing **F4: Merged-Brewfile projection + flock serialization**
+(difficulty 45).
 
 ## Live facts (do not re-litigate)
 
-- Immich is currently an **unmanaged** system-domain LaunchDaemon (paths.yml
-  known_gaps: `com.immich.*` among LaunchDaemons). Target shape from step2:
-  dedicated user under `/opt/services/immich`, site-owned role, **port
-  registration** for Immich web in `registry/ports.yml`.
-- Site pattern for user-domain agents: `roles/litellm`, `roles/site_agents`
-  (LaunchAgent bootstrap/bootout/kickstart). Immich is **system domain** —
-  different privileges, service user, and failure modes. R1 MF-1 style
-  disable-on-retire applies if replacing labels.
-- E5 mini + `vps-primary` remain `offline_unprovisioned` — F3 is control-node
-  (m1-air) only unless operator expands scope.
-- REVIEW-1: OliveTin/VM unauthenticated on single-user tailnet — do not widen
-  Immich to public/Tailscale without an auth story.
-- LiteLLM cold start ~30–90s; missing-key storms can wedge the process.
+- F1–F3 complete. Immich is site-managed under `com.immich.*` (labels kept;
+  **disabled** while `/opt/services/immich/app` is missing). Ports 3001–3003
+  planned. App restore is out of band.
 - F2 defaults (not executed): remove orphaned `postgresql@14` agent; stop+uninstall
   redis if unused; leave mariadb stopped; herdr/omlx claimed site; et system keep.
+- E5 mini + `vps-primary` remain `offline_unprovisioned`.
+- REVIEW-1: OliveTin/VM unauthenticated on single-user tailnet — do not widen
+  unauthenticated surfaces.
+- LiteLLM cold start ~30–90s; missing-key storms can wedge the process.
+- system-state-backup already captures Brewfile under Homebrew var + `~/system-state`.
 
 ## Decided constraints
 
-- Prefer idempotent Ansible role under `roles/` + playbook + just recipes matching
-  existing site patterns (`site-agents-*`, `litellm-*`).
-- Register Immich listen port(s) in `registry/ports.yml` **before** claiming them
-  live; lint with `bin/registry_lint.py`.
-- Update `registry/paths.yml` for Immich paths / LaunchDaemon labels under `site`.
-- System-domain work needs careful verification: before/after `launchctl print`,
-  HTTP health to Immich web, rollback command documented (bootout site label +
-  restore prior plist if any — do not delete the old path in the same session
-  that stands up the new one if both exist).
-- No secrets in git. Service user / data dir ownership must be correct.
-- Do not start F4. Do not execute F2 destructive stops without operator decisions
-  file updates.
+- Project a **Merged-Brewfile** (or site-owned Brewfile fragment set) per
+  step1 §4.3 — compare against live `Brewfile` snapshot; do not blindly
+  `brew bundle` destructive uninstalls without operator gates.
+- Serialize concurrent brew operations with **`flock`** in the site justfile
+  (wrapper recipes), so two sessions cannot clobber each other.
+- Prefer idempotent just recipes + docs; lint registry if you touch it.
+- No secrets in git. Do not execute F2 destructive stops. Do not reinstall Immich app.
 
 ## Task
 
-1. Survey live Immich: LaunchDaemon plists, service user, data dir, ports, version,
-   how it was installed (docker? binary? brew?).
-2. Design + implement site role that owns the daemon under site namespace or
-   documents intentional keep of `com.immich.*` labels with site-managed
-   content (pick one approach; record deviation if needed).
-3. Port/path registry claims; README + just status/apply/check; live apply with
-   second-apply idempotence; health checks before and after.
-4. Record rollback command in role README and ledger.
+1. Read step1 §4.3 and current system-state Brewfile snapshot; inventory how
+   brew is invoked today (justfile, roles, ad-hoc).
+2. Implement Merged-Brewfile projection (site-owned source of truth for
+   intended formulae/casks the site claims) + just recipes to generate/diff
+   against live snapshot.
+3. Add `flock`-based serialization wrapper for brew-touching just recipes.
+4. Verify: generate/diff exit 0; flock prevents concurrent writers (simple
+   evidence); second run idempotent; document rollback (remove wrapper /
+   generated file path).
+5. Do not run mass `brew bundle cleanup` / uninstall without operator sign-off.
 
 ## Carry-forward
 
-- After F3, rewrite `NEXT-PROMPT.md` for **F4** (Merged-Brewfile + flock) per
-  step2 §7, difficulty 45 — unless a review baton for E1–E5/F is inserted first.
 - Preserve REVIEW-1 OliveTin/VM note.
 - Carry the AI quota procedure into every next baton.
 - F2 residual: operator sign-off on redis remove, postgres@14 agent bootout,
   user-domain et agent cleanup (`human/F2-BREW-SERVICES-DECISIONS.md`).
+- F3 residual: Immich app tree missing; labels disabled; re-apply after restore;
+  flip ports planned→active when healthy.
 - E5 residual: mini/VPS LiteLLM planned until hosts join tailnet and operator
   sets `ansible_host` + `site_host_status: online`.
 
 ## End of session
 
 Follow `docs/relay/PROTOCOL.md`: record verification evidence, append exactly
-one `F3` ledger row, rewrite the baton for the next step with full catalog AI
-rows and fresh quota data, commit/push site straight to master, print the new
-baton, and copy it with:
+one `F4` ledger row, rewrite the baton for the next step (or Phase E/F review
+if that is the plan's next slot) with full catalog AI rows and fresh quota
+data, commit/push site straight to master, print the new baton, and copy it
+with:
 
 ```bash
 pbcopy < docs/relay/NEXT-PROMPT.md

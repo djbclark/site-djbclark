@@ -1,0 +1,117 @@
+---
+# Manage one system-domain LaunchDaemon (bootstrap / bootout / enable / disable).
+# Expects: _immich_label, _immich_plist_path, _immich_plist (register), _immich_want_running
+
+- name: "Probe whether Immich label is loaded — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print
+      - "system/{{ _immich_label }}"
+  register: _immich_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "Probe disabled state for Immich label — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print-disabled
+      - system
+  register: _immich_disabled_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "Set disabled fact for Immich label — {{ _immich_label }}"
+  ansible.builtin.set_fact:
+    # print-disabled lines look like: "com.immich" => disabled
+    _immich_is_disabled: >-
+      {{
+        ('"' ~ _immich_label ~ '" => disabled') in (_immich_disabled_probe.stdout | default(''))
+      }}
+
+- name: "Boot out Immich label when plist changed or should stop — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootout
+      - "system/{{ _immich_label }}"
+  become: true
+  when:
+    - not ansible_check_mode
+    - _immich_launch_state.rc == 0
+    - >-
+      (_immich_plist.changed | default(false))
+      or (not (_immich_want_running | bool))
+  register: _immich_bootout
+  changed_when: true
+  failed_when: false
+
+- name: "Disable Immich label when app missing — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - disable
+      - "system/{{ _immich_label }}"
+  become: true
+  when:
+    - not ansible_check_mode
+    - not (_immich_want_running | bool)
+    - not (_immich_is_disabled | bool)
+  register: _immich_disable
+  changed_when: true
+  failed_when: false
+
+- name: "Enable Immich label when app present and disabled — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - enable
+      - "system/{{ _immich_label }}"
+  become: true
+  when:
+    - not ansible_check_mode
+    - _immich_want_running | bool
+    - _immich_is_disabled | bool
+  register: _immich_enable
+  changed_when: true
+  failed_when: false
+
+- name: "Bootstrap Immich label when app present — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootstrap
+      - system
+      - "{{ _immich_plist_path }}"
+  become: true
+  when:
+    - not ansible_check_mode
+    - _immich_want_running | bool
+    - >-
+      (_immich_launch_state.rc != 0)
+      or (_immich_bootout.changed | default(false))
+  register: _immich_bootstrap
+  changed_when: true
+  until: _immich_bootstrap.rc == 0
+  retries: 5
+  delay: 1
+
+- name: "Kickstart Immich label when only log dir changed — {{ _immich_label }}"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - kickstart
+      - -k
+      - "system/{{ _immich_label }}"
+  become: true
+  when:
+    - not ansible_check_mode
+    - _immich_want_running | bool
+    - _immich_launch_state.rc == 0
+    - not (_immich_plist.changed | default(false))
+    - immich_log_dir_state.changed | default(false)
+  changed_when: true
+  failed_when: false

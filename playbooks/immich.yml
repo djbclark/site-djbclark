@@ -1,0 +1,11 @@
+---
+# Site-owned Immich system-domain LaunchDaemons (Phase F3).
+# Requires become for /Library/LaunchDaemons + launchctl system domain.
+#   just immich-apply -- --ask-become-pass
+- name: Configure Immich LaunchDaemons
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  roles:
+    - role: immich

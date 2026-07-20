@@ -1,0 +1,56 @@
+---
+# roles/immich — Immich system-domain LaunchDaemons (Phase F3).
+#
+# Live install source (survey 2026-07-20): unofficial native macOS installer
+# v2.2.3 (immich-native-macos) → /opt/services/immich, user immich (uid 9999).
+# Labels intentionally keep com.immich.* (native-installer contract), not
+# com.<site_ns>.* — site ownership is the Ansible role + registry claims.
+# See roles/immich/README.md.
+
+immich_enabled: true
+
+# Service identity (must match live dscl user).
+immich_user: immich
+immich_uid: 9999
+immich_group: immich
+immich_gid: 9999
+
+# Paths (native installer layout).
+immich_root: /opt/services/immich
+immich_app: "{{ immich_root }}/app"
+immich_home: "{{ immich_root }}/home"
+immich_upload: "{{ immich_root }}/upload"
+immich_env_file: "{{ immich_root }}/env"
+immich_log_dir: /var/log/immich
+immich_server_start: "{{ immich_app }}/start.sh"
+immich_ml_start: "{{ immich_app }}/machine-learning/start.sh"
+
+# LaunchDaemon labels — intentional keep of com.immich.* (DEVIATION from
+# com.<site_ns>.*: matches unofficial installer plists / updatepaths.sh /
+# uninstall.sh; relabeling would break reinstall paths and is pure churn
+# while the app tree is absent).
+immich_server_label: com.immich
+immich_ml_label: com.immich.machine-learning
+
+# Plist filenames on disk (upstream uses dots in the ML filename).
+immich_server_plist_name: com.immich.plist
+immich_ml_plist_name: com.immich.machine.learning.plist
+immich_launchdaemons_dir: /Library/LaunchDaemons
+immich_server_plist: "{{ immich_launchdaemons_dir }}/{{ immich_server_plist_name }}"
+immich_ml_plist: "{{ immich_launchdaemons_dir }}/{{ immich_ml_plist_name }}"
+
+# Ports from native installer README / start scripts (loopback after install).
+# Register before claiming live; status stays planned until HTTP health passes.
+immich_web_port: 3001
+immich_web_bind: "127.0.0.1"
+immich_microservices_port: 3002
+immich_ml_port: 3003
+immich_ml_bind: "127.0.0.1"
+
+# Health probe (server API ping when app is present).
+immich_health_url: "http://{{ immich_web_bind }}:{{ immich_web_port }}/api/server/ping"
+immich_health_timeout_sec: 5
+
+# When start.sh is missing, disable labels (stop KeepAlive EX_CONFIG thrash).
+# When present, ensure enabled + loaded.
+immich_require_app: true
