@@ -14,22 +14,23 @@ stayturgid ADR 005).
 | `docs/plans/site-djbclark-step0-plan-v1.md` | Goose + LiteLLM AI-stack plan (see amendment header) |
 | `registry/ports.yml`, `registry/paths.yml` | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py` |
 
-## LiteLLM proxy (Phase E1)
+## LiteLLM proxy (Phase E1 + E4 keys)
 
 The site-owned LiteLLM proxy runs as `com.djbclark.litellm` on
 `127.0.0.1:4000`. Apply it with `just litellm-apply`, dry-run it with
 `just litellm-check`, and inspect it with `just litellm-status`.
 
-Provider keys are optional until E4. Once a SecretSpec provider is configured,
-inject them only for the apply process; the role writes them into the live
-mode-0600 LaunchAgent and never into Git:
+**API Keys – Human Step (E4):** SecretSpec dotenv + LaunchAgent injection.
+Operator checklist (never commit keys):
+[`human/API-KEYS-E4.md`](human/API-KEYS-E4.md).
 
 ```bash
+# After secretspec defaults + .env keys exist:
 secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
 See `roles/litellm/README.md` for model routing, verification, and rollback.
-
+Goose against this proxy: `roles/goose/README.md`.
 ## OliveTin user actions (unused on this site)
 
 `stayturgid`'s D6 OliveTin projection (`control/site_contract/olivetin_projection.py`,

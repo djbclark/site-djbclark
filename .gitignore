@@ -1,4 +1,5 @@
 # Secret values and local credentials. Declarations remain committed.
+.env
 *.env
 *.pem
 *.key

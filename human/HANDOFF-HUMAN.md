@@ -7,9 +7,21 @@
 > **Index:** [human/README.md](README.md) · Agent context: [docs/handoff.md](../docs/handoff.md)
 > · Open work: [docs/options.md](https://github.com/djbclark/stayturgid/blob/master/docs/options.md)
 
-Last updated: **2026-07-10 afternoon** (review fixes + Fire wireless-debug self-heal + handoff)
+Last updated: **2026-07-20** (E4 SecretSpec / LiteLLM keys checklist)
 
 ---
+
+## Session notes (2026-07-20) — E4 agent completed (keys partially human)
+
+| Area | Status |
+| --- | --- |
+| SecretSpec operational | User `~/.config/secretspec/config.toml` uses `[defaults]` dotenv + default profile; site `.env` 0600 gitignored |
+| LiteLLM LaunchAgent keys | `ANTHROPIC_API_KEY` injected via `secretspec run -- just litellm-apply`; `OPENAI_API_KEY` still **human** if not set |
+| Completions / Goose | Proven with Anthropic (+ router fallbacks); full SIMPLE OpenAI path needs your OpenAI key |
+| Fieldy | Still `enabled: false`; enable + browser OAuth when ready — see `API-KEYS-E4.md` |
+| Shortwave / Saner | No Goose MCP — out of scope |
+
+**You do (if not done):** follow [`API-KEYS-E4.md`](API-KEYS-E4.md) — set `OPENAI_API_KEY`, re-apply LiteLLM, optional Fieldy OAuth. Do not paste secrets into `RESPONSES.md`.
 
 ## Session notes (2026-07-10 evening) — agent completed
 

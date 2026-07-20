@@ -29,22 +29,26 @@ just goose-check
 just goose-status
 ```
 
-## Provider and E4 boundary
+## Provider and SecretSpec boundary (E4)
 
 The managed provider targets `http://127.0.0.1:4000/v1` with model
 `smart-router`. Authentication is disabled at the Goose layer
 (`requires_auth: false`) because E1 binds LiteLLM to loopback without a master
 key.
 
-Until E4 configures SecretSpec and LiteLLM provider credentials:
+**API Keys – Human Step:** provider keys live in SecretSpec / LiteLLM, not in
+this role. Operator checklist: [`human/API-KEYS-E4.md`](../../human/API-KEYS-E4.md).
 
-- `curl http://127.0.0.1:4000/v1/models` works
-- `goose info -v` shows `litellm-local` / `smart-router`
-- `goose run --no-session -t "…"` starts but hangs or fails once LiteLLM tries
-  upstream provider completion — expected missing-credential behavior
+```bash
+# After keys are in the LiteLLM LaunchAgent (secretspec run → just litellm-apply):
+goose info -v    # litellm-local / smart-router
+goose run --no-session -t "Reply with exactly the word PONG and nothing else."
+```
 
-Do not invent API keys in this role or configure SecretSpec here.
-
+Partial keys: if only `ANTHROPIC_API_KEY` is injected, LiteLLM can still answer
+via COMPLEX / Anthropic and router **fallbacks** to `claude-sonnet-5`, but
+OpenAI-only tiers fail until `OPENAI_API_KEY` is set and LiteLLM is re-applied.
+Do not invent API keys in this role.
 ## E3 MCP research findings (2026-07-20)
 
 Step0 guessed package names (`@shortwave/mcp-server`, `@saner-ai/mcp-server`,
@@ -97,14 +101,23 @@ Step0 guessed package names (`@shortwave/mcp-server`, `@saner-ai/mcp-server`,
 First filesystem tool use downloads the npm package via `npx -y` (network).
 This role does **not** pre-install MCP packages at apply time.
 
-### What remains human / E4
+### Fieldy OAuth first-run (human; default stays disabled)
 
-1. SecretSpec + LiteLLM provider API keys (E4) so completions work.
-2. Fieldy: set `goose_ext_fieldy_enabled: true` (or re-apply after default flip)
-   and complete browser OAuth when Goose first connects to the extension.
-3. Shortwave / Saner: no Goose extension until a vendor ships a real MCP server;
-   operator may revisit research if products change.
+`goose_ext_fieldy_enabled` remains **`false`** until the operator is ready.
+Do not flip the role default in git until OAuth has succeeded once on this host.
 
+```bash
+# When ready: enable only for this apply, then complete browser OAuth on first use
+just goose-apply -- -e goose_ext_fieldy_enabled=true
+# Goose Desktop/CLI → first Fieldy tool call → browser OAuth (Fieldy account email)
+```
+
+Full steps: [`human/API-KEYS-E4.md`](../../human/API-KEYS-E4.md) §4.
+
+### Shortwave / Saner — out of scope
+
+No Goose-facing MCP servers exist (E3 research). Comment stubs only; do not
+install guessed packages.
 ## Rollback
 
 ### Full E2 provider rollback

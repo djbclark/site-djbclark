@@ -20,19 +20,54 @@ just litellm-check
 just litellm-status
 ```
 
-The keyless E1 state is intentional: `/v1/models` and routing classification
-work, while provider completions wait for E4. After configuring a SecretSpec
-provider, inject `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` at apply time:
+### API Keys – Human Step (E4)
 
-```bash
-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
-```
+Provider completions need real keys. **Never commit keys.** Full operator
+checklist: [`human/API-KEYS-E4.md`](../../human/API-KEYS-E4.md).
+
+1. SecretSpec user defaults (local, not git) must use the 0.16 `[defaults]`
+   table — bare top-level `provider = "dotenv"` is ignored:
+
+   ```toml
+   # ~/.config/secretspec/config.toml
+   [defaults]
+   provider = "dotenv"
+   profile = "default"
+   ```
+
+2. Store values in the site dotenv (gitignored `*.env` / `.env`, mode 0600):
+
+   ```bash
+   cd /Users/djbclark/ops/site-djbclark
+   secretspec set OPENAI_API_KEY
+   secretspec set ANTHROPIC_API_KEY
+   secretspec check -n --explain   # presence only; no values printed
+   ```
+
+3. Inject into the LaunchAgent at apply time (keys are not read live from
+   SecretSpec by the daemon):
+
+   ```bash
+   secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+   ```
+
+4. Verify (expect 200 once the matching key is in the plist):
+
+   ```bash
+   curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
+   # SIMPLE vs multi-step REASONING — tiers differ in the decision log
+   rg 'ComplexityRouter: routing decision' ~/Library/Logs/litellm/stderr.log | tail
+   ```
 
 The committed config references `os.environ/...`; values are rendered only
 into `~/Library/LaunchAgents/com.djbclark.litellm.plist`, which is mode 0600.
 The proxy has no master key while it is bound to loopback. Add authentication
 before any future Tailscale bind or multi-user access.
 
+**Cold start / heal:** first launchd boot can take ~30–90s of Python import
+before `:4000` listens. After missing-key completion storms, stderr can grow
+large and the process can wedge — `launchctl bootout` /
+`launchctl bootstrap` the label and rotate logs if needed (see human checklist).
 ## Routing and cache
 
 The `smart-router` alias uses the LiteLLM Auto Router v2 tiers documented on

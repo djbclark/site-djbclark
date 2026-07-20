@@ -49,11 +49,17 @@ inventory-check:
 lint:
     bin/registry_lint.py
 
-# Install/configure the loopback-only LiteLLM proxy (Phase E1).
-# To inject provider keys after E4, wrap this recipe with SecretSpec:
+# Install/configure the loopback-only LiteLLM proxy (Phase E1 + E4 keys).
+# Keys: see human/API-KEYS-E4.md — never commit secrets.
 # secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 litellm-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml {{ args }}
+
+# Apply with SecretSpec injection from site .env (requires TELEGRAM_BOT_TOKEN
+# resolved because it is required in secretspec.toml; OPENAI/ANTHROPIC optional
+# until set).
+litellm-apply-secrets *args:
+    secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
 
 litellm-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml
