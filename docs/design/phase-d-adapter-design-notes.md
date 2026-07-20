@@ -275,3 +275,29 @@ to Mac vector 0.0.0.0:4318). Rollout decisions:
    to write anywhere. (R1 A-3 / M1-Q.) Accepted because no inject-mode site
    exists yet to validate real auto-detect against — implement it once one
    does.
+
+## 6. Operator decision — D7 route scheme / stayturgid §11 #9 (2026-07-19)
+
+**Decided — Choice E (hybrid, convenience-max front door):**
+
+- Front door host remains `caddy_public_hostname`
+  (`mac.greyhound-sidemirror.ts.net`); landing stays at `/`.
+- Existing path-prefix routes kept: `/dashboard/`, `/opencode/`, `/vlm/`,
+  `/stats/` (Caddy `handle_path` strip-prefix pattern already in
+  `stayturgid.caddy.j2`).
+- **Add** O-V-G-O UI routes on the same host (not subdomains):
+
+  | Path | Backend (registry) |
+  | --- | --- |
+  | `/grafana/` | grafana :3000 |
+  | `/oo/` | openobserve-http :5080 |
+  | `/olivetin/` | olivetin :1337 |
+  | `/vm/` | victoriametrics :8428 (optional but included) |
+
+- Prefer `handle_path` so backends see `/`. Apps that break under a subpath
+  (e.g. Grafana `root_url` / `serve_from_sub_path`) get config fixes in the
+  same baton; if still broken, promote **only that app** to a subdomain later
+  without abandoning Choice E for the rest.
+- Auth remains Tailscale-network trust (no new Caddy auth in this decision).
+- Implementation is a **small queued baton** (`D7-ROUTES-E`), not full D7
+  legacy-monitor retirement.

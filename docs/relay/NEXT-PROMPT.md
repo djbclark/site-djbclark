@@ -1,103 +1,103 @@
-# NEXT: E1 — LiteLLM role (Phase E AI stack) (difficulty 50/100)
+# NEXT: D7-ROUTES-E — Caddy Choice E front-door routes (difficulty 35/100)
 
-**Funding plan context:** FUND-B revised Phase D recovery is done (M1-R → M1-F
-→ M1-Q → R3 closed Phase D). D9 just closed the last step2-plan §5 box that
-FUND-B never scheduled. **Phase E begins** per step2 plan §6.
+**Funding plan context:** FUND-B Phase D recovery closed (R3). D9 logging
+close-out done. Operator **decided D7 route scheme §11 #9 = Choice E**
+(2026-07-19; design notes §6 + ledger). This baton is the **small
+implementation** of that decision only — **not** full D7 (do not retire
+dashboard.py / fleet-health / 4097 here).
 
 **Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
-recheck quotas with `codexbar usage --format json --provider all` to a file in
-the background before starting — never pipe through `head`):
+recheck quotas with `codexbar usage --format json --provider all` to a file
+in the background before starting — never pipe through `head`):
 
 - **Primary —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 · `grok-4.5` ·
   Low, Medium, High (default High) · _Flagship for code + agentic work_ —
-  effort **High** (role + config + live verify; step2 row's "Codex (high)" is
-  preferred once weekly resets ~Jul 25 — until then Grok is the working
-  flagship). Self-passoff from D9 is fine.
+  effort **Medium** (Caddy fragment + app root_url + landing links + verify).
 - **Alternate —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
-  Code/API) · _Default for most plans_ — **original account**, High.
-- **Escalation / preferred after reset —** Codex 0.144.6 (oauth) · OpenAI ·
-  GPT-5.6 Sol · `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra ·
-  _Flagship; complex coding, computer use, research, cybersecurity_ — **High**,
-  **prefer after the ~Jul 25 weekly reset** (step2 plan's named pick for E1).
+  Code/API) · _Default for most plans_ — **original account**, Medium.
+- **Escalation —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
+  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship_ —
+  Medium, after ~Jul 25 weekly reset if stuck on Grafana subpath.
 
-**Working dir:** `/Users/djbclark/ops/site-djbclark` (LiteLLM is a **site**
-role under `roles/`, not stayturgid). stayturgid only if you need the
-homebrew-prefix / launchd patterns as reference. `git fetch origin --prune &&
-git pull --ff-only origin master` in both before starting. Required reading:
-`docs/relay/PROTOCOL.md`, step2 plan §0 ground rules + §2 risk register + §6
-E1 row (`docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`), and
-step0 AI-stack design as amended (header note + risk register in step2).
+**Working dir:** `/Users/djbclark/ops/stayturgid` (Caddy fragment template +
+any Grafana provisioning root_url; branch + PR) and
+`/Users/djbclark/ops/site-djbclark` (ledger/baton; landing links if site-owned;
+straight to master). `git fetch origin --prune && git pull --ff-only origin
+master` in both before starting. Required reading:
+`docs/relay/PROTOCOL.md`, step2 plan §0 + §2
+(`docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`), design notes
+§6 Choice E
+(`docs/design/phase-d-adapter-design-notes.md`), live fragment
+`generated/stayturgid/fragments/caddy/stayturgid.caddy` and template
+`control/site_contract/sync_templates/fragments/caddy/stayturgid.caddy.j2`.
 
 ---
 
-You are running **E1 — `roles/litellm`** per the step2 plan §6:
+You are implementing **Choice E front-door routes** for O-V-G-O UIs.
 
-> `roles/litellm`: uv tool install (pin ≥1.94), config template (Auto Router
-> v2 syntax verified against **live docs**, not memory),
-> `com.djbclark.litellm` plist, secretspec entries, port 4000.
+## Decided scheme (do not re-litigate)
+
+Front door: `https://mac.greyhound-sidemirror.ts.net` (site
+`caddy_public_hostname`). Landing stays at `/`. Keep existing
+`/dashboard/`, `/opencode/`, `/vlm/`, `/stats/`.
+
+**Add** (Caddy `handle_path`, strip prefix, reverse_proxy to registry ports):
+
+| Path | Service | Port key (registry) |
+| --- | --- | --- |
+| `/grafana/` | grafana | 3000 / `grafana` |
+| `/oo/` | openobserve HTTP | 5080 / `openobserve-http` |
+| `/olivetin/` | olivetin | 1337 / `olivetin` |
+| `/vm/` | victoriametrics | 8428 / `victoriametrics` |
+
+Port numbers **only** from site `registry/ports.yml` (StrictUndefined).
 
 ## Task
 
-1. Implement `roles/litellm` in the site repo: uv tool install with pinned
-   LiteLLM ≥1.94, config template, launchd plist label `com.djbclark.litellm`,
-   secretspec entries for provider keys (no secrets in git), registry port
-   **4000**.
-2. **Verify Auto Router v2 syntax against current LiteLLM docs** (fetch live
-   docs; do not invent router YAML from memory).
-3. Wire into site inventory / just recipes as the existing serverapp / role
-   patterns do (mirror Grafana/OliveTin adapter style only where it fits —
-   LiteLLM is site-owned, not a stayturgid product fragment).
-4. Self-verify (FUND-B: no human gate):
-   - `curl -sS http://127.0.0.1:4000/v1/models` succeeds when the service is up
-   - A SIMPLE and a REASONING prompt route to **different** tiers (check
-     LiteLLM logs for model selection evidence)
-   - `bin/registry_lint.py` clean; port 4000 claimed in `registry/ports.yml`
-   - secretspec resolves; no world-readable secret files (0600)
-   - rollback path noted in the ledger (bootout new label; leave any prior
-     path intact until a later session)
+1. Extend `stayturgid.caddy.j2` (and re-render via site-sync) so the live
+   fragment includes the four routes **before** the catch-all landing
+   `handle { … }`.
+2. Fix app base-path / `root_url` as required so UIs work under subpaths
+   (Grafana is the usual offender: `serve_from_sub_path` / `root_url`).
+   OliveTin / OpenObserve / VM: verify; if one app cannot do subpaths,
+   document DEVIATION and either fix config or note subdomain follow-up —
+   do not abandon Choice E for the others.
+3. Update landing / network services directory links to the new HTTPS paths
+   (so operators never need raw ports for these UIs).
+4. Apply: `just site-sync` / `just site-serverapps` as appropriate so Caddy
+   reloads (fragment checksum / M1-F reload paths). **Before/after health:**
+   `curl` caddy `/health`, HTTPS front door, and each new path (expect 200
+   or app login page, not 502).
+5. Rollback note in ledger: revert fragment + re-apply; or bootout/bootstrap
+   caddy label path already documented for D1.
 
 ## Constraints
 
-- Small, focused PR/commit scope: LiteLLM role + registry + secretspec +
-  docs checklist stubs only. Do not start E2 (Goose) in this session.
-- Never commit API keys. Operator key entry is E4's human checklist; E1
-  should leave secretspec keys defined and empty/placeholder-safe.
-- Site repo: straight to master. stayturgid: branch+PR only if you truly need
-  a product change (you should not for E1).
+- **Scope:** routes + app subpath config + landing links + verify. **Not**
+  full D7: do **not** delete `dashboard.py`, fleet-health, access_monitor, or
+  retire 4097.
+- stayturgid: branch + PR, merge same session when CI green (admin only if
+  GitHub 503 flake after local green). site: ledger/baton straight to master.
+- No secrets in commits. Tailscale trust remains the auth model (no new
+  Caddy basic-auth unless trivial and already patterned).
 
-## Carry-forward (not E1 work unless free)
+## Carry-forward
 
-- **Next project code review MUST cover (2026-07-19 fleet batch):** stayturgid#29 (sticky a11y detect, catastrophic-alert 2h window, Fire OS skip-catastrophic); AutoJs6#1 sticky rebind + debug17 LeakCanary-off; ASCII-only on-device path policy and retirement of `/sdcard/脚本/stayturgid` + `/sdcard/Scripts/stayturgid` mirrors (p7a SyntaxError Invalid quantifier). Do not drop these from the review scope.
-
-- **OPERATOR decision still open — D7 route scheme (§11 #9) — explain only, do not implement without a decision:**
-  This is **not** “finish retiring dashboard.py” alone. Two linked choices:
-  1. **Caddy route naming** for stayturgid-generated fragments (path-prefix
-     scheme already partially adopted vs other naming conventions).
-  2. **Whether O-V-G-O UIs get front-door routes** on the public/Tailscale
-     Caddy (e.g. `/grafana`, `/oo`, `/olivetin`) or stay **localhost-only** /
-     direct ports only.
-  Today the HTTPS front door serves landing; Grafana/OpenObserve/OliveTin may
-  lack named front-door paths. Closing this is an **architecture preference**
-  (security surface vs convenience). Options: (a) accept path-prefix as-is and
-  record “accepted as-is” in the ledger; (b) queue a small baton to add/rename
-  routes. **Do not expand E1 into Caddy work** unless the operator explicitly
-  decides and asks for implementation.
-
-- **D9 fleet notes:** s24/p7a dual-write code is deployed (repair+log.js match
-  master); AutoJs6 watchdog still not cycling on s24/p7a (device-ops). p7a
-  still has a11y/bootloop flags in fleet-health. hd8 otelcol disabled
-  (pending-incompatible-runtime). `deploy-termux` hits a pre-existing CFEngine
-  `cf-serverd.cf` Jinja template parse error — owner stayturgid termux_userland
-  (deferred from D9).
-- Verification baseline at D9 close: stayturgid `node tests/js/log.test.js`
-  24/24; dual-write live on all three devices for **repair**; full `just test`
-  was 497 passed / 1 skipped at M1-Q/R3 (re-run if you touch stayturgid).
+- **After this baton → E1 LiteLLM** (step2 §6). Rewrite NEXT-PROMPT for E1
+  with full catalog AI rows; do not start Goose (E2).
+- **Next project code review MUST include:** stayturgid#29/#30/#31 (sticky
+  a11y, catastrophic 2h window, Fire skip-catastrophic, ASCII paths, sticky
+  degraded); AutoJs6#1 + debug17 LeakCanary-off; this D7-ROUTES-E change.
+- Operator GUI available for Accessibility OFF→ON / run main.js if fleet
+  work blocks.
+- Fleet baseline: health OK on s24/p7a/hd8; main.js auto-running; canonical
+  AutoJs6 path only `/sdcard/stayturgid/autojs6`.
 
 ## End of session
 
-Per `docs/relay/PROTOCOL.md`: self-verify with recorded evidence, one `E1`
-ledger line, rewrite `NEXT-PROMPT.md` for **E2** (Goose), commit/push (site
-straight to master; stayturgid only if needed, then merge PR same-session and
-end on pulled master), print the new baton in chat and
+Per `docs/relay/PROTOCOL.md`: self-verify with recorded evidence (curl
+matrix, site-sync/apply, commits/PR), one ledger line `D7-ROUTES-E`, rewrite
+`NEXT-PROMPT.md` for **E1**, commit/push both repos (stayturgid PR merged +
+master pulled; site on master), print the new baton and
 `pbcopy < docs/relay/NEXT-PROMPT.md`.
