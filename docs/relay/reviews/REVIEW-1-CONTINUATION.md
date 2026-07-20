@@ -1,8 +1,10 @@
 # REVIEW-1 CONTINUATION — paste-able successor prompt
 
-**Status: IN PROGRESS** (updated at each checkpoint; if this says IN PROGRESS
-and you are a fresh AI session, the previous session died mid-run — resume
-from "Next actions" below.)
+**Status: COMPLETE (2026-07-20).** REVIEW-1 finished and wrapped up: findings
+in `REVIEW-1-findings.md`, ledger line appended, E1 baton restored in
+`docs/relay/NEXT-PROMPT.md`, stayturgid PR #33 merged (master `6ca9d31`),
+site fixes in `08409bf`, front door + daemons verified. No successor action
+needed — next session takes the E1 baton.
 
 You are continuing **REVIEW-1: whole-repo code review + fix** across
 `~/ops/stayturgid`, `~/ops/site-djbclark`, `~/src/AutoJs6`. Read
