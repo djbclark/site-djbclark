@@ -55,23 +55,29 @@ hosts:
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.
 
-      # ── brew-services / unmanaged (observed; adopt in Phase F) ───────────
-      - {port: 6379,  bind: "127.0.0.1", owner: unmanaged, service: redis,        status: active}
+      # ── brew-services / F2 audit (docs/relay/audits/F2-brew-services-audit.md)
+      - {port: 6379,  bind: "127.0.0.1", owner: unmanaged, service: redis,        status: active,
+         note: "F2: homebrew.mxcl.redis; DBSIZE 0; default recommend stop+uninstall pending human/F2-BREW-SERVICES-DECISIONS"}
+      - {port: 8000,  bind: "127.0.0.1", owner: site, service: omlx,              status: active,
+         note: "F2: homebrew.mxcl.omlx (jundot/omlx); local MLX LLM; was TODO-identify"}
       - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
       - {port: 3283,  bind: "*",         owner: unmanaged, service: apple-remote-desktop, status: active}
       - {port: 445,   bind: "*",         owner: unmanaged, service: smb,          status: active}
       - {port: 88,    bind: "*",         owner: unmanaged, service: kerberos-macos, status: active}
       - {port: 17500, bind: "*",         owner: unmanaged, service: dropbox-lansync, status: active}
       - {port: 5938,  bind: "*",         owner: unmanaged, service: teamviewer,   status: active}
-      - {port: 8000,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
       - {port: 8021,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
-      - {port: 9000,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9000,  bind: "*",         owner: unmanaged, service: photosync,    status: active,
+         note: "F2: PhotoSync app (not homebrew.mxcl)"}
       - {port: 9350,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
-      - {port: 9999,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9999,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active,
+         note: "F2: java process observed; still TODO-identify app name"}
       - {port: 3031,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
-      - {port: 15220, bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
-      # postgresql@14 (homebrew.mxcl) currently exit-status 78 — not listening;
-      # mariadb installed but not observed listening. Register when adopted.
+      - {port: 15220, bind: "*",         owner: unmanaged, service: octoclip,     status: active,
+         note: "F2: Octoclip app (not homebrew.mxcl)"}
+      # postgresql@14: formula gone; orphaned agent exit 78 — not listening (F2 remove-candidate).
+      # postgresql@18 installed, service none. mariadb installed, service none, 3306 free.
+      # Register 5432/3306 only when a service is adopted and started.
 
   # E5: Intel Mac mini — same loopback LiteLLM port claim; host offline/unprovisioned
   # on the tailnet as of 2026-07-20. status planned until first successful apply.

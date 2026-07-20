@@ -21,6 +21,7 @@ Agent work menu: [docs/options.md](https://github.com/djbclark/stayturgid/blob/m
 | ---------------------- | -------------------------------- | ---------- |
 | `HANDOFF-HUMAN.md`     | Agent (task list, session notes) | yes        |
 | `API-KEYS-E4.md`       | Agent (SecretSpec / LiteLLM / Fieldy first-run) | yes |
+| `F2-BREW-SERVICES-DECISIONS.md` | Operator keep/kill sign-off (F2 audit) | yes |
 | `RESPONSES.md.example` | Template                         | yes        |
 | `RESPONSES.md`         | **You** (outcomes, approvals)    | gitignored |
 

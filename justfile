@@ -111,3 +111,31 @@ site-agents-status:
     else \
       echo "launchd: not loaded (com.djbclark.hibernate-disk-check)"; \
     fi
+
+# F2: re-survey homebrew.mxcl services (read-only). Audit doc:
+# docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md
+brew-services-audit:
+    @echo "=== brew services list ==="
+    @brew services list
+    @echo ""
+    @echo "=== launchctl homebrew.mxcl.* ==="
+    @launchctl list 2>/dev/null | rg 'homebrew\.mxcl' || true
+    @echo ""
+    @echo "=== listeners (postgres/redis/mysql/omlx/et/ui-tars ports) ==="
+    @lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | rg -i 'postgres|redis|mysql|maria|omlx|llama|etserver|:6379|:5432|:3306|:2022|:8000|:8081' || true
+    @echo ""
+    @echo "=== probes ==="
+    @nc -z -w 2 127.0.0.1 2022 >/dev/null 2>&1 && echo "et :2022 open" || echo "et :2022 closed"
+    @if command -v redis-cli >/dev/null 2>&1; then \
+      echo -n "redis: "; redis-cli -h 127.0.0.1 ping 2>/dev/null || echo "unreachable"; \
+      echo -n "redis DBSIZE: "; redis-cli -h 127.0.0.1 DBSIZE 2>/dev/null || true; \
+    else \
+      echo "redis-cli: not installed"; \
+    fi
+    @echo ""
+    @echo "=== formula presence (key F2 candidates) ==="
+    @for f in et postgresql@14 postgresql@18 redis mariadb herdr omlx; do \
+      if brew list --formula "$$f" >/dev/null 2>&1; then echo "INSTALLED $$f"; else echo "ABSENT   $$f"; fi; \
+    done
+    @echo ""
+    @echo "Full write-up: docs/relay/audits/F2-brew-services-audit.md"
