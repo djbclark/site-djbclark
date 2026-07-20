@@ -54,11 +54,10 @@ prefixes:
     # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
     # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
     # Operator keep/kill sign-off: human/F2-BREW-SERVICES-DECISIONS.md
-    - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal port 2022; system LaunchDaemon is live; user LaunchAgent exit 78 dual-load — remove user agent (operator gate)"}
+    - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal port 2022; system LaunchDaemon is live; user LaunchAgent removed 2026-07-20 (operator Accept, RESIDUAL-EF) — dual-load noise resolved"}
     - {label: homebrew.mxcl.ui-tars,        claimed_by: stayturgid, note: "VLM llama.cpp server port 8081; custom plist not a brew formula"}
-    - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2 remove-candidate: formula uninstalled; orphaned KeepAlive agent exit 78; data dir /opt/homebrew/var/postgresql@14 remains (~50MB, last down 2026-06-27)"}
+    - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
-    - {label: homebrew.mxcl.redis,          claimed_by: unmanaged,  note: "F2 remove-candidate: 127.0.0.1:6379 started, DBSIZE 0, no site consumer; operator gate to stop+uninstall"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
     - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "F2 keep: workstation AI workspace manager; UDS only (~/.config/herdr); no Ansible role yet"}
     - {label: homebrew.mxcl.omlx,           claimed_by: site,       note: "F2 keep: local MLX LLM server 127.0.0.1:8000; no Ansible role yet"}

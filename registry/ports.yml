@@ -64,8 +64,7 @@ hosts:
       # system-state-backup, hibernate-disk-check — no ports.
 
       # ── brew-services / F2 audit (docs/relay/audits/F2-brew-services-audit.md)
-      - {port: 6379,  bind: "127.0.0.1", owner: unmanaged, service: redis,        status: active,
-         note: "F2: homebrew.mxcl.redis; DBSIZE 0; default recommend stop+uninstall pending human/F2-BREW-SERVICES-DECISIONS"}
+      # redis (6379): stopped + uninstalled 2026-07-20 (operator Accept, RESIDUAL-EF) — claim dropped.
       - {port: 8000,  bind: "127.0.0.1", owner: site, service: omlx,              status: active,
          note: "F2: homebrew.mxcl.omlx (jundot/omlx); local MLX LLM; was TODO-identify"}
       - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
@@ -83,7 +82,7 @@ hosts:
       - {port: 3031,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
       - {port: 15220, bind: "*",         owner: unmanaged, service: octoclip,     status: active,
          note: "F2: Octoclip app (not homebrew.mxcl)"}
-      # postgresql@14: formula gone; orphaned agent exit 78 — not listening (F2 remove-candidate).
+      # postgresql@14: formula gone; orphaned agent removed 2026-07-20 (operator Accept, RESIDUAL-EF).
       # postgresql@18 installed, service none. mariadb installed, service none, 3306 free.
       # Register 5432/3306 only when a service is adopted and started.
 

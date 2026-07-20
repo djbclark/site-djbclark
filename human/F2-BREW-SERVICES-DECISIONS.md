@@ -8,15 +8,15 @@ Record **Accept** (default recommendation) or **Override** with a one-line reaso
 
 | # | Service | Default recommendation | Operator decision | Date / initials |
 | --- | --- | --- | --- | --- |
-| 1 | `homebrew.mxcl.et` (system) | **KEEP** stayturgid | | |
-| 2 | `homebrew.mxcl.et` (user agent error 78) | **REMOVE user agent only** — leave system daemon | | |
-| 3 | `homebrew.mxcl.ui-tars` | **KEEP** stayturgid | | |
-| 4 | `homebrew.mxcl.postgresql@14` (orphaned) | **REMOVE agent + decide data dir** | | |
-| 5 | `postgresql@18` (installed, not started) | **DEFER** — leave off | | |
-| 6 | `homebrew.mxcl.redis` | **STOP + uninstall** (empty DB, no consumers) | | |
-| 7 | `mariadb` (installed, not started) | **LEAVE STOPPED**; uninstall later if unused | | |
-| 8 | `homebrew.mxcl.herdr` | **KEEP** site workstation (no role yet) | | |
-| 9 | `homebrew.mxcl.omlx` | **KEEP** site (port 8000; no role yet) | | |
+| 1 | `homebrew.mxcl.et` (system) | **KEEP** stayturgid | Accept | 2026-07-20 / djbc |
+| 2 | `homebrew.mxcl.et` (user agent error 78) | **REMOVE user agent only** — leave system daemon | Accept | 2026-07-20 / djbc |
+| 3 | `homebrew.mxcl.ui-tars` | **KEEP** stayturgid | Accept | 2026-07-20 / djbc |
+| 4 | `homebrew.mxcl.postgresql@14` (orphaned) | **REMOVE agent + decide data dir** | Accept — remove agent, preserve data dir (defer delete) | 2026-07-20 / djbc |
+| 5 | `postgresql@18` (installed, not started) | **DEFER** — leave off | Accept | 2026-07-20 / djbc |
+| 6 | `homebrew.mxcl.redis` | **STOP + uninstall** (empty DB, no consumers) | Accept | 2026-07-20 / djbc |
+| 7 | `mariadb` (installed, not started) | **LEAVE STOPPED**; uninstall later if unused | Accept | 2026-07-20 / djbc |
+| 8 | `homebrew.mxcl.herdr` | **KEEP** site workstation (no role yet) | Accept | 2026-07-20 / djbc |
+| 9 | `homebrew.mxcl.omlx` | **KEEP** site (port 8000; no role yet) | Accept | 2026-07-20 / djbc |
 
 ## Suggested commands (only after decision signed)
 

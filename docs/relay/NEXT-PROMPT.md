@@ -1,22 +1,29 @@
-# NEXT: RESIDUAL-EF — operator-gated residuals from Phase E/F (difficulty 25/100)
+# NEXT: RESIDUAL-EF — operator-gated residuals from Phase E/F (difficulty 20/100)
 
 **Funding plan context:** FUND-B Phase D, REVIEW-1, Phase E (E1–E5), Phase F
 (F1–F4), and REVIEW-EF are all closed with zero must-fix findings
-(`docs/relay/reviews/REVIEW-EF-findings.md`). This is **not** a further
-implementation step in the AI relay chain — it is a light triage baton that
-checks whether any of the three known operator-gated residuals have been
-unblocked, and executes the mechanical follow-through if so. If none have
-moved, the correct action is to say so and stop; do not invent new work.
+(`docs/relay/reviews/REVIEW-EF-findings.md`). Of the three original
+operator-gated residuals, **F2 (brew-services keep/kill) is now fully
+resolved** — the operator signed off interactively on 2026-07-20 (all 9 rows
+Accept, no overrides) and the mechanical follow-through executed: user-domain
+`et` agent removed, orphaned `postgresql@14` agent removed (data dir
+preserved), `redis` stopped + uninstalled, registry updated
+(`docs/relay/LEDGER.md` row `RESIDUAL-EF-F2` has full detail). **This baton
+only tracks the remaining two.** This is **not** a further implementation
+step in the AI relay chain — it is a light triage baton that checks whether
+either residual has been unblocked, and executes the mechanical
+follow-through if so. If neither has moved, the correct action is to say so
+and stop; do not invent new work.
 
 **Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
-quota snapshot taken 2026-07-20T15:59Z via `cswap list --json` +
+quota snapshot taken 2026-07-20T16:39Z via `cswap list --json` +
 `codexbar usage --format json --provider <name>` — **recheck live**, do not
 trust this snapshot):
 
 - **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
   Code/API) · _Default for most plans_ — use **`cswap` account 2
-  (djbclark@mit.edu)** (active; 5h **29%**, 7d **21%**, 7d reset Jul 25
+  (djbclark@mit.edu)** (active; 5h **36%**, 7d **22%**, 7d reset Jul 25
   ~05:00 local). This is mechanical triage, not judgment — Sonnet 5 is
   correctly sized; save Fable 5 for the eventual project-level final
   review. Original gmail account: 5h **2%**, 7d **70%** (reset Jul 24
@@ -54,40 +61,24 @@ git pull --ff-only origin master
 Required reading:
 
 - `docs/relay/PROTOCOL.md`
-- `docs/relay/reviews/REVIEW-EF-findings.md` (what was just verified clean —
-  do not re-review E1–F4, only check the three residuals below)
-- `docs/relay/LEDGER.md` (tail — F2/F3/E5/REVIEW-EF rows)
-- `human/F2-BREW-SERVICES-DECISIONS.md`
+- `docs/relay/reviews/REVIEW-EF-findings.md` (what was verified clean — do
+  not re-review E1–F4)
+- `docs/relay/LEDGER.md` (tail — F2/F3/E5/REVIEW-EF/RESIDUAL-EF-F2 rows;
+  the last row has the full F2 close-out detail)
 - `docs/relay/audits/F3-immich-adoption.md`
 - `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md` §0 ground
   rules + §10 (final review is separate and may wait)
 
 ---
 
-You are triaging **three specific, pre-existing operator-gated residuals**.
-For each: check whether it has moved; if yes, do the mechanical
-follow-through; if no, leave it alone and say so in the ledger note. Do not
-re-open REVIEW-EF's scope (E1–F4 code) — that review is done and clean.
+You are triaging **two specific, pre-existing operator-gated residuals**
+(F2 is closed — do not re-open it or touch `human/F2-BREW-SERVICES-
+DECISIONS.md` again). For each: check whether it has moved; if yes, do the
+mechanical follow-through; if no, leave it alone and say so in the ledger
+note. Do not re-open REVIEW-EF's scope (E1–F4 code) — that review is done
+and clean.
 
-## 1. F2 brew-services keep/kill sign-off
-
-Check `human/F2-BREW-SERVICES-DECISIONS.md` — all 9 rows were blank as of
-REVIEW-EF. If the operator has filled in any "Operator decision" cells:
-
-- For each **Accept**ed or **Override**n row, execute exactly the command(s)
-  the row calls for (the audit doc
-  `docs/relay/audits/F2-brew-services-audit.md` has the suggested commands
-  for the default recommendations; an Override may need a different
-  command — use judgment, but never touch a service whose row is still
-  blank).
-- Re-run `brew services list` before/after each change; update
-  `registry/paths.yml` `brew_services` claims and `registry/ports.yml` to
-  match the new live state (e.g. drop the `redis` port claim if
-  stopped+uninstalled); `bin/registry_lint.py` after every registry edit.
-- If **all** rows are still blank, do nothing here — note it in the ledger
-  and move on.
-
-## 2. F3 Immich app restore
+## 1. F3 Immich app restore
 
 Check `test -d /opt/services/immich/app` (or re-run `just immich-status`).
 If the app tree is now present (restored out-of-band by the operator/native
@@ -101,10 +92,10 @@ installer):
   `active`.
 - If the app tree is still absent, do nothing — note it and move on.
 
-## 3. E5 mini/VPS coming online
+## 2. E5 mini/VPS coming online
 
 Check whether `mac-mini-intel` or `vps-primary` are reachable
-(`ping`/`tailscale status`, or just try
+(`tailscale status`, or try
 `ANSIBLE_CONFIG=$PWD/ansible.cfg ansible -i inventory/hosts.yml <host> -m ping`).
 If either is now reachable:
 
@@ -120,24 +111,23 @@ If either is now reachable:
 - `bin/registry_lint.py` clean after any registry edit.
 - Any daemon you started/changed: health-curl + `launchctl print` evidence.
 - `git status` clean at session end; nothing left half-applied.
-- If you touched **nothing** (all three residuals still blocked), that is a
+- If you touched **nothing** (both residuals still blocked), that is a
   valid, complete session — do not manufacture work.
 
 ## End of session
 
 Follow `docs/relay/PROTOCOL.md`: append exactly one `RESIDUAL-EF` ledger row
-recording which of the three residuals (if any) moved and what you did.
+recording which residual (if any) moved and what you did.
 Rewrite `NEXT-PROMPT.md`:
 
-- If you executed real work (any of the three) → same `RESIDUAL-EF` shape
-  for whatever's still outstanding, OR if all three are now fully resolved,
-  write the **project-level final review** baton (Fable 5 Max, or
+- If you executed real work (F3 or E5) → same `RESIDUAL-EF` shape for
+  whatever's still outstanding, OR if both are now fully resolved, write
+  the **project-level final review** baton (Fable 5 Max, or
   `/code-review ultra` per repo, reading step1 + step2 + every diff since
   the last whole-repo review) per step2 §10.
-- If nothing moved (all three still blocked) → re-issue this same
-  `RESIDUAL-EF` baton essentially unchanged (fresh quota snapshot, same
-  three checks) — there is no reason to escalate model tier for a "nothing
-  changed" triage.
+- If nothing moved (both still blocked) → re-issue this same `RESIDUAL-EF`
+  baton essentially unchanged (fresh quota snapshot, same two checks) —
+  there is no reason to escalate model tier for a "nothing changed" triage.
 
 Commit/push straight to master, print the new baton in chat, and copy it to
 the clipboard:
