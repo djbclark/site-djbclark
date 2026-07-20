@@ -29,7 +29,9 @@ prefixes:
   site:
     - "~/ops/site-djbclark/**"
     - "~/Library/LaunchAgents/com.djbclark.*"   # de facto since system-state-backup
+    - "~/.config/systemd/user/com.djbclark.*"   # E5: Linux user units (LiteLLM et al.)
     - "~/.config/djbclark/**"                   # reserved; not yet populated
+    - "~/.local/state/litellm/**"               # E5: Linux LiteLLM logs/state
     - "~/ai-stack/**"                           # AI-stack runtime dir (step0), if kept
     - "~/.litellm/**"                           # LiteLLM config/cache (step0)
     - "~/system-state/**"                       # snapshot output; adopt in Phase F

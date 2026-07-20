@@ -58,5 +58,5 @@ router_settings:
     - claude-sonnet-5: [gpt-5.5, gpt-4o]
     - gpt-5.5: [claude-sonnet-5, gpt-4o]
 
-# No master_key while the proxy is loopback-only. E4 may add one if a local
-# client needs authentication; never widen the bind without revisiting auth.
+# No master_key while the proxy is loopback-only. Never widen litellm_bind
+# (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).

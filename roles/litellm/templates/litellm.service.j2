@@ -1,0 +1,31 @@
+# Managed by site-djbclark roles/litellm (E5). Local edits will be overwritten.
+# systemd --user unit. Mode 0600 — may embed provider API keys from apply-time env.
+# Loopback-only bind; do not change litellm_bind without a master-key / auth plan.
+# Boot without interactive login: loginctl enable-linger $USER (operator once).
+
+[Unit]
+Description=LiteLLM proxy (site {{ site_ns }})
+Documentation=file://{{ litellm_config_path }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ litellm_bin }} --config {{ litellm_config_path }} --host {{ litellm_bind }} --port {{ litellm_port }}
+Restart=on-failure
+RestartSec=5
+UMask=0077
+StandardOutput=append:{{ litellm_logs_dir }}/stdout.log
+StandardError=append:{{ litellm_logs_dir }}/stderr.log
+Environment=HOME={{ litellm_home }}
+Environment=PATH={{ litellm_service_path }}
+Environment=LITELLM_LOG=INFO
+{% if litellm_openai_api_key | length > 0 %}
+Environment=OPENAI_API_KEY={{ litellm_openai_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+{% endif %}
+{% if litellm_anthropic_api_key | length > 0 %}
+Environment=ANTHROPIC_API_KEY={{ litellm_anthropic_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+{% endif %}
+
+[Install]
+WantedBy=default.target

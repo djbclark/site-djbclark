@@ -1,11 +1,16 @@
 ---
 galaxy_info:
   author: djbclark
-  description: Site-owned loopback LiteLLM proxy managed by launchd
+  description: >-
+    Site-owned loopback LiteLLM proxy — Darwin LaunchAgent or Linux systemd
+    --user unit (Phase E1 + E5 multi-host)
   license: proprietary
   min_ansible_version: "2.16"
   platforms:
     - name: MacOSX
+      versions:
+        - all
+    - name: GenericLinux
       versions:
         - all
 dependencies: []

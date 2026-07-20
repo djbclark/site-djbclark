@@ -32,7 +32,7 @@
         <key>HOME</key>
         <string>{{ litellm_home }}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{{ litellm_home }}/.local/bin</string>
+        <string>{{ litellm_service_path }}</string>
         <key>LITELLM_LOG</key>
         <string>INFO</string>
 {% if litellm_openai_api_key | length > 0 %}

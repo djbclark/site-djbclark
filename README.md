@@ -14,22 +14,33 @@ stayturgid ADR 005).
 | `docs/plans/site-djbclark-step0-plan-v1.md` | Goose + LiteLLM AI-stack plan (see amendment header) |
 | `registry/ports.yml`, `registry/paths.yml` | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py` |
 
-## LiteLLM proxy (Phase E1 + E4 keys)
+## LiteLLM proxy (Phase E1 + E4 keys + E5 multi-host)
 
-The site-owned LiteLLM proxy runs as `com.djbclark.litellm` on
-`127.0.0.1:4000`. Apply it with `just litellm-apply`, dry-run it with
-`just litellm-check`, and inspect it with `just litellm-status`.
+The site-owned LiteLLM proxy listens on **`127.0.0.1:4000`** (loopback default;
+no public bind without a master-key / auth design).
 
-**API Keys – Human Step (E4):** SecretSpec dotenv + LaunchAgent injection.
-Operator checklist (never commit keys):
+| Host (inventory `site_litellm`) | Runtime | Default |
+| --- | --- | --- |
+| `m1-air` | launchd `com.djbclark.litellm` | **online** — `just litellm-apply` |
+| `mac-mini-intel` | launchd (Intel Homebrew `/usr/local`) | planned until online |
+| `vps-primary` | systemd user unit | planned until online |
+
+```bash
+just litellm-apply          # limit m1-air
+just litellm-check
+just litellm-status
+LITELLM_HOSTS=site_litellm just litellm-apply   # all members; skips unprovisioned
+```
+
+**API Keys – Human Step:** SecretSpec dotenv + unit injection (LaunchAgent or
+systemd user unit mode 0600). Checklist:
 [`human/API-KEYS-E4.md`](human/API-KEYS-E4.md).
 
 ```bash
-# After secretspec defaults + .env keys exist:
 secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
-See `roles/litellm/README.md` for model routing, verification, and rollback.
+See `roles/litellm/README.md` for multi-host, routing, verification, rollback.
 Goose against this proxy: `roles/goose/README.md`.
 ## OliveTin user actions (unused on this site)
 

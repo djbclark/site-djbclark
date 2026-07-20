@@ -1,0 +1,69 @@
+---
+# Darwin: user LaunchAgent com.<site_ns>.litellm (gui/<uid> domain).
+
+- name: Render secret-bearing LiteLLM LaunchAgent
+  ansible.builtin.template:
+    src: litellm.plist.j2
+    dest: "{{ litellm_plist_path }}"
+    mode: "0600"
+  register: _litellm_plist
+  no_log: true
+
+- name: Probe whether the LiteLLM LaunchAgent is loaded
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  register: _litellm_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out LiteLLM when its LaunchAgent changed
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootout
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_launch_state.rc == 0
+    - _litellm_plist.changed | default(false)
+  register: _litellm_bootout
+  changed_when: true
+
+- name: Bootstrap LiteLLM when unloaded or after a LaunchAgent change
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootstrap
+      - "gui/{{ litellm_uid }}"
+      - "{{ litellm_plist_path }}"
+  when:
+    - not ansible_check_mode
+    - >-
+      (_litellm_launch_state.rc != 0)
+      or (_litellm_bootout.changed | default(false))
+  register: _litellm_bootstrap
+  changed_when: true
+  until: _litellm_bootstrap.rc == 0
+  retries: 5
+  delay: 1
+
+- name: Kickstart LiteLLM after a tool or config-only change
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - kickstart
+      - -k
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_launch_state.rc == 0
+    - >-
+      (_litellm_config.changed | default(false))
+      or (_litellm_tool_install.changed | default(false))
+      or (_litellm_tool_repair.changed | default(false))
+    - not (_litellm_plist.changed | default(false))
+  changed_when: true

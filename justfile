@@ -49,24 +49,35 @@ inventory-check:
 lint:
     bin/registry_lint.py
 
-# Install/configure the loopback-only LiteLLM proxy (Phase E1 + E4 keys).
-# Keys: see human/API-KEYS-E4.md — never commit secrets.
+# Install/configure loopback LiteLLM (E1 + E4 keys + E5 multi-host).
+# Default limit m1-air (live). Other hosts: --limit mac-mini-intel|vps-primary|site_litellm
+# Keys: human/API-KEYS-E4.md — never commit secrets.
 # secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+litellm_hosts := env_var_or_default("LITELLM_HOSTS", "m1-air")
+
 litellm-apply *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml {{ args }}
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
 
 # Apply with SecretSpec injection from site .env (requires TELEGRAM_BOT_TOKEN
 # resolved because it is required in secretspec.toml; OPENAI/ANTHROPIC optional
-# until set).
+# until set). Same limit as litellm-apply (LITELLM_HOSTS / default m1-air).
 litellm-apply-secrets *args:
     secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
 
-litellm-check:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml
+litellm-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
 
+# Local host status (Air). Remote: ssh + curl loopback on that host, or
+# LITELLM_HOSTS=mac-mini-intel just litellm-status after it is online.
 litellm-status:
-    @launchctl print gui/$(id -u)/com.djbclark.litellm >/dev/null && echo "launchd: loaded"
-    @curl -fsS http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
+    @if launchctl print "gui/$(id -u)/com.djbclark.litellm" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.litellm)"; \
+    elif systemctl --user is-active com.djbclark.litellm.service >/dev/null 2>&1; then \
+      echo "systemd-user: active (com.djbclark.litellm.service)"; \
+    else \
+      echo "service: not loaded on this host"; \
+    fi
+    @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
 
 # Install/configure Goose Desktop + CLI against loopback LiteLLM (Phase E2).
 goose-apply *args:

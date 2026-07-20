@@ -48,9 +48,9 @@ hosts:
       - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: active,
          note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
 
-      # ── site: AI stack (step0 plan, revised per step1 §9) ────────────────
+      # ── site: AI stack (step0 plan, revised per step1 §9; E5 multi-host) ─
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
-         note: "E1: com.djbclark.litellm; keyless until E4; bind widens to Tailscale iff mini consumes it"}
+         note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
 
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.
@@ -73,10 +73,19 @@ hosts:
       # postgresql@14 (homebrew.mxcl) currently exit-status 78 — not listening;
       # mariadb installed but not observed listening. Register when adopted.
 
+  # E5: Intel Mac mini — same loopback LiteLLM port claim; host offline/unprovisioned
+  # on the tailnet as of 2026-07-20. status planned until first successful apply.
   mac-mini-intel:
-    ports: []   # populate when site management reaches the mini
+    ports:
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy, status: planned,
+         note: "E5: com.djbclark.litellm launchd; Homebrew /usr/local (Intel); loopback until auth story"}
 
-  # vps-*: populate per host when site management reaches the VPSs
+  # E5: first Linux VPS slot — systemd user unit, not launchd. Rename or add
+  # vps-* hosts in inventory + here when additional VPS identities exist.
+  vps-primary:
+    ports:
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy, status: planned,
+         note: "E5: com.djbclark.litellm systemd --user; loopback until master key + Tailscale bind design"}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:

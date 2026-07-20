@@ -9,10 +9,12 @@
 > [roles/goose/README.md](../roles/goose/README.md) · Declarations:
 > [secretspec.toml](../secretspec.toml)
 
-Last updated: **2026-07-20** (E4)
+Last updated: **2026-07-20** (E4 + E5 multi-host notes)
 
-This checklist is the step0 §5 / §7 human boundary for the M1 Air control node:
-SecretSpec provider wiring, LiteLLM provider credentials, and Fieldy OAuth.
+This checklist is the step0 §5 / §7 human boundary for LiteLLM provider
+credentials (and Fieldy OAuth). E1–E4 established the M1 Air control node;
+**E5** reuses the same SecretSpec inject pattern on every host that runs
+LiteLLM — do not invent a second secrets path.
 
 **Never commit** `.env`, API keys, or OAuth tokens. Site `.gitignore` already
 ignores `*.env`.
@@ -230,7 +232,44 @@ Do **not** flip the role default to `true` until OAuth succeeds on this host.
 
 ---
 
-## 6. Record outcomes
+## 6. Multi-host LiteLLM keys (E5)
+
+Inventory group `site_litellm`: `m1-air` (online), `mac-mini-intel` and
+`vps-primary` (planned / offline until you set `ansible_host` and clear
+`site_host_status`). See [`roles/litellm/README.md`](../roles/litellm/README.md).
+
+| Host | Service unit | Keys land in (mode 0600) |
+| --- | --- | --- |
+| `m1-air` | launchd `com.djbclark.litellm` | `~/Library/LaunchAgents/com.djbclark.litellm.plist` |
+| `mac-mini-intel` | same launchd label | same path on the mini (Intel Homebrew `/usr/local`) |
+| `vps-primary` | systemd user `com.djbclark.litellm.service` | `~/.config/systemd/user/com.djbclark.litellm.service` |
+
+**Preferred:** keep one site dotenv on the control node and inject at apply
+time (keys travel only into the remote unit file via Ansible, never into git):
+
+```bash
+cd /Users/djbclark/ops/site-djbclark
+# After mini/VPS are online and inventory ansible_host is set:
+LITELLM_HOSTS=mac-mini-intel secretspec run --reason "LiteLLM keys mini" -- just litellm-apply
+LITELLM_HOSTS=vps-primary secretspec run --reason "LiteLLM keys vps" -- just litellm-apply
+```
+
+**Alternate:** on each host, install SecretSpec, mirror `[defaults]` + a local
+0600 dotenv with the same declarations, and run apply on-host. Do not commit
+per-host `.env` files.
+
+Linux once-per-host: `loginctl enable-linger "$USER"` so the user unit survives
+logout. Still bind loopback only until a master-key / Tailscale auth design
+exists — **no public bind**.
+
+Verify per host (on that machine or via SSH to its loopback):
+
+```bash
+curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
+# Presence only — never paste unit env output into chat
+```
+
+## 7. Record outcomes
 
 Copy `RESPONSES.md.example` → `RESPONSES.md` (gitignored) and note, without
 pasting secrets:
@@ -242,5 +281,6 @@ pasting secrets:
 - [ ] `goose run` returned a model response
 - [ ] Fieldy OAuth done (or deferred)
 - [ ] Shortwave/Saner acknowledged as no Goose MCP
+- [ ] (E5) mini/VPS: inventory online + keys applied when hosts exist
 
 Tell the agent: _Read human/RESPONSES.md and continue._
