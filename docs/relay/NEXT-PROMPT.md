@@ -19,22 +19,22 @@ neither has moved, the correct action is to say so and stop; do not invent
 new work.
 
 **Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
-quota snapshot taken 2026-07-20T16:55Z via `cswap list --json` +
+quota snapshot taken 2026-07-20T17:22Z via `cswap list --json` +
 `codexbar usage --format json --provider <name>` — **recheck live**, do not
 trust this snapshot):
 
 - **Primary —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
   Code/API) · _Default for most plans_ — use **`cswap` account 2
-  (djbclark@mit.edu)** (active; 5h **41%**, 7d **22%**, 7d reset Jul 25
-  ~05:00 local). This is mechanical triage, not judgment — Sonnet 5 is
-  correctly sized. **Note: Claude Fable 5 is no longer part of the monthly
-  plan and is very expensive per-use — do not recommend it for the eventual
-  project-level final review or anywhere else unless nothing else will
-  work.** Prefer Sonnet 5 at `xhigh` effort or `/code-review ultra` for that
-  step instead (see step2 §10, updated 2026-07-20). Original gmail account:
-  5h **2%**, 7d **70%** (reset Jul 24 ~06:00) — fine as an alternate if the
-  mit.edu account is busy.
+  (djbclark@mit.edu)** (active; 5h **49%**, 7d **23%**, 7d reset Jul 25
+  ~05:00 local). This is mechanical triage, not judgment — Sonnet 5 at Low
+  effort is correctly sized. **Note: Claude Fable 5 is no longer part of the
+  monthly plan and is very expensive per-use — do not recommend it for the
+  eventual project-level final review or anywhere else unless nothing else
+  will work.** Prefer Sonnet 5 at `xhigh` effort or `/code-review ultra` for
+  that step instead (see step2 §10, updated 2026-07-20). Original gmail
+  account: 5h **2%**, 7d **70%** (reset Jul 24 ~06:00) — fine as an
+  alternate if the mit.edu account is busy.
 - **Alternate —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
   agentic work_ — SuperGrok weekly **71%** used, reset Jul 23 ~2:41am ET
