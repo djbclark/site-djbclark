@@ -28,13 +28,20 @@ prefixes:
     - "~/.ssh/authorized_keys"              # marked block only (ET fleet keys)
   site:
     - "~/ops/site-djbclark/**"
-    - "~/Library/LaunchAgents/com.djbclark.*"   # de facto since system-state-backup
+    - "~/Library/LaunchAgents/com.djbclark.*"   # F1: site_agents + LiteLLM et al.
     - "~/.config/systemd/user/com.djbclark.*"   # E5: Linux user units (LiteLLM et al.)
     - "~/.config/djbclark/**"                   # reserved; not yet populated
+    - "~/.local/bin/system-state-backup.sh"      # F1: site_agents role
+    - "~/.local/bin/hibernate-disk-check"        # F1: site_agents role
+    - "~/.local/state/hibernate-disk-check.*"    # F1: hibernate-disk-check logs/state
     - "~/.local/state/litellm/**"               # E5: Linux LiteLLM logs/state
     - "~/ai-stack/**"                           # AI-stack runtime dir (step0), if kept
     - "~/.litellm/**"                           # LiteLLM config/cache (step0)
-    - "~/system-state/**"                       # snapshot output; adopt in Phase F
+    - "~/system-state/**"                       # F1: system-state-backup mirror output
+    - "/opt/homebrew/var/system-state/**"       # F1: arm64 canonical capture dir
+    - "/opt/homebrew/var/log/system-state-backup.log"
+    - "/usr/local/var/system-state/**"          # F1: Intel canonical capture dir
+    - "/usr/local/var/log/system-state-backup.log"
   brew_services:
     # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
     - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal, port 2022"}

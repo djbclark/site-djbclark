@@ -91,3 +91,23 @@ goose-status:
     @goose --version
     @goose info -v 2>/dev/null | rg -i 'config yaml|goose_provider|goose_model|active_provider|litellm-local|smart-router|filesystem|fieldy|extensions:' || true
     @stat -f '%Sp %N' ~/.config/goose ~/.config/goose/config.yaml ~/.config/goose/custom_providers/litellm-local.json 2>/dev/null || true
+
+# Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
+# hibernate-disk-check. No secrets; localhost only.
+site-agents-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/site_agents.yml {{ args }}
+
+site-agents-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/site_agents.yml {{ args }}
+
+site-agents-status:
+    @if launchctl print "gui/$(id -u)/com.djbclark.system-state-backup" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.system-state-backup)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.system-state-backup)"; \
+    fi
+    @if launchctl print "gui/$(id -u)/com.djbclark.hibernate-disk-check" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.hibernate-disk-check)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.hibernate-disk-check)"; \
+    fi

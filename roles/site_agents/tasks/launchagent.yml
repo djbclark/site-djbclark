@@ -1,0 +1,59 @@
+---
+# Bootstrap / bootout a user LaunchAgent (gui/<uid> domain).
+# Expects: _agent_label, _agent_plist_path, _agent_plist (register from template).
+
+- name: "Probe whether {{ _agent_label }} is loaded"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print
+      - "gui/{{ site_agents_uid }}/{{ _agent_label }}"
+  register: _agent_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "Boot out {{ _agent_label }} when its LaunchAgent changed"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootout
+      - "gui/{{ site_agents_uid }}/{{ _agent_label }}"
+  when:
+    - not ansible_check_mode
+    - _agent_launch_state.rc == 0
+    - _agent_plist.changed | default(false)
+  register: _agent_bootout
+  changed_when: true
+
+- name: "Bootstrap {{ _agent_label }} when unloaded or after a LaunchAgent change"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootstrap
+      - "gui/{{ site_agents_uid }}"
+      - "{{ _agent_plist_path }}"
+  when:
+    - not ansible_check_mode
+    - >-
+      (_agent_launch_state.rc != 0)
+      or (_agent_bootout.changed | default(false))
+  register: _agent_bootstrap
+  changed_when: true
+  until: _agent_bootstrap.rc == 0
+  retries: 5
+  delay: 1
+
+- name: "Kickstart {{ _agent_label }} after a script-only change"
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - kickstart
+      - -k
+      - "gui/{{ site_agents_uid }}/{{ _agent_label }}"
+  when:
+    - not ansible_check_mode
+    - _agent_launch_state.rc == 0
+    - _agent_script.changed | default(false)
+    - not (_agent_plist.changed | default(false))
+  changed_when: true

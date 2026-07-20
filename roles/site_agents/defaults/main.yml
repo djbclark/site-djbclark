@@ -1,0 +1,40 @@
+---
+# roles/site_agents — control-node maintenance LaunchAgents (Phase F1).
+
+site_agents_home: >-
+  {{
+    (ansible_facts.get('env') or {}).get('HOME')
+    | default(lookup('env', 'HOME'), true)
+  }}
+site_agents_uid: "{{ ansible_facts['user_uid'] }}"
+
+# Homebrew prefix: Apple Silicon /opt/homebrew, Intel /usr/local
+# (same pattern as litellm stayturgid_homebrew_prefix).
+site_agents_homebrew_prefix: >-
+  {{
+    '/opt/homebrew'
+    if ansible_facts.get('architecture', 'arm64') in ['arm64', 'aarch64']
+    else '/usr/local'
+  }}
+
+site_agents_bin_dir: "{{ site_agents_home }}/.local/bin"
+site_agents_state_dir: "{{ site_agents_home }}/.local/state"
+site_agents_launchagents_dir: "{{ site_agents_home }}/Library/LaunchAgents"
+
+# --- system-state-backup ----------------------------------------------------
+site_agents_system_state_label: "com.{{ site_ns }}.system-state-backup"
+site_agents_system_state_script: "{{ site_agents_bin_dir }}/system-state-backup.sh"
+site_agents_system_state_var_dir: "{{ site_agents_homebrew_prefix }}/var/system-state"
+site_agents_system_state_log: "{{ site_agents_homebrew_prefix }}/var/log/system-state-backup.log"
+site_agents_system_state_home_mirror: "{{ site_agents_home }}/system-state"
+site_agents_system_state_plist: >-
+  {{ site_agents_launchagents_dir }}/{{ site_agents_system_state_label }}.plist
+
+# --- hibernate-disk-check ---------------------------------------------------
+site_agents_hibernate_label: "com.{{ site_ns }}.hibernate-disk-check"
+site_agents_hibernate_script: "{{ site_agents_bin_dir }}/hibernate-disk-check"
+site_agents_hibernate_threshold_gb: 25
+site_agents_hibernate_plist: >-
+  {{ site_agents_launchagents_dir }}/{{ site_agents_hibernate_label }}.plist
+site_agents_hibernate_log: "{{ site_agents_state_dir }}/hibernate-disk-check.log"
+site_agents_hibernate_error_log: "{{ site_agents_state_dir }}/hibernate-disk-check.error.log"

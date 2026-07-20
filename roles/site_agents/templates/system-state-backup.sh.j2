@@ -1,0 +1,97 @@
+#!/bin/bash
+# Snapshot system state that is easier to capture via commands on a live
+# system than from a filesystem backup (for bare-metal restore reference).
+# Writes everything to {{ site_agents_homebrew_prefix }}/var/system-state and
+# mirrors it to ~/system-state.
+# Site-managed: roles/site_agents (Phase F1). Run by LaunchAgent
+# {{ site_agents_system_state_label }}; also runnable by hand.
+set -uo pipefail
+
+BREW_PREFIX="{{ site_agents_homebrew_prefix }}"
+# launchd provides a minimal PATH; extend it so `command -v npm/code/...` work.
+export PATH="${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+BREW="${BREW_PREFIX}/bin/brew"
+VAR_DIR="{{ site_agents_system_state_var_dir }}"
+HOME_DIR="{{ site_agents_system_state_home_mirror }}"
+LOG="{{ site_agents_system_state_log }}"
+
+mkdir -p "$VAR_DIR"
+
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+# capture <output-file> <cmd...>
+# Runs the command, atomically replacing the target only on success, so a
+# failing command never clobbers a previously good capture.
+capture() {
+    local out="$VAR_DIR/$1"; shift
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/state.XXXXXX")" || return 1
+    if "$@" >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+        mv -f "$tmp" "$out"
+    else
+        rm -f "$tmp"
+        echo "$(ts) WARN capture failed or empty: $1 ($*)" >>"$LOG"
+        return 1
+    fi
+}
+
+FAILED=0
+
+# --- Homebrew ---------------------------------------------------------------
+capture Brewfile "$BREW" bundle dump --force --file - || FAILED=1
+capture brew-services.txt "$BREW" services list
+
+# --- User preferences (all defaults domains) --------------------------------
+capture defaults-read.txt defaults read || FAILED=1
+capture defaults-domains.txt defaults domains
+capture defaults-read-globaldomain.txt defaults read NSGlobalDomain
+
+# --- Installed applications -------------------------------------------------
+capture applications.txt ls -1 /Applications || FAILED=1
+[ -d "$HOME/Applications" ] && capture applications-home.txt ls -1 "$HOME/Applications"
+
+# --- OS / hardware identity -------------------------------------------------
+capture sw_vers.txt sw_vers
+capture uname.txt uname -a
+capture hardware.txt system_profiler SPHardwareDataType
+capture hostnames.txt bash -c 'echo "ComputerName: $(scutil --get ComputerName)"; echo "LocalHostName: $(scutil --get LocalHostName)"; echo "HostName: $(scutil --get HostName 2>/dev/null || echo "(not set)")"'
+capture xcode-select.txt xcode-select -p
+
+# --- Disks / volumes (partition layout for bare-metal reference) ------------
+capture diskutil-list.txt diskutil list
+capture diskutil-apfs.txt diskutil apfs list
+capture mounts.txt mount
+
+# --- launchd / cron ---------------------------------------------------------
+capture launchctl-list.txt launchctl list
+capture launch-agents-daemons.txt bash -c 'for d in ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons; do echo "== $d =="; ls -1 "$d" 2>/dev/null; echo; done'
+crontab -l >/dev/null 2>&1 && capture crontab.txt crontab -l
+
+# --- Network / power --------------------------------------------------------
+capture network-hardware.txt networksetup -listallhardwareports
+capture network-services.txt networksetup -listallnetworkservices
+capture pmset.txt pmset -g custom
+
+# --- Per-tool package inventories (only if the tool exists) -----------------
+command -v npm  >/dev/null && capture npm-global.txt  npm ls -g --depth=0
+command -v pipx >/dev/null && capture pipx-list.txt   pipx list
+command -v code >/dev/null && capture vscode-extensions.txt code --list-extensions
+command -v gem  >/dev/null && capture gem-list.txt    gem list
+
+date '+%Y-%m-%d %H:%M:%S' > "$VAR_DIR/LAST_RUN.txt"
+
+# --- Mirror to home ---------------------------------------------------------
+if rsync -a --delete "$VAR_DIR/" "$HOME_DIR/" 2>>"$LOG"; then
+    :
+else
+    echo "$(ts) WARN rsync mirror to $HOME_DIR failed" >>"$LOG"
+    FAILED=1
+fi
+
+if [ "$FAILED" -eq 0 ]; then
+    echo "$(ts) OK  wrote $(ls "$VAR_DIR" | wc -l | tr -d ' ') files to $VAR_DIR and mirrored to $HOME_DIR" >>"$LOG"
+else
+    echo "$(ts) PARTIAL one or more core captures failed; see WARN lines above" >>"$LOG"
+    exit 1
+fi
