@@ -1,0 +1,62 @@
+# Managed by site-djbclark roles/litellm. Local edits will be overwritten.
+# Auto Router v2 syntax verified against docs.litellm.ai/docs/proxy/auto_routing
+# on 2026-07-20; PyPI's first available Auto Router v2 build is 1.94.0rc1.
+
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: smart-router
+    litellm_params:
+      model: auto_router/complexity_router
+      drop_params: true
+      complexity_router_config:
+        tiers:
+          SIMPLE: gpt-4o-mini
+          MEDIUM: gpt-4o
+          COMPLEX: claude-sonnet-5
+          REASONING: gpt-5.5
+        tier_boundaries:
+          simple_medium: 0.15
+          medium_complex: 0.35
+          complex_reasoning: 0.60
+      complexity_router_default_model: gpt-4o
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: "{{ litellm_cache_dir }}"
+    ttl: 3600
+  drop_params: true
+  request_timeout: 120
+
+router_settings:
+  num_retries: 2
+  timeout: 120
+  fallbacks:
+    - smart-router: [gpt-4o, claude-sonnet-5]
+    - gpt-4o-mini: [gpt-4o]
+    - gpt-4o: [claude-sonnet-5, gpt-4o-mini]
+    - claude-sonnet-5: [gpt-5.5, gpt-4o]
+    - gpt-5.5: [claude-sonnet-5, gpt-4o]
+
+# No master_key while the proxy is loopback-only. E4 may add one if a local
+# client needs authentication; never widen the bind without revisiting auth.

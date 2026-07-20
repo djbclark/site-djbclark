@@ -48,3 +48,16 @@ inventory-check:
 
 lint:
     bin/registry_lint.py
+
+# Install/configure the loopback-only LiteLLM proxy (Phase E1).
+# To inject provider keys after E4, wrap this recipe with SecretSpec:
+# secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+litellm-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml {{ args }}
+
+litellm-check:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml
+
+litellm-status:
+    @launchctl print gui/$(id -u)/com.djbclark.litellm >/dev/null && echo "launchd: loaded"
+    @curl -fsS http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'

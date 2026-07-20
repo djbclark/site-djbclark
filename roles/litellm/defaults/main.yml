@@ -1,0 +1,28 @@
+---
+# roles/litellm — site-owned, loopback-only LiteLLM proxy (Phase E1).
+
+litellm_home: "{{ lookup('env', 'HOME') }}"
+litellm_uid: "{{ ansible_facts['user_uid'] }}"
+litellm_label: "com.{{ site_ns }}.litellm"
+litellm_bind: "127.0.0.1"
+litellm_port: 4000
+
+# Auto Router v2 first ships in the 1.94 train. As of 2026-07-20 PyPI's
+# newest stable is 1.93.0 and the first usable 1.94 build is 1.94.0rc1.
+litellm_minimum_version: "1.94.0rc1"
+litellm_package_spec: "litellm[proxy,caching]>=1.94.0rc1,<2"
+litellm_uv_bin: /opt/homebrew/bin/uv
+litellm_bin: "{{ litellm_home }}/.local/bin/litellm"
+litellm_tool_python: "{{ litellm_home }}/.local/share/uv/tools/litellm/bin/python"
+
+litellm_config_dir: "{{ litellm_home }}/.litellm"
+litellm_config_path: "{{ litellm_config_dir }}/config.yaml"
+litellm_cache_dir: "{{ litellm_config_dir }}/cache"
+litellm_logs_dir: "{{ litellm_home }}/Library/Logs/litellm"
+litellm_plist_path: "{{ litellm_home }}/Library/LaunchAgents/{{ litellm_label }}.plist"
+litellm_health_url: "http://{{ litellm_bind }}:{{ litellm_port }}/v1/models"
+
+# Values enter Ansible from the ambient environment, normally through
+# `secretspec run`. They are rendered only into the mode-0600 live plist.
+litellm_openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
+litellm_anthropic_api_key: "{{ lookup('env', 'ANTHROPIC_API_KEY') | default('', true) }}"

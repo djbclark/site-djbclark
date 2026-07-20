@@ -49,8 +49,8 @@ hosts:
          note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
 
       # ── site: AI stack (step0 plan, revised per step1 §9) ────────────────
-      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: planned,
-         note: "com.djbclark.litellm; bind widens to Tailscale iff mini consumes it"}
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
+         note: "E1: com.djbclark.litellm; keyless until E4; bind widens to Tailscale iff mini consumes it"}
 
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.

@@ -1,146 +1,182 @@
-# NEXT: E1 — LiteLLM proxy role + launchd (difficulty 50/100)
+# NEXT: E2 — Goose role + local LiteLLM provider (difficulty 40/100)
 
-**Funding plan context:** FUND-B Phase D recovery closed (R3). D9 logging
-close-out done. D7-ROUTES-E Choice E front-door routes shipped (stayturgid
-#32 → master `ab329a5`). REVIEW-1 whole-repo review complete 2026-07-20
-(findings: `docs/relay/reviews/REVIEW-1-findings.md`; fixes merged as
-stayturgid #33 `6ca9d31` + site `08409bf`). This baton is **Phase E step E1
-only** — LiteLLM proxy under site ownership. **Do not start Goose (E2)** or
-MCP research (E3).
+**Funding plan context:** FUND-B Phase D recovery and REVIEW-1 are closed.
+Phase E E1 is complete: the site-owned LiteLLM proxy is live and healthy at
+`127.0.0.1:4000`. This baton is **Phase E step E2 only** — install/configure
+Goose against the local proxy. **Do not start MCP research/configuration (E3),
+configure the SecretSpec backend or provider API keys (E4), or widen LiteLLM
+beyond loopback (E5).**
 
-**Recommended AI** (full rows from `docs/reference/available-ai-models.md`;
-quotas verified 2026-07-20T02:35Z via per-provider codexbar — NOTE
-`codexbar usage --provider all` is broken: the Gemini CLI OAuth probe fails
-and the whole command exits 1 with empty stdout; call
-`codexbar usage --format json --provider <codex|claude|grok>` per provider,
-backgrounded to a file, never piped through `head`):
+**Recommended AI** (full rows from
+`docs/reference/available-ai-models.md`; quota snapshot taken
+2026-07-20T13:45Z):
 
-- **Primary —** Codex 0.144.6 (oauth) · OpenAI · GPT-5.6 Sol ·
-  `gpt-5.6-sol` · Light, Medium, High, Extra High, Max, Ultra · _Flagship;
-  complex coding, computer use, research, cybersecurity_ — effort **High**
-  (verify Auto Router v2 against live LiteLLM docs, not memory; pin ≥1.94).
-  **Quota gate:** weekly window was 100% used until Jul 25 ~5:17pm ET
-  (118.8 credits remain — do not burn credits). If running E1 before that
-  reset, use the Alternate instead.
-- **Alternate —** Grok 0.2.106 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
+- **Primary —** Cursor (GUI) · Cursor · Composer 2.5 · `Composer 2.5` ·
+  Agent Thinking · _Native agentic coding_ — main monthly pools were 57.9%
+  and 50.9% used (third pool exhausted), resetting Aug 2 ~7:22pm ET. The E2
+  plan row says Copilot premium, and Copilot was only 11.3% used, but the
+  operator-maintained AI catalog contains no full GitHub Copilot model row;
+  relay protocol therefore cannot make it the formal recommendation without
+  an operator catalog edit.
+- **Alternate —** Grok 0.2.103 (TUI) · xAI / SpaceXAI · Grok 4.5 ·
   `grok-4.5` · Low, Medium, High (default High) · _Flagship for code +
-  agentic work_ — 64% weekly used at write time, resets Jul 23 ~2:41am ET.
+  agentic work_ — use **Medium**; live CodexBar saw installed Grok 0.2.106,
+  65% weekly used, reset Jul 23 ~2:41am ET.
 - **Escalation —** Claude 2.1.205 (Mac GUI) · Anthropic · Claude Sonnet 5 ·
   `claude-sonnet-5` · Adaptive Thinking + Effort (default High on Claude
-  Code/API) · _Default for most plans_ — **original account**, Medium, if
-  router config vs docs is ambiguous or secretspec/launchd integration
-  needs judgment. (Fable-only weekly on the new account was 16% used,
-  resets Jul 25 ~5am ET; its 5h session meter resets 12:30am ET Jul 20 —
-  recheck if using that account.)
+  Code/API) · _Default for most plans_ — use **original Gmail account**,
+  Medium, only if the installed Goose configuration format cannot be
+  reconciled with current official docs. At snapshot: original Gmail was 2%
+  of its five-hour window and 70% weekly (Fable 100%); the newer MIT account
+  was 23% five-hour, 20% weekly, and 35% Fable weekly. Preserve the newer
+  account's Fable pool for reviews/design/escalations.
 
-**Working dir:** `/Users/djbclark/ops/site-djbclark` (roles incubate **here**
-per step1 §9 / step2 §6 — `roles/litellm`, not a standalone `~/ai-stack`
-tree; branch optional — site often straight to master for ops) and pull
-stayturgid only if you need port/registry patterns as reference.
-`git fetch origin --prune && git pull --ff-only origin master` before
-starting. Required reading:
+**Quota-check procedure — operator update 2026-07-20 (carry forward
+verbatim in substance):**
 
-- `docs/relay/PROTOCOL.md`
-- step2 plan §6 Phase E (`docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`)
-- step0 plan as **amended** (`docs/plans/site-djbclark-step0-plan-v1.md` —
-  header amendment: label `com.djbclark.litellm`, port 4000 in registry,
-  secretspec, roles in this repo)
-- step1 §9 revisions (`docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`)
-- live `registry/ports.yml` (`litellm-proxy` port 4000, status planned)
-- live `registry/paths.yml` (`~/.litellm/**`)
-- site `secretspec.toml` pattern (declarations only; never commit secrets)
-- existing Phase D adapters in stayturgid for launchd/site_ns patterns
-  (reference only — LiteLLM is a **site** role, not a stayturgid serverapp
-  unless you explicitly decide to promote it later)
+- CodexBar does **not** hang; it can take a long time to reply. Give every
+  invocation a hard **two-minute timeout**. Query relevant non-Claude
+  providers separately, background output to files, and never pipe it through
+  `head`, for example:
+  `timeout 120 codexbar usage --format json --provider cursor > /tmp/cursor-usage.json`.
+- **Ignore everything CodexBar says about Claude.** There are two Claude
+  accounts managed by `cswap`; use **`cswap list --json`** as the authority
+  for both accounts' usage and name the selected account in any recommendation.
+- Snapshot context only: Codex weekly was 100% used until Jul 25 ~5:17pm ET
+  (118.8 credits remain); avoid burning credits before reset. Recheck live
+  rather than trusting this snapshot.
+
+**Working dir:** `/Users/djbclark/ops/site-djbclark` (Goose role incubates
+here as `roles/goose`). Start with:
+
+```bash
+cd /Users/djbclark/ops/site-djbclark
+git fetch origin --prune
+git pull --ff-only origin master
+```
+
+Required reading:
+
+- `/Users/djbclark/ops/site-djbclark/docs/relay/PROTOCOL.md`
+- step2 ground rules/risk register and §6 Phase E:
+  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`
+- step0 plan as amended, especially Goose provider config and verification:
+  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step0-plan-v1.md`
+- step1 §9 role-location revisions:
+  `/Users/djbclark/ops/site-djbclark/docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`
+- completed E1 role and runtime notes:
+  `/Users/djbclark/ops/site-djbclark/roles/litellm/README.md`
+- current Goose official docs for the **installed version**; do not rely on a
+  remembered config path or format.
 
 ---
 
-You are implementing **E1: LiteLLM proxy** for the site control node.
+You are implementing **E2: Goose desktop/CLI and local LiteLLM provider** on
+the M1 Air control node.
 
-## Decided constraints (do not re-litigate)
+## Live E1 facts (do not re-litigate)
 
-- **Role home:** `site-djbclark/roles/litellm` (or `ansible/roles/litellm`
-  matching this repo’s layout — inspect existing site ansible structure).
-- **Label:** `com.{{ site_ns }}.litellm` → live `com.djbclark.litellm`
-  (not `local.litellm`).
-- **Bind:** `127.0.0.1:4000` (registry `litellm-proxy`). Widen to Tailscale
-  only if mini/other host will consume it later (E5) — default loopback.
-- **Install:** `uv tool install "litellm[proxy]"` with pin **≥1.94** (Auto
-  Router v2 / `auto_router/complexity_router` shipped 2026-07-14). If config
-  is rejected, upgrade LiteLLM — **do not** rewrite config to older syntax.
-- **Config:** `~/.litellm/config.yaml` mode 0600; disk cache under
-  `~/.litellm/cache`; logs under site or `~/Library/Logs/litellm` as
-  patterned in step0.
-- **Secrets:** API keys via secretspec / env (`OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY`, etc.) — **never** commit secrets or master keys.
-  Template may reference `os.environ/...`; human fills keys (E4 gate) but
-  E1 must leave secretspec entries declared and document how keys enter.
-- **Router:** model `smart-router` using Auto Router v2 complexity tiers
-  (SIMPLE/MEDIUM/COMPLEX/REASONING) per step0 template, **verified against
-  current docs.litellm.ai** at implement time. Update stale model IDs
-  (step0 still shows `claude-sonnet-4-20250514` — use current IDs).
+- LiteLLM `1.94.0rc1` is running as
+  `gui/501/com.djbclark.litellm`, bound only to `127.0.0.1:4000`.
+- PyPI stable was still 1.93.0 on 2026-07-20; Auto Router v2 first existed in
+  the 1.94 train. The E1 role uses
+  `litellm[proxy,caching]>=1.94.0rc1,<2`; the `caching` extra is required for
+  disk cache. Do not downgrade it or rewrite its v2 config.
+- `curl -fsS http://127.0.0.1:4000/v1/models` returns `gpt-4o-mini`,
+  `gpt-4o`, `claude-sonnet-5`, `gpt-5.5`, and `smart-router`.
+- No master key is configured because the proxy is loopback-only.
+- **SecretSpec is declared but not operational:**
+  `secretspec config show` reports provider `(none)`, profile `(none)`, and
+  no aliases. The operator explicitly chose not to configure it during E1.
+  Provider completions therefore fail with missing credentials until E4.
+- Auto Router itself is proven: SIMPLE routed to `gpt-4o-mini`; REASONING
+  routed to `gpt-5.5`. Do not claim a real provider completion in E2.
+- E1 rollback (do not perform):
+  `launchctl bootout gui/$(id -u)/com.djbclark.litellm`; config/cache/plist
+  remain for re-bootstrap.
+
+## Decided constraints
+
+- **Role home:** `site-djbclark/roles/goose`; add a site-local playbook and
+  `just` apply/check/status recipes matching E1's operator ergonomics.
+- **Install:** native Homebrew only, no Docker. Install Goose Desktop cask
+  `block-goose` and Goose CLI formula `block-goose-cli` if absent; never
+  upgrade already-present packages as an incidental apply.
+- **Provider:** configure Goose's custom OpenAI-compatible provider to
+  `http://127.0.0.1:4000` with model `smart-router`. Because E1 has no master
+  key, do not invent or commit a Goose API key; if current Goose requires a
+  nonempty placeholder for an OpenAI-compatible endpoint, verify and document
+  the least-secret local value its official docs permit.
+- **Config path/format:** inspect the actually installed Goose 1.43.x (or
+  current) CLI/help and current official docs before templating. The old plan's
+  `~/.config/goose/config.yaml` vs profiles YAML/JSON warning is real. Record
+  the discovered path and schema; do not force an old example onto a new
+  release.
+- **Secrets:** do not run `secretspec config init`, select a provider backend,
+  enter API keys, or render keys. That is E4.
+- **Scope:** provider configuration only. Do **not** add guessed or real MCP
+  extensions/packages; Shortwave/Saner.ai/Fieldy/filesystem research is E3.
+- Preserve LiteLLM, D7 routes, and O-V-G-O daemons. Goose need not expose a
+  listener or receive a Caddy route.
 
 ## Task
 
-1. Author Ansible role + playbook/wrapper so the operator can apply
-   LiteLLM idempotently (install if absent, render config + plist, bootstrap
-   launchd, health wait). Prefer patterns already used on this Mac
-   (site just recipes, `site_ns` from `inventory/group_vars/all.yml`).
-2. Render `litellm-config.yaml.j2` with Auto Router v2 + disk cache +
-   sensible fallbacks; no secrets in git.
-3. Render launchd plist `com.djbclark.litellm` (RunAtLoad + KeepAlive),
-   ProgramArguments: litellm binary `--config` `--host 127.0.0.1` `--port 4000`.
-4. Declare secretspec keys needed for provider API keys (values operator-
-   supplied; empty-ok until E4).
-5. Flip registry `litellm-proxy` status from `planned` → `active` when live
-   and healthy (or document why still planned).
-6. **Verify:**
-   - `launchctl print gui/$(id -u)/com.djbclark.litellm` loaded
-   - `curl -sS http://127.0.0.1:4000/v1/models` (auth as configured —
-     master_key local-only or documented)
-   - One **SIMPLE** and one **REASONING** prompt route to different tiers
-     (check LiteLLM logs / response headers / `model` field — record
-     evidence)
-7. Rollback note in ledger: bootout label; keep config on disk for re-bootstrap.
+1. Inspect pre-state: Homebrew cask/formula presence, any existing Goose app,
+   CLI, and user config. Preserve any unrelated user config; if a managed-file
+   collision exists, stop and record it rather than overwrite blindly.
+2. Verify the installed/current Goose documentation for its configuration
+   path and custom OpenAI-compatible provider schema.
+3. Author an idempotent `roles/goose` plus local playbook/wrappers that:
+   - requires Homebrew;
+   - installs `block-goose` and `block-goose-cli` only when absent;
+   - creates the correct config directory with private permissions;
+   - renders or safely manages the provider pointing at local LiteLLM;
+   - reports the discovered Goose version/config path.
+4. Document apply, check/status, configuration ownership, the expected
+   keyless-provider limitation until E4, and a non-destructive rollback.
+5. Verify live without pretending E4 is complete:
+   - Goose app is installed in `/Applications` (or the cask's actual path);
+   - `goose --version` succeeds;
+   - Goose recognizes/loads the local provider and `smart-router` using an
+     official CLI/config inspection command if available;
+   - config file exists at the version-correct path and is mode 0600 (parent
+     private as appropriate);
+   - LiteLLM `/v1/models` still returns 200;
+   - a second full apply reports zero changes;
+   - `just lint`, inventory, Ansible syntax/lint, and check mode pass;
+   - D7 front-door paths `/grafana/`, `/oo/`, `/olivetin/`, `/vm/` remain 200.
+6. If Goose can issue a prompt without interactive first-run setup, a missing
+   provider credential is the expected E4 boundary. Record it; do not work
+   around it with ad-hoc keys or configure SecretSpec.
 
-## Constraints
+## Rollback expectation
 
-- **Scope:** LiteLLM only. **Do not** install Goose (E2), MCP servers (E3),
-  or run the human API-key checklist as if E4 is done (you may document it).
-- No Docker. No secrets in commits. Tailscale auth remains the network trust
-  model; LiteLLM stays loopback unless explicitly widened.
-- Do not break D7-ROUTES-E Caddy routes or O-V-G-O daemons.
-- If weekly Codex is reset ~Jul 25 and you are pre-reset, prefer Grok/Claude
-  alternate rather than burning Sol Ultra needlessly.
+Document how to remove or disable the managed Goose provider configuration
+without touching LiteLLM or user-owned config. Homebrew package removal is not
+part of ordinary rollback unless the install itself prevents Goose from
+starting; prefer leaving installed artifacts and restoring the prior config.
 
 ## Carry-forward
 
-- **After this baton → E2 Goose** (step2 §6). Rewrite NEXT-PROMPT for E2
-  with full catalog AI rows; do not start MCP research (E3).
-- REVIEW-1 (2026-07-20) covered stayturgid#29/#30/#31/#32, AutoJs6#1 +
-  debug17, and D7-ROUTES-E — the previously mandated carry-forward review is
-  **done**; this E1 role itself joins the next review slot's scope.
-  Flagged-not-fixed E-phase notes from REVIEW-1
-  (`docs/relay/reviews/REVIEW-1-findings.md`):
-  - R1-2: OliveTin + VictoriaMetrics are unauthenticated behind the tailnet
-    front door (by D7-ROUTES-E design, single-user tailnet). If E-phase work
-    widens any service beyond loopback (e.g. LiteLLM to Tailscale in E5) or
-    adds tailnet users, revisit auth on those paths first.
-  - R1-1: guard.js still hard-notifies sticky-a11y per watchdog cycle
-    (comonitor was softened in #31); only touch with s24 device-log evidence.
-  - R1-3 (nit): WATCHDOG_FRESH_SEC 1800 duplicated as a literal in
-    stayturgid_repair.py — deliberate (device file can't import control lib).
-- Operator GUI available for Accessibility OFF→ON / run main.js if fleet
-  work blocks.
-- Fleet baseline: health OK on s24/p7a/hd8; main.js auto-running; canonical
-  AutoJs6 path only `/sdcard/stayturgid/autojs6`.
-- Front door: `https://mac.greyhound-sidemirror.ts.net/{grafana,oo,olivetin,vm}/`
-  already live — operators need not use raw ports for those UIs.
+- After E2, rewrite `NEXT-PROMPT.md` for **E3 MCP server research + Goose
+  extension config** (difficulty 55). E3 must verify real vendor offerings and
+  must never install a guessed package name. Do not start E3 in this session.
+- SecretSpec backend selection, provider API keys, first-run auth, and real
+  provider completions remain **E4**.
+- E1 and E2 join the next review slot's scope. Preserve REVIEW-1 notes:
+  OliveTin/VictoriaMetrics are intentionally unauthenticated on a single-user
+  tailnet; revisit before widening any service or adding tailnet users.
+- The AI quota procedure at the top of this baton must be carried into every
+  next baton: CodexBar timeout 120 seconds; Claude usage only from
+  `cswap list --json` across both accounts.
 
 ## End of session
 
-Per `docs/relay/PROTOCOL.md`: self-verify with recorded evidence (uv install
-version ≥1.94, launchctl, curl `/v1/models`, router tier proof, registry
-status), one ledger line `E1`, rewrite `NEXT-PROMPT.md` for **E2**,
-commit/push site (and stayturgid only if you touched product), print the
-new baton and `pbcopy < docs/relay/NEXT-PROMPT.md`.
+Follow `docs/relay/PROTOCOL.md`: record verification evidence, append exactly
+one `E2` ledger row, rewrite the baton for E3 with full catalog AI rows and
+fresh quota data using the corrected procedure, commit/push site straight to
+master, print the new baton, and copy it with:
+
+```bash
+pbcopy < docs/relay/NEXT-PROMPT.md
+```

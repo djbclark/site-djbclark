@@ -1,0 +1,8 @@
+---
+# Site-owned LiteLLM proxy entry point (Phase E1).
+- name: Configure the site LiteLLM proxy
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  roles:
+    - role: litellm

@@ -1,0 +1,218 @@
+---
+- name: Assert LiteLLM is being configured on macOS
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Darwin'
+      - site_ns is defined
+      - site_ns | length > 0
+      - litellm_bind == '127.0.0.1'
+    fail_msg: "E1 supports the loopback-only macOS control-node deployment."
+
+- name: Check that uv is installed
+  ansible.builtin.stat:
+    path: "{{ litellm_uv_bin }}"
+  register: _litellm_uv
+
+- name: Require uv for the isolated LiteLLM tool install
+  ansible.builtin.assert:
+    that: _litellm_uv.stat.executable | default(false)
+    fail_msg: "Install uv first; E1 requires `uv tool install litellm[proxy]`."
+
+- name: Probe installed LiteLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_bin }}"
+      - --version
+  register: _litellm_version_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse installed LiteLLM version
+  ansible.builtin.set_fact:
+    _litellm_current_version: >-
+      {{
+        ((_litellm_version_before.stdout | default(''))
+        ~ ' ' ~ (_litellm_version_before.stderr | default('')))
+        | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
+        | default('0.0.0', true)
+      }}
+
+- name: Probe the disk-cache extra in the LiteLLM tool environment
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_tool_python }}"
+      - -c
+      - import diskcache
+  register: _litellm_cache_extra_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install LiteLLM proxy tool when absent
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_uv_bin }}"
+      - tool
+      - install
+      - --prerelease
+      - allow
+      - "{{ litellm_package_spec }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_version_before.rc != 0
+  register: _litellm_tool_install
+  changed_when: true
+
+- name: Repair LiteLLM when below the version floor or missing disk caching
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_uv_bin }}"
+      - tool
+      - install
+      - --force
+      - --prerelease
+      - allow
+      - "{{ litellm_package_spec }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_version_before.rc == 0
+    - >-
+      (_litellm_current_version is version(litellm_minimum_version, '<'))
+      or (_litellm_cache_extra_before.rc != 0)
+  register: _litellm_tool_repair
+  changed_when: true
+
+- name: Verify installed LiteLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_bin }}"
+      - --version
+  register: _litellm_version_after
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Parse verified LiteLLM version
+  ansible.builtin.set_fact:
+    _litellm_verified_version: >-
+      {{
+        ((_litellm_version_after.stdout | default(''))
+        ~ ' ' ~ (_litellm_version_after.stderr | default('')))
+        | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
+        | default('0.0.0', true)
+      }}
+  when: not ansible_check_mode
+
+- name: Enforce the Auto Router v2 LiteLLM version floor
+  ansible.builtin.assert:
+    that: _litellm_verified_version is version(litellm_minimum_version, '>=')
+    fail_msg: >-
+      LiteLLM {{ _litellm_verified_version }} is below the required
+      {{ litellm_minimum_version }} Auto Router v2 floor.
+  when: not ansible_check_mode
+
+- name: Verify the disk-cache extra after install
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_tool_python }}"
+      - -c
+      - import diskcache
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Ensure LiteLLM runtime directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ litellm_config_dir }}", mode: "0700"}
+    - {path: "{{ litellm_cache_dir }}", mode: "0700"}
+    - {path: "{{ litellm_logs_dir }}", mode: "0700"}
+    - {path: "{{ litellm_home }}/Library/LaunchAgents", mode: "0755"}
+
+- name: Render Auto Router v2 LiteLLM config
+  ansible.builtin.template:
+    src: litellm-config.yaml.j2
+    dest: "{{ litellm_config_path }}"
+    mode: "0600"
+  register: _litellm_config
+
+- name: Render secret-bearing LiteLLM LaunchAgent
+  ansible.builtin.template:
+    src: litellm.plist.j2
+    dest: "{{ litellm_plist_path }}"
+    mode: "0600"
+  register: _litellm_plist
+  no_log: true
+
+- name: Probe whether the LiteLLM LaunchAgent is loaded
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  register: _litellm_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out LiteLLM when its LaunchAgent changed
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootout
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_launch_state.rc == 0
+    - _litellm_plist.changed | default(false)
+  register: _litellm_bootout
+  changed_when: true
+
+- name: Bootstrap LiteLLM when unloaded or after a LaunchAgent change
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootstrap
+      - "gui/{{ litellm_uid }}"
+      - "{{ litellm_plist_path }}"
+  when:
+    - not ansible_check_mode
+    - >-
+      (_litellm_launch_state.rc != 0)
+      or (_litellm_bootout.changed | default(false))
+  register: _litellm_bootstrap
+  changed_when: true
+  until: _litellm_bootstrap.rc == 0
+  retries: 5
+  delay: 1
+
+- name: Kickstart LiteLLM after a tool or config-only change
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - kickstart
+      - -k
+      - "gui/{{ litellm_uid }}/{{ litellm_label }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_launch_state.rc == 0
+    - >-
+      (_litellm_config.changed | default(false))
+      or (_litellm_tool_install.changed | default(false))
+      or (_litellm_tool_repair.changed | default(false))
+    - not (_litellm_plist.changed | default(false))
+  changed_when: true
+
+- name: Wait for the LiteLLM models endpoint
+  ansible.builtin.uri:
+    url: "{{ litellm_health_url }}"
+    status_code: 200
+  register: _litellm_health
+  until: _litellm_health.status == 200
+  retries: 60
+  delay: 2
+  when: not ansible_check_mode

@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: djbclark
+  description: Site-owned loopback LiteLLM proxy managed by launchd
+  license: proprietary
+  min_ansible_version: "2.16"
+  platforms:
+    - name: MacOSX
+      versions:
+        - all
+dependencies: []
