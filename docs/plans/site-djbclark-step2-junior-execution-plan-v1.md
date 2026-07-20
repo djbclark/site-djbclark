@@ -37,10 +37,15 @@ origin master` before editing; pre-commit hooks must pass (prettier,
 
 ### 1.1 Difficulty bands → capability tiers
 
+**Note (2026-07-20):** Claude Fable 5 is no longer part of either Claude Pro
+plan and is very expensive per-use — do not route to it below unless
+nothing else will work. Use Sonnet 5 (`xhigh` effort), Opus 4.8, or
+`/code-review ultra` in its place for the 70–100 band.
+
 | Band   | Tier to use                                   | Examples                                                                                                                  |
 | ------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 70–100 | Frontier, max effort.                         | Claude Fable 5 (Max); final reviews via `/code-review ultra`                                                              |
-| 55–69  | Frontier at normal effort or top coding agent | Fable 5 (medium/low), Opus 4.8, Codex (high reasoning), Grok 4 (thinking), Gemini 3 Pro                                   |
+| 70–100 | Frontier, max effort.                         | Sonnet 5 (`xhigh`), Opus 4.8; final reviews via `/code-review ultra`                                                      |
+| 55–69  | Frontier at normal effort or top coding agent | Opus 4.8, Codex (high reasoning), Grok 4 (thinking), Gemini 3 Pro                                                          |
 | 40–54  | Strong workhorse                              | Sonnet 5, Codex (medium), Cursor composer, Copilot premium (Sonnet/GPT-5 class), DeepSeek R1 for research-shaped subtasks |
 | 0–39   | Cheap/fast                                    | Haiku 4.5, Codex (low), Copilot chat, Gemini Flash, DeepSeek V3, Cursor auto                                              |
 
@@ -220,5 +225,7 @@ baton for the next step from this plan.
 - Two failed attempts at a step → escalate one band; a step that grows beyond
   its listed files → stop and split.
 - Each phase ends with the review noted above; the **project-level final
-  review** (all phases) is a frontier senior pass: Fable 5 (Max) reading
-  step1 + this doc + the diffs, or `/code-review ultra` per repo.
+  review** (all phases) is a frontier senior pass: `/code-review ultra` per
+  repo, or Sonnet 5 at `xhigh` effort reading step1 + this doc + the diffs
+  (**not Fable 5** — no longer part of either Claude Pro plan and very
+  expensive per-use as of 2026-07-20; only use it if nothing else works).

@@ -60,25 +60,6 @@ Concurrent brew mutations (e.g. `just goose-apply`) take
 has no util-linux `flock(1)` by default). Details and rollback:
 [`brew/README.md`](brew/README.md).
 
-## Immich (Phase F3 — system-domain LaunchDaemons)
-
-Site-managed Immich under **`com.immich`** / **`com.immich.machine-learning`**
-(labels kept for native-installer compatibility; not renamed to `com.djbclark.*`).
-Service user `immich`, root `/opt/services/immich`. Ports **3001/3002/3003**
-loopback claimed in `registry/ports.yml` as **planned** until the app tree
-exists and HTTP health passes. Do not expose on Tailscale without auth
-(REVIEW-1).
-
-```bash
-just immich-apply -- --ask-become-pass   # system domain needs root
-just immich-status
-just immich-check -- --ask-become-pass
-```
-
-If `/opt/services/immich/app` is missing, apply **disables** the labels (stops
-exit-78 KeepAlive thrash). Restore the app out of band, then re-apply. Full
-notes and rollback: `roles/immich/README.md`.
-
 ## OliveTin user actions (unused on this site)
 
 `stayturgid`'s D6 OliveTin projection (`control/site_contract/olivetin_projection.py`,

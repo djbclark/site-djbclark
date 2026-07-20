@@ -45,11 +45,6 @@ prefixes:
     # F4 Merged-Brewfile (source: brew/fragments; projection under generated/)
     - "~/ops/site-djbclark/brew/**"
     - "~/ops/site-djbclark/generated/Merged-Brewfile"
-    # F3 Immich (system domain; labels intentionally com.immich.* — see roles/immich)
-    - "/opt/services/immich/**"
-    - "/var/log/immich/**"
-    - "/Library/LaunchDaemons/com.immich.plist"
-    - "/Library/LaunchDaemons/com.immich.machine.learning.plist"
   brew_services:
     # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
     # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
@@ -68,6 +63,5 @@ known_gaps:
      Ansible-templated (patched by hand after the Big Move; fold into
      control_node agents tasks or the Phase D landing adapter role)"
   - "LaunchDaemons (system domain): RustDesk, TeamViewer, Zoom, Adobe —
-     still unmanaged (com.immich.* adopted F3 into roles/immich; labels kept
-     as com.immich.*; app tree may still be absent — restore out of band)"
+     still unmanaged"
   - "stayturgid repo-root .env should relocate to ~/.config/stayturgid/"

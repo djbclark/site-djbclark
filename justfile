@@ -117,45 +117,6 @@ site-agents-status:
       echo "launchd: not loaded (com.djbclark.hibernate-disk-check)"; \
     fi
 
-# Immich system-domain LaunchDaemons (Phase F3). Needs become/root.
-# Preferred (GUI askpass, no password on argv):
-#   just immich-apply-sudo
-# Or: just immich-apply -- --ask-become-pass
-# Pre-F3 plists archived: docs/relay/audits/f3-immich-pre-plists/
-immich-apply *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/immich.yml {{ args }}
-
-# System-domain apply using macOS GUI password dialog (bin/sudo-askpass-osascript).
-immich-apply-sudo *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    export SUDO_ASKPASS="${SUDO_ASKPASS:-$PWD/bin/sudo-askpass-osascript}"
-    BECOME_PASS="$("$SUDO_ASKPASS")"
-    export ANSIBLE_BECOME_PASSWORD="$BECOME_PASS"
-    unset BECOME_PASS
-    # Double braces escaped for just → ansible jinja lookup
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/immich.yml --become \
-      -e "ansible_become_password={{{{ lookup('env', 'ANSIBLE_BECOME_PASSWORD') }}}}" {{ args }}
-    unset ANSIBLE_BECOME_PASSWORD
-
-immich-check *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/immich.yml {{ args }}
-
-immich-status:
-    @echo "=== launchctl system/com.immich ==="
-    @launchctl print system/com.immich 2>&1 | rg -i 'path|state|program|username|last exit|runs |pid =' || echo "(print failed or not loaded)"
-    @echo "=== launchctl system/com.immich.machine-learning ==="
-    @launchctl print system/com.immich.machine-learning 2>&1 | rg -i 'path|state|program|username|last exit|runs |pid =' || echo "(print failed or not loaded)"
-    @echo "=== print-disabled (immich) ==="
-    @launchctl print-disabled system 2>&1 | rg -i immich || echo "(none listed)"
-    @echo "=== app scripts ==="
-    @test -x /opt/services/immich/app/start.sh && echo "server start.sh: present" || echo "server start.sh: MISSING"
-    @test -x /opt/services/immich/app/machine-learning/start.sh && echo "ml start.sh: present" || echo "ml start.sh: MISSING"
-    @echo "=== ports 3001/3002/3003 ==="
-    @bash -c 'for p in 3001 3002 3003; do nc -z -w 1 127.0.0.1 "$p" 2>/dev/null && echo "port $p OPEN" || echo "port $p closed"; done'
-    @echo "=== HTTP health ==="
-    @curl -fsS --max-time 5 http://127.0.0.1:3001/api/server/ping 2>&1 || echo "health: unreachable (expected if app absent)"
-
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)
 # Fragments: brew/fragments/*.yml  Projection: generated/Merged-Brewfile

@@ -52,14 +52,6 @@ hosts:
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
 
-      # ── site: Immich (Phase F3; native installer ports; loopback) ────────
-      - {port: 3001,  bind: "127.0.0.1", owner: site, service: immich-web,      status: planned,
-         note: "F3: com.immich LaunchDaemon; /opt/services/immich; planned until app present + HTTP health; no Tailscale without auth (REVIEW-1)"}
-      - {port: 3002,  bind: "127.0.0.1", owner: site, service: immich-microservices, status: planned,
-         note: "F3: Immich microservices (native installer); loopback"}
-      - {port: 3003,  bind: "127.0.0.1", owner: site, service: immich-machine-learning, status: planned,
-         note: "F3: com.immich.machine-learning; loopback"}
-
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.
 
