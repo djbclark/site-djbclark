@@ -803,6 +803,34 @@ version.json                 — repo release version + changelog
 
 ## Changelog (condensed, reverse chronological — git history has full detail)
 
+- **2026-07-21** — **AutoJs6 JS → TypeScript migration completed** (PR #39, #40):
+  all `device/autojs6/`, `tests/js/`, `just/tools/`, and
+  `docs/research/autojs6-hd8-project/` `.js` files now have a side-by-side
+  `.ts` source, strictly typed with `strict: true` and zero `any`/
+  `@ts-nocheck` (`just build-ts` / `just check-ts`; `ts-compile` pre-commit
+  hook rebuilds and fails if output isn't staged). Ambient Rhino/AutoJs6
+  globals live in `device/autojs6/types/globals.d.ts`, hand-authored from
+  real call sites (there is no usable first-party `.d.ts` package — the npm
+  one is an empty stub). 4 separate `tsconfig.json`s (device/autojs6 +
+  docs/research vs. tests/js vs. just/tools) keep Node/DOM globals out of
+  device code's type environment. Module syntax is `import x =
+  require("./y.js")` — compiles to a plain `require()` call, verified
+  byte-structurally equivalent to the original hand-written requires, so
+  Rhino's module loader (confirmed via its own source: auto-appends `.js`
+  when missing) resolves it identically. `.ts` sources are excluded from
+  `adb push` (Rhino only loads compiled `.js`). CodeRabbit review across
+  both PRs caught two real bugs — worth knowing about since they're easy to
+  reintroduce: (1) `watchdog.ts`'s post-bridge-unhealthy check must treat
+  `sshd === "FAILED"` as unhealthy alongside `"down"`, because
+  `stayturgid_repair.py` genuinely writes that value (unlike
+  `comonitor.ts`'s own internal sshd probe, which never produces it — don't
+  conflate the two `sshd` value spaces); (2) a scratch-dir leak on
+  `copytree()` failure in `autojs6_deploy_util.py`. CodeRabbit also twice
+  misapplied the AGENTS.md device-announcement/`ScreenControlSession`
+  convention to on-device Rhino code and Mac-side deploy `module_utils` —
+  both conventions are scoped to interactive AI-session/Mac screen-control
+  work, not autonomous watchdog code; don't implement them there without
+  checking scope first.
 - **2026-07-13** — **Secure FIRERPA + accessibility coexistence:** private
   certificate auth and `shell` SSH aliases validated on s24/p7a; upstream
   `getUiAutomation(0)` patched to preserve ordinary accessibility services using a
