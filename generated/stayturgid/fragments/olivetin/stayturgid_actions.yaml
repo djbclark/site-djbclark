@@ -47,6 +47,24 @@ actions:
       cd /Users/djbclark/ops/stayturgid
       just deploy hd8
 
+  - id: stayturgid_deploy_m1_air
+    title: "Deploy m1-air (m1-air)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd /Users/djbclark/ops/stayturgid
+      just deploy m1-air
+
+  - id: stayturgid_deploy_mac_mini_intel
+    title: "Deploy mac-mini-intel (mac-mini-intel)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd /Users/djbclark/ops/stayturgid
+      just deploy mac-mini-intel
+
   - id: stayturgid_deploy_p7a
     title: "Deploy Pixel 7a (p7a)"
     icon: "&#128640;"
@@ -64,4 +82,13 @@ actions:
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       cd /Users/djbclark/ops/stayturgid
       just deploy s24
+
+  - id: stayturgid_deploy_vps_primary
+    title: "Deploy vps-primary (vps-primary)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd /Users/djbclark/ops/stayturgid
+      just deploy vps-primary
 

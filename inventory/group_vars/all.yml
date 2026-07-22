@@ -13,6 +13,35 @@ caddy_short_hostname: mac
 # OPENOBSERVE_ROOT_PASSWORD only — never commit secrets). Matches live OO.
 openobserve_root_email: djbclark@gmail.com
 
+# blackbox_exporter active-check targets (serverapp_victoriametrics scrapes
+# these via /probe with the matching module). Seeded from real inventory
+# (hosts.yml Tailscale IPs) and this Mac's actual listening services
+# (`lsof -iTCP -sTCP:LISTEN`) — not placeholders. Add/remove targets here as
+# the fleet/control-node service set changes; no product code change needed.
+serverapp_victoriametrics_blackbox_targets:
+  # Termux SSH on the three real fleet devices — previously unmonitored
+  # (access_monitor.py checks ADB reachability, not the SSH port itself).
+  ssh_banner:
+    - "100.123.218.30:8022"  # s24 (Galaxy S24)
+    - "100.65.230.108:8022"  # p7a (Pixel 7a)
+    - "100.124.55.39:8022"   # hd8 (Kindle Fire HD 8)
+  # Caddy front door. HTTPS target uses the real tailnet hostname, not
+  # 127.0.0.1 — the cert (real Let's Encrypt via Tailscale's cert
+  # integration, confirmed live) is issued for caddy_public_hostname, and
+  # its CN won't match a 127.0.0.1 SNI/Host even though the cert is valid.
+  http_2xx:
+    - "127.0.0.1:80"
+    - "127.0.0.1:8080"
+    - "https://mac.greyhound-sidemirror.ts.net"
+  # Cheap "did the daemon silently die between deploys" check for the other
+  # locally-managed serverapps (redundant with their own health checks at
+  # deploy time, but those don't run continuously between deploys).
+  tcp_connect:
+    - "127.0.0.1:3000"  # grafana
+    - "127.0.0.1:5080"  # openobserve
+    - "127.0.0.1:8428"  # victoriametrics (self; redundant with self-scrape up)
+    - "127.0.0.1:1337"  # olivetin
+
 # Generic defaults for any Android/Termux device. Overridden by increasingly
 # specific taxonomy layers (android_* < vendor_* < oneui_* < model_* < host).
 termux_home: /data/data/com.termux/files/home
