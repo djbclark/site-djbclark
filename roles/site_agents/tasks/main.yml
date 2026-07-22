@@ -60,6 +60,13 @@
     _agent_plist: "{{ _system_state_plist }}"
     _agent_script: "{{ _system_state_script }}"
 
+- name: Render cswap-auto LaunchAgent
+  ansible.builtin.template:
+    src: cswap-auto.plist.j2
+    dest: "{{ site_agents_cswap_plist }}"
+    mode: "0644"
+  register: _cswap_plist
+
 - name: Manage hibernate-disk-check LaunchAgent
   ansible.builtin.include_tasks: launchagent.yml
   vars:
@@ -67,3 +74,11 @@
     _agent_plist_path: "{{ site_agents_hibernate_plist }}"
     _agent_plist: "{{ _hibernate_plist }}"
     _agent_script: "{{ _hibernate_script }}"
+
+- name: Manage cswap-auto LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_cswap_label }}"
+    _agent_plist_path: "{{ site_agents_cswap_plist }}"
+    _agent_plist: "{{ _cswap_plist }}"
+    _agent_script: "{{ site_agents_cswap_plist }}"

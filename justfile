@@ -116,6 +116,11 @@ site-agents-status:
     else \
       echo "launchd: not loaded (com.djbclark.hibernate-disk-check)"; \
     fi
+    @if launchctl print "gui/$(id -u)/com.djbclark.cswap-auto" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.cswap-auto)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.cswap-auto)"; \
+    fi
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)

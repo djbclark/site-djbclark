@@ -38,3 +38,14 @@ site_agents_hibernate_plist: >-
   {{ site_agents_launchagents_dir }}/{{ site_agents_hibernate_label }}.plist
 site_agents_hibernate_log: "{{ site_agents_state_dir }}/hibernate-disk-check.log"
 site_agents_hibernate_error_log: "{{ site_agents_state_dir }}/hibernate-disk-check.error.log"
+
+# --- cswap-auto --------------------------------------------------------------
+site_agents_cswap_label: "com.{{ site_ns }}.cswap-auto"
+site_agents_cswap_plist: >-
+  {{ site_agents_launchagents_dir }}/{{ site_agents_cswap_label }}.plist
+site_agents_cswap_log: "{{ site_agents_state_dir }}/cswap-auto.log"
+site_agents_cswap_error_log: "{{ site_agents_state_dir }}/cswap-auto.error.log"
+site_agents_cswap_threshold: 90
+site_agents_cswap_interval: 60
+site_agents_cswap_cooldown: 300
+site_agents_cswap_model: "all"
