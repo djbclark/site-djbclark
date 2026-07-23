@@ -1,10 +1,15 @@
 # site-djbclark
 
+> **AI agents:** start at [AGENTS.md](AGENTS.md) instead of this file — it's
+> the entry point with the doc map and conventions.
+
 Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
-mini, Linux VPSs) — the identity/allocation authority in a two-repo system
-whose public product side is [stayturgid](https://github.com/djbclark/stayturgid).
-Base layout: `~/ops/stayturgid` + `~/ops/site-djbclark` (permanent; see
-stayturgid ADR 005).
+mini, Linux VPSs) — the identity/allocation authority paired with the public
+product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
+layout is three sibling checkouts under `~/ops/`: this repo, `stayturgid`, and
+`site-private` (private, always the same name, holds anything not managed by
+either of the other two — see
+[stayturgid's multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-third-repo-opssite-private)).
 
 | Where | What |
 | --- | --- |
