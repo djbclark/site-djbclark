@@ -9,16 +9,50 @@ Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
 layout is three sibling checkouts under `~/ops/`: this repo, `stayturgid`,
-and `site-private` (private, canonical name, holds anything not managed by
-either of the other two — see
-[stayturgid's multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-third-repo-opssite-private)
-for the full policy, not duplicated here).
+and `site-private`.
+
+## Memory & documentation policy (this repo's slice)
+
+There is **no single canonical policy copy**. Each sibling's `AGENTS.md` owns
+its slice; read all three for a full picture. Cross-repo: filesystem path **and**
+absolute GitHub URL.
+
+**This repo (`site-djbclark`) owns:**
+
+- Non-sensitive **site-specific** practice that other stayturgid operators might
+  still benefit from seeing or adapting (relay protocol, registry discipline,
+  LiteLLM/brew site notes, segmentation plans under `docs/`).
+- Live inventory, credentials-adjacent config, hostnames/IPs for **this** site
+  (never upstream into public stayturgid).
+
+**Point elsewhere:**
+
+- Durable **stayturgid product** rules/lessons →
+  [`~/ops/stayturgid/AGENTS.md`](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md)
+  (`https://github.com/djbclark/stayturgid/blob/master/AGENTS.md`).
+- Private / Mac-wide / not-for-public extras →
+  [`~/ops/site-private/AGENTS.md`](https://github.com/djbclark/site-private/blob/master/AGENTS.md)
+  (`https://github.com/djbclark/site-private/blob/master/AGENTS.md`).
+
+**Never commit passwords or secrets** (same rule as the other two). IPs and
+hostnames for this site are expected here.
+
+**Symlinks** under `~` (`AGENTS.md`, `CLAUDE.md`, other root-level vendor agent
+files) and `~/.claude/.../memory` are documented in site-private /
+stayturgid — not duplicated here. Optional local
+`~/ops/.mysite` → this checkout is planned in stayturgid
+[#48](https://github.com/djbclark/stayturgid/issues/48) (do not rely on it in
+GitHub URLs).
+
+Topology background:
+[stayturgid multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-third-repo-opssite-private).
 
 ## Where documentation goes
 
 | Location                                                | What goes here                                                              | Update cadence   |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------- |
 | [`README.md`](README.md)                                | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes            | Rare             |
+| [`AGENTS.md`](AGENTS.md) (this file)                    | Agent entry + **this site's slice** of the three-way memory/docs policy   | Rare             |
 | [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md) | Current baton for the segmentation/AI-stack relay — which AI, exact prompt | Every relay step |
 | [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)       | Rules for the relay process itself                                          | Rare             |
 | [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)           | History of relay steps                                                      | Every relay step |
@@ -26,8 +60,8 @@ for the full policy, not duplicated here).
 | [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md) | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either | As allocations change |
 | [`human/`](human/)                                       | Operator-only tasks, credentials checklists, decision records              | As needed        |
-| `~/ops/stayturgid` (sibling repo)                        | The public product this site runs — code, fleet conventions, durable rules | N/A (other repo) |
-| `~/ops/site-private` (sibling repo)                       | Anything not managed by this repo or stayturgid — canonical policy lives there | N/A (other repo) |
+| `~/ops/stayturgid` (sibling)                             | Public product — code, fleet conventions, product policy slice             | N/A (other repo) |
+| `~/ops/site-private` (sibling)                           | Private/generic companion — private policy slice + Claude generic memory | N/A (other repo) |
 
 ## Conventions
 
