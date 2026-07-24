@@ -11,7 +11,7 @@ install to `~/.local/bin`; plists render to
 | system-state-backup | `com.{{ site_ns }}.system-state-backup` | Daily 12:00 + RunAtLoad | `{{ homebrew_prefix }}/var/system-state` + mirror `~/system-state` |
 | hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad | macOS notification when `/` free GB < threshold (default 25) |
 | cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
-| aiuse | `com.{{ site_ns }}.aiuse` | Every 21600s (6h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
+| aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
 
 Homebrew prefix follows the LiteLLM / stayturgid pattern: Apple Silicon
 `/opt/homebrew`, Intel `/usr/local` (from `ansible_facts.architecture`).
