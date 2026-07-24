@@ -52,7 +52,7 @@ site_agents_cswap_model: "all"
 
 # --- aiuse (quota snapshot collector) ----------------------------------------
 # Periodic `aiuse -q --json` to accumulate ~/.cache/aiuse/snapshots.
-# Enable analysis.persist_snapshots via tasks (learn_from_history stays off).
+# Enable persist_snapshots + learn_from_history: auto (learns once >= 2 snaps).
 site_agents_aiuse_label: "com.{{ site_ns }}.aiuse"
 site_agents_aiuse_plist: >-
   {{ site_agents_launchagents_dir }}/{{ site_agents_aiuse_label }}.plist
