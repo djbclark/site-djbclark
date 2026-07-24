@@ -87,7 +87,7 @@ Prefer these when shelling out:
 
 | Use case             | Use                                                                                 | Not             | Why                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------ | --------------- | --------------------------------------------------------------------------- |
-| search file text      | `rg`                                                                                  | `grep`          | respects `.gitignore`, faster, saner defaults                              |
+| search file text      | `rg`                                                                                  | `grep`, `ag`, `ack`, `ugrep` | benchmarked on stayturgid (799 files): rg 0.03s vs ag 0.57s vs ugrep 1.09s vs ack 3.13s for the same search; only rg/ugrep support `--json`, rg won on speed so ag/ugrep/ack weren't kept |
 | find files             | `fd`                                                                                  | `find`          | respects `.gitignore`, simple glob syntax, faster                          |
 | view files in shell    | `bat`                                                                                 | `cat`           | line numbers + syntax highlighting                                        |
 | find/replace           | `sd`                                                                                  | `sed`           | plain regex, no backslash-escaping hell                                    |
