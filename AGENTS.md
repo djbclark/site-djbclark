@@ -39,29 +39,29 @@ hostnames for this site are expected here.
 
 **Symlinks** under `~` (`AGENTS.md`, `CLAUDE.md`, other root-level vendor agent
 files) and `~/.claude/.../memory` are documented in site-private /
-stayturgid — not duplicated here. Optional local
-`~/ops/.mysite` → this checkout is planned in stayturgid
-[#48](https://github.com/djbclark/stayturgid/issues/48) (do not rely on it in
-GitHub URLs).
+stayturgid — not duplicated here. The supported optional local selector is
+`~/ops/.mysite` → this checkout; do not use `.mysite` in GitHub URLs.
+stayturgid discovery excludes `site-private`, prints the selected path/source,
+and creates a missing private-companion directory without Git or secrets.
 
 Topology background:
 [stayturgid multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-third-repo-opssite-private).
 
 ## Where documentation goes
 
-| Location                                                | What goes here                                                              | Update cadence   |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------- |
-| [`README.md`](README.md)                                | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes            | Rare             |
-| [`AGENTS.md`](AGENTS.md) (this file)                    | Agent entry + **this site's slice** of the three-way memory/docs policy   | Rare             |
-| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md) | Current baton for the segmentation/AI-stack relay — which AI, exact prompt | Every relay step |
-| [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)       | Rules for the relay process itself                                          | Rare             |
-| [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)           | History of relay steps                                                      | Every relay step |
-| [`docs/plans/`](docs/plans/)                             | Architecture + phased execution plans for this site's segmentation work    | As plans evolve  |
-| [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md) | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
-| [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either | As allocations change |
-| [`human/`](human/)                                       | Operator-only tasks, credentials checklists, decision records              | As needed        |
-| `~/ops/stayturgid` (sibling)                             | Public product — code, fleet conventions, product policy slice             | N/A (other repo) |
-| `~/ops/site-private` (sibling)                           | Private/generic companion — private policy slice + Claude generic memory | N/A (other repo) |
+| Location                                                                               | What goes here                                                                                | Update cadence           |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------ |
+| [`README.md`](README.md)                                                               | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes                               | Rare                     |
+| [`AGENTS.md`](AGENTS.md) (this file)                                                   | Agent entry + **this site's slice** of the three-way memory/docs policy                       | Rare                     |
+| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md)                               | Current baton for the segmentation/AI-stack relay — which AI, exact prompt                    | Every relay step         |
+| [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)                                     | Rules for the relay process itself                                                            | Rare                     |
+| [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)                                         | History of relay steps                                                                        | Every relay step         |
+| [`docs/plans/`](docs/plans/)                                                           | Architecture + phased execution plans for this site's segmentation work                       | As plans evolve          |
+| [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)       | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
+| [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
+| [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
+| `~/ops/stayturgid` (sibling)                                                           | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
+| `~/ops/site-private` (sibling)                                                         | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
 
 ## Conventions
 
