@@ -49,3 +49,16 @@ site_agents_cswap_threshold: 90
 site_agents_cswap_interval: 60
 site_agents_cswap_cooldown: 300
 site_agents_cswap_model: "all"
+
+# --- aiuse (quota snapshot collector) ----------------------------------------
+# Periodic `aiuse -q --json` to accumulate ~/.cache/aiuse/snapshots.
+# Enable analysis.persist_snapshots via tasks (learn_from_history stays off).
+site_agents_aiuse_label: "com.{{ site_ns }}.aiuse"
+site_agents_aiuse_plist: >-
+  {{ site_agents_launchagents_dir }}/{{ site_agents_aiuse_label }}.plist
+site_agents_aiuse_bin: "{{ site_agents_bin_dir }}/aiuse"
+site_agents_aiuse_log: "{{ site_agents_state_dir }}/aiuse.log"
+site_agents_aiuse_error_log: "{{ site_agents_state_dir }}/aiuse.error.log"
+site_agents_aiuse_interval_seconds: 21600
+site_agents_aiuse_config_dir: "{{ site_agents_home }}/.config/aiuse"
+site_agents_aiuse_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"

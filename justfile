@@ -121,6 +121,11 @@ site-agents-status:
     else \
       echo "launchd: not loaded (com.djbclark.cswap-auto)"; \
     fi
+    @if launchctl print "gui/$(id -u)/com.djbclark.aiuse" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.aiuse)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.aiuse)"; \
+    fi
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)

@@ -82,3 +82,55 @@
     _agent_plist_path: "{{ site_agents_cswap_plist }}"
     _agent_plist: "{{ _cswap_plist }}"
     _agent_script: "{{ site_agents_cswap_plist }}"
+
+- name: Assert aiuse binary is present
+  ansible.builtin.stat:
+    path: "{{ site_agents_aiuse_bin }}"
+  register: _aiuse_bin_stat
+
+- name: Fail when aiuse is missing from PATH install location
+  ansible.builtin.assert:
+    that:
+      - _aiuse_bin_stat.stat.exists
+    fail_msg: >-
+      {{ site_agents_aiuse_bin }} not found.
+      Install with: pipx install aiuse   (or brew tap djbclark/aiuse && brew install aiuse,
+      then symlink/copy into ~/.local/bin or override site_agents_aiuse_bin).
+
+- name: Ensure aiuse config directory exists
+  ansible.builtin.file:
+    path: "{{ site_agents_aiuse_config_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Ensure aiuse services.yaml exists for persist_snapshots
+  ansible.builtin.copy:
+    dest: "{{ site_agents_aiuse_services_yaml }}"
+    content: |
+      analysis:
+        persist_snapshots: true
+        learn_from_history: false
+    mode: "0600"
+    force: false
+
+- name: Enable analysis.persist_snapshots in aiuse services.yaml
+  ansible.builtin.lineinfile:
+    path: "{{ site_agents_aiuse_services_yaml }}"
+    regexp: '^(\s*)persist_snapshots:\s*'
+    line: '  persist_snapshots: true'
+    insertafter: '^analysis:'
+
+- name: Render aiuse LaunchAgent
+  ansible.builtin.template:
+    src: aiuse.plist.j2
+    dest: "{{ site_agents_aiuse_plist }}"
+    mode: "0644"
+  register: _aiuse_plist
+
+- name: Manage aiuse LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_aiuse_label }}"
+    _agent_plist_path: "{{ site_agents_aiuse_plist }}"
+    _agent_plist: "{{ _aiuse_plist }}"
+    _agent_script: "{{ site_agents_aiuse_plist }}"
