@@ -95,6 +95,14 @@ Prefer these when shelling out:
 | cut/select columns     | `hck`                                                                                 | `awk`/`cut`     | simple `-f`/`-d` flags — `choose` was tried too but isn't packaged in Homebrew (only `choose-gui`/`choose-rust` exist under different names), so skipped |
 | git diffs/pager        | `delta` (set globally as `core.pager` + `interactive.diffFilter` in gitconfig)        | raw `git diff`  | syntax-highlighted, line-numbered hunks                                    |
 | JSON                   | `jq` (Homebrew build at `/opt/homebrew/bin/jq`, ahead of macOS-system `/usr/bin/jq` on PATH) | —        | newer jq (1.8.x) vs system's 1.7.1                                          |
+| YAML query/edit         | `yq`                                                                                  | inline python/`grep` on YAML | jq-style query syntax for the ansible/registry/brew-fragment YAML these repos actually have |
+| ad-hoc JSON API calls   | `xh`                                                                                  | raw `curl`      | pretty-prints + colorizes JSON by default (verified against `curl` on local grafana/ollama endpoints) instead of a manual `| jq` follow-up; `curl` is still right for uploads/non-JSON/complex auth |
+| spelling in docs/prose  | `typos` (already installed) — run before finalizing AGENTS.md/docs edits            | manual proofreading | catches misspellings for free; ran clean on all three repos' AGENTS.md as of 2026-07-24 |
+
+**Tried and rejected:** `difftastic` (structural diff) — tested head-to-head
+against `delta` on a reordered/reformatted dict-key diff; it did not
+reconstruct the reorder any more cleanly than delta's word-diff, so no
+demonstrated token win over the already-adopted `delta`. Not installed.
 
 These govern **raw shell/bash use** — Codex, other bash-first agents, and
 this operator's terminal. They do **not** change Claude Code's own dedicated
