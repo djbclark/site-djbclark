@@ -3,8 +3,9 @@
 # Policy/rationale: see AGENTS.md "Modern CLI tool policy" section.
 stack: agent-cli-tools
 description: >-
-  Machine-wide modern CLI replacements (rg/fd/bat/sd/eza/hck/delta/jq) that
-  AI coding agents and this operator's shell should prefer over the classic
+  Machine-wide modern CLI replacements (rg/fd/bat/sd/eza/hck/delta/jq) plus
+  structural/semantic code search (ast-grep/semgrep) that AI coding agents
+  and this operator's shell should prefer over the classic
   grep/find/cat/sed/ls/awk/cut/diff/jq incumbents. Not owned by one repo's
   stack — cross-project agent ergonomics.
 
@@ -25,3 +26,7 @@ formulae:
     note: git diff pager — syntax-highlighted, line-numbered hunks
   - name: jq
     note: JSON CLI — Homebrew build supersedes older macOS-system /usr/bin/jq on PATH
+  - name: ast-grep
+    note: structural code search+rewrite (AST-aware) — use instead of rg/Grep for code-shape queries
+  - name: semgrep
+    note: structural pattern matching + large security-rule registry — already used by security-review skill

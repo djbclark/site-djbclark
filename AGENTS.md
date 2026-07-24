@@ -102,6 +102,51 @@ tools (`Read`/`Edit`/`Grep`/`Glob`), which stay preferred over shelling out
 to any of the above when an equivalent dedicated tool exists; this table only
 governs the Bash-tool fallback path and agents without those dedicated tools.
 
+### Structural/semantic code search — `ast-grep` and `semgrep`
+
+**Goal is tokens, not raw speed.** `rg` (and Claude Code's dedicated `Grep`
+tool) only match text/regex per line — the agent still has to *read* every
+hit and manually reason about which are real (multi-line calls get missed
+entirely; string literals containing the pattern text are false positives).
+`ast-grep` and `semgrep` parse actual syntax, so the tool itself does that
+filtering — fewer, cleaner hits, less context spent verifying matches.
+Verified 2026-07-24: searching for `subprocess.run(..., shell=True, ...)` in
+a file with a real multi-line call plus a decoy string literal containing
+`"shell=True"`, `rg` returned both (agent has to discard the string by
+hand); `ast-grep`/`semgrep` returned only the real, correctly-reconstructed
+call.
+
+**Use structural search instead of `rg`/`Grep` whenever the query is about
+code shape, not literal text** — e.g. "find all calls to X regardless of
+argument order/formatting/line breaks," refactors, or security-pattern
+scanning (bare `except`, `shell=True`, hardcoded secrets, SQL string
+concatenation, etc.). This applies even inside Claude Code, since the
+built-in `Grep` tool has the same text-only limitation as `rg` — shell out
+via Bash to `ast-grep`/`semgrep` for structural queries instead.
+
+- **`ast-grep`** (aliased `sg`, but prefer the unaliased `ast-grep` — `sg` is
+  the deprecated name) — general-purpose structural search *and rewrite*,
+  any language, no rule file needed for one-off queries:
+  ```
+  ast-grep run -p 'subprocess.run($$$ARGS, shell=True)' -l python .   # search
+  ast-grep run -p 'foo($ARG)' -r 'bar($ARG)' -l python . -U           # rewrite, apply without confirmation
+  ast-grep run -p 'foo($ARG)' -r 'bar($ARG)' -l python . -i           # rewrite, interactive confirm per hit
+  ```
+  `$FOO` matches one node, `$$$FOO` matches zero-or-more (e.g. arg lists).
+- **`semgrep`** — same structural matching, but its real strength is the
+  huge existing registry of security/correctness rules (already used by the
+  `security-review` skill) rather than one-off patterns:
+  ```
+  semgrep --lang python --pattern 'subprocess.run(..., shell=True, ...)' --metrics off .   # one-off pattern
+  semgrep --config p/security-audit --metrics off .                                        # registry ruleset
+  ```
+  `...` is semgrep's wildcard for "any args here."
+
+Both were installed and benchmarked head-to-head against the same repo
+before adoption — see
+[`memory/reference_agent_cli_tool_policy.md`](https://github.com/djbclark/site-private/blob/master/memory/reference_agent_cli_tool_policy.md)
+in site-private for the full evaluation notes.
+
 ## Multi-Agent Protocol
 
 Before any edit: `git fetch origin --prune && git pull --ff-only origin master`.
