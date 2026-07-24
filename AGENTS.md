@@ -75,6 +75,33 @@ Topology background:
 - Site-specific facts (real hostnames, IPs, credentials-adjacent config)
   belong here, never in `stayturgid`.
 
+### Modern CLI tool policy (any vendor AI, any of the three repos)
+
+Homebrew-installed machine-wide, decided 2026-07-24 by testing candidates
+from [ComposioHQ/awesome-agent-clis](https://github.com/ComposioHQ/awesome-agent-clis)
+and [thegdsks/awesome-modern-cli](https://github.com/thegdsks/awesome-modern-cli)
+head-to-head against the incumbents. Source of truth for the package list:
+[`brew/fragments/agent-cli-tools.yml`](brew/fragments/agent-cli-tools.yml)
+(stack `agent-cli-tools` in [`generated/Merged-Brewfile`](generated/Merged-Brewfile)).
+Prefer these when shelling out:
+
+| Use case             | Use                                                                                 | Not             | Why                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------ | --------------- | --------------------------------------------------------------------------- |
+| search file text      | `rg`                                                                                  | `grep`          | respects `.gitignore`, faster, saner defaults                              |
+| find files             | `fd`                                                                                  | `find`          | respects `.gitignore`, simple glob syntax, faster                          |
+| view files in shell    | `bat`                                                                                 | `cat`           | line numbers + syntax highlighting                                        |
+| find/replace           | `sd`                                                                                  | `sed`           | plain regex, no backslash-escaping hell                                    |
+| list directories       | `eza`                                                                                 | `ls`            | saner default columns/colors, git-aware                                    |
+| cut/select columns     | `hck`                                                                                 | `awk`/`cut`     | simple `-f`/`-d` flags — `choose` was tried too but isn't packaged in Homebrew (only `choose-gui`/`choose-rust` exist under different names), so skipped |
+| git diffs/pager        | `delta` (set globally as `core.pager` + `interactive.diffFilter` in gitconfig)        | raw `git diff`  | syntax-highlighted, line-numbered hunks                                    |
+| JSON                   | `jq` (Homebrew build at `/opt/homebrew/bin/jq`, ahead of macOS-system `/usr/bin/jq` on PATH) | —        | newer jq (1.8.x) vs system's 1.7.1                                          |
+
+These govern **raw shell/bash use** — Codex, other bash-first agents, and
+this operator's terminal. They do **not** change Claude Code's own dedicated
+tools (`Read`/`Edit`/`Grep`/`Glob`), which stay preferred over shelling out
+to any of the above when an equivalent dedicated tool exists; this table only
+governs the Bash-tool fallback path and agents without those dedicated tools.
+
 ## Multi-Agent Protocol
 
 Before any edit: `git fetch origin --prune && git pull --ff-only origin master`.
