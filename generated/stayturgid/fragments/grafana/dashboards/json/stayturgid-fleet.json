@@ -380,12 +380,12 @@
             "type": "prometheus",
             "uid": "stayturgid-victoriametrics"
           },
-          "expr": "last_over_time(stayturgid_host_up{host=\"m1-air\"}[15m])",
-          "legendFormat": "m1-air",
+          "expr": "last_over_time(stayturgid_host_up{host=\"mac\"}[15m])",
+          "legendFormat": "mac",
           "refId": "A"
         }
       ],
-      "title": "m1-air (m1-air)",
+      "title": "mac (mac)",
       "type": "stat"
     },
     {

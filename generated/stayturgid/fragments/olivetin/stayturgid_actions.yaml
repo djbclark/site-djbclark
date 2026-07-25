@@ -47,14 +47,14 @@ actions:
       cd /Users/djbclark/ops/stayturgid
       just deploy hd8
 
-  - id: stayturgid_deploy_m1_air
-    title: "Deploy m1-air (m1-air)"
+  - id: stayturgid_deploy_mac
+    title: "Deploy mac (mac)"
     icon: "&#128640;"
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       cd /Users/djbclark/ops/stayturgid
-      just deploy m1-air
+      just deploy mac
 
   - id: stayturgid_deploy_mac_mini_intel
     title: "Deploy mac-mini-intel (mac-mini-intel)"

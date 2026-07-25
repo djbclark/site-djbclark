@@ -1,6 +1,6 @@
 ---
 # Site-owned LiteLLM proxy (Phase E1 + E5 multi-host).
-# Default limit: m1-air (live control node). Planned hosts in site_litellm
+# Default limit: mac (live control node). Planned hosts in site_litellm
 # with site_host_status=offline_unprovisioned end before gather_facts/SSH.
 # Examples:
 #   just litellm-apply

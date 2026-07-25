@@ -7,10 +7,10 @@
 # authority. Lint: every effective listen port must appear here exactly once
 # per host; collisions fail CI.
 #
-# Seeded 2026-07-18 from netstat, launchd plists, and role defaults on m1-air.
+# Seeded 2026-07-18 from netstat, launchd plists, and role defaults on mac.
 
 hosts:
-  m1-air:
+  mac:
     ports:
       # ── stayturgid (control node) ────────────────────────────────────────
       - {port: 80,    bind: "*",         owner: site, service: caddy-http-redirect, status: active,

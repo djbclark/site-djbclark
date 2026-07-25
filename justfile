@@ -54,10 +54,10 @@ lint:
     bin/registry_lint.py
 
 # Install/configure loopback LiteLLM (E1 + E4 keys + E5 multi-host).
-# Default limit m1-air (live). Other hosts: --limit mac-mini-intel|vps-primary|site_litellm
+# Default limit mac (live). Other hosts: --limit mac-mini-intel|vps-primary|site_litellm
 # Keys: human/API-KEYS-E4.md — never commit secrets.
 # secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
-litellm_hosts := env_var_or_default("LITELLM_HOSTS", "m1-air")
+litellm_hosts := env_var_or_default("LITELLM_HOSTS", "mac")
 
 litellm-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
