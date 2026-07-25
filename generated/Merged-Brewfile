@@ -24,9 +24,10 @@ brew "xh"  # [agent-cli-tools] JSON-friendly HTTP client — pretty-prints/color
 brew "yq"  # [agent-cli-tools] YAML query/edit, jq-style syntax — fits the ansible/registry/brew-fragment YAML these repos have
 
 # === stack: ai-quota-tools ===
-# Machine-wide AI coding quota collectors and companions for aiuse multi-source cross-checks: OpenUsage (menu bar + loopback API), plus notes for caut (Rust cargo install, not a Homebrew formula).
+# Homebrew pieces of the aiuse data-source set: OpenUsage and CodexBar casks. Also installed by packaging/install-deps.sh / just install-aiuse-deps: cswap (uv tool claude-swap), caut (cargo), tokscale (npx PATH shim).
 # fragment: brew/fragments/ai-quota-tools.yml
 
+cask "codexbar"  # [ai-quota-tools] CodexBar.app + codexbar CLI — primary multi-provider live quotas for aiuse. Formula installs CodexBarCLI as `codexbar` on PATH.
 cask "openusage"  # [ai-quota-tools] OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits. After install: open app once; Settings → Command Line → Install for `openusage` CLI. Used by aiuse collectors.openusage (enabled by default).
 
 # === stack: site ===
@@ -63,4 +64,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 2 taps, 33 formulae, 3 casks across 4 stack(s)
+# summary: 2 taps, 33 formulae, 4 casks across 4 stack(s)

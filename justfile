@@ -175,6 +175,54 @@ install-openusage:
 install-ai-quota-tools: install-openusage install-caut
     @echo "Done. Verify: just ai-quota-status"
 
+# Full aiuse collector set: cswap, CodexBar, caut, OpenUsage, tokscale.
+# Prefers repo packaging/install-deps.sh when aiuse checkout is present.
+aiuse_root := env_var_or_default("AIUSE_ROOT", env("HOME") + "/src/aiuse")
+
+install-aiuse-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    script="{{ aiuse_root }}/packaging/install-deps.sh"
+    if [[ -x "${script}" ]]; then
+      exec "${script}"
+    fi
+    echo "aiuse install-deps.sh not found at ${script}; installing via just recipes…"
+    just install-cswap || true
+    just install-codexbar || true
+    just install-tokscale || true
+    just install-caut
+    just install-openusage
+    just aiuse-deps-status
+
+install-cswap:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cswap >/dev/null; then echo "cswap already on PATH"; exit 0; fi
+    if command -v uv >/dev/null; then uv tool install claude-swap
+    elif command -v pipx >/dev/null; then pipx install claude-swap
+    else echo "need uv or pipx for claude-swap"; exit 1; fi
+    mkdir -p "${HOME}/.local/bin"
+    if [[ -x "${HOME}/.local/share/uv/tools/claude-swap/bin/cswap" ]]; then
+      ln -sfn "${HOME}/.local/share/uv/tools/claude-swap/bin/cswap" "${HOME}/.local/bin/cswap"
+    fi
+    command -v cswap && cswap --version
+
+install-codexbar:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v codexbar >/dev/null; then echo "codexbar already on PATH"; exit 0; fi
+    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py -- brew install --cask codexbar
+    command -v codexbar && codexbar -V || true
+
+install-tokscale:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v tokscale >/dev/null; then echo "tokscale already on PATH"; exit 0; fi
+    mkdir -p "${HOME}/.local/bin"
+    printf '%s\n' '#!/usr/bin/env bash' 'exec npx --yes tokscale@latest "$@"' >"${HOME}/.local/bin/tokscale"
+    chmod +x "${HOME}/.local/bin/tokscale"
+    echo "tokscale → ${HOME}/.local/bin/tokscale"
+
 ai-quota-status:
     @echo "=== caut ==="
     @command -v caut >/dev/null && caut --version || echo "MISSING (just install-caut)"
@@ -186,6 +234,21 @@ ai-quota-status:
     @curl -fsS --max-time 2 http://127.0.0.1:6736/v1/limits >/dev/null 2>&1 \
       && echo "responding" || echo "not responding (launch OpenUsage.app)"
 
+aiuse-deps-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    script="{{ aiuse_root }}/packaging/install-deps.sh"
+    if [[ -x "${script}" ]]; then
+      "${script}" --check || true
+    else
+      echo "cswap:     $(command -v cswap || echo MISSING)"
+      echo "codexbar:  $(command -v codexbar || echo MISSING)"
+      echo "caut:      $(command -v caut || echo MISSING)"
+      echo "openusage: $(command -v openusage || echo 'CLI missing')"
+      echo "tokscale:  $(command -v tokscale || echo MISSING)"
+      test -d /Applications/OpenUsage.app && echo "OpenUsage.app: installed" || echo "OpenUsage.app: MISSING"
+    fi
+    just ai-quota-status
 # F2: re-survey homebrew.mxcl services (read-only). Audit doc:
 # docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md
 brew-services-audit:
