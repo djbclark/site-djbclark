@@ -1,15 +1,15 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 66bb0374cefe45350609217e91b7cef5d958277b
-synced: '2026-07-22T17:08:38Z'
+product_commit: 71d20b935598285aafc7d6cefcf34fb4cfb7bdee
+synced: '2026-07-25T10:50:10Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
 - path: generated/stayturgid/fragments/.keep
   sha256: f7d7428aead7a842bcd7726a44ed681db0539abeed0715a99e0426bf0909d4bc
 - path: generated/stayturgid/fragments/caddy/stayturgid.caddy
-  sha256: 0a7596af7f00a50c8f9808eedd3bb7e6e258f11b56b33b57869afed28bf98d7d
+  sha256: 770cf1a49362434df1a58616e2707c991ee2d74f5ba244cad2927a4f85e07267
 - path: generated/stayturgid/fragments/vector/stayturgid_sources.yaml
   sha256: 7774ffac6078f5fd046521fa3593c055b6608a2af465fa9843cc3fefc8ff514c
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
