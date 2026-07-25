@@ -155,6 +155,37 @@ brew-diff *args:
 brew-lock *args:
     SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py {{ args }}
 
+# AI quota collectors for aiuse multi-source cross-checks (caut + OpenUsage).
+# OpenUsage: brew cask (fragment brew/fragments/ai-quota-tools.yml).
+# caut: cargo install from GitHub (no Homebrew formula).
+install-caut:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
+    mkdir -p "${HOME}/.local/bin"
+    ln -sfn "${HOME}/.cargo/bin/caut" "${HOME}/.local/bin/caut"
+    echo "caut → $(command -v caut || true)"
+    caut --version
+
+install-openusage:
+    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py -- brew install --cask openusage
+    @echo "Open OpenUsage once, then: Settings → Command Line → Install (for PATH CLI)."
+    @echo "aiuse also uses http://127.0.0.1:6736/v1/limits while the app is running."
+
+install-ai-quota-tools: install-openusage install-caut
+    @echo "Done. Verify: just ai-quota-status"
+
+ai-quota-status:
+    @echo "=== caut ==="
+    @command -v caut >/dev/null && caut --version || echo "MISSING (just install-caut)"
+    @echo "=== openusage CLI ==="
+    @command -v openusage >/dev/null && echo "on PATH: $(command -v openusage)" || echo "CLI not on PATH (install from OpenUsage Settings → Command Line)"
+    @echo "=== OpenUsage.app ==="
+    @test -d /Applications/OpenUsage.app && echo "installed" || echo "missing (just install-openusage)"
+    @echo "=== OpenUsage HTTP :6736 ==="
+    @curl -fsS --max-time 2 http://127.0.0.1:6736/v1/limits >/dev/null 2>&1 \
+      && echo "responding" || echo "not responding (launch OpenUsage.app)"
+
 # F2: re-survey homebrew.mxcl services (read-only). Audit doc:
 # docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md
 brew-services-audit:

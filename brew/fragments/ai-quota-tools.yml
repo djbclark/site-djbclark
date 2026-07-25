@@ -1,0 +1,18 @@
+# AI subscription/quota tooling used by aiuse collectors (and ambient monitors).
+# Hand-edited. Project with: just brew-project
+stack: ai-quota-tools
+description: >-
+  Machine-wide AI coding quota collectors and companions for aiuse multi-source
+  cross-checks: OpenUsage (menu bar + loopback API), plus notes for caut (Rust
+  cargo install, not a Homebrew formula).
+
+casks:
+  - name: openusage
+    note: >-
+      OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits.
+      After install: open app once; Settings → Command Line → Install for `openusage` CLI.
+      Used by aiuse collectors.openusage (enabled by default).
+
+# caut is installed via cargo (see just install-caut / roles/site_agents notes):
+#   cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
+#   ln -sfn ~/.cargo/bin/caut ~/.local/bin/caut
