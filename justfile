@@ -16,7 +16,7 @@ site_dir := justfile_directory()
 
 # F4: exclusive lock for brew-touching operations (see bin/brew_flock.py).
 # Override: SITE_BREW_LOCK=/path/to/lock just brew-lock -- …
-brew_lock := env_var_or_default("SITE_BREW_LOCK", "/tmp/site-djbclark-brew.lock")
+brew_lock := env_var_or_default("SITE_BREW_LOCK", env_var_or_default("XDG_STATE_HOME", env("HOME") + "/.local/state") + "/site-djbclark/brew.lock")
 
 deploy:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" STAYTURGID_SITE_DIR="{{ site_dir }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy

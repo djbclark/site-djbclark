@@ -6,11 +6,12 @@
 """Serialize brew-touching commands with an exclusive advisory lock (Phase F4).
 
 macOS does not ship util-linux flock(1). This wrapper uses fcntl.flock on a
-lock file (same semantics). Default lock path:
+lock file (same semantics). Default lock path resolution:
 
-  /tmp/site-djbclark-brew.lock
-
-Override with SITE_BREW_LOCK.
+  1. $SITE_BREW_LOCK
+  2. $XDG_RUNTIME_DIR/site-djbclark/brew.lock (Linux / systemd user session, 0700)
+  3. $TMPDIR/site-djbclark/brew.lock (macOS per-user isolated temp dir /var/folders/..., 0700)
+  4. ~/.local/state/site-djbclark/brew.lock (XDG state directory, 0700)
 
 Usage:
   bin/brew_flock.py -- brew install just
@@ -35,17 +36,28 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_LOCK = "/tmp/site-djbclark-brew.lock"
 EX_TEMPFAIL = 75
 EX_TIMEOUT = 124
+
+
+def get_default_lock_path() -> Path:
+    if env_lock := os.environ.get("SITE_BREW_LOCK"):
+        return Path(env_lock)
+    if xdg_runtime := os.environ.get("XDG_RUNTIME_DIR"):
+        return Path(xdg_runtime) / "site-djbclark" / "brew.lock"
+    if tmpdir := os.environ.get("TMPDIR"):
+        if tmpdir.startswith("/var/folders/"):
+            return Path(tmpdir) / "site-djbclark" / "brew.lock"
+    xdg_state = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    return Path(xdg_state) / "site-djbclark" / "brew.lock"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--lock-file",
-        default=os.environ.get("SITE_BREW_LOCK", DEFAULT_LOCK),
-        help=f"lock file path (default: $SITE_BREW_LOCK or {DEFAULT_LOCK})",
+        default=None,
+        help="lock file path (default: per-user runtime/state lock directory)",
     )
     p.add_argument(
         "--nonblock",
@@ -66,15 +78,14 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def acquire(lock_fd: int, *, nonblock: bool, timeout: float | None) -> None:
+def acquire(lock_fd: int, lock_path: Path, *, nonblock: bool, timeout: float | None) -> None:
     if nonblock:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             if exc.errno in (errno.EACCES, errno.EAGAIN):
                 print(
-                    f"brew_flock: lock held ({os.environ.get('SITE_BREW_LOCK', DEFAULT_LOCK)}); "
-                    "another brew operation is in progress",
+                    f"brew_flock: lock held ({lock_path}); another brew operation is in progress",
                     file=sys.stderr,
                 )
                 raise SystemExit(EX_TEMPFAIL) from exc
@@ -90,8 +101,7 @@ def acquire(lock_fd: int, *, nonblock: bool, timeout: float | None) -> None:
             if exc.errno not in (errno.EACCES, errno.EAGAIN):
                 raise
             print(
-                "brew_flock: waiting for exclusive lock "
-                f"({os.environ.get('SITE_BREW_LOCK', DEFAULT_LOCK)})…",
+                f"brew_flock: waiting for exclusive lock ({lock_path})…",
                 file=sys.stderr,
             )
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
@@ -126,12 +136,26 @@ def main() -> int:
         print("brew_flock: --nonblock and --timeout are mutually exclusive", file=sys.stderr)
         return 2
 
-    lock_path = Path(args.lock_file).expanduser()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Open for read/write; create if missing. Keep fd open for the child lifetime.
-    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+    lock_path = Path(args.lock_file).expanduser() if args.lock_file else get_default_lock_path()
+    lock_dir = lock_path.parent
+    lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        acquire(lock_fd, nonblock=args.nonblock, timeout=args.timeout)
+        os.chmod(lock_dir, 0o700)
+    except OSError:
+        pass
+
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    try:
+        lock_fd = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        print(f"brew_flock: error opening lock file {lock_path}: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        acquire(lock_fd, lock_path, nonblock=args.nonblock, timeout=args.timeout)
         # Record holder for debugging (best-effort).
         try:
             os.ftruncate(lock_fd, 0)
@@ -158,3 +182,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

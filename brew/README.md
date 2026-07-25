@@ -41,7 +41,7 @@ Live snapshot path (first existing wins):
 
 ## Flock lock
 
-Lock file default: `/tmp/site-djbclark-brew.lock`  
+Lock file default: `~/.local/state/site-djbclark/brew.lock` (or `$XDG_RUNTIME_DIR` / macOS per-user `$TMPDIR`)  
 Override: `SITE_BREW_LOCK=/path/to/lock just brew-lock -- …`
 
 macOS has no util-linux `flock(1)` by default; `bin/brew_flock.py` uses

@@ -64,7 +64,7 @@ just brew-lock -- brew info just   # exclusive lock around brew-touching cmds
 ```
 
 Concurrent brew mutations (e.g. `just goose-apply`) take
-`/tmp/site-djbclark-brew.lock` via `bin/brew_flock.py` (`fcntl.flock`; macOS
+`~/.local/state/site-djbclark/brew.lock` (or `$XDG_RUNTIME_DIR` / `$TMPDIR`) via `bin/brew_flock.py` (`fcntl.flock`; macOS
 has no util-linux `flock(1)` by default). Details and rollback:
 [`brew/README.md`](brew/README.md).
 
