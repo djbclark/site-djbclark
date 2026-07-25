@@ -49,6 +49,8 @@ hosts:
       # ── site: AI stack & local services ──────────────────────────────────
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
+      - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
+         note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
       - {port: 11434, bind: "127.0.0.1", owner: site, service: ollama-llm-api,   status: active,
          note: "Ollama local LLM API server"}
       - {port: 9115,  bind: "127.0.0.1", owner: site, service: blackbox-exporter, status: active,
