@@ -1,9 +1,18 @@
 version: 1.4
 
+resultSinks:
+  - &programSink
+    type: program
+    path: {{ site_agents_jobber_notify_script }}
+  - &filesystemSink
+    type: filesystem
+    path: {{ site_agents_jobber_state_dir }}
+    maxAgeDays: 14
+
 jobs:
   brew-fast-upgrade:
     cmd: {{ site_agents_brew_fast_upgrade_script }}
     time: 0 0 3 * * *
     onError: Backoff
-    notifyOnError: false
-    notifyOnFailure: true
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]

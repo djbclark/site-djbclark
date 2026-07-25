@@ -19,10 +19,13 @@
   loop:
     - {path: "{{ site_agents_bin_dir }}", mode: "0755"}
     - {path: "{{ site_agents_state_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_jobber_state_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_jobber_var_dir }}", mode: "0755"}
     - {path: "{{ site_agents_launchagents_dir }}", mode: "0755"}
     - {path: "{{ site_agents_system_state_var_dir }}", mode: "0755"}
     - {path: "{{ site_agents_system_state_home_mirror }}", mode: "0755"}
     - {path: "{{ site_agents_homebrew_prefix }}/var/log", mode: "0755"}
+
 
 - name: Install system-state-backup script
   ansible.builtin.template:
@@ -142,6 +145,13 @@
     _agent_plist: "{{ _aiuse_plist }}"
     _agent_script: "{{ site_agents_aiuse_plist }}"
 
+- name: Install jobber-notify script
+  ansible.builtin.template:
+    src: jobber-notify.py.j2
+    dest: "{{ site_agents_jobber_notify_script }}"
+    mode: "0755"
+  register: _jobber_notify_script
+
 - name: Install brew-fast-upgrade script
   ansible.builtin.template:
     src: brew-fast-upgrade.sh.j2
@@ -153,17 +163,21 @@
     src: jobber.yaml.j2
     dest: "{{ site_agents_jobber_config }}"
     mode: "0600"
+  register: _jobber_config
 
-- name: Ensure Jobber LaunchAgent plist is symlinked
-  ansible.builtin.file:
-    src: "{{ site_agents_jobber_plist_src }}"
+- name: Render Jobber LaunchAgent plist
+  ansible.builtin.template:
+    src: jobber.plist.j2
     dest: "{{ site_agents_jobber_plist }}"
-    state: link
-    force: true
+    mode: "0644"
+  register: _jobber_plist
 
-- name: Ensure Jobber is running
-  community.general.launchd:
-    name: homebrew.mxcl.jobber
-    state: started
-    enabled: true
+- name: Manage Jobber LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_jobber_label }}"
+    _agent_plist_path: "{{ site_agents_jobber_plist }}"
+    _agent_plist: "{{ _jobber_plist }}"
+    _agent_script: "{{ _jobber_config }}"
+
 

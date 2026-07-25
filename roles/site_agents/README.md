@@ -14,6 +14,15 @@ install to `~/.local/bin`; plists render to
 | aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
 | jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00) |
 
+## Jobber Notifications (`jobber-notify`)
+
+Job failures in Jobber trigger `~/.local/bin/jobber-notify`, which implements three notification sinks:
+
+1. **Option A: macOS Desktop Notifications (`osascript`)** — Native macOS banner alert on job failure.
+2. **Option B: Telegram / Hermes Alerting** — Posts HTML alert with job status, hostname, and error details to Telegram (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_HOME_CHANNEL`).
+3. **Option C: Log Sinks & Filesystem Capture** — Jobber `filesystem` sink + structured JSON records in `~/.local/state/jobber/notifications.log` (14-day retention).
+
+
 
 Homebrew prefix follows the LiteLLM / stayturgid pattern: Apple Silicon
 `/opt/homebrew`, Intel `/usr/local` (from `ansible_facts.architecture`).
