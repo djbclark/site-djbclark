@@ -35,8 +35,6 @@ hosts:
          note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
       - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
          note: "Phase D1: com.djbclark.caddy health; D4 fixed landing.py default 8080→8088 (no longer collides)"}
-      - {port: 8081,  bind: "127.0.0.1", owner: stayturgid, service: ui-tars-vlm,         status: active,
-         note: "llama.cpp UI-TARS; homebrew.mxcl.ui-tars"}
       - {port: 8088,  bind: "127.0.0.1", owner: site, service: landing,             status: active,
          note: "Phase D4: com.djbclark.landing + landing-discover; legacy plists archived and removed in D7"}
 

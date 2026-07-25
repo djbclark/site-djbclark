@@ -164,8 +164,8 @@ brew-services-audit:
     @echo "=== launchctl homebrew.mxcl.* ==="
     @launchctl list 2>/dev/null | rg 'homebrew\.mxcl' || true
     @echo ""
-    @echo "=== listeners (postgres/redis/mysql/omlx/et/ui-tars ports) ==="
-    @lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | rg -i 'postgres|redis|mysql|maria|omlx|llama|etserver|:6379|:5432|:3306|:2022|:8000|:8081' || true
+    @echo "=== listeners (postgres/redis/mysql/omlx/et ports) ==="
+    @lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | rg -i 'postgres|redis|mysql|maria|omlx|etserver|:6379|:5432|:3306|:2022|:8000' || true
     @echo ""
     @echo "=== probes ==="
     @nc -z -w 2 127.0.0.1 2022 >/dev/null 2>&1 && echo "et :2022 open" || echo "et :2022 closed"

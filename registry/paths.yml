@@ -50,7 +50,6 @@ prefixes:
     # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
     # Operator keep/kill sign-off: human/F2-BREW-SERVICES-DECISIONS.md
     - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal port 2022; system LaunchDaemon is live; user LaunchAgent removed 2026-07-20 (operator Accept, RESIDUAL-EF) — dual-load noise resolved"}
-    - {label: homebrew.mxcl.ui-tars,        claimed_by: stayturgid, note: "VLM llama.cpp server port 8081; custom plist not a brew formula"}
     - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
