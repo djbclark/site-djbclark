@@ -141,3 +141,29 @@
     _agent_plist_path: "{{ site_agents_aiuse_plist }}"
     _agent_plist: "{{ _aiuse_plist }}"
     _agent_script: "{{ site_agents_aiuse_plist }}"
+
+- name: Install brew-fast-upgrade script
+  ansible.builtin.template:
+    src: brew-fast-upgrade.sh.j2
+    dest: "{{ site_agents_brew_fast_upgrade_script }}"
+    mode: "0755"
+
+- name: Deploy Jobber configuration
+  ansible.builtin.template:
+    src: jobber.yaml.j2
+    dest: "{{ site_agents_jobber_config }}"
+    mode: "0600"
+
+- name: Ensure Jobber LaunchAgent plist is symlinked
+  ansible.builtin.file:
+    src: "{{ site_agents_jobber_plist_src }}"
+    dest: "{{ site_agents_jobber_plist }}"
+    state: link
+    force: true
+
+- name: Ensure Jobber is running
+  community.general.launchd:
+    name: homebrew.mxcl.jobber
+    state: started
+    enabled: true
+

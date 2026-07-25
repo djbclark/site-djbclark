@@ -62,3 +62,10 @@ site_agents_aiuse_error_log: "{{ site_agents_state_dir }}/aiuse.error.log"
 site_agents_aiuse_interval_seconds: 3600
 site_agents_aiuse_config_dir: "{{ site_agents_home }}/.config/aiuse"
 site_agents_aiuse_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"
+
+# --- jobber / brew-fast-upgrade ---------------------------------------------
+site_agents_jobber_config: "{{ site_agents_home }}/.jobber"
+site_agents_brew_fast_upgrade_script: "{{ site_agents_bin_dir }}/brew-fast-upgrade"
+site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobber.plist"
+site_agents_jobber_plist_src: "{{ site_agents_homebrew_prefix }}/opt/jobber/homebrew.mxcl.jobber.plist"
+

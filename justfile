@@ -126,6 +126,12 @@ site-agents-status:
     else \
       echo "launchd: not loaded (com.djbclark.aiuse)"; \
     fi
+    @if launchctl print "gui/$(id -u)/homebrew.mxcl.jobber" >/dev/null 2>&1; then \
+      echo "launchd: loaded (homebrew.mxcl.jobber)"; \
+    else \
+      echo "launchd: not loaded (homebrew.mxcl.jobber)"; \
+    fi
+
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)

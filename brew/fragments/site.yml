@@ -19,6 +19,8 @@ formulae:
     note: F2 site claim — workstation AI workspace manager (UDS)
   - name: jundot/omlx/omlx
     note: F2 site claim — local MLX LLM server 127.0.0.1:8000
+  - name: jobber
+    note: Jobber daemon for scheduled background jobs
   - name: just
     note: site justfile runner
 

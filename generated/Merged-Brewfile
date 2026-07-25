@@ -30,6 +30,7 @@ brew "yq"  # [agent-cli-tools] YAML query/edit, jq-style syntax — fits the ans
 tap "jundot/omlx", "https://github.com/jundot/omlx"  # omlx formula tap (F2 site claim)
 brew "block-goose-cli"  # [site] roles/goose E2 CLI
 brew "herdr"  # [site] F2 site claim — workstation AI workspace manager (UDS)
+brew "jobber"  # [site] Jobber daemon for scheduled background jobs
 brew "jundot/omlx/omlx"  # [site] F2 site claim — local MLX LLM server 127.0.0.1:8000
 brew "just"  # [site] site justfile runner
 brew "secretspec"  # [site] SecretSpec CLI; LiteLLM key injection (E4)
@@ -56,4 +57,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 2 taps, 32 formulae, 2 casks across 3 stack(s)
+# summary: 2 taps, 33 formulae, 2 casks across 3 stack(s)
