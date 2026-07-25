@@ -48,9 +48,17 @@ hosts:
       - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: active,
          note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
 
-      # ── site: AI stack (step0 plan, revised per step1 §9; E5 multi-host) ─
+      # ── site: AI stack & local services ──────────────────────────────────
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
+      - {port: 11434, bind: "127.0.0.1", owner: site, service: ollama-llm-api,   status: active,
+         note: "Ollama local LLM API server"}
+      - {port: 9115,  bind: "127.0.0.1", owner: site, service: blackbox-exporter, status: active,
+         note: "Prometheus Blackbox Exporter endpoint"}
+      - {port: 53837, bind: "127.0.0.1", owner: site, service: antigravity-agy-ipc, status: active,
+         note: "Google Antigravity CLI daemon IPC"}
+      - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
+         note: "Google Antigravity CLI sidecar listener"}
 
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.
@@ -64,6 +72,11 @@ hosts:
       - {port: 445,   bind: "*",         owner: unmanaged, service: smb,          status: active}
       - {port: 88,    bind: "*",         owner: unmanaged, service: kerberos-macos, status: active}
       - {port: 17500, bind: "*",         owner: unmanaged, service: dropbox-lansync, status: active}
+      - {port: 17600, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-helper, status: active}
+      - {port: 17603, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-api,    status: active}
+      - {port: 7265,  bind: "127.0.0.1", owner: unmanaged, service: raycast-helper,       status: active}
+      - {port: 44438, bind: "127.0.0.1", owner: unmanaged, service: zed-editor-helper,     status: active}
+      - {port: 59869, bind: "*",         owner: unmanaged, service: logi-options-daemon,  status: active}
       - {port: 5938,  bind: "*",         owner: unmanaged, service: teamviewer,   status: active}
       - {port: 8021,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
       - {port: 9000,  bind: "*",         owner: unmanaged, service: photosync,    status: active,
