@@ -21,6 +21,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 RELEASE_FILE = "ops-release.json"
@@ -682,7 +683,7 @@ class OpsReleaseLock:
         self.path = default_lock_path()
         self.fd = -1
 
-    def __enter__(self) -> OpsReleaseLock:
+    def __enter__(self) -> Self:
         if not self.enabled:
             return self
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -707,7 +708,9 @@ class OpsReleaseLock:
             except OSError as exc:
                 os.close(self.fd)
                 self.fd = -1
-                raise ReleaseError(f"could not acquire ops-release lock: {exc}") from exc
+                raise ReleaseError(
+                    f"could not acquire ops-release lock: {exc}"
+                ) from exc
         try:
             os.ftruncate(self.fd, 0)
             os.lseek(self.fd, 0, os.SEEK_SET)

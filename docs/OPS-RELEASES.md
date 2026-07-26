@@ -35,10 +35,14 @@ independent of the coordinated suite version in `ops-release.json`.
 Two agents must not cut or deploy overlapping suite versions. site-djbclark
 ships serialization for that:
 
-| Layer | Path | Scope |
-| ----- | ---- | ----- |
-| Exclusive flock | `~/.local/state/site-djbclark/ops-release.lock` | Held for one `check`/`deploy`/`memory-sync` (or `ops_release_lock.py hold`) |
-| Version claim | `~/.local/state/site-djbclark/ops-release.claim.json` | Multi-step reservation across tag + GH release + deploy |
+<!-- markdownlint-disable MD013 -->
+
+| Layer           | Path                                                  | Scope                                                                       |
+| --------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| Exclusive flock | `~/.local/state/site-djbclark/ops-release.lock`       | Held for one `check`/`deploy`/`memory-sync` (or `ops_release_lock.py hold`) |
+| Version claim   | `~/.local/state/site-djbclark/ops-release.claim.json` | Multi-step reservation across tag + GH release + deploy                     |
+
+<!-- markdownlint-enable MD013 -->
 
 ```bash
 # Before starting a cut or deploy of version X:
