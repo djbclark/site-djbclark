@@ -10,7 +10,37 @@ becomes actionable.
 
 ---
 
-## What's true right now (2026-07-20, post FINAL-REVIEW)
+## Update — 2026-07-26 (current state; supersedes the dated snapshot below)
+
+Since the 2026-07-20 snapshot, the chain stayed closed but the repos moved on.
+Current `master` HEADs, all pushed, **0 open PRs** across the three repos:
+
+- **stayturgid** `master` @ `48249c2` — merged PR #67 (native-agent Kotlin
+  toolchain modernization: Spotless/ktfmt + detekt + JUnit 5). Native-agent
+  `just kt-check` (spotlessCheck + detekt + debug/release compile + unit
+  tests) verified green. Also carries the peer-start activation + per-device
+  stagger + stream-id fixes.
+- **site-djbclark** `master` @ `e358731` — merged PR #5 (hardcoded ops paths
+  → `${OPS_ROOT:-~/ops}`).
+- **site-private** `master` @ `947bc53` — merged PR #3 (same OPS_ROOT
+  migration) plus the go-forward workflow policy.
+
+Other changes since 2026-07-20:
+
+- **VLM/UI-TARS vision stack removed** and coordinate-tap **screen-control
+  automation retired** (too error-prone) — use human notifications
+  (toasts/popups) + ADB/API paths instead. Don't reintroduce either.
+- **Workflow change:** all development now happens under
+  `~/src/ops-worktrees/` (bare-store + task-workspace layout). `~/ops/` is a
+  **deploy-only** checkout (pull merged releases; no branching/editing/
+  committing). The one exception is `site-private/memory/`, committed in
+  place. Authoritative policy: `~/ops/site-private/home-agents.md`.
+
+The 2026-07-20 block below is retained as a historical record. Its stayturgid
+hash and `just test` counts are point-in-time and were **not** re-verified on
+2026-07-26 (only the native-agent Kotlin suite was re-run).
+
+## What was true at chain close (2026-07-20, post FINAL-REVIEW)
 
 - **stayturgid** `master` @ `430560fa67ef1cdcd8d8ae53d261767186b74acb` — `just
 check` and full `just test` green (510 passed, 1 skipped), CI green, no
