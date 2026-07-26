@@ -123,6 +123,32 @@ local memory-only commit diverged from the requested later release, the gate
 rebases only that verified memory-only range onto the release before advancing
 the other two checkouts.
 
+### Local Codex preferences
+
+`site-private/codex/config.toml` is ignored machine-local state beginning with
+`ops-v1.0.1`. Codex and the operator may update that file without dirtying the
+deploy checkout; the tracked `codex/config.toml.example` is only a bootstrap
+example.
+
+The `ops-v1.0.0` → `ops-v1.0.1` deployment is a one-time tracked-to-ignored
+transition. The deploy tool permits no other dirty path, verifies the target
+release both removes and ignores `codex/config.toml`, preserves the exact local
+bytes and mode, deploys `site-private` last, and atomically restores the local
+file. Subsequent releases leave the ignored file untouched naturally.
+
+Because the deployed `ops-v1.0.0` tool predates this migration, perform this
+one transition with the source copy from the published `ops-v1.0.1` commit,
+after verifying the source worktree is exactly on that tag:
+
+```bash
+cd ~/src/ops-worktrees/main/site-djbclark
+test "$(git rev-parse HEAD)" = "$(git rev-parse ops-v1.0.1^{commit})"
+python3 bin/deploy_ops_release.py --ops-root "${OPS_ROOT:-$HOME/ops}" check 1.0.1
+python3 bin/deploy_ops_release.py --ops-root "${OPS_ROOT:-$HOME/ops}" deploy 1.0.1
+cd "${OPS_ROOT:-$HOME/ops}/site-djbclark"
+just ops-release-status
+```
+
 For the initial `ops-v1.0.0` bootstrap, run the same script from the
 synchronized source baseline after merging and publishing:
 
