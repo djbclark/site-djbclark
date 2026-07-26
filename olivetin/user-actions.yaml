@@ -1,0 +1,67 @@
+# Site-local OliveTin actions (merged by stayturgid site-sync into
+# ~/.config/djbclark/olivetin/config.yaml). Action ids MUST be user_-prefixed.
+# Product actions stay in generated/stayturgid/fragments/olivetin/.
+#
+# Herdr is UDS-only (no TCP port in registry/ports.yml). These buttons manage
+# the brew services LaunchAgent that keeps `herdr server` running.
+
+actions:
+  - id: user_herdr_status
+    title: "Herdr — status"
+    icon: "&#128202;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      echo "=== brew services info herdr ==="
+      brew services info herdr || true
+      echo
+      echo "=== herdr status ==="
+      herdr status || true
+      echo
+      echo "=== socket ==="
+      ls -la "${HOME}/.config/herdr/herdr.sock" 2>&1 || true
+      echo
+      echo "=== launchctl (homebrew.mxcl.herdr) ==="
+      launchctl print "gui/$(id -u)/homebrew.mxcl.herdr" 2>&1 | head -40 || true
+
+  - id: user_herdr_start
+    title: "Herdr — brew services start"
+    icon: "&#9654;"
+    timeout: 120
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services start herdr
+      sleep 1
+      brew services info herdr
+      herdr status
+
+  - id: user_herdr_stop
+    title: "Herdr — brew services stop"
+    icon: "&#9209;"
+    timeout: 120
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services stop herdr
+      sleep 1
+      brew services info herdr || true
+      herdr status || true
+
+  - id: user_herdr_restart
+    title: "Herdr — brew services restart"
+    icon: "&#128260;"
+    timeout: 180
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services restart herdr
+      sleep 2
+      brew services info herdr
+      herdr status
+
+  - id: user_herdr_reload_config
+    title: "Herdr — reload config (no process restart)"
+    icon: "&#128260;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      herdr server reload-config
+      herdr status
