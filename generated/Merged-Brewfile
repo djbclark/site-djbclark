@@ -44,7 +44,7 @@ brew "secretspec"  # [site] SecretSpec CLI; LiteLLM key injection (E4)
 cask "block-goose"  # [site] roles/goose E2 Desktop app
 
 # === stack: stayturgid ===
-# Formulae/casks stayturgid roles install on the control node (prereqs, VLM, serverapps, ET).
+# Formulae/casks stayturgid roles install on the control node (prereqs, serverapps, ET).
 # fragment: brew/fragments/stayturgid.yml
 
 tap "vectordotdev/brew"  # vector formula (serverapp_vector)
@@ -56,7 +56,6 @@ brew "fdroidcl"  # [stayturgid] F-Droid CLI (app stores)
 brew "git"  # [stayturgid] control_node prereqs
 brew "grafana"  # [stayturgid] serverapp_grafana
 brew "hermes-agent"  # [stayturgid] control_node hermes task
-brew "llama.cpp"  # [stayturgid] UI-TARS / VLM (control_node vlm)
 brew "python"  # [stayturgid] control_node prereqs (may resolve as python@N on live)
 brew "scrcpy"  # [stayturgid] control_node prereqs (Android mirroring)
 brew "uv"  # [stayturgid] control_node prereqs + LiteLLM uv tool path
@@ -64,4 +63,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 2 taps, 33 formulae, 4 casks across 4 stack(s)
+# summary: 2 taps, 32 formulae, 4 casks across 4 stack(s)

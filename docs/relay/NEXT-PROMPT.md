@@ -32,8 +32,9 @@ Other changes since 2026-07-20:
   (toasts/popups) + ADB/API paths instead. Don't reintroduce either.
 - **Workflow change:** all development now happens under
   `~/src/ops-worktrees/` (bare-store + task-workspace layout). `~/ops/` is a
-  **deploy-only** checkout (pull merged releases; no branching/editing/
-  committing). The one exception is `site-private/memory/`, committed in
+  **deploy-only** checkout that advances only to coordinated
+  `ops-vMAJOR.MINOR.PATCH` releases; no branching/editing/direct master pulls.
+  The guarded data-only exception is `site-private/memory/`, committed in
   place. Authoritative policy: `~/ops/site-private/home-agents.md`.
 
 The 2026-07-20 block below is retained as a historical record. Its stayturgid

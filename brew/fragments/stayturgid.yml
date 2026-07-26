@@ -4,7 +4,7 @@
 # Sources: stayturgid control_node defaults + serverapp_* homebrew tasks.
 stack: stayturgid
 description: >-
-  Formulae/casks stayturgid roles install on the control node (prereqs, VLM,
+  Formulae/casks stayturgid roles install on the control node (prereqs,
   serverapps, ET).
 
 taps:
@@ -30,9 +30,6 @@ formulae:
     note: F-Droid CLI (app stores)
   - name: apkeep
     note: APK download CLI (app stores)
-  # VLM
-  - name: llama.cpp
-    note: UI-TARS / VLM (control_node vlm)
   # serverapps (own-mode install when absent)
   - name: caddy
     note: serverapp_caddy

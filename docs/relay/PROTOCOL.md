@@ -43,15 +43,14 @@ A session may end only in one of two states:
    (FUND-B decision) — instead, carry the gate's substance into the body as
    extra self-verification: before/after health checks, a tested rollback
    command, and old-path retirement deferred to a later session.
-4. Commit and push everything. This repo: straight to master. stayturgid:
-   branch + PR — and then, **in the same session, once the checklist
-   evidence is recorded: merge the PR
-   (`gh pr merge <n> --merge --delete-branch`), run
-   `git checkout master && git pull --ff-only` in `~/ops/stayturgid`, and
-   verify the repo's check suite is green on merged master.** Never end a
-   session with an open PR, an undeleted step branch, or the stayturgid
-   checkout off master — the next session must start from a master that
-   contains your work.
+4. Commit and push task branches, open PRs, record verification, and obtain
+   operator confirmation before merging. A deploy happens only after the
+   participating changes are included in a coordinated stable
+   `ops-vMAJOR.MINOR.PATCH` release across all three repositories. Preflight
+   and deploy that release with `just ops-release-check <version>` and
+   `just ops-release-deploy <version>` from `site-djbclark`; never pull
+   arbitrary `master` commits into `~/ops`. See
+   [`docs/OPS-RELEASES.md`](../OPS-RELEASES.md).
 5. Print the new NEXT-PROMPT.md contents in chat, so the human can hand it
    straight to the next AI, **and copy the baton to the clipboard**:
    `pbcopy < docs/relay/NEXT-PROMPT.md`.

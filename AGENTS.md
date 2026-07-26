@@ -60,8 +60,8 @@ Topology background:
 | [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)       | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
 | [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
-| `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                           | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
-| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                                         | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
+| `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                              | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
+| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                            | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
 
 ## Conventions
 
@@ -75,6 +75,23 @@ Topology background:
 - Site-specific facts (real hostnames, IPs, credentials-adjacent config)
   belong here, never in `stayturgid`.
 
+### Versioned deploy releases
+
+The three `${OPS_ROOT:-~/ops}` deploy checkouts advance only to coordinated
+stable GitHub Releases tagged `ops-vMAJOR.MINOR.PATCH`; never deploy with a raw
+`git pull origin master`. This repo owns the release/deploy procedure and
+guarded memory synchronization:
+
+```bash
+just ops-release-check 1.0.0
+just ops-release-deploy 1.0.0
+just ops-release-status
+just ops-memory-sync
+```
+
+See [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md). Development synchronization
+inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
+
 ### Modern CLI tool policy (any vendor AI, any of the three repos)
 
 Homebrew-installed machine-wide, decided 2026-07-24 by testing candidates
@@ -85,19 +102,19 @@ head-to-head against the incumbents. Source of truth for the package list:
 (stack `agent-cli-tools` in [`generated/Merged-Brewfile`](generated/Merged-Brewfile)).
 Prefer these when shelling out:
 
-| Use case             | Use                                                                                 | Not             | Why                                                                        |
-| --------------------- | ------------------------------------------------------------------------------------ | --------------- | --------------------------------------------------------------------------- |
-| search file text      | `rg`                                                                                  | `grep`, `ag`, `ack`, `ugrep` | benchmarked on stayturgid (799 files): rg 0.03s vs ag 0.57s vs ugrep 1.09s vs ack 3.13s for the same search; only rg/ugrep support `--json`, rg won on speed so ag/ugrep/ack weren't kept |
-| find files             | `fd`                                                                                  | `find`          | respects `.gitignore`, simple glob syntax, faster                          |
-| view files in shell    | `bat`                                                                                 | `cat`           | line numbers + syntax highlighting                                        |
-| find/replace           | `sd`                                                                                  | `sed`           | plain regex, no backslash-escaping hell                                    |
-| list directories       | `eza`                                                                                 | `ls`            | saner default columns/colors, git-aware                                    |
-| cut/select columns     | `hck`                                                                                 | `awk`/`cut`     | simple `-f`/`-d` flags — `choose` was tried too but isn't packaged in Homebrew (only `choose-gui`/`choose-rust` exist under different names), so skipped |
-| git diffs/pager        | `delta` (set globally as `core.pager` + `interactive.diffFilter` in gitconfig)        | raw `git diff`  | syntax-highlighted, line-numbered hunks                                    |
-| JSON                   | `jq` (Homebrew build at `/opt/homebrew/bin/jq`, ahead of macOS-system `/usr/bin/jq` on PATH) | —        | newer jq (1.8.x) vs system's 1.7.1                                          |
-| YAML query/edit         | `yq`                                                                                  | inline python/`grep` on YAML | jq-style query syntax for the ansible/registry/brew-fragment YAML these repos actually have |
-| ad-hoc JSON API calls   | `xh`                                                                                  | raw `curl`      | pretty-prints + colorizes JSON by default (verified against `curl` on local grafana/ollama endpoints) instead of a manual `| jq` follow-up; `curl` is still right for uploads/non-JSON/complex auth |
-| spelling in docs/prose  | `typos` (already installed) — run before finalizing AGENTS.md/docs edits            | manual proofreading | catches misspellings for free; ran clean on all three repos' AGENTS.md as of 2026-07-24 |
+| Use case               | Use                                                                                          | Not                          | Why                                                                                                                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| search file text       | `rg`                                                                                         | `grep`, `ag`, `ack`, `ugrep` | benchmarked on stayturgid (799 files): rg 0.03s vs ag 0.57s vs ugrep 1.09s vs ack 3.13s for the same search; only rg/ugrep support `--json`, rg won on speed so ag/ugrep/ack weren't kept            |
+| find files             | `fd`                                                                                         | `find`                       | respects `.gitignore`, simple glob syntax, faster                                                                                                                                                    |
+| view files in shell    | `bat`                                                                                        | `cat`                        | line numbers + syntax highlighting                                                                                                                                                                   |
+| find/replace           | `sd`                                                                                         | `sed`                        | plain regex, no backslash-escaping hell                                                                                                                                                              |
+| list directories       | `eza`                                                                                        | `ls`                         | saner default columns/colors, git-aware                                                                                                                                                              |
+| cut/select columns     | `hck`                                                                                        | `awk`/`cut`                  | simple `-f`/`-d` flags — `choose` was tried too but isn't packaged in Homebrew (only `choose-gui`/`choose-rust` exist under different names), so skipped                                             |
+| git diffs/pager        | `delta` (set globally as `core.pager` + `interactive.diffFilter` in gitconfig)               | raw `git diff`               | syntax-highlighted, line-numbered hunks                                                                                                                                                              |
+| JSON                   | `jq` (Homebrew build at `/opt/homebrew/bin/jq`, ahead of macOS-system `/usr/bin/jq` on PATH) | —                            | newer jq (1.8.x) vs system's 1.7.1                                                                                                                                                                   |
+| YAML query/edit        | `yq`                                                                                         | inline python/`grep` on YAML | jq-style query syntax for the ansible/registry/brew-fragment YAML these repos actually have                                                                                                          |
+| ad-hoc JSON API calls  | `xh`                                                                                         | raw `curl`                   | pretty-prints + colorizes JSON by default (verified against `curl` on local grafana/ollama endpoints) instead of a manual `\| jq` follow-up; `curl` is still right for uploads/non-JSON/complex auth |
+| spelling in docs/prose | `typos` (already installed) — run before finalizing AGENTS.md/docs edits                     | manual proofreading          | catches misspellings for free; ran clean on all three repos' AGENTS.md as of 2026-07-24                                                                                                              |
 
 **Tried and rejected:** `difftastic` (structural diff) — tested head-to-head
 against `delta` on a reordered/reformatted dict-key diff; it did not
@@ -113,7 +130,7 @@ governs the Bash-tool fallback path and agents without those dedicated tools.
 ### Structural/semantic code search — `ast-grep` and `semgrep`
 
 **Goal is tokens, not raw speed.** `rg` (and Claude Code's dedicated `Grep`
-tool) only match text/regex per line — the agent still has to *read* every
+tool) only match text/regex per line — the agent still has to _read_ every
 hit and manually reason about which are real (multi-line calls get missed
 entirely; string literals containing the pattern text are false positives).
 `ast-grep` and `semgrep` parse actual syntax, so the tool itself does that
@@ -133,7 +150,7 @@ built-in `Grep` tool has the same text-only limitation as `rg` — shell out
 via Bash to `ast-grep`/`semgrep` for structural queries instead.
 
 - **`ast-grep`** (aliased `sg`, but prefer the unaliased `ast-grep` — `sg` is
-  the deprecated name) — general-purpose structural search *and rewrite*,
+  the deprecated name) — general-purpose structural search _and rewrite_,
   any language, no rule file needed for one-off queries:
   ```
   ast-grep run -p 'subprocess.run($$$ARGS, shell=True)' -l python .   # search
@@ -157,7 +174,8 @@ in site-private for the full evaluation notes.
 
 ## Multi-Agent Protocol
 
-Before any edit: `git fetch origin --prune && git pull --ff-only origin master`.
+Before any edit in a source task worktree:
+`git fetch origin --prune && git pull --ff-only origin master`.
 Always commit and push when done. Leave no uncommitted changes you didn't
 create. If `git pull` fails with a merge conflict, STOP and report it. Verify
 changes are yours before editing — if a file has unrelated modifications from

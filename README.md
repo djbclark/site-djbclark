@@ -14,24 +14,37 @@ links there to
 and
 [site-private's AGENTS.md](https://github.com/djbclark/site-private/blob/master/AGENTS.md).
 
-| Where | What |
-| --- | --- |
-| `docs/relay/NEXT-PROMPT.md` | **Start here to continue the work** — the baton: which AI to use and the exact prompt to paste ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md)) |
-| `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` | Architecture + decision log (2026-07-18) |
-| `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md` | Phased execution plan: steps, difficulty, AI routing, risk register |
-| `docs/plans/site-djbclark-step0-plan-v1.md` | Goose + LiteLLM AI-stack plan (see amendment header) |
-| `registry/ports.yml`, `registry/paths.yml` | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py` |
+| Where                                                            | What                                                                                                                                                                |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/relay/NEXT-PROMPT.md`                                      | **Start here to continue the work** — the baton: which AI to use and the exact prompt to paste ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md)) |
+| `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` | Architecture + decision log (2026-07-18)                                                                                                                            |
+| `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`     | Phased execution plan: steps, difficulty, AI routing, risk register                                                                                                 |
+| `docs/plans/site-djbclark-step0-plan-v1.md`                      | Goose + LiteLLM AI-stack plan (see amendment header)                                                                                                                |
+| `registry/ports.yml`, `registry/paths.yml`                       | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py`                                                       |
+| `bin/check_hostnames.py`                                         | Site-specific Mac/Linux/Android hostname audit (`just hostnames-audit`)                                                                                             |
+
+## Versioned deployments
+
+The three `${OPS_ROOT:-~/ops}` checkouts deploy as one coordinated suite and
+advance only to published `ops-vMAJOR.MINOR.PATCH` releases. Use
+`just ops-release-check`, `just ops-release-deploy`, and
+`just ops-release-status`; do not pull deploy checkouts directly from
+`master`. The guarded `just ops-memory-sync` command is the sole data-only
+exception for `site-private/memory/`.
+
+Full release, rollback, and verification policy:
+[docs/OPS-RELEASES.md](docs/OPS-RELEASES.md).
 
 ## LiteLLM proxy (Phase E1 + E4 keys + E5 multi-host)
 
 The site-owned LiteLLM proxy listens on **`127.0.0.1:4000`** (loopback default;
 no public bind without a master-key / auth design).
 
-| Host (inventory `site_litellm`) | Runtime | Default |
-| --- | --- | --- |
-| `m1-air` | launchd `com.djbclark.litellm` | **online** — `just litellm-apply` |
-| `mac-mini-intel` | launchd (Intel Homebrew `/usr/local`) | planned until online |
-| `vps-primary` | systemd user unit | planned until online |
+| Host (inventory `site_litellm`) | Runtime                               | Default                           |
+| ------------------------------- | ------------------------------------- | --------------------------------- |
+| `m1-air`                        | launchd `com.djbclark.litellm`        | **online** — `just litellm-apply` |
+| `mac-mini-intel`                | launchd (Intel Homebrew `/usr/local`) | planned until online              |
+| `vps-primary`                   | systemd user unit                     | planned until online              |
 
 ```bash
 just litellm-apply          # limit m1-air
@@ -89,7 +102,7 @@ M1-Q).
 
 The existing Phase D route scheme is the site convention: the public hostname
 root serves the network landing page, while product UIs use stable lowercase
-noun paths (`/dashboard/`, `/stats/`, `/opencode/`, and `/vlm/`). Internal
+noun paths (`/dashboard/`, `/stats/`, and `/opencode/`). Internal
 service health and observability ports remain loopback-only and do not receive
 public route names. D7 adopts this scheme as-is; M1 may revisit the naming as an
 architecture improvement without changing the current route contract.
