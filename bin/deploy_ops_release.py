@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Deploy coordinated, immutable releases to the three ~/ops checkouts."""
+"""Deploy coordinated, immutable releases to the three ~/ops checkouts.
+
+Mutating commands (check preflight that takes the lock, deploy, memory-sync)
+take an exclusive ops-release flock so concurrent agents cannot interleave
+fast-forwards. Multi-step cut/deploy series should also take a version claim
+via ``bin/ops_release_lock.py claim begin|end`` (see docs/OPS-RELEASES.md).
+"""
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -15,6 +23,7 @@ from pathlib import Path
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 RELEASE_FILE = "ops-release.json"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+EX_TEMPFAIL = 75
 
 
 class ReleaseError(RuntimeError):
@@ -367,12 +376,134 @@ def memory_sync(
     print(f"site-private: synchronized {len(changed)} memory-only path(s) after {tag}")
 
 
+def default_lock_path() -> Path:
+    if env := os.environ.get("SITE_OPS_RELEASE_LOCK"):
+        return Path(env).expanduser()
+    if env := os.environ.get("SITE_OPS_RELEASE_STATE"):
+        return Path(env).expanduser() / "ops-release.lock"
+    xdg_state = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+    return Path(xdg_state) / "site-djbclark" / "ops-release.lock"
+
+
+def default_claim_path() -> Path:
+    if env := os.environ.get("SITE_OPS_RELEASE_CLAIM"):
+        return Path(env).expanduser()
+    if env := os.environ.get("SITE_OPS_RELEASE_STATE"):
+        return Path(env).expanduser() / "ops-release.claim.json"
+    xdg_state = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+    return Path(xdg_state) / "site-djbclark" / "ops-release.claim.json"
+
+
+def read_active_claim() -> dict | None:
+    path = default_claim_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema") != 1:
+        return None
+    return data
+
+
+def assert_claim_allows(version: str | None, *, require_claim: bool) -> None:
+    """Refuse when another live claim owns a different version.
+
+    When require_claim is True, a live matching claim must already exist
+    (used by deploy when OPS_RELEASE_REQUIRE_CLAIM=1).
+    """
+    claim = read_active_claim()
+    if claim is None:
+        if require_claim:
+            raise ReleaseError(
+                "no ops-release claim; run: bin/ops_release_lock.py claim begin "
+                f"{version or 'VERSION'} --operation deploy"
+            )
+        return
+    claim_version = str(claim.get("version") or "")
+    # Claims outlive the begin CLI process; PID death alone is not stale.
+    # Conflicting live claims always block until end/force/age expiry.
+    if version is not None and claim_version and claim_version != version:
+        raise ReleaseError(
+            f"active ops-release claim is for {claim_version}, not {version}; "
+            "wait for that cut/deploy to finish (bin/ops_release_lock.py claim status)"
+        )
+    if require_claim and version is not None and claim_version != version:
+        raise ReleaseError(
+            f"ops-release claim version {claim_version!r} does not match {version!r}"
+        )
+
+
+class OpsReleaseLock:
+    """Exclusive fcntl flock for the duration of a deploy/check/memory-sync."""
+
+    def __init__(self, *, enabled: bool = True, note: str = "") -> None:
+        self.enabled = enabled
+        self.note = note
+        self.path = default_lock_path()
+        self.fd = -1
+
+    def __enter__(self) -> OpsReleaseLock:
+        if not self.enabled:
+            return self
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.chmod(self.path.parent, 0o700)
+        except OSError:
+            pass
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        self.fd = os.open(self.path, flags, 0o600)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # Block after announcing contention.
+            print(
+                f"deploy_ops_release: waiting for exclusive lock ({self.path})…",
+                file=sys.stderr,
+            )
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX)
+            except OSError as exc:
+                os.close(self.fd)
+                self.fd = -1
+                raise ReleaseError(f"could not acquire ops-release lock: {exc}") from exc
+        try:
+            os.ftruncate(self.fd, 0)
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            os.write(
+                self.fd,
+                (
+                    f"pid={os.getpid()} host={socket.gethostname()} {self.note}\n"
+                ).encode(),
+            )
+        except OSError:
+            pass
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self.fd >= 0:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = -1
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--ops-root",
         type=Path,
         default=Path(os.environ.get("OPS_ROOT", Path.home() / "ops")).expanduser(),
+    )
+    parser.add_argument(
+        "--no-lock",
+        action="store_true",
+        help="skip exclusive flock (tests only; never use for live deploys)",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     check_parser = subparsers.add_parser(
@@ -392,17 +523,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    require_claim = os.environ.get("OPS_RELEASE_REQUIRE_CLAIM", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     try:
         if args.command == "check":
-            deploy_release(args.ops_root, normalize_tag(args.version), apply=False)
+            tag = normalize_tag(args.version)
+            version = version_from_tag(tag)
+            assert_claim_allows(version, require_claim=False)
+            with OpsReleaseLock(enabled=not args.no_lock, note=f"check {version}"):
+                deploy_release(args.ops_root, tag, apply=False)
         elif args.command == "deploy":
-            deploy_release(args.ops_root, normalize_tag(args.version), apply=True)
+            tag = normalize_tag(args.version)
+            version = version_from_tag(tag)
+            assert_claim_allows(version, require_claim=require_claim)
+            with OpsReleaseLock(enabled=not args.no_lock, note=f"deploy {version}"):
+                deploy_release(args.ops_root, tag, apply=True)
         elif args.command == "status":
+            # Read-only; no flock (status must stay cheap for concurrent agents).
             status(args.ops_root)
         else:
-            memory_sync(args.ops_root)
+            with OpsReleaseLock(enabled=not args.no_lock, note="memory-sync"):
+                memory_sync(args.ops_root)
     except (OSError, ReleaseError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        # Map "active claim" collisions to EX_TEMPFAIL for scripting.
+        message = str(exc)
+        if "active ops-release claim" in message or "no ops-release claim" in message:
+            return EX_TEMPFAIL
         return 1
     return 0
 

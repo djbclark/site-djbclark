@@ -30,31 +30,71 @@ forward-only and auditable.
 `stayturgid/version.json` is the older on-device fleet-content notifier. It is
 independent of the coordinated suite version in `ops-release.json`.
 
+## Locking (multi-agent safety)
+
+Two agents must not cut or deploy overlapping suite versions. site-djbclark
+ships serialization for that:
+
+| Layer | Path | Scope |
+| ----- | ---- | ----- |
+| Exclusive flock | `~/.local/state/site-djbclark/ops-release.lock` | Held for one `check`/`deploy`/`memory-sync` (or `ops_release_lock.py hold`) |
+| Version claim | `~/.local/state/site-djbclark/ops-release.claim.json` | Multi-step reservation across tag + GH release + deploy |
+
+```bash
+# Before starting a cut or deploy of version X:
+just ops-release-claim-status
+just ops-release-claim-begin 1.0.2 cut          # or: deploy
+# … tag three repos, gh release create, then:
+just ops-release-deploy 1.0.2
+just ops-release-claim-end --version 1.0.2
+```
+
+- `deploy_ops_release.py check|deploy|memory-sync` **always** takes the
+  exclusive flock (unless `--no-lock` for unit tests).
+- If a **live** claim exists for a **different** version, deploy/check exit
+  **75** (`EX_TEMPFAIL`) with a clear error. Wait or clear a stale claim:
+  `just ops-release-claim-wait` / `claim end --force`.
+- Stale claims (older than 2h by default) can be replaced by a new
+  `claim begin`. Dead holder PID alone is **not** stale — `claim begin` is a
+  short CLI; crashed agents must `claim end --force` or wait out the TTL.
+- Optional strict mode: `OPS_RELEASE_REQUIRE_CLAIM=1 just ops-release-deploy 1.0.2`
+  refuses deploy without an active matching claim.
+- Overrides: `SITE_OPS_RELEASE_STATE`, `SITE_OPS_RELEASE_LOCK`,
+  `SITE_OPS_RELEASE_CLAIM`.
+
+Ordinary feature PR merges to `master` do **not** need this lock. Only
+version bumps, tagging, GitHub Releases, and `~/ops` fast-forwards do.
+
 ## Cutting a release
 
 1. Choose the next semantic version.
-2. Update `ops-release.json` to that version in all three task worktrees.
-3. Run each repository's checks, open PRs, and obtain operator confirmation
+2. **Claim it:** `just ops-release-claim-begin X.Y.Z cut`.
+3. Update `ops-release.json` to that version in all three task worktrees.
+4. Run each repository's checks, open PRs, and obtain operator confirmation
    before merging.
-4. Confirm all three `master` branches are clean, synchronized, and contain
+5. Confirm all three `master` branches are clean, synchronized, and contain
    the intended commits.
-5. Create and push the same annotated tag in each repository:
+6. Create and push the same annotated tag in each repository:
 
    ```bash
    git tag -a ops-v1.0.0 -m "djbclark ops 1.0.0"
    git push origin ops-v1.0.0
    ```
 
-6. Create the three stable GitHub Releases with concise, repository-specific
+7. Create the three stable GitHub Releases with concise, repository-specific
    notes:
 
    ```bash
    gh release create ops-v1.0.0 --verify-tag --title "djbclark ops 1.0.0"
    ```
 
+8. Deploy (below), then `just ops-release-claim-end --version X.Y.Z`.
+
 If tag or release creation fails partway through, stop. Do not deploy a
 partial suite. Remove only the newly created incomplete release/tag, after
-resolving its exact scope, then retry the coordinated cut.
+resolving its exact scope, then retry the coordinated cut. Keep or refresh
+the claim until the suite is either fully published+deployed or explicitly
+abandoned (`claim end --force`).
 
 ## Deploying
 

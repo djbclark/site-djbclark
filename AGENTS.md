@@ -83,13 +83,18 @@ stable GitHub Releases tagged `ops-vMAJOR.MINOR.PATCH`; never deploy with a raw
 guarded memory synchronization:
 
 ```bash
+just ops-release-claim-status
+just ops-release-claim-begin 1.0.0 cut   # multi-agent reservation
 just ops-release-check 1.0.0
-just ops-release-deploy 1.0.0
+just ops-release-deploy 1.0.0              # exclusive flock while mutating ~/ops
+just ops-release-claim-end --version 1.0.0
 just ops-release-status
 just ops-memory-sync
 ```
 
-See [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md). Development synchronization
+Concurrent agents must not cut/deploy overlapping versions — use the claim +
+flock helpers (`bin/ops_release_lock.py`). See
+[docs/OPS-RELEASES.md](docs/OPS-RELEASES.md). Development synchronization
 inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
 
 ### Modern CLI tool policy (any vendor AI, any of the three repos)

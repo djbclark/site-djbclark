@@ -62,12 +62,34 @@ lint:
     bin/registry_lint.py
     python3 -m unittest discover -s tests -v
 
+# Serialize multi-agent release cut/deploy (see docs/OPS-RELEASES.md § locking).
+# State dir: ~/.local/state/site-djbclark/ (ops-release.lock + ops-release.claim.json)
+ops-release-claim-status:
+    bin/ops_release_lock.py claim status
+
+# Reserve a version before tagging/publishing or deploying.
+# operation: cut | deploy | hold
+ops-release-claim-begin version operation="cut" *args:
+    bin/ops_release_lock.py claim begin "{{ version }}" --operation "{{ operation }}" {{ args }}
+
+ops-release-claim-end *args:
+    bin/ops_release_lock.py claim end {{ args }}
+
+ops-release-claim-wait *args:
+    bin/ops_release_lock.py claim wait {{ args }}
+
+# Run an arbitrary command under the exclusive ops-release flock.
+ops-release-lock *args:
+    bin/ops_release_lock.py hold {{ args }}
+
 # Verify that all three deploy checkouts can advance to a coordinated,
 # published stable release without changing them.
+# Acquires exclusive flock; refuses if another live claim owns a different version.
 ops-release-check version:
     bin/deploy_ops_release.py check "{{ version }}"
 
 # Fast-forward all three clean ~/ops checkouts to one coordinated release.
+# Acquires exclusive flock; optional OPS_RELEASE_REQUIRE_CLAIM=1 enforces claim.
 ops-release-deploy version:
     bin/deploy_ops_release.py deploy "{{ version }}"
 
