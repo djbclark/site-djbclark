@@ -50,8 +50,23 @@ def make_repo(path: Path) -> str:
     commit_file(path, "README.md", "test repo\n", "initial")
     manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.0.0"}
     commit = commit_file(path, "ops-release.json", json.dumps(manifest), "release")
-    git(path, "tag", "-a", "ops-v1.0.0", "-m", "ops v1.0.0")
+    tag_release(path, "1.0.0")
     return commit
+
+
+def tag_release(path: Path, version: str) -> None:
+    git(
+        path,
+        "-c",
+        "user.name=Release Test",
+        "-c",
+        "user.email=release-test@example.invalid",
+        "tag",
+        "-a",
+        f"ops-v{version}",
+        "-m",
+        f"ops v{version}",
+    )
 
 
 class DeployOpsReleaseTest(unittest.TestCase):
@@ -68,7 +83,12 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 targets[name] = make_repo(ops_root / name)
                 git(ops_root / name, "checkout", "--detach", "HEAD^")
                 git(ops_root / name, "checkout", "-B", "master")
-                git(ops_root / name, "update-ref", "refs/remotes/origin/master", targets[name])
+                git(
+                    ops_root / name,
+                    "update-ref",
+                    "refs/remotes/origin/master",
+                    targets[name],
+                )
 
             plans = release.deploy_release(
                 ops_root,
@@ -121,10 +141,71 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 verify_github=False,
             )
 
-            self.assertTrue(next(plan for plan in plans if plan.name == "site-private").memory_ahead)
-            self.assertEqual(git(ops_root / "site-private", "rev-parse", "HEAD"), memory_commit)
+            self.assertTrue(
+                next(plan for plan in plans if plan.name == "site-private").memory_ahead
+            )
+            self.assertEqual(
+                git(ops_root / "site-private", "rev-parse", "HEAD"), memory_commit
+            )
             for name in ("stayturgid", "site-djbclark"):
-                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), targets[name])
+                self.assertEqual(
+                    git(ops_root / name, "rev-parse", "HEAD"), targets[name]
+                )
+
+    def test_deploy_rebases_divergent_site_private_memory_onto_later_release(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            targets: dict[str, str] = {}
+            for name in release.REPOSITORIES:
+                path = ops_root / name
+                make_repo(path)
+                manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
+                targets[name] = commit_file(
+                    path,
+                    "ops-release.json",
+                    json.dumps(manifest),
+                    "release 1.1",
+                )
+                tag_release(path, "1.1.0")
+                git(path, "update-ref", "refs/remotes/origin/master", targets[name])
+                git(path, "reset", "--hard", "ops-v1.0.0")
+            memory_commit = commit_file(
+                ops_root / "site-private",
+                "memory/fact.md",
+                "fact\n",
+                "memory",
+            )
+
+            plans = release.deploy_release(
+                ops_root,
+                "ops-v1.1.0",
+                apply=True,
+                fetch=False,
+                verify_github=False,
+            )
+
+            private_plan = next(plan for plan in plans if plan.name == "site-private")
+            self.assertEqual(private_plan.memory_rebase_from, "ops-v1.0.0")
+            private_head = git(ops_root / "site-private", "rev-parse", "HEAD")
+            self.assertNotEqual(private_head, memory_commit)
+            self.assertTrue(
+                release.is_ancestor(
+                    ops_root / "site-private",
+                    targets["site-private"],
+                    private_head,
+                )
+            )
+            self.assertEqual(
+                release.changed_paths(
+                    ops_root / "site-private",
+                    "ops-v1.1.0",
+                    "HEAD",
+                ),
+                ["memory/fact.md"],
+            )
 
     def test_status_rejects_unversioned_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -134,7 +215,25 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 make_repo(ops_root / name)
             commit_file(ops_root / "stayturgid", "code.txt", "drift\n", "unreleased")
 
-            with self.assertRaisesRegex(release.ReleaseError, "unversioned code/config"):
+            with self.assertRaisesRegex(
+                release.ReleaseError, "unversioned code/config"
+            ):
+                release.status(ops_root, fetch=False, verify_github=False)
+
+    def test_status_rejects_mismatched_release_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            for name in release.REPOSITORIES:
+                make_repo(ops_root / name)
+            path = ops_root / "stayturgid"
+            manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
+            commit_file(path, "ops-release.json", json.dumps(manifest), "release 1.1")
+            tag_release(path, "1.1.0")
+
+            with self.assertRaisesRegex(
+                release.ReleaseError, "unversioned code/config"
+            ):
                 release.status(ops_root, fetch=False, verify_github=False)
 
     def test_memory_sync_accepts_only_memory_remote_drift(self) -> None:

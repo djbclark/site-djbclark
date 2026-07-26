@@ -29,6 +29,7 @@ class ReleasePlan:
     current_commit: str
     target_commit: str
     memory_ahead: bool = False
+    memory_rebase_from: str | None = None
 
 
 def run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -46,7 +47,9 @@ def git(path: Path, *args: str, check: bool = True) -> str:
 def normalize_tag(value: str) -> str:
     tag = value if value.startswith("ops-v") else f"ops-v{value}"
     if not TAG_RE.fullmatch(tag):
-        raise ReleaseError(f"invalid release {value!r}; expected MAJOR.MINOR.PATCH or ops-vMAJOR.MINOR.PATCH")
+        raise ReleaseError(
+            f"invalid release {value!r}; expected MAJOR.MINOR.PATCH or ops-vMAJOR.MINOR.PATCH"
+        )
     return tag
 
 
@@ -62,9 +65,13 @@ def declared_version(path: Path, ref: str) -> str:
     try:
         document = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ReleaseError(f"{path.name} {ref}:{RELEASE_FILE} is invalid JSON: {exc}") from exc
+        raise ReleaseError(
+            f"{path.name} {ref}:{RELEASE_FILE} is invalid JSON: {exc}"
+        ) from exc
     if document.get("schema") != 1 or document.get("suite") != "djbclark-ops":
-        raise ReleaseError(f"{path.name} {ref}:{RELEASE_FILE} is not a djbclark-ops schema-1 manifest")
+        raise ReleaseError(
+            f"{path.name} {ref}:{RELEASE_FILE} is not a djbclark-ops schema-1 manifest"
+        )
     version = document.get("version")
     if not isinstance(version, str):
         raise ReleaseError(f"{path.name} {ref}:{RELEASE_FILE} has no string version")
@@ -72,7 +79,18 @@ def declared_version(path: Path, ref: str) -> str:
 
 
 def is_ancestor(path: Path, ancestor: str, descendant: str) -> bool:
-    return run("git", "merge-base", "--is-ancestor", ancestor, descendant, cwd=path, check=False).returncode == 0
+    return (
+        run(
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+            cwd=path,
+            check=False,
+        ).returncode
+        == 0
+    )
 
 
 def require_annotated_tag(path: Path, tag: str) -> None:
@@ -82,7 +100,9 @@ def require_annotated_tag(path: Path, tag: str) -> None:
 
 def require_clean_master(path: Path) -> None:
     if git(path, "status", "--porcelain"):
-        raise ReleaseError(f"{path} is dirty; release deployment requires a clean checkout")
+        raise ReleaseError(
+            f"{path} is dirty; release deployment requires a clean checkout"
+        )
     branch = git(path, "symbolic-ref", "--short", "HEAD", check=False)
     if branch != "master":
         raise ReleaseError(f"{path} is on {branch or 'detached HEAD'}, expected master")
@@ -104,8 +124,14 @@ def verify_github_release(name: str, tag: str, path: Path) -> None:
     if result.returncode != 0:
         raise ReleaseError(f"djbclark/{name} has no GitHub release for {tag}")
     release = json.loads(result.stdout)
-    if release.get("tagName") != tag or release.get("isDraft") or release.get("isPrerelease"):
-        raise ReleaseError(f"djbclark/{name} {tag} is not a published stable GitHub release")
+    if (
+        release.get("tagName") != tag
+        or release.get("isDraft")
+        or release.get("isPrerelease")
+    ):
+        raise ReleaseError(
+            f"djbclark/{name} {tag} is not a published stable GitHub release"
+        )
 
 
 def inspect_release(
@@ -135,18 +161,45 @@ def inspect_release(
     if not is_ancestor(path, target_commit, remote_master):
         raise ReleaseError(f"{name} {tag} is not reachable from origin/master")
     memory_ahead = False
+    memory_rebase_from = None
     if not is_ancestor(path, current_commit, target_commit):
         if (
             name == "site-private"
             and is_ancestor(path, target_commit, current_commit)
-            and all(item.startswith("memory/") for item in changed_paths(path, tag, "HEAD"))
+            and all(
+                item.startswith("memory/") for item in changed_paths(path, tag, "HEAD")
+            )
         ):
             memory_ahead = True
+        elif name == "site-private":
+            prior_tag = latest_release_tag(path, current_commit)
+            require_annotated_tag(path, prior_tag)
+            memory_paths = changed_paths(path, prior_tag, current_commit)
+            if (
+                is_ancestor(path, prior_tag, target_commit)
+                and memory_paths
+                and all(item.startswith("memory/") for item in memory_paths)
+            ):
+                memory_rebase_from = prior_tag
+            else:
+                raise ReleaseError(
+                    f"{name} cannot fast-forward from {current_commit[:12]} to {tag}"
+                )
         else:
-            raise ReleaseError(f"{name} cannot fast-forward from {current_commit[:12]} to {tag}")
+            raise ReleaseError(
+                f"{name} cannot fast-forward from {current_commit[:12]} to {tag}"
+            )
     if verify_github:
         verify_github_release(name, tag, path)
-    return ReleasePlan(name, path, tag, current_commit, target_commit, memory_ahead)
+    return ReleasePlan(
+        name,
+        path,
+        tag,
+        current_commit,
+        target_commit,
+        memory_ahead,
+        memory_rebase_from,
+    )
 
 
 def deploy_release(
@@ -163,15 +216,36 @@ def deploy_release(
     ]
     for plan in plans:
         action = "would deploy" if not apply else "deploying"
-        suffix = " + existing memory commits" if plan.memory_ahead else ""
+        if plan.memory_rebase_from:
+            suffix = f" + rebased memory commits after {plan.memory_rebase_from}"
+        elif plan.memory_ahead:
+            suffix = " + existing memory commits"
+        else:
+            suffix = ""
         print(f"{plan.name}: {action} {plan.tag} ({plan.target_commit[:12]}){suffix}")
     if not apply:
         return plans
     for plan in plans:
-        if not plan.memory_ahead:
+        require_clean_master(plan.path)
+        if git(plan.path, "rev-parse", "HEAD") != plan.current_commit:
+            raise ReleaseError(
+                f"{plan.name} changed after release preflight; nothing was deployed"
+            )
+    apply_plans = sorted(plans, key=lambda plan: plan.memory_rebase_from is None)
+    for plan in apply_plans:
+        if plan.memory_rebase_from:
+            run(
+                "git",
+                "rebase",
+                "--onto",
+                plan.target_commit,
+                plan.memory_rebase_from,
+                cwd=plan.path,
+            )
+        elif not plan.memory_ahead:
             run("git", "merge", "--ff-only", plan.target_commit, cwd=plan.path)
         deployed = git(plan.path, "rev-parse", "HEAD")
-        if plan.memory_ahead:
+        if plan.memory_ahead or plan.memory_rebase_from:
             drift = changed_paths(plan.path, plan.tag, "HEAD")
             valid = is_ancestor(plan.path, plan.target_commit, deployed) and all(
                 item.startswith("memory/") for item in drift
@@ -201,7 +275,13 @@ def latest_release_tag(path: Path, ref: str = "HEAD") -> str:
 
 
 def changed_paths(path: Path, old_ref: str, new_ref: str) -> list[str]:
-    return [line for line in git(path, "diff", "--name-only", f"{old_ref}..{new_ref}").splitlines() if line]
+    return [
+        line
+        for line in git(
+            path, "diff", "--name-only", f"{old_ref}..{new_ref}"
+        ).splitlines()
+        if line
+    ]
 
 
 def status(
@@ -211,29 +291,47 @@ def status(
     verify_github: bool = True,
 ) -> None:
     failed = False
+    deployed_tags: dict[str, str] = {}
     for name in REPOSITORIES:
         path = ops_root / name
         require_clean_master(path)
         if fetch:
             run("git", "fetch", "origin", "--prune", "--tags", cwd=path)
         tag = latest_release_tag(path)
+        deployed_tags[name] = tag
         require_annotated_tag(path, tag)
         expected_version = version_from_tag(tag)
         if declared_version(path, tag) != expected_version:
-            raise ReleaseError(f"{name} {tag} does not declare version {expected_version}")
+            raise ReleaseError(
+                f"{name} {tag} does not declare version {expected_version}"
+            )
         if verify_github:
             verify_github_release(name, tag, path)
         changed = changed_paths(path, tag, "HEAD")
         if not changed:
             print(f"{name}: {tag}")
             continue
-        if name == "site-private" and all(item.startswith("memory/") for item in changed):
+        if name == "site-private" and all(
+            item.startswith("memory/") for item in changed
+        ):
             print(f"{name}: {tag} + {len(changed)} memory-only path(s)")
             continue
         failed = True
-        print(f"{name}: ERROR unversioned paths after {tag}: {', '.join(changed)}", file=sys.stderr)
+        print(
+            f"{name}: ERROR unversioned paths after {tag}: {', '.join(changed)}",
+            file=sys.stderr,
+        )
+    if len(set(deployed_tags.values())) != 1:
+        failed = True
+        summary = ", ".join(f"{name}={tag}" for name, tag in deployed_tags.items())
+        print(
+            f"ERROR: deploy checkouts are on different releases: {summary}",
+            file=sys.stderr,
+        )
     if failed:
-        raise ReleaseError("one or more deploy checkouts contain unversioned code/config")
+        raise ReleaseError(
+            "one or more deploy checkouts contain unversioned code/config"
+        )
 
 
 def memory_sync(
@@ -251,7 +349,9 @@ def memory_sync(
     if verify_github:
         verify_github_release("site-private", tag, path)
     local_non_memory = [
-        item for item in changed_paths(path, tag, "HEAD") if not item.startswith("memory/")
+        item
+        for item in changed_paths(path, tag, "HEAD")
+        if not item.startswith("memory/")
     ]
     if local_non_memory:
         raise ReleaseError(
@@ -275,12 +375,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path(os.environ.get("OPS_ROOT", Path.home() / "ops")).expanduser(),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    check_parser = subparsers.add_parser("check", help="preflight a coordinated release")
+    check_parser = subparsers.add_parser(
+        "check", help="preflight a coordinated release"
+    )
     check_parser.add_argument("version")
-    deploy_parser = subparsers.add_parser("deploy", help="fast-forward all checkouts to a release")
+    deploy_parser = subparsers.add_parser(
+        "deploy", help="fast-forward all checkouts to a release"
+    )
     deploy_parser.add_argument("version")
     subparsers.add_parser("status", help="verify deployed code/config is versioned")
-    subparsers.add_parser("memory-sync", help="sync site-private only when remote drift is memory-only")
+    subparsers.add_parser(
+        "memory-sync", help="sync site-private only when remote drift is memory-only"
+    )
     return parser.parse_args(argv)
 
 

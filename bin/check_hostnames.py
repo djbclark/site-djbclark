@@ -31,13 +31,25 @@ def audit_mac_hostname() -> bool:
     if is_darwin():
         print("=== macOS Hostname Audit ===")
         try:
-            r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["scutil", "--get", "LocalHostName"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
             local_name = r.stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
             local_name = "unknown"
 
         try:
-            r = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["scutil", "--get", "ComputerName"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
             comp_name = r.stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
             comp_name = "unknown"
@@ -64,7 +76,13 @@ def audit_local_linux_hostname(expected_name: str) -> bool:
     if is_linux():
         print("=== Linux Local Hostname Audit ===")
         try:
-            r = subprocess.run(["hostname"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["hostname"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
             current_name = r.stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
             current_name = "unknown"
@@ -72,16 +90,21 @@ def audit_local_linux_hostname(expected_name: str) -> bool:
         print(f"Current Linux Hostname: {current_name}")
 
         if current_name == expected_name:
-            print(f"✓ Linux hostname is fully aligned with canonical name '{expected_name}'.")
+            print(
+                f"✓ Linux hostname is fully aligned with canonical name '{expected_name}'."
+            )
             return True
 
-        print(f"\n-> Reconciling local Linux hostname (current: '{current_name}') -> '{expected_name}'...")
+        print(
+            f"\n-> Reconciling local Linux hostname (current: '{current_name}') -> '{expected_name}'..."
+        )
         try:
             r = subprocess.run(
                 ["sudo", "-n", "hostnamectl", "set-hostname", expected_name],
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
             if r.returncode == 0:
                 print(f"✓ Successfully reconciled Linux hostname to '{expected_name}'.")
@@ -89,8 +112,12 @@ def audit_local_linux_hostname(expected_name: str) -> bool:
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-        print(f"⚠️ WARNING: Linux hostname differs from canonical name '{expected_name}'!")
-        print(f"To align your Linux hostname, please run:\n  sudo hostnamectl set-hostname '{expected_name}'\n")
+        print(
+            f"⚠️ WARNING: Linux hostname differs from canonical name '{expected_name}'!"
+        )
+        print(
+            f"To align your Linux hostname, please run:\n  sudo hostnamectl set-hostname '{expected_name}'\n"
+        )
         return False
     return True
 
@@ -100,20 +127,37 @@ def audit_remote_linux_hosts() -> None:
     for addr, expected_name in KNOWN_LINUX_HOSTS.items():
         try:
             r = subprocess.run(
-                ["ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", f"djbclark@{addr}", "hostname"],
+                [
+                    "ssh",
+                    "-o",
+                    "ConnectTimeout=3",
+                    "-o",
+                    "BatchMode=yes",
+                    f"djbclark@{addr}",
+                    "hostname",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
             if r.returncode == 0:
                 current_name = r.stdout.strip()
                 if current_name == expected_name:
-                    print(f"✓ Remote Linux node {addr} ({expected_name}) hostname is aligned.")
+                    print(
+                        f"✓ Remote Linux node {addr} ({expected_name}) hostname is aligned."
+                    )
                 else:
-                    print(f"⚠️ Remote Linux node {addr} hostname is '{current_name}' (expected: '{expected_name}')!")
-                    print(f"  Run on {addr}: sudo hostnamectl set-hostname '{expected_name}'")
+                    print(
+                        f"⚠️ Remote Linux node {addr} hostname is '{current_name}' (expected: '{expected_name}')!"
+                    )
+                    print(
+                        f"  Run on {addr}: sudo hostnamectl set-hostname '{expected_name}'"
+                    )
             else:
-                print(f"ℹ️ Remote Linux node {addr} ({expected_name}) unreachable or offline.")
+                print(
+                    f"ℹ️ Remote Linux node {addr} ({expected_name}) unreachable or offline."
+                )
         except (OSError, subprocess.TimeoutExpired):
             print(f"ℹ️ Remote Linux node {addr} ({expected_name}) offline.")
 
@@ -123,11 +167,26 @@ def reconcile_android_hostnames() -> None:
     for addr, expected_name in ANDROID_TARGETS.items():
         try:
             r = subprocess.run(
-                ["adb", "-s", addr, "shell", "settings", "get", "global", "device_name"],
+                [
+                    "adb",
+                    "-s",
+                    addr,
+                    "shell",
+                    "settings",
+                    "get",
+                    "global",
+                    "device_name",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
+            if r.returncode != 0:
+                print(
+                    f"❌ Unable to read device name for {addr}: {r.stderr.strip() or 'adb failed'}"
+                )
+                continue
             current_name = r.stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
             current_name = "unreachable"
@@ -135,22 +194,47 @@ def reconcile_android_hostnames() -> None:
         if current_name == expected_name:
             print(f"✓ Android device at {addr} is set to '{expected_name}'.")
         else:
-            print(f"-> Reconciling {addr} (current: '{current_name}') -> '{expected_name}'...")
+            print(
+                f"-> Reconciling {addr} (current: '{current_name}') -> '{expected_name}'..."
+            )
             try:
-                subprocess.run(
-                    ["adb", "-s", addr, "shell", "settings", "put", "global", "device_name", expected_name],
+                result = subprocess.run(
+                    [
+                        "adb",
+                        "-s",
+                        addr,
+                        "shell",
+                        "settings",
+                        "put",
+                        "global",
+                        "device_name",
+                        expected_name,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    check=False,
                 )
-                print(f"✓ Reconciled {addr} to '{expected_name}'.")
+                if result.returncode == 0:
+                    print(f"✓ Reconciled {addr} to '{expected_name}'.")
+                else:
+                    print(
+                        f"❌ Failed to reconcile {addr}: {result.stderr.strip() or 'adb failed'}"
+                    )
             except (OSError, subprocess.TimeoutExpired) as e:
                 print(f"❌ Failed to reconcile {addr}: {e}")
 
 
 def main() -> int:
     mac_ok = audit_mac_hostname()
-    linux_ok = audit_local_linux_hostname(os.environ.get("STAYTURGID_EXPECTED_HOST", "vps-primary"))
+    expected_linux_hostname = os.environ.get("STAYTURGID_EXPECTED_HOST", "").strip()
+    if is_linux() and not expected_linux_hostname:
+        print(
+            "ℹ️ Linux hostname audit skipped; set STAYTURGID_EXPECTED_HOST to enable reconciliation."
+        )
+        linux_ok = True
+    else:
+        linux_ok = audit_local_linux_hostname(expected_linux_hostname)
     audit_remote_linux_hosts()
     reconcile_android_hostnames()
     return 0 if (mac_ok and linux_ok) else 1

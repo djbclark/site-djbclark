@@ -78,6 +78,11 @@ The deploy command preflights all three repositories before changing any:
 It then fast-forwards each local `master` only to the tag commit, even when
 `origin/master` contains newer unreleased work.
 
+For `site-private`, post-release `memory/` commits are preserved. If a valid
+local memory-only commit diverged from the requested later release, the gate
+rebases only that verified memory-only range onto the release before advancing
+the other two checkouts.
+
 For the initial `ops-v1.0.0` bootstrap, run the same script from the
 synchronized source baseline after merging and publishing:
 
