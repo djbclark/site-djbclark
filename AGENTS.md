@@ -60,6 +60,7 @@ Topology background:
 | [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)       | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
 | [`docs/reference/herdr-workstation.md`](docs/reference/herdr-workstation.md)           | Multi-vendor Herdr workstation usage (keys, mouse, agents, worktrees) — config is on-box `~/.config/herdr/` | When Herdr config/workflow changes |
 | [`docs/reference/herdr-brew-service.md`](docs/reference/herdr-brew-service.md)         | Herdr brew service (persistent server), registry claim, OliveTin dashboard actions            | When service/registry changes |
+| [`docs/operations/sessions/`](docs/operations/sessions/)                               | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups       | Each handoff             |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
 | [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
 | `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                              | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
