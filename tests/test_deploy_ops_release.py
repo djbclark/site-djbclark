@@ -394,6 +394,52 @@ class DeployOpsReleaseTest(unittest.TestCase):
                     verify_github=False,
                 )
 
+    def test_codex_config_migration_requires_target_gitignore(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site-private"
+            make_repo(path, tracked_codex_config=True)
+            (path / release.LOCAL_CODEX_CONFIG).unlink()
+            example = path / release.LOCAL_CODEX_CONFIG_EXAMPLE
+            example.parent.mkdir(parents=True, exist_ok=True)
+            example.write_text('model = "example"\n', encoding="utf-8")
+            target = commit_all(path, "remove tracked config without gitignore")
+
+            with self.assertRaisesRegex(
+                release.ReleaseError,
+                "target removes codex/config.toml without ignoring it",
+            ):
+                release.inspect_local_file_migration(
+                    "site-private",
+                    path,
+                    "ops-v1.0.0",
+                    target,
+                )
+
+    def test_interrupted_codex_config_migration_recovers_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site-private"
+            make_repo(path, tracked_codex_config=True)
+            local_config = path / release.LOCAL_CODEX_CONFIG
+            local_config.write_text('model = "local-choice"\n', encoding="utf-8")
+            local_config.chmod(0o600)
+            migration = release.LocalFileMigration(
+                release.LOCAL_CODEX_CONFIG,
+                local_config.read_bytes(),
+                local_config.stat().st_mode & 0o777,
+            )
+            backup = release.persist_local_file_backup(path, migration)
+            local_config.write_text('model = "released"\n', encoding="utf-8")
+            local_config.chmod(0o644)
+
+            release.recover_local_file_backup(path)
+
+            self.assertFalse(backup.exists())
+            self.assertEqual(
+                local_config.read_text(encoding="utf-8"),
+                'model = "local-choice"\n',
+            )
+            self.assertEqual(local_config.stat().st_mode & 0o777, 0o600)
+
     def test_status_rejects_unversioned_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"

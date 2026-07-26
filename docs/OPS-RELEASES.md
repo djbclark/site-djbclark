@@ -133,8 +133,10 @@ example.
 The `ops-v1.0.0` → `ops-v1.0.1` deployment is a one-time tracked-to-ignored
 transition. The deploy tool permits no other dirty path, verifies the target
 release both removes and ignores `codex/config.toml`, preserves the exact local
-bytes and mode, deploys `site-private` last, and atomically restores the local
-file. Subsequent releases leave the ignored file untouched naturally.
+bytes and mode in Git metadata, deploys `site-private` last, and atomically
+restores the local file. A later invocation automatically recovers that backup
+if the deploy process is interrupted. Subsequent releases leave the ignored
+file untouched naturally.
 
 Because the deployed `ops-v1.0.0` tool predates this migration, perform this
 one transition with the source copy from the published `ops-v1.0.1` commit,

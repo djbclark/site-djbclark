@@ -26,6 +26,7 @@ REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 RELEASE_FILE = "ops-release.json"
 LOCAL_CODEX_CONFIG = "codex/config.toml"
 LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
+LOCAL_CODEX_CONFIG_BACKUP = "ops-release/codex-config.toml.backup"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 EX_TEMPFAIL = 75
 
@@ -149,7 +150,16 @@ def ref_tracks_path(path: Path, ref: str, relative_path: str) -> bool:
 
 
 def ref_ignores_path(path: Path, ref: str, relative_path: str) -> bool:
-    raw = git(path, "show", f"{ref}:.gitignore")
+    result = run(
+        "git",
+        "show",
+        f"{ref}:.gitignore",
+        cwd=path,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    raw = result.stdout
     normalized = {
         line.strip().removeprefix("/")
         for line in raw.splitlines()
@@ -202,8 +212,7 @@ def inspect_local_file_migration(
     )
 
 
-def restore_local_file(path: Path, migration: LocalFileMigration) -> None:
-    target = path / migration.relative_path
+def write_file_atomically(target: Path, content: bytes, mode: int) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{target.name}.release-",
@@ -212,11 +221,64 @@ def restore_local_file(path: Path, migration: LocalFileMigration) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(migration.content)
-        temporary.chmod(migration.mode)
+            stream.write(content)
+            os.fchmod(stream.fileno(), mode)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, target)
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def restore_local_file(path: Path, migration: LocalFileMigration) -> None:
+    write_file_atomically(
+        path / migration.relative_path,
+        migration.content,
+        migration.mode,
+    )
+
+
+def local_file_backup_path(path: Path) -> Path:
+    raw = git(path, "rev-parse", "--git-path", LOCAL_CODEX_CONFIG_BACKUP)
+    backup = Path(raw)
+    return backup if backup.is_absolute() else path / backup
+
+
+def persist_local_file_backup(path: Path, migration: LocalFileMigration) -> Path:
+    backup = local_file_backup_path(path)
+    if backup.exists():
+        raise ReleaseError(
+            f"{path.name} has an unrecovered local config backup at {backup}"
+        )
+    write_file_atomically(backup, migration.content, migration.mode)
+    return backup
+
+
+def recover_local_file_backup(path: Path) -> None:
+    backup = local_file_backup_path(path)
+    if not backup.exists():
+        return
+    if not backup.is_file() or backup.is_symlink():
+        raise ReleaseError(
+            f"{path.name} local config backup is not a regular file: {backup}"
+        )
+    migration = LocalFileMigration(
+        LOCAL_CODEX_CONFIG,
+        backup.read_bytes(),
+        stat.S_IMODE(backup.stat().st_mode),
+    )
+    restore_local_file(path, migration)
+    if not local_file_matches(path, migration):
+        raise ReleaseError(
+            f"{path.name} could not recover local {LOCAL_CODEX_CONFIG} from {backup}"
+        )
+    backup.unlink()
+    print(f"{path.name}: recovered local {LOCAL_CODEX_CONFIG} from interrupted deploy")
 
 
 def local_file_matches(path: Path, migration: LocalFileMigration) -> bool:
@@ -341,6 +403,9 @@ def deploy_release(
     fetch: bool = True,
     verify_github: bool = True,
 ) -> list[ReleasePlan]:
+    private_path = ops_root / "site-private"
+    if private_path.exists():
+        recover_local_file_backup(private_path)
     plans = [
         inspect_release(ops_root, name, tag, fetch=fetch, verify_github=verify_github)
         for name in REPOSITORIES
@@ -389,7 +454,9 @@ def deploy_release(
     )
     for plan in apply_plans:
         migration = plan.local_file_migration
+        backup: Path | None = None
         if migration:
+            backup = persist_local_file_backup(plan.path, migration)
             run(
                 "git",
                 "restore",
@@ -413,6 +480,12 @@ def deploy_release(
         finally:
             if migration:
                 restore_local_file(plan.path, migration)
+                if not local_file_matches(plan.path, migration):
+                    raise ReleaseError(
+                        f"{plan.name} did not restore local {migration.relative_path}"
+                    )
+                if backup:
+                    backup.unlink()
         deployed = git(plan.path, "rev-parse", "HEAD")
         if plan.memory_ahead or plan.memory_rebase_from:
             drift = changed_paths(plan.path, plan.tag, "HEAD")
