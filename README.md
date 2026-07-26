@@ -81,7 +81,7 @@ Concurrent brew mutations (e.g. `just goose-apply`) take
 has no util-linux `flock(1)` by default). Details and rollback:
 [`brew/README.md`](brew/README.md).
 
-## OliveTin user actions (unused on this site)
+## OliveTin user actions
 
 `stayturgid`'s D6 OliveTin projection (`control/site_contract/olivetin_projection.py`,
 `USER_ACTIONS_RELATIVE`) merges an optional site-local action file into the
@@ -89,14 +89,20 @@ live OliveTin config alongside the product's own fragment:
 
 - Product actions: `generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml`
   (rendered by site-sync, `stayturgid_`-prefixed ids).
-- Site actions (optional, **not present on this site**): `olivetin/user-actions.yaml`
-  at this repo's root, never touched by the product, ids must be `user_`-prefixed.
+- Site actions: [`olivetin/user-actions.yaml`](olivetin/user-actions.yaml)
+  (`user_`-prefixed ids). Currently: **Herdr** status / start / stop / restart /
+  reload-config (`user_herdr_*`). Herdr is UDS-only — no TCP row in
+  `registry/ports.yml`; claim is under `registry/paths.yml`.
 
-To add a site-only OliveTin action (e.g. a djbclark-specific button not worth
-upstreaming), create `olivetin/user-actions.yaml` here with `user_`-prefixed
-action ids; the next `just site-sync apply` merges it into the live config.
-No file exists yet because no such action has been needed (D6 residual,
-M1-Q).
+After editing user actions, reproject the live config:
+
+```bash
+just site-sync   # apply (default); uses this checkout as STAYTURGID_SITE_DIR
+```
+
+CLI equivalents: `just herdr-status`, `just herdr-start`, `just herdr-stop`,
+`just herdr-restart`, `just herdr-reload`. Details:
+[`docs/reference/herdr-brew-service.md`](docs/reference/herdr-brew-service.md).
 
 ## Caddy route naming
 

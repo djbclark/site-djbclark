@@ -298,6 +298,39 @@ aiuse-deps-status:
       test -d /Applications/OpenUsage.app && echo "OpenUsage.app: installed" || echo "OpenUsage.app: MISSING"
     fi
     just ai-quota-status
+# Herdr server (homebrew.mxcl.herdr) — UDS-only agent multiplexer.
+# Registry: paths.yml brew_services + ~/.config/herdr/**; ports.yml UDS note.
+# OliveTin: olivetin/user-actions.yaml (user_herdr_*); reproject with just site-sync.
+# Docs: docs/reference/herdr-brew-service.md
+herdr-status:
+    @echo "=== brew services info herdr ==="
+    @brew services info herdr || true
+    @echo ""
+    @echo "=== herdr status ==="
+    @herdr status || true
+    @echo ""
+    @echo "=== socket ==="
+    @ls -la "${HOME}/.config/herdr/herdr.sock" 2>&1 || true
+
+herdr-start:
+    brew services start herdr
+    @sleep 1
+    just herdr-status
+
+herdr-stop:
+    brew services stop herdr
+    @sleep 1
+    just herdr-status
+
+herdr-restart:
+    brew services restart herdr
+    @sleep 2
+    just herdr-status
+
+herdr-reload:
+    herdr server reload-config
+    herdr status
+
 # F2: re-survey homebrew.mxcl services (read-only). Audit doc:
 # docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md
 brew-services-audit:

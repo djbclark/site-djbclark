@@ -45,6 +45,9 @@ prefixes:
     # F4 Merged-Brewfile (source: brew/fragments; projection under generated/)
     - "~/ops/site-djbclark/brew/**"
     - "~/ops/site-djbclark/generated/Merged-Brewfile"
+    # herdr (homebrew.mxcl.herdr): config, UDS sockets, session state — no TCP port
+    - "~/.config/herdr/**"
+    - "/opt/homebrew/var/log/herdr.log"
   brew_services:
     # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
     # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
@@ -53,7 +56,7 @@ prefixes:
     - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
-    - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "F2 keep: workstation AI workspace manager; UDS only (~/.config/herdr); no Ansible role yet"}
+    - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
     - {label: homebrew.mxcl.omlx,           claimed_by: site,       note: "F2 keep: local MLX LLM server 127.0.0.1:8000; no Ansible role yet"}
 
 known_gaps:

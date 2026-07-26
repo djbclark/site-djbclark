@@ -65,6 +65,11 @@ hosts:
 
       # ── brew-services / F2 audit (docs/relay/audits/F2-brew-services-audit.md)
       # redis (6379): stopped + uninstalled 2026-07-20 (operator Accept, RESIDUAL-EF) — claim dropped.
+      #
+      # UDS-only (no TCP listen — cannot appear as a ports.yml row; claim lives in
+      # registry/paths.yml brew_services + site prefixes for ~/.config/herdr/**):
+      #   herdr — homebrew.mxcl.herdr → ~/.config/herdr/herdr.sock (agent multiplexer server)
+      # Dashboard: OliveTin actions user_herdr_* (olivetin/user-actions.yaml).
       - {port: 8000,  bind: "127.0.0.1", owner: site, service: omlx,              status: active,
          note: "F2: homebrew.mxcl.omlx (jundot/omlx); local MLX LLM; was TODO-identify"}
       - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
