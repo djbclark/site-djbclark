@@ -87,7 +87,7 @@ per-host notes).
 2. Store values in the site dotenv (gitignored `*.env` / `.env`, mode 0600):
 
    ```bash
-   cd /Users/djbclark/ops/site-djbclark
+   cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
    secretspec set OPENAI_API_KEY
    secretspec set ANTHROPIC_API_KEY
    secretspec check -n --explain   # presence only; no values printed

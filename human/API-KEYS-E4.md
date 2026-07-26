@@ -27,8 +27,8 @@ ignores `*.env`.
 | --- | --- |
 | CLI | `secretspec` 0.16.x (`brew`) |
 | User config | `~/.config/secretspec/config.toml` with **`[defaults]`** `provider = "dotenv"` and `profile = "default"` |
-| Site store | `~/ops/site-djbclark/.env` mode **0600** (gitignored) |
-| Manifest | `~/ops/site-djbclark/secretspec.toml` (declarations only; in git) |
+| Site store | `${OPS_ROOT:-~/ops}/site-djbclark/.env` mode **0600** (gitignored) |
+| Manifest | `${OPS_ROOT:-~/ops}/site-djbclark/secretspec.toml` (declarations only; in git) |
 
 **Important:** SecretSpec 0.16 ignores a bare top-level `provider = "dotenv"`
 line. Defaults must live under `[defaults]` or `secretspec config show`
@@ -37,7 +37,7 @@ reports `Provider: (none)` and every resolve fails.
 Quick checks (safe — no secret values printed):
 
 ```bash
-cd /Users/djbclark/ops/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 secretspec config show
 # Provider: dotenv  Profile: default
 
@@ -62,7 +62,7 @@ LiteLLM Auto Router v2 tiers (see `roles/litellm`):
 ### Preferred: SecretSpec CLI
 
 ```bash
-cd /Users/djbclark/ops/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 
 # Prompts once; stores into dotenv ./.env (mode should stay 0600)
 secretspec set OPENAI_API_KEY
@@ -75,8 +75,8 @@ secretspec set ANTHROPIC_API_KEY   # skip if already resolved
 ### Alternate: edit the dotenv file
 
 ```bash
-chmod 600 /Users/djbclark/ops/site-djbclark/.env
-${EDITOR:-nano} /Users/djbclark/ops/site-djbclark/.env
+chmod 600 ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark/.env
+${EDITOR:-nano} ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark/.env
 # Add or update (values from your provider dashboards — never paste into chat/git):
 #   OPENAI_API_KEY=<your-openai-key>
 #   ANTHROPIC_API_KEY=<your-anthropic-key>
@@ -97,7 +97,7 @@ ${EDITOR:-nano} /Users/djbclark/ops/site-djbclark/.env
 Confirm presence without printing values:
 
 ```bash
-cd /Users/djbclark/ops/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 secretspec check -n --explain | rg 'OPENAI|ANTHROPIC|TELEGRAM_BOT'
 ```
 
@@ -110,7 +110,7 @@ into `~/Library/LaunchAgents/com.djbclark.litellm.plist` (mode **0600**) from
 the apply-time environment:
 
 ```bash
-cd /Users/djbclark/ops/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
@@ -248,7 +248,7 @@ Inventory group `site_litellm`: `m1-air` (online), `mac-mini-intel` and
 time (keys travel only into the remote unit file via Ansible, never into git):
 
 ```bash
-cd /Users/djbclark/ops/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 # After mini/VPS are online and inventory ansible_host is set:
 LITELLM_HOSTS=mac-mini-intel secretspec run --reason "LiteLLM keys mini" -- just litellm-apply
 LITELLM_HOSTS=vps-primary secretspec run --reason "LiteLLM keys vps" -- just litellm-apply

@@ -4,7 +4,10 @@ set shell := ["bash", "-uc"]
 
 # Override when the product checkout lives somewhere other than its conventional
 # sibling path. The upstream justfile preserves this site's ANSIBLE_CONFIG.
-stayturgid_root := env_var_or_default("STAYTURGID_ROOT", "/Users/djbclark/ops/stayturgid")
+ops_root := env_var_or_default("OPS_ROOT", env_var_or_default("HOME", "") + "/ops")
+stayturgid_root := env_var_or_default("STAYTURGID_ROOT", ops_root + "/stayturgid")
+export ANSIBLE_ROLES_PATH := stayturgid_root + "/ansible/roles"
+export ANSIBLE_COLLECTIONS_PATH := stayturgid_root + "/.ansible/collections:" + stayturgid_root
 
 # Match stayturgid's `hosts` variable.
 hosts := env_var_or_default("hosts", "")

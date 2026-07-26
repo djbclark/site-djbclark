@@ -7,7 +7,7 @@
 Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
-layout is three sibling checkouts under `~/ops/`: this repo, `stayturgid`, and
+layout is three sibling checkouts under `${OPS_ROOT:-~/ops}/`: this repo, `stayturgid`, and
 `site-private`. Policy is distributed — see [AGENTS.md](AGENTS.md) and the
 links there to
 [stayturgid's AGENTS.md](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md)

@@ -8,7 +8,7 @@
 Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
-layout is three sibling checkouts under `~/ops/`: this repo, `stayturgid`,
+layout is three sibling checkouts under `${OPS_ROOT:-~/ops}/`: this repo, `stayturgid`,
 and `site-private`.
 
 ## Memory & documentation policy (this repo's slice)
@@ -28,10 +28,10 @@ absolute GitHub URL.
 **Point elsewhere:**
 
 - Durable **stayturgid product** rules/lessons →
-  [`~/ops/stayturgid/AGENTS.md`](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md)
+  [`${OPS_ROOT:-~/ops}/stayturgid/AGENTS.md`](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md)
   (`https://github.com/djbclark/stayturgid/blob/master/AGENTS.md`).
 - Private / Mac-wide / not-for-public extras →
-  [`~/ops/site-private/AGENTS.md`](https://github.com/djbclark/site-private/blob/master/AGENTS.md)
+  [`${OPS_ROOT:-~/ops}/site-private/AGENTS.md`](https://github.com/djbclark/site-private/blob/master/AGENTS.md)
   (`https://github.com/djbclark/site-private/blob/master/AGENTS.md`).
 
 **Never commit passwords or secrets** (same rule as the other two). IPs and
@@ -40,7 +40,7 @@ hostnames for this site are expected here.
 **Symlinks** under `~` (`AGENTS.md`, `CLAUDE.md`, other root-level vendor agent
 files) and `~/.claude/.../memory` are documented in site-private /
 stayturgid — not duplicated here. The supported optional local selector is
-`~/ops/.mysite` → this checkout; do not use `.mysite` in GitHub URLs.
+`${OPS_ROOT:-~/ops}/.mysite` → this checkout; do not use `.mysite` in GitHub URLs.
 stayturgid discovery excludes `site-private`, prints the selected path/source,
 and creates a missing private-companion directory without Git or secrets.
 
@@ -60,8 +60,8 @@ Topology background:
 | [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)       | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
 | [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
-| `~/ops/stayturgid` (sibling)                                                           | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
-| `~/ops/site-private` (sibling)                                                         | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
+| `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                           | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
+| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                                         | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
 
 ## Conventions
 

@@ -22,9 +22,9 @@
 > `stayturgid-hermes` — verified empty) are **deleted**. `.venv-test` was
 > rebuilt after the move (bad-interpreter shebangs — `rm -rf` + `just
 test-venv` if it recurs). Remaining phased work is sequenced by the site
-> repo relay: `~/ops/site-djbclark/docs/relay/NEXT-PROMPT.md`.
+> repo relay: `${OPS_ROOT:-~/ops}/site-djbclark/docs/relay/NEXT-PROMPT.md`.
 >
-> **2026-07-18:** Repo checkout moved **`~/stayturgid` → `~/ops/stayturgid`** (permanent; base-dir convention `~/ops`, siblings with the private site repo `~/ops/site-djbclark`). Control-node launchd plists were regenerated for the new path (`--tags agents,agents-ensure`); the two hand-managed landing plists were patched manually (gap noted in [ADR 005](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/adr/005-two-repo-topology.md)). Stale checkouts `~/stayturgid_work` and `~/stayturgid.d` parked under `~/ops/scratch/`. Also removed an accidentally committed FIRERPA CA key pair from the repo root (never-deployed CA; see ADR 005 PR). Topology + segmentation decisions: ADR 005 and the site repo's `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`.
+> **2026-07-18:** Repo checkout moved **`~/stayturgid` → `${OPS_ROOT:-~/ops}/stayturgid`** (permanent; base-dir convention `${OPS_ROOT:-~/ops}`, siblings with the private site repo `${OPS_ROOT:-~/ops}/site-djbclark`). Control-node launchd plists were regenerated for the new path (`--tags agents,agents-ensure`); the two hand-managed landing plists were patched manually (gap noted in [ADR 005](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/adr/005-two-repo-topology.md)). Stale checkouts `~/stayturgid_work` and `~/stayturgid.d` parked under `${OPS_ROOT:-~/ops}/scratch/`. Also removed an accidentally committed FIRERPA CA key pair from the repo root (never-deployed CA; see ADR 005 PR). Topology + segmentation decisions: ADR 005 and the site repo's `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md`.
 
 ---
 
