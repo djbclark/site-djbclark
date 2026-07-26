@@ -53,17 +53,15 @@ Shell: `h` / `hs` / `hreload` / `hstop` in `~/.bashrc`; `~/.local/bin/hreload` o
 
 ## Open issue (next work)
 
-**[site-djbclark#12](https://github.com/djbclark/site-djbclark/issues/12)** — *Herdr: first-class detection for Goose and Aider; LiteLLM ops next to Herdr*
+**[site-djbclark#12](https://github.com/djbclark/site-djbclark/issues/12)** — *Herdr workstation: Goose, Aider, LiteLLM, and local inference (omlx/Ollama/…)*
 
-Research snapshot (full detail in the issue; operator corrected **LiteLLM**, not “local LLM”):
+Three layers (full detail in the issue):
 
-- **goose 1.44.0**, **aider 0.86.2** on PATH; site Goose via `roles/goose` → **`litellm-local`** → `http://127.0.0.1:4000/v1`
-- **LiteLLM:** `com.djbclark.litellm`, port **4000**, `roles/litellm` — **API proxy**, not a Herdr agent pane. Track docs + OliveTin health next to Herdr; optional model/provider metadata on Goose rows.
-- **No** Herdr official integration / remote manifests for goose or aider
-- Local `agent-detection/<agent>.toml` cannot invent new agent ids without upstream process detection
-- Aider: screen-manifest first; resume likely out of scope v1
-- Goose: session resume may be feasible; lifecycle hooks need research
-- Upstream Herdr contribution preferred over permanent site fork
+1. **Agents:** goose 1.44.0, aider 0.86.2 — need Herdr process detection + manifests (upstream preferred).
+2. **LiteLLM:** `com.djbclark.litellm` **:4000** — proxy for Goose `litellm-local`; docs + OliveTin, not an agent pane.
+3. **Local inference installed:** **omlx** (brew service, **:8000**), **Ollama** (listening **:11434**), **llama.cpp** (`llama-server`/`llama-cli`), **mlx** formulae, **LM Studio** app. Registry/health/docs; optional interactive-client detection only.
+
+Also: no Herdr integrations for goose/aider today; local `agent-detection/*.toml` cannot invent agent ids without binary update.
 
 ## Loose ends (non-blocking)
 
