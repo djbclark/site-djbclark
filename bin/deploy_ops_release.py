@@ -15,19 +15,32 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 RELEASE_FILE = "ops-release.json"
+LOCAL_CODEX_CONFIG = "codex/config.toml"
+LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
+LOCAL_CODEX_CONFIG_BACKUP = "ops-release/codex-config.toml.backup"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 EX_TEMPFAIL = 75
 
 
 class ReleaseError(RuntimeError):
     """A release precondition failed."""
+
+
+@dataclass(frozen=True)
+class LocalFileMigration:
+    relative_path: str
+    content: bytes
+    mode: int
 
 
 @dataclass(frozen=True)
@@ -39,6 +52,7 @@ class ReleasePlan:
     target_commit: str
     memory_ahead: bool = False
     memory_rebase_from: str | None = None
+    local_file_migration: LocalFileMigration | None = None
 
 
 def run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -107,14 +121,175 @@ def require_annotated_tag(path: Path, tag: str) -> None:
         raise ReleaseError(f"{path.name} {tag} is not an annotated tag")
 
 
-def require_clean_master(path: Path) -> None:
-    if git(path, "status", "--porcelain"):
+def require_clean_master(
+    path: Path,
+    *,
+    allowed_dirty_paths: tuple[str, ...] = (),
+) -> None:
+    pathspecs = [".", *(f":(exclude){item}" for item in allowed_dirty_paths)]
+    if git(path, "status", "--porcelain", "--untracked-files=all", "--", *pathspecs):
         raise ReleaseError(
             f"{path} is dirty; release deployment requires a clean checkout"
         )
     branch = git(path, "symbolic-ref", "--short", "HEAD", check=False)
     if branch != "master":
         raise ReleaseError(f"{path} is on {branch or 'detached HEAD'}, expected master")
+
+
+def ref_tracks_path(path: Path, ref: str, relative_path: str) -> bool:
+    return (
+        run(
+            "git",
+            "cat-file",
+            "-e",
+            f"{ref}:{relative_path}",
+            cwd=path,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def ref_ignores_path(path: Path, ref: str, relative_path: str) -> bool:
+    result = run(
+        "git",
+        "show",
+        f"{ref}:.gitignore",
+        cwd=path,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    raw = result.stdout
+    normalized = {
+        line.strip().removeprefix("/")
+        for line in raw.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    return relative_path in normalized
+
+
+def inspect_local_file_migration(
+    name: str,
+    path: Path,
+    current_commit: str,
+    target_commit: str,
+) -> LocalFileMigration | None:
+    if (
+        name != "site-private"
+        or not ref_tracks_path(path, current_commit, LOCAL_CODEX_CONFIG)
+        or ref_tracks_path(path, target_commit, LOCAL_CODEX_CONFIG)
+    ):
+        return None
+    if not ref_ignores_path(path, target_commit, LOCAL_CODEX_CONFIG):
+        raise ReleaseError(
+            f"{name} target removes {LOCAL_CODEX_CONFIG} without ignoring it"
+        )
+    if not ref_tracks_path(path, target_commit, LOCAL_CODEX_CONFIG_EXAMPLE):
+        raise ReleaseError(
+            f"{name} target removes {LOCAL_CODEX_CONFIG} without a tracked "
+            f"{LOCAL_CODEX_CONFIG_EXAMPLE}"
+        )
+    if git(
+        path,
+        "diff",
+        "--cached",
+        "--name-only",
+        "--",
+        LOCAL_CODEX_CONFIG,
+    ):
+        raise ReleaseError(
+            f"{name} {LOCAL_CODEX_CONFIG} is staged; unstage it before deployment"
+        )
+    local_path = path / LOCAL_CODEX_CONFIG
+    if not local_path.is_file() or local_path.is_symlink():
+        raise ReleaseError(
+            f"{name} cannot preserve missing or non-regular {LOCAL_CODEX_CONFIG}"
+        )
+    return LocalFileMigration(
+        LOCAL_CODEX_CONFIG,
+        local_path.read_bytes(),
+        stat.S_IMODE(local_path.stat().st_mode),
+    )
+
+
+def write_file_atomically(target: Path, content: bytes, mode: int) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.release-",
+        dir=target.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            os.fchmod(stream.fileno(), mode)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def restore_local_file(path: Path, migration: LocalFileMigration) -> None:
+    write_file_atomically(
+        path / migration.relative_path,
+        migration.content,
+        migration.mode,
+    )
+
+
+def local_file_backup_path(path: Path) -> Path:
+    raw = git(path, "rev-parse", "--git-path", LOCAL_CODEX_CONFIG_BACKUP)
+    backup = Path(raw)
+    return backup if backup.is_absolute() else path / backup
+
+
+def persist_local_file_backup(path: Path, migration: LocalFileMigration) -> Path:
+    backup = local_file_backup_path(path)
+    if backup.exists():
+        raise ReleaseError(
+            f"{path.name} has an unrecovered local config backup at {backup}"
+        )
+    write_file_atomically(backup, migration.content, migration.mode)
+    return backup
+
+
+def recover_local_file_backup(path: Path) -> None:
+    backup = local_file_backup_path(path)
+    if not backup.exists():
+        return
+    if not backup.is_file() or backup.is_symlink():
+        raise ReleaseError(
+            f"{path.name} local config backup is not a regular file: {backup}"
+        )
+    migration = LocalFileMigration(
+        LOCAL_CODEX_CONFIG,
+        backup.read_bytes(),
+        stat.S_IMODE(backup.stat().st_mode),
+    )
+    restore_local_file(path, migration)
+    if not local_file_matches(path, migration):
+        raise ReleaseError(
+            f"{path.name} could not recover local {LOCAL_CODEX_CONFIG} from {backup}"
+        )
+    backup.unlink()
+    print(f"{path.name}: recovered local {LOCAL_CODEX_CONFIG} from interrupted deploy")
+
+
+def local_file_matches(path: Path, migration: LocalFileMigration) -> bool:
+    local_path = path / migration.relative_path
+    return (
+        local_path.is_file()
+        and not local_path.is_symlink()
+        and local_path.read_bytes() == migration.content
+        and stat.S_IMODE(local_path.stat().st_mode) == migration.mode
+    )
 
 
 def verify_github_release(name: str, tag: str, path: Path) -> None:
@@ -154,12 +329,21 @@ def inspect_release(
     path = ops_root / name
     if not path.exists():
         raise ReleaseError(f"missing deploy checkout: {path}")
-    require_clean_master(path)
     if fetch:
         run("git", "fetch", "origin", "--prune", "--tags", cwd=path)
     require_annotated_tag(path, tag)
     target_commit = git(path, "rev-parse", f"refs/tags/{tag}^{{commit}}")
     current_commit = git(path, "rev-parse", "HEAD")
+    local_file_migration = inspect_local_file_migration(
+        name,
+        path,
+        current_commit,
+        target_commit,
+    )
+    allowed_dirty_paths = (
+        (local_file_migration.relative_path,) if local_file_migration else ()
+    )
+    require_clean_master(path, allowed_dirty_paths=allowed_dirty_paths)
     remote_master = git(path, "rev-parse", "origin/master")
     expected_version = version_from_tag(tag)
     actual_version = declared_version(path, tag)
@@ -208,6 +392,7 @@ def inspect_release(
         target_commit,
         memory_ahead,
         memory_rebase_from,
+        local_file_migration,
     )
 
 
@@ -219,40 +404,89 @@ def deploy_release(
     fetch: bool = True,
     verify_github: bool = True,
 ) -> list[ReleasePlan]:
+    private_path = ops_root / "site-private"
+    if private_path.exists():
+        recover_local_file_backup(private_path)
     plans = [
         inspect_release(ops_root, name, tag, fetch=fetch, verify_github=verify_github)
         for name in REPOSITORIES
     ]
     for plan in plans:
         action = "would deploy" if not apply else "deploying"
+        details = []
         if plan.memory_rebase_from:
-            suffix = f" + rebased memory commits after {plan.memory_rebase_from}"
+            details.append(f"rebased memory commits after {plan.memory_rebase_from}")
         elif plan.memory_ahead:
-            suffix = " + existing memory commits"
-        else:
-            suffix = ""
+            details.append("existing memory commits")
+        if plan.local_file_migration:
+            details.append(f"preserved local {plan.local_file_migration.relative_path}")
+        suffix = "".join(f" + {detail}" for detail in details)
         print(f"{plan.name}: {action} {plan.tag} ({plan.target_commit[:12]}){suffix}")
     if not apply:
         return plans
     for plan in plans:
-        require_clean_master(plan.path)
+        allowed_dirty_paths = (
+            (plan.local_file_migration.relative_path,)
+            if plan.local_file_migration
+            else ()
+        )
+        require_clean_master(
+            plan.path,
+            allowed_dirty_paths=allowed_dirty_paths,
+        )
         if git(plan.path, "rev-parse", "HEAD") != plan.current_commit:
             raise ReleaseError(
                 f"{plan.name} changed after release preflight; nothing was deployed"
             )
-    apply_plans = sorted(plans, key=lambda plan: plan.memory_rebase_from is None)
+        if plan.local_file_migration and not local_file_matches(
+            plan.path,
+            plan.local_file_migration,
+        ):
+            raise ReleaseError(
+                f"{plan.name} {plan.local_file_migration.relative_path} "
+                "changed after release preflight; nothing was deployed"
+            )
+    apply_plans = sorted(
+        plans,
+        key=lambda plan: (
+            plan.memory_rebase_from is None,
+            plan.local_file_migration is not None,
+        ),
+    )
     for plan in apply_plans:
-        if plan.memory_rebase_from:
+        migration = plan.local_file_migration
+        backup: Path | None = None
+        if migration:
+            backup = persist_local_file_backup(plan.path, migration)
             run(
                 "git",
-                "rebase",
-                "--onto",
-                plan.target_commit,
-                plan.memory_rebase_from,
+                "restore",
+                "--worktree",
+                "--",
+                migration.relative_path,
                 cwd=plan.path,
             )
-        elif not plan.memory_ahead:
-            run("git", "merge", "--ff-only", plan.target_commit, cwd=plan.path)
+        try:
+            if plan.memory_rebase_from:
+                run(
+                    "git",
+                    "rebase",
+                    "--onto",
+                    plan.target_commit,
+                    plan.memory_rebase_from,
+                    cwd=plan.path,
+                )
+            elif not plan.memory_ahead:
+                run("git", "merge", "--ff-only", plan.target_commit, cwd=plan.path)
+        finally:
+            if migration:
+                restore_local_file(plan.path, migration)
+                if not local_file_matches(plan.path, migration):
+                    raise ReleaseError(
+                        f"{plan.name} did not restore local {migration.relative_path}"
+                    )
+                if backup:
+                    backup.unlink()
         deployed = git(plan.path, "rev-parse", "HEAD")
         if plan.memory_ahead or plan.memory_rebase_from:
             drift = changed_paths(plan.path, plan.tag, "HEAD")
@@ -263,6 +497,11 @@ def deploy_release(
             valid = deployed == plan.target_commit
         if not valid:
             raise ReleaseError(f"{plan.name} did not land on {plan.target_commit}")
+        if migration and not local_file_matches(plan.path, migration):
+            raise ReleaseError(
+                f"{plan.name} did not preserve local {migration.relative_path}"
+            )
+        require_clean_master(plan.path)
     return plans
 
 
@@ -444,7 +683,7 @@ class OpsReleaseLock:
         self.path = default_lock_path()
         self.fd = -1
 
-    def __enter__(self) -> OpsReleaseLock:
+    def __enter__(self) -> Self:
         if not self.enabled:
             return self
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -469,7 +708,9 @@ class OpsReleaseLock:
             except OSError as exc:
                 os.close(self.fd)
                 self.fd = -1
-                raise ReleaseError(f"could not acquire ops-release lock: {exc}") from exc
+                raise ReleaseError(
+                    f"could not acquire ops-release lock: {exc}"
+                ) from exc
         try:
             os.ftruncate(self.fd, 0)
             os.lseek(self.fd, 0, os.SEEK_SET)

@@ -44,10 +44,32 @@ def commit_file(path: Path, relative: str, text: str, message: str) -> str:
     return git(path, "rev-parse", "HEAD")
 
 
-def make_repo(path: Path) -> str:
+def commit_all(path: Path, message: str) -> str:
+    git(path, "add", "--all")
+    git(
+        path,
+        "-c",
+        "user.name=Release Test",
+        "-c",
+        "user.email=release-test@example.invalid",
+        "commit",
+        "-m",
+        message,
+    )
+    return git(path, "rev-parse", "HEAD")
+
+
+def make_repo(path: Path, *, tracked_codex_config: bool = False) -> str:
     path.mkdir()
     git(path, "init", "-b", "master")
     commit_file(path, "README.md", "test repo\n", "initial")
+    if tracked_codex_config:
+        commit_file(
+            path,
+            release.LOCAL_CODEX_CONFIG,
+            'model = "released"\n',
+            "tracked codex config",
+        )
     manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.0.0"}
     commit = commit_file(path, "ops-release.json", json.dumps(manifest), "release")
     tag_release(path, "1.0.0")
@@ -206,6 +228,217 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 ),
                 ["memory/fact.md"],
             )
+
+    def test_deploy_localizes_and_preserves_codex_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            targets: dict[str, str] = {}
+            for name in release.REPOSITORIES:
+                path = ops_root / name
+                make_repo(path, tracked_codex_config=name == "site-private")
+                manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
+                (path / "ops-release.json").write_text(
+                    json.dumps(manifest),
+                    encoding="utf-8",
+                )
+                if name == "site-private":
+                    (path / release.LOCAL_CODEX_CONFIG).unlink()
+                    (path / ".gitignore").write_text(
+                        f"/{release.LOCAL_CODEX_CONFIG}\n",
+                        encoding="utf-8",
+                    )
+                    example = path / f"{release.LOCAL_CODEX_CONFIG}.example"
+                    example.parent.mkdir(parents=True, exist_ok=True)
+                    example.write_text('model = "example"\n', encoding="utf-8")
+                targets[name] = commit_all(path, "release 1.1")
+                tag_release(path, "1.1.0")
+                git(path, "update-ref", "refs/remotes/origin/master", targets[name])
+                git(path, "reset", "--hard", "ops-v1.0.0")
+
+            private_path = ops_root / "site-private"
+            local_config = private_path / release.LOCAL_CODEX_CONFIG
+            local_config.write_text('model = "local-choice"\n', encoding="utf-8")
+            local_config.chmod(0o600)
+
+            plans = release.deploy_release(
+                ops_root,
+                "ops-v1.1.0",
+                apply=True,
+                fetch=False,
+                verify_github=False,
+            )
+
+            private_plan = next(plan for plan in plans if plan.name == "site-private")
+            self.assertIsNotNone(private_plan.local_file_migration)
+            self.assertEqual(
+                local_config.read_text(encoding="utf-8"), 'model = "local-choice"\n'
+            )
+            self.assertEqual(local_config.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(git(private_path, "status", "--porcelain"), "")
+            self.assertEqual(
+                git(private_path, "check-ignore", release.LOCAL_CODEX_CONFIG),
+                release.LOCAL_CODEX_CONFIG,
+            )
+            for name, target in targets.items():
+                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), target)
+
+            later_targets: dict[str, str] = {}
+            for name in release.REPOSITORIES:
+                path = ops_root / name
+                manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.2.0"}
+                later_targets[name] = commit_file(
+                    path,
+                    "ops-release.json",
+                    json.dumps(manifest),
+                    "release 1.2",
+                )
+                tag_release(path, "1.2.0")
+                git(
+                    path,
+                    "update-ref",
+                    "refs/remotes/origin/master",
+                    later_targets[name],
+                )
+
+            later_plans = release.deploy_release(
+                ops_root,
+                "ops-v1.2.0",
+                apply=True,
+                fetch=False,
+                verify_github=False,
+            )
+
+            later_private_plan = next(
+                plan for plan in later_plans if plan.name == "site-private"
+            )
+            self.assertIsNone(later_private_plan.local_file_migration)
+            self.assertEqual(
+                local_config.read_text(encoding="utf-8"),
+                'model = "local-choice"\n',
+            )
+            self.assertEqual(git(private_path, "status", "--porcelain"), "")
+            for name, target in later_targets.items():
+                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), target)
+
+    def test_deploy_rejects_dirty_codex_config_while_target_tracks_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            for name in release.REPOSITORIES:
+                make_repo(
+                    ops_root / name,
+                    tracked_codex_config=name == "site-private",
+                )
+                git(
+                    ops_root / name,
+                    "update-ref",
+                    "refs/remotes/origin/master",
+                    git(ops_root / name, "rev-parse", "HEAD"),
+                )
+            (ops_root / "site-private" / release.LOCAL_CODEX_CONFIG).write_text(
+                'model = "local-choice"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(release.ReleaseError, "dirty"):
+                release.deploy_release(
+                    ops_root,
+                    "ops-v1.0.0",
+                    apply=False,
+                    fetch=False,
+                    verify_github=False,
+                )
+
+    def test_codex_config_migration_rejects_other_dirty_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            for name in release.REPOSITORIES:
+                path = ops_root / name
+                make_repo(path, tracked_codex_config=name == "site-private")
+                manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
+                (path / "ops-release.json").write_text(
+                    json.dumps(manifest),
+                    encoding="utf-8",
+                )
+                if name == "site-private":
+                    (path / release.LOCAL_CODEX_CONFIG).unlink()
+                    (path / ".gitignore").write_text(
+                        f"/{release.LOCAL_CODEX_CONFIG}\n",
+                        encoding="utf-8",
+                    )
+                    example = path / release.LOCAL_CODEX_CONFIG_EXAMPLE
+                    example.parent.mkdir(parents=True, exist_ok=True)
+                    example.write_text('model = "example"\n', encoding="utf-8")
+                target = commit_all(path, "release 1.1")
+                tag_release(path, "1.1.0")
+                git(path, "update-ref", "refs/remotes/origin/master", target)
+                git(path, "reset", "--hard", "ops-v1.0.0")
+            private_path = ops_root / "site-private"
+            (private_path / release.LOCAL_CODEX_CONFIG).write_text(
+                'model = "local-choice"\n',
+                encoding="utf-8",
+            )
+            (private_path / "README.md").write_text(
+                "unexpected drift\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(release.ReleaseError, "dirty"):
+                release.deploy_release(
+                    ops_root,
+                    "ops-v1.1.0",
+                    apply=False,
+                    fetch=False,
+                    verify_github=False,
+                )
+
+    def test_codex_config_migration_requires_target_gitignore(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site-private"
+            make_repo(path, tracked_codex_config=True)
+            (path / release.LOCAL_CODEX_CONFIG).unlink()
+            example = path / release.LOCAL_CODEX_CONFIG_EXAMPLE
+            example.parent.mkdir(parents=True, exist_ok=True)
+            example.write_text('model = "example"\n', encoding="utf-8")
+            target = commit_all(path, "remove tracked config without gitignore")
+
+            with self.assertRaisesRegex(
+                release.ReleaseError,
+                "target removes codex/config.toml without ignoring it",
+            ):
+                release.inspect_local_file_migration(
+                    "site-private",
+                    path,
+                    "ops-v1.0.0",
+                    target,
+                )
+
+    def test_interrupted_codex_config_migration_recovers_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site-private"
+            make_repo(path, tracked_codex_config=True)
+            local_config = path / release.LOCAL_CODEX_CONFIG
+            local_config.write_text('model = "local-choice"\n', encoding="utf-8")
+            local_config.chmod(0o600)
+            migration = release.LocalFileMigration(
+                release.LOCAL_CODEX_CONFIG,
+                local_config.read_bytes(),
+                local_config.stat().st_mode & 0o777,
+            )
+            backup = release.persist_local_file_backup(path, migration)
+            local_config.write_text('model = "released"\n', encoding="utf-8")
+            local_config.chmod(0o644)
+
+            release.recover_local_file_backup(path)
+
+            self.assertFalse(backup.exists())
+            self.assertEqual(
+                local_config.read_text(encoding="utf-8"),
+                'model = "local-choice"\n',
+            )
+            self.assertEqual(local_config.stat().st_mode & 0o777, 0o600)
 
     def test_status_rejects_unversioned_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

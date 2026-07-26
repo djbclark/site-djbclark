@@ -35,10 +35,14 @@ independent of the coordinated suite version in `ops-release.json`.
 Two agents must not cut or deploy overlapping suite versions. site-djbclark
 ships serialization for that:
 
-| Layer | Path | Scope |
-| ----- | ---- | ----- |
-| Exclusive flock | `~/.local/state/site-djbclark/ops-release.lock` | Held for one `check`/`deploy`/`memory-sync` (or `ops_release_lock.py hold`) |
-| Version claim | `~/.local/state/site-djbclark/ops-release.claim.json` | Multi-step reservation across tag + GH release + deploy |
+<!-- markdownlint-disable MD013 -->
+
+| Layer           | Path                                                  | Scope                                                                       |
+| --------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| Exclusive flock | `~/.local/state/site-djbclark/ops-release.lock`       | Held for one `check`/`deploy`/`memory-sync` (or `ops_release_lock.py hold`) |
+| Version claim   | `~/.local/state/site-djbclark/ops-release.claim.json` | Multi-step reservation across tag + GH release + deploy                     |
+
+<!-- markdownlint-enable MD013 -->
 
 ```bash
 # Before starting a cut or deploy of version X:
@@ -122,6 +126,34 @@ For `site-private`, post-release `memory/` commits are preserved. If a valid
 local memory-only commit diverged from the requested later release, the gate
 rebases only that verified memory-only range onto the release before advancing
 the other two checkouts.
+
+### Local Codex preferences
+
+`site-private/codex/config.toml` is ignored machine-local state beginning with
+`ops-v1.0.1`. Codex and the operator may update that file without dirtying the
+deploy checkout; the tracked `codex/config.toml.example` is only a bootstrap
+example.
+
+The `ops-v1.0.0` → `ops-v1.0.1` deployment is a one-time tracked-to-ignored
+transition. The deploy tool permits no other dirty path, verifies the target
+release both removes and ignores `codex/config.toml`, preserves the exact local
+bytes and mode in Git metadata, deploys `site-private` last, and atomically
+restores the local file. A later invocation automatically recovers that backup
+if the deploy process is interrupted. Subsequent releases leave the ignored
+file untouched naturally.
+
+Because the deployed `ops-v1.0.0` tool predates this migration, perform this
+one transition with the source copy from the published `ops-v1.0.1` commit,
+after verifying the source worktree is exactly on that tag:
+
+```bash
+cd ~/src/ops-worktrees/main/site-djbclark
+test "$(git rev-parse HEAD)" = "$(git rev-parse ops-v1.0.1^{commit})"
+python3 bin/deploy_ops_release.py --ops-root "${OPS_ROOT:-$HOME/ops}" check 1.0.1
+python3 bin/deploy_ops_release.py --ops-root "${OPS_ROOT:-$HOME/ops}" deploy 1.0.1
+cd "${OPS_ROOT:-$HOME/ops}/site-djbclark"
+just ops-release-status
+```
 
 For the initial `ops-v1.0.0` bootstrap, run the same script from the
 synchronized source baseline after merging and publishing:
