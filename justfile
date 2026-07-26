@@ -53,8 +53,33 @@ landing-discover:
 inventory-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-inventory --list | jq -S .
 
+# Audit and reconcile this site's Mac, Linux, and Android hostnames.
+# This touches live hosts; follow the stayturgid device-interaction rules.
+hostnames-audit:
+    bin/check_hostnames.py
+
 lint:
     bin/registry_lint.py
+    python3 -m unittest discover -s tests -v
+
+# Verify that all three deploy checkouts can advance to a coordinated,
+# published stable release without changing them.
+ops-release-check version:
+    bin/deploy_ops_release.py check "{{ version }}"
+
+# Fast-forward all three clean ~/ops checkouts to one coordinated release.
+ops-release-deploy version:
+    bin/deploy_ops_release.py deploy "{{ version }}"
+
+# Fail if deployed code/config is ahead of its latest coordinated release.
+# site-private may be ahead only by memory/ data commits.
+ops-release-status:
+    bin/deploy_ops_release.py status
+
+# Sync site-private's live memory only when all remote post-release changes
+# are confined to memory/. This replaces a raw git pull in ~/ops/site-private.
+ops-memory-sync:
+    bin/deploy_ops_release.py memory-sync
 
 # Install/configure loopback LiteLLM (E1 + E4 keys + E5 multi-host).
 # Default limit mac (live). Other hosts: --limit mac-mini-intel|vps-primary|site_litellm
@@ -134,7 +159,6 @@ site-agents-status:
     else \
       echo "launchd: not loaded (homebrew.mxcl.jobber)"; \
     fi
-
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)

@@ -89,7 +89,6 @@ when AutoJs6 stalls or a11y drifts — the Mac log is the signal.
 ```bash
 just health
 python3 control/bin/screen_lease.py status   # cross-project glass holds (esp. p7a); see docs/architecture/components/screen-control-lease.md
-# Optional when touching VLM: just vlm-upstream-check  # RQS VLM.md best practices
 # Optional when touching phone→Mac et: just check-et-mac
 ```
 
@@ -112,8 +111,8 @@ Also skim when the operator asks about fleet status, soak, OPTIONS **43–45**, 
 | `~/.config/stayturgid/state/fleet-health/<host>` | Consecutive soft-fail count (≥2 ≈ notified)                     |
 
 Agents: `com.stayturgid.fleet-health`, `com.stayturgid.access-monitor` (via
-`ansible/playbooks/control_node/agents.yml`). Neo/Aurora gui-audit is **parked** (`control/bin/gui_audit.py`
-remains for manual use). Disable soft probes: `STAYTURGID_SKIP_HEALTH=1`.
+`ansible/playbooks/control_node/agents.yml`). Disable soft probes:
+`STAYTURGID_SKIP_HEALTH=1`.
 
 Mac→Android UI playbook: [docs/research/mac-android-ui-automation.md](https://github.com/djbclark/stayturgid/blob/master/docs/research/mac-android-ui-automation.md).
 
@@ -158,17 +157,18 @@ On the Mac, a launchd agent runs every 60 s and reconnects `adb connect <ip>:555
 
 ## How updates work
 
-GitHub `master` is the source of truth. To release:
-
-1. Bump `version.json` (`version` + `changelog`), commit, push.
-2. `just deploy` (or `python3 control/bin/deploy_fleet.py`) — full fleet via `ansible/playbooks/site.yml`
-   (`just deploy-check` = dry run): bootstrap APK verify,
-   bootstrap APK ensure (version-aware over ADB), Shizuku start, preflight (SSH),
-   fleet deploy (Termux, AutoJs6, Obtainium, Tailscale, privileges), post-UI,
-   validate. The first three phases run over ADB (no SSH required) — they install
-   prerequisite APKs and start Shizuku before SSH bootstrap. Idempotent (re-run =
-   `changed=0`). Granular phases: `just bootstrap-apks`, `just verify-bootstrap-apks`,
-   `just ensure-shizuku`, `just deploy-termux`.
+GitHub `master` is the development source of truth. The three
+`${OPS_ROOT:-~/ops}` checkouts deploy only coordinated stable
+`ops-vMAJOR.MINOR.PATCH` releases; see
+[OPS-RELEASES.md](OPS-RELEASES.md). After deploying a release,
+`just deploy` (or `python3 control/bin/deploy_fleet.py`) runs the full fleet via `ansible/playbooks/site.yml`
+(`just deploy-check` = dry run): bootstrap APK verify,
+bootstrap APK ensure (version-aware over ADB), Shizuku start, preflight (SSH),
+fleet deploy (Termux, AutoJs6, Obtainium, Tailscale, privileges), post-UI,
+validate. The first three phases run over ADB (no SSH required) — they install
+prerequisite APKs and start Shizuku before SSH bootstrap. Idempotent (re-run =
+`changed=0`). Granular phases: `just bootstrap-apks`, `just verify-bootstrap-apks`,
+`just ensure-shizuku`, `just deploy-termux`.
 
 Optional on-device notifier: `stayturgid_check_repo_version.py` (max once/24 h) fires `termux-notification` when GitHub `version.json` moves ahead of the last-seen stamp.
 
@@ -187,8 +187,9 @@ Source of truth: **`origin/master`** on `https://github.com/djbclark/stayturgid.
 ### Session start (every agent)
 
 ```bash
-cd ~/stayturgid && git fetch origin --prune && git status -sb
-git pull --ff-only origin master   # if behind only
+cd "${OPS_ROOT:-$HOME/ops}/site-djbclark"
+just ops-release-status
+cd "${OPS_ROOT:-$HOME/ops}/stayturgid"
 just health
 just firerpa-health 2>/dev/null    # check FIRERPA fleet health
 python3 control/bin/screen_lease.py status
@@ -465,7 +466,7 @@ shizuku_server` alongside port 5555 `ss` check (port alone is not sufficient).
 - Split storage — Termux under `~/.stayturgid/shared`; AutoJs6 under `/sdcard/stayturgid/`.
 - No Termux→localhost:5555 loopback — verify item 4 is an expected informational note, not a failure. Post-UI stays on Mac adb (USB or wireless).
 - Mac adb: Tailscale or USB `GN43T503430603PS`; wireless failover works after one USB bootstrap.
-- **Sideloaded Google Play:** Play Store can auto-update GMS past Fire-compatible builds → GSF/GMS crash loop. Pin via `just fix-fireos-device-google` (recipe renamed from `fix-hd8-google` in the B5 identity scrub); disable Play Store auto-updates. **VLM close-out** (when `just vlm-server` running): `just verify-fireos-device-google` or auto after `fix-fireos-device-google`. See [docs/research/fire-os-google-play.md](https://github.com/djbclark/stayturgid/blob/master/docs/research/fire-os-google-play.md) and [docs/architecture/vlm.md](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/vlm.md).
+- **Sideloaded Google Play:** Play Store can auto-update GMS past Fire-compatible builds → GSF/GMS crash loop. Pin via `just fix-fireos-device-google` (recipe renamed from `fix-hd8-google` in the B5 identity scrub); disable Play Store auto-updates and verify that UI setting manually. See [docs/research/fire-os-google-play.md](https://github.com/djbclark/stayturgid/blob/master/docs/research/fire-os-google-play.md).
 
 **Next work:** follow
 [Outstanding Fix Priorities](https://github.com/djbclark/stayturgid/blob/master/docs/operations/plans/outstanding-fix-priorities-2026-07-13.md), with
@@ -699,7 +700,6 @@ control/                     — Mac control node (see docs/architecture/core-ar
   bin/                       — deploy_fleet.py, check_fleet_health.py, monitors, a11y_services.py
   lib/                       — stayturgid_device.py, adb_cli.py, screen_control.py, fleet_health.py
   tools/{autojs6,obtainium,play,fdroid}/  — Mac deploy helpers (Ansible + operator)
-  vlm/ui-tars/               — optional UI-TARS sidecar
 device/
   autojs6/                   — watchdog JS (deployed to /sdcard/stayturgid/autojs6/)
   termux/                    — boot/*.sh, repair-bridge, py/*.py → ~/.stayturgid/bin/
@@ -709,7 +709,7 @@ docs/                        — handoff.md, hacking.md, options.md, modules/, a
 ansible/
   playbooks/site.yml         — canonical fleet entry (imports fleet/* + control_node/*)
   playbooks/fleet/           — bootstrap, fleet.yml, post-ui, validate, preflight, firerpa, verify-drift
-  playbooks/control_node/    — Mac prereqs, agents, vlm
+  playbooks/control_node/    — Mac prerequisites and agents
   roles/control_node/        — launchd plists, devices.conf templates
 ansible_collections/stayturgid/
   termux/roles/termux_userland
@@ -814,7 +814,7 @@ version.json                 — repo release version + changelog
   one is an empty stub). 4 separate `tsconfig.json`s (device/autojs6 +
   docs/research vs. tests/js vs. just/tools) keep Node/DOM globals out of
   device code's type environment. Module syntax is `import x =
-  require("./y.js")` — compiles to a plain `require()` call, verified
+require("./y.js")` — compiles to a plain `require()` call, verified
   byte-structurally equivalent to the original hand-written requires, so
   Rhino's module loader (confirmed via its own source: auto-appends `.js`
   when missing) resolves it identically. `.ts` sources are excluded from
