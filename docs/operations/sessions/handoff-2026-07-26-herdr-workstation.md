@@ -53,16 +53,16 @@ Shell: `h` / `hs` / `hreload` / `hstop` in `~/.bashrc`; `~/.local/bin/hreload` o
 
 ## Open issue (next work)
 
-**[site-djbclark#12](https://github.com/djbclark/site-djbclark/issues/12)** — *Herdr: first-class detection/integration for Goose and Aider*
+**[site-djbclark#12](https://github.com/djbclark/site-djbclark/issues/12)** — *Herdr: first-class detection for Goose, Aider, and local-LLM backends*
 
-Research snapshot (full detail in the issue):
+Research snapshot (full detail + localllm addendum in the issue):
 
-- Both on PATH: **goose 1.44.0**, **aider 0.86.2**
-- Goose is site-managed (`roles/goose`, LiteLLM loopback)
-- **No** Herdr official integration and **no** remote screen manifests for either
-- Local `~/.config/herdr/agent-detection/<agent>.toml` cannot invent a new agent id without an upstream binary process-detection update
+- **goose 1.44.0**, **aider 0.86.2** on PATH; site Goose via `roles/goose` + LiteLLM
+- **No** Herdr official integration / remote manifests for goose or aider
+- Local `agent-detection/<agent>.toml` cannot invent new agent ids without upstream process detection
 - Aider: screen-manifest first; resume likely out of scope v1
 - Goose: session resume may be feasible; lifecycle hooks need research
+- **Local LLM (“localllm”):** no `localllm` binary — site stack is **omlx** (running :8000), **Ollama** (:11434), **LM Studio** app, **LiteLLM** (:4000). These are inference/providers, not Herdr agents; document + optional interactive clients. Do not confuse with WordPress **Local.app**.
 - Upstream Herdr contribution preferred over permanent site fork
 
 ## Loose ends (non-blocking)
