@@ -25,6 +25,7 @@ from pathlib import Path
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 RELEASE_FILE = "ops-release.json"
 LOCAL_CODEX_CONFIG = "codex/config.toml"
+LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 EX_TEMPFAIL = 75
 
@@ -172,6 +173,11 @@ def inspect_local_file_migration(
     if not ref_ignores_path(path, target_commit, LOCAL_CODEX_CONFIG):
         raise ReleaseError(
             f"{name} target removes {LOCAL_CODEX_CONFIG} without ignoring it"
+        )
+    if not ref_tracks_path(path, target_commit, LOCAL_CODEX_CONFIG_EXAMPLE):
+        raise ReleaseError(
+            f"{name} target removes {LOCAL_CODEX_CONFIG} without a tracked "
+            f"{LOCAL_CODEX_CONFIG_EXAMPLE}"
         )
     if git(
         path,

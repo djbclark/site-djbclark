@@ -368,6 +368,9 @@ class DeployOpsReleaseTest(unittest.TestCase):
                         f"/{release.LOCAL_CODEX_CONFIG}\n",
                         encoding="utf-8",
                     )
+                    example = path / release.LOCAL_CODEX_CONFIG_EXAMPLE
+                    example.parent.mkdir(parents=True, exist_ok=True)
+                    example.write_text('model = "example"\n', encoding="utf-8")
                 target = commit_all(path, "release 1.1")
                 tag_release(path, "1.1.0")
                 git(path, "update-ref", "refs/remotes/origin/master", target)
