@@ -1,7 +1,8 @@
 """Site desired-state guards for native-agent peer redundancy."""
 
-from pathlib import Path
+import re
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,9 +21,14 @@ class NativeAgentInventoryTest(unittest.TestCase):
         hd8_block = inventory.split("        hd8:\n", 1)[1].split(
             "      vars:\n", 1
         )[0]
+        hd8_address = re.search(
+            r"^\s+ansible_host:\s+(\S+)", hd8_block, flags=re.MULTILINE
+        )
+        self.assertIsNotNone(hd8_address)
+        assert hd8_address is not None
         peer_assignment = (
             "stayturgid_native_agent_peer_targets:\n"
-            '            - "100.124.55.39:5555"'
+            f'            - "{hd8_address.group(1)}:5555"'
         )
 
         self.assertIn(peer_assignment, s24_block)
