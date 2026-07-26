@@ -168,7 +168,7 @@ floor: D0-design + D1 + R1.
 batons, in order:**
 
 1. **M1-R (Fable 5, Mac GUI, new account):** "Review every commit in
-   ~/ops/stayturgid and ~/ops/site-djbclark since ledger entry R1 against
+   ${OPS_ROOT:-~/ops}/stayturgid and ${OPS_ROOT:-~/ops}/site-djbclark since ledger entry R1 against
    docs/design/phase-d-adapter-design-notes.md and the deviations logged in
    LEDGER.md. Classify findings: correctness/safety (must-fix), architecture
    (fix if cheap, else justify keeping), code-quality (list). Rewrite

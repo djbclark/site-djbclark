@@ -30,7 +30,7 @@ Homebrew prefix follows the LiteLLM / stayturgid pattern: Apple Silicon
 ## Apply
 
 ```bash
-cd ~/ops/site-djbclark
+cd ${OPS_ROOT:-~/ops}/site-djbclark
 just site-agents-apply          # first apply
 just site-agents-check          # dry-run (ansible --check)
 just site-agents-status         # launchctl print all labels
@@ -65,7 +65,7 @@ launchctl bootout "gui/$uid/com.djbclark.aiuse"
 To restore pre-F1 hand-managed copies after apply replaced them:
 
 ```bash
-git -C ~/ops/site-djbclark checkout HEAD~1 -- \
+git -C ${OPS_ROOT:-~/ops}/site-djbclark checkout HEAD~1 -- \
   roles/site_agents/files/hibernate-disk-check \
   roles/site_agents/templates/system-state-backup.sh.j2
 # Re-render/install manually or re-run an older playbook revision, then:

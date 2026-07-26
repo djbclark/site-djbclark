@@ -94,7 +94,7 @@ Step0 guessed package names (`@shortwave/mcp-server`, `@saner-ai/mcp-server`,
 | --- | --- | --- |
 | `goose_ext_filesystem_enabled` | `true` | Needs Node/npx (Homebrew `node` on this host) |
 | `goose_ext_filesystem_package` | `@modelcontextprotocol/server-filesystem` | Official only |
-| `goose_ext_filesystem_allowed_dirs` | `~/ops`, `~/Documents` | Narrower than full `$HOME`; override in group_vars if needed |
+| `goose_ext_filesystem_allowed_dirs` | `${OPS_ROOT:-~/ops}`, `~/Documents` | Narrower than full `$HOME`; override in group_vars if needed |
 | `goose_ext_fieldy_enabled` | `false` | Flip to `true` after E4 OAuth first-run |
 | `goose_ext_fieldy_uri` | `https://api.fieldy.ai/mcp` | Vendor endpoint |
 

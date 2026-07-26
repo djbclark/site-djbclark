@@ -53,7 +53,7 @@ on `PATH`, the wrapper still uses Python for consistent wait messaging.
 1. Remove recipes from the root `justfile` (search for `F4` / `brew-project`).
 2. Delete `generated/Merged-Brewfile` and optionally `brew/` + the two `bin/*`
    scripts.
-3. Drop the `~/ops/site-djbclark/generated/Merged-Brewfile` path claim from
+3. Drop the `${OPS_ROOT:-~/ops}/site-djbclark/generated/Merged-Brewfile` path claim from
    `registry/paths.yml` if you remove the projection entirely.
 4. No brew packages are installed or removed by F4 itself.
 
