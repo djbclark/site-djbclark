@@ -1,4 +1,9 @@
 ---
+# SITE-SPECIFIC overrides for the 'all' group ONLY. Product-default 'all'
+# group_vars (termux paths, shizuku/tailscale package ids, etc.) are
+# generated to generated/stayturgid/inventory/group_vars/all.yml by
+# site-sync and loaded as a lower-precedence inventory source; do not
+# copy them here. Values below override those product defaults.
 # Site Contract v1 / Phase D: site namespace for shared serverapp launchd labels
 # (com.<site_ns>.<app>). Product tooling reads this fact — never hard-code it
 # in stayturgid.
@@ -42,27 +47,3 @@ serverapp_victoriametrics_blackbox_targets:
     - "127.0.0.1:8428"  # victoriametrics (self; redundant with self-scrape up)
     - "127.0.0.1:1337"  # olivetin
 
-# Generic defaults for any Android/Termux device. Overridden by increasingly
-# specific taxonomy layers (android_* < vendor_* < oneui_* < model_* < host).
-termux_home: /data/data/com.termux/files/home
-termux_prefix: /data/data/com.termux/files/usr
-
-# AutoJs6 device profile defaults (templated to /sdcard/stayturgid_device.json)
-shizuku_package: moe.shizuku.privileged.api
-shizuku_activity: moe.shizuku.manager.MainActivity
-tailscale_package: com.tailscale.ipn
-tailscale_activity: com.tailscale.ipn.MainActivity
-# Coordinates for the Shizuku "Start" tap when text search fails; models set
-# their own (resolution-dependent). Empty = text-search only.
-stayturgid_shizuku_start_coords: null
-# Whether enabling wireless debugging needs the Settings-UI toggle fallback.
-stayturgid_wireless_debug_ui_fallback: false
-# Shared-storage root for logs/state/autojs6. Default Android path; Fire OS
-# overrides in vendor_amazon.yml (Termux cannot write /sdcard without broken perms).
-stayturgid_sd_root: /sdcard/stayturgid
-# Tailscale health checks in AutoJs6 watchdog only when ansible_host is a tailnet IP.
-stayturgid_tailscale_enabled: "{{ ansible_host is match('^100\\.') }}"
-stayturgid_tailscale_ip: "{{ ansible_host if ansible_host is match('^100\\.') else none }}"
-# Push Android always-on VPN for Tailscale on fleet deploy (lockdown off = LAN ADB safe).
-stayturgid_always_on_vpn: true
-stayturgid_always_on_vpn_lockdown: false

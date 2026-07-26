@@ -1,15 +1,15 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 0aa1f1090e2fc30dd8eb1c80a0da82b772d931b0
-synced: '2026-07-25T11:15:25Z'
+product_commit: 560639380b5c02417b65d5e8a5c99f2a1927630f
+synced: '2026-07-26T03:38:12Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
 - path: generated/stayturgid/fragments/.keep
   sha256: f7d7428aead7a842bcd7726a44ed681db0539abeed0715a99e0426bf0909d4bc
 - path: generated/stayturgid/fragments/caddy/stayturgid.caddy
-  sha256: 770cf1a49362434df1a58616e2707c991ee2d74f5ba244cad2927a4f85e07267
+  sha256: 3329b5e577d54035206cbeb71dc870a15954742258296e43afd284a7a3e00fca
 - path: generated/stayturgid/fragments/vector/stayturgid_sources.yaml
   sha256: 7774ffac6078f5fd046521fa3593c055b6608a2af465fa9843cc3fefc8ff514c
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
@@ -24,3 +24,25 @@ files:
   sha256: 1fca4c0bf04b706097bd346e2d329a33fbd547de3b52d7a8ad2d02572de7c740
 - path: generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml
   sha256: 232265bae4238d56ee45917896ce315dcc22d0513d15803de1ed6ab3158690ff
+- path: generated/stayturgid/inventory/placeholder_inventory.yml
+  sha256: 170070f18a97b4f9134c9ed664184a8f31870b471ed357e316d43d90cecf606e
+- path: generated/stayturgid/inventory/group_vars/all.yml
+  sha256: 933e517e3641f1152acb98dc54c49f866cb9b5f6122f0d2077b04100fbb06ba5
+- path: generated/stayturgid/inventory/group_vars/android_11.yml
+  sha256: 69623b791896df2e41acd9cf6d0b7606e9225cd05c8404e04d9f40bd62a2adf1
+- path: generated/stayturgid/inventory/group_vars/android_16.yml
+  sha256: ae2159aa7ddf03c90239956cf9c6d59455ceb89a48440dc0fc14efc2ced62837
+- path: generated/stayturgid/inventory/group_vars/model_galaxy_s24.yml
+  sha256: b717688471f6635cee049e5063c2264fa164594d4719927a3e63177476936ea6
+- path: generated/stayturgid/inventory/group_vars/model_kindle_hd8.yml
+  sha256: b8dc76610f02d9f26b4f703d5e80c72f2bdb02ac9b5b56eceb95c99dd247f111
+- path: generated/stayturgid/inventory/group_vars/model_pixel_7a.yml
+  sha256: 0fc267e8523747dac96280e2285d0afa787a30b874c6c99d8065ac19e8aea6a9
+- path: generated/stayturgid/inventory/group_vars/oneui_7.yml
+  sha256: ffcb194522b4bf7b9d676ed6b949e7323a571075b83a93ccb9fe0622a0824c11
+- path: generated/stayturgid/inventory/group_vars/vendor_amazon.yml
+  sha256: 4be7c766585d3793bc1075059f9c96b49e95558061950ad8340f019431bad60d
+- path: generated/stayturgid/inventory/group_vars/vendor_google.yml
+  sha256: 115718ca805a1a8e244abd05b53661a71af03655bb6af05484208202c79e5b84
+- path: generated/stayturgid/inventory/group_vars/vendor_samsung.yml
+  sha256: 23fabe3a273f02b51ebc3b1f1629770b7aa496e122cd4ec786b915b86131ee3e

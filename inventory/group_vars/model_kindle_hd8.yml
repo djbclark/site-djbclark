@@ -1,7 +1,0 @@
----
-# Kindle Fire HD 8 (KFRASWI / raspite), 800x1280. Shizuku Start tap when
-# text search fails — approximate wireless-debug section.
-stayturgid_shizuku_start_coords: { x: 400, y: 1100 }
-
-# D8: pending-incompatible-runtime — official contrib binary SIGSYS under Fire OS seccomp (cilium/ebpf memcg probe); recovery = minimal OCB build, see m1-r review §D8
-stayturgid_otelcol_enabled: false
