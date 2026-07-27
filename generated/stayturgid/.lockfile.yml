@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: ad81eaa37b6789bf8da1cdbb300326580e14c59f
-synced: '2026-07-26T04:16:02Z'
+product_commit: 84c73a07ca79f25d59621f7263e9644a0d5f47b1
+synced: '2026-07-27T21:52:47Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -17,13 +17,13 @@ files:
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
   sha256: a599a750d31966a04d394e1b53206d88355358f72c311fcc0bbdf09d2d2f5539
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
-  sha256: 16deac0915c1f1313e7a838b0b5e247809cd6585c34cc8a39925581525ae877b
+  sha256: 9ca0b038ac3cfe78b4ac81652fb20bb3390aebccca965ca41f5ebb0df939b965
 - path: generated/stayturgid/fragments/grafana/dashboards/json/stayturgid-fleet.json
   sha256: 348664049449a9c99c01bf9ef59d5e0ee593d083314d7f4752df1fb29657ad7f
 - path: generated/stayturgid/fragments/grafana/alerting/rules.yaml
-  sha256: 1fca4c0bf04b706097bd346e2d329a33fbd547de3b52d7a8ad2d02572de7c740
+  sha256: 6692d638159bd3d56d47d90b71b328ae5a0b7867da570759fa6c9fa45a2b293e
 - path: generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml
-  sha256: 232265bae4238d56ee45917896ce315dcc22d0513d15803de1ed6ab3158690ff
+  sha256: 6091399ceca6b06cebea126c31a83c27788e4a3de0fb8eaa52d7783f056bf374
 - path: generated/stayturgid/inventory/placeholder_inventory.yml
   sha256: 170070f18a97b4f9134c9ed664184a8f31870b471ed357e316d43d90cecf606e
 - path: generated/stayturgid/inventory/group_vars/all.yml

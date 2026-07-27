@@ -19,7 +19,7 @@ actions:
     timeout: 300
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just health
   - id: stayturgid_fleet_deploy_check
     title: "Deploy check — all hosts (dry-run)"
@@ -27,7 +27,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy-check
   - id: stayturgid_fleet_deploy
     title: "Deploy fleet — all hosts"
@@ -35,7 +35,7 @@ actions:
     timeout: 3600
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy
 
   - id: stayturgid_deploy_hd8
@@ -44,7 +44,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy hd8
 
   - id: stayturgid_deploy_mac
@@ -53,7 +53,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy mac
 
   - id: stayturgid_deploy_mac_mini_intel
@@ -62,7 +62,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy mac-mini-intel
 
   - id: stayturgid_deploy_p7a
@@ -71,7 +71,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy p7a
 
   - id: stayturgid_deploy_s24
@@ -80,7 +80,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy s24
 
   - id: stayturgid_deploy_vps_primary
@@ -89,6 +89,6 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd /Users/djbclark/src/ops-worktrees/brew-pinning/stayturgid
       just deploy vps-primary
 

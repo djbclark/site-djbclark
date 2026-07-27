@@ -27,23 +27,43 @@ serverapp_victoriametrics_blackbox_targets:
   # Termux SSH on the three real fleet devices — previously unmonitored
   # (access_monitor.py checks ADB reachability, not the SSH port itself).
   ssh_banner:
-    - "100.123.218.30:8022"  # s24 (Galaxy S24)
-    - "100.65.230.108:8022"  # p7a (Pixel 7a)
-    - "100.124.55.39:8022"   # hd8 (Kindle Fire HD 8)
+    - target: "100.123.218.30:8022"  # s24 (Galaxy S24)
+      labels:
+        machine_name: s24
+    - target: "100.65.230.108:8022"  # p7a (Pixel 7a)
+      labels:
+        machine_name: p7a
+    - target: "100.124.55.39:8022"   # hd8 (Kindle Fire HD 8)
+      labels:
+        machine_name: hd8
   # Caddy front door. HTTPS target uses the real tailnet hostname, not
   # 127.0.0.1 — the cert (real Let's Encrypt via Tailscale's cert
   # integration, confirmed live) is issued for caddy_public_hostname, and
   # its CN won't match a 127.0.0.1 SNI/Host even though the cert is valid.
   http_2xx:
-    - "127.0.0.1:80"
-    - "127.0.0.1:8080"
-    - "https://mac.greyhound-sidemirror.ts.net"
+    - target: "127.0.0.1:80"
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:8080"
+      labels:
+        machine_name: localhost
+    - target: "https://mac.greyhound-sidemirror.ts.net"
+      labels:
+        machine_name: mac
   # Cheap "did the daemon silently die between deploys" check for the other
   # locally-managed serverapps (redundant with their own health checks at
   # deploy time, but those don't run continuously between deploys).
   tcp_connect:
-    - "127.0.0.1:3000"  # grafana
-    - "127.0.0.1:5080"  # openobserve
-    - "127.0.0.1:8428"  # victoriametrics (self; redundant with self-scrape up)
-    - "127.0.0.1:1337"  # olivetin
+    - target: "127.0.0.1:3000"  # grafana
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:5080"  # openobserve
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:8428"  # victoriametrics (self; redundant with self-scrape up)
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:1337"  # olivetin
+      labels:
+        machine_name: localhost
 
