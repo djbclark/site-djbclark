@@ -18,5 +18,5 @@ providers:
     updateIntervalSeconds: 30
     allowUiUpdates: false
     options:
-      path: /Users/djbclark/src/ops-worktrees/brew-pinning/site-djbclark/generated/stayturgid/fragments/grafana/dashboards/json
+      path: ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark/generated/stayturgid/fragments/grafana/dashboards/json
       foldersFromFilesStructure: false

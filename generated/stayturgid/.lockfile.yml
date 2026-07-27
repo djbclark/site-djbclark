@@ -17,13 +17,13 @@ files:
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
   sha256: a599a750d31966a04d394e1b53206d88355358f72c311fcc0bbdf09d2d2f5539
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
-  sha256: 9ca0b038ac3cfe78b4ac81652fb20bb3390aebccca965ca41f5ebb0df939b965
+  sha256: 403b133fafc9db9100a2d96dd8e7837c50b692b106c8dc1df5ecc3c59ae6d60e
 - path: generated/stayturgid/fragments/grafana/dashboards/json/stayturgid-fleet.json
   sha256: 348664049449a9c99c01bf9ef59d5e0ee593d083314d7f4752df1fb29657ad7f
 - path: generated/stayturgid/fragments/grafana/alerting/rules.yaml
   sha256: 84b8e63d719be3f3c640b7ccea5695aa0550cb9a3bb6f718e29db92c197da883
 - path: generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml
-  sha256: 6091399ceca6b06cebea126c31a83c27788e4a3de0fb8eaa52d7783f056bf374
+  sha256: 380787be8046d83deaf06beca86f1b6d40837950cc528c59b89f76e2d6377044
 - path: generated/stayturgid/inventory/placeholder_inventory.yml
   sha256: 170070f18a97b4f9134c9ed664184a8f31870b471ed357e316d43d90cecf606e
 - path: generated/stayturgid/inventory/group_vars/all.yml
