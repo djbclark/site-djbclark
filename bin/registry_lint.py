@@ -17,6 +17,7 @@ Run from repo root:  bin/registry_lint.py   (or: uv run bin/registry_lint.py)
 
 from __future__ import annotations
 
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -89,17 +90,20 @@ def lint_generated_paths() -> None:
     ]
     for rel_path in artifacts:
         path = REPO / rel_path
-        if not path.is_file():
+        if not path.exists():
             continue
+        if not path.is_file():
+            fail(f"{rel_path} exists but is not a regular file")
+            sys.exit(2)
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             fail(f"cannot read {rel_path}: {exc}")
             sys.exit(2)
         
         for i, line in enumerate(lines, 1):
             stripped = line.strip()
-            if stripped.startswith("path: /") or stripped.startswith("cd /"):
+            if re.match(r'^(?:path:|cd)\s+["\']?/', stripped):
                 fail(f"{rel_path}:{i} contains an absolute path (must use portable ${{OPS_ROOT...}} form)")
                 sys.exit(2)
 
