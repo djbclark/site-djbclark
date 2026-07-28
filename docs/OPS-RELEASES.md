@@ -122,6 +122,25 @@ The deploy command preflights all three repositories before changing any:
 It then fast-forwards each local `master` only to the tag commit, even when
 `origin/master` contains newer unreleased work.
 
+### Applying the release to the running stack
+
+`ops-release-deploy` only fast-forwards the three `~/ops` checkouts — it does
+**not**, by itself, apply anything to the running Android fleet or the Mac
+control node's own services. Depending on what the release changed, run the
+relevant command(s) from the now-advanced `~/ops/stayturgid` checkout:
+
+- **Android fleet** (device roles/config): `just deploy` (or `just
+  deploy-check` for a dry run first).
+- **Mac control node** (launchd agents, control_node role): `just deploy-mac`
+  (`--tags mac`).
+- **Mac-hosted serverapps** (`caddy`/`grafana`/`vector`/`victoriametrics`/
+  `openobserve`/`blackbox_exporter`/`olivetin`/`landing` — including their
+  brew-pin tasks): **neither of the above covers these.** They only run via
+  `just site-serverapps`, a separate own/inject/off adapter-activation entry
+  point (`control/site_contract/serverapps.py`). If a release touches a
+  `serverapp_*` role, `just site-serverapps` must be run explicitly or the
+  change won't reach the running service.
+
 For `site-private`, post-release `memory/` commits are preserved. If a valid
 local memory-only commit diverged from the requested later release, the gate
 rebases only that verified memory-only range onto the release before advancing
