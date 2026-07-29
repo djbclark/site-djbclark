@@ -57,7 +57,8 @@ prefixes:
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
     - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
-    - {label: homebrew.mxcl.omlx,           claimed_by: site,       note: "F2 keep: local MLX LLM server 127.0.0.1:8000; no Ansible role yet"}
+    # homebrew.mxcl.omlx — removed 2026-07-29 (operator): formula/tap/weights uninstalled;
+    # claim dropped so brew-diff / agents do not treat it as a missing install.
 
 known_gaps:
   # Observed during the 2026-07-18 survey; resolve during phased work.

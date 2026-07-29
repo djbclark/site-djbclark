@@ -31,14 +31,12 @@ cask "codexbar"  # [ai-quota-tools] CodexBar.app + codexbar CLI — primary mult
 cask "openusage"  # [ai-quota-tools] OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits. After install: open app once; Settings → Command Line → Install for `openusage` CLI. Used by aiuse collectors.openusage (enabled by default).
 
 # === stack: site ===
-# Packages the site repo owns: Goose (E2), SecretSpec (E4), F2 workstation claims (herdr, omlx), and site orchestration tooling.
+# Packages the site repo owns: Goose (E2), SecretSpec (E4), F2 workstation claim (herdr), and site orchestration tooling.
 # fragment: brew/fragments/site.yml
 
-tap "jundot/omlx", "https://github.com/jundot/omlx"  # omlx formula tap (F2 site claim)
 brew "block-goose-cli"  # [site] roles/goose E2 CLI
 brew "herdr"  # [site] F2 site claim — workstation AI workspace manager (UDS)
 brew "jobber"  # [site] Jobber daemon for scheduled background jobs
-brew "jundot/omlx/omlx"  # [site] F2 site claim — local MLX LLM server 127.0.0.1:8000
 brew "just"  # [site] site justfile runner
 brew "secretspec"  # [site] SecretSpec CLI; LiteLLM key injection (E4)
 cask "block-goose"  # [site] roles/goose E2 Desktop app
@@ -63,4 +61,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 2 taps, 32 formulae, 4 casks across 4 stack(s)
+# summary: 1 taps, 31 formulae, 4 casks across 4 stack(s)

@@ -91,39 +91,5 @@ actions:
       sleep 2
       curl -s -m 5 http://127.0.0.1:4000/health || true
 
-  - id: user_omlx_status
-    title: "omlx (MLX LLM) — status"
-    icon: "&#9889;"
-    timeout: 60
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      echo "=== brew services info omlx ==="
-      brew services info omlx || true
-      echo
-      echo "=== http://127.0.0.1:8000/v1/models ==="
-      curl -s -m 5 http://127.0.0.1:8000/v1/models || echo "omlx :8000 not responding"
-
-  - id: user_omlx_restart
-    title: "omlx (MLX LLM) — brew services restart"
-    icon: "&#128260;"
-    timeout: 60
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      brew services restart omlx
-      sleep 2
-      brew services info omlx
-
-  - id: user_ollama_status
-    title: "Ollama LLM — status & models"
-    icon: "&#19968;"
-    timeout: 60
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      echo "=== brew services info ollama ==="
-      brew services info ollama 2>&1 || true
-      echo
-      echo "=== http://127.0.0.1:11434/api/tags ==="
-      curl -s -m 5 http://127.0.0.1:11434/api/tags || echo "Ollama :11434 not responding"
-      echo
-      echo "=== ollama list ==="
-      ollama list || true
+  # user_omlx_* / user_ollama_* removed 2026-07-29 — local inference packages
+  # uninstalled; do not re-add restart actions that would brew services start them.

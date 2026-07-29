@@ -30,11 +30,6 @@ handle_path /opencode/* {
 
 
 
-# Ollama local LLM API (site-owned, optional — omitted on sites without it)
-handle_path /ollama/* {
-	reverse_proxy 127.0.0.1:11434
-}
-
 
 
 # LiteLLM Proxy (site-owned, optional — omitted on sites without it)

@@ -16,7 +16,7 @@ Record **Accept** (default recommendation) or **Override** with a one-line reaso
 | 6 | `homebrew.mxcl.redis` | **STOP + uninstall** (empty DB, no consumers) | Accept | 2026-07-20 / djbc |
 | 7 | `mariadb` (installed, not started) | **LEAVE STOPPED**; uninstall later if unused | Accept | 2026-07-20 / djbc |
 | 8 | `homebrew.mxcl.herdr` | **KEEP** site workstation (no role yet) | Accept | 2026-07-20 / djbc |
-| 9 | `homebrew.mxcl.omlx` | **KEEP** site (port 8000; no role yet) | Accept | 2026-07-20 / djbc |
+| 9 | `homebrew.mxcl.omlx` | **KEEP** site (port 8000; no role yet) | **OVERRIDE → REMOVE** — formula, tap, weights, OliveTin actions, and registry claims dropped 2026-07-29; do not reinstall | 2026-07-29 / djbc |
 
 ## Suggested commands (only after decision signed)
 
