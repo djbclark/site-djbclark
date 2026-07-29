@@ -340,8 +340,8 @@ brew-services-audit:
     @echo "=== launchctl homebrew.mxcl.* ==="
     @launchctl list 2>/dev/null | rg 'homebrew\.mxcl' || true
     @echo ""
-    @echo "=== listeners (postgres/redis/mysql/omlx/et ports) ==="
-    @lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | rg -i 'postgres|redis|mysql|maria|omlx|etserver|:6379|:5432|:3306|:2022|:8000' || true
+    @echo "=== listeners (postgres/redis/mysql/et ports) ==="
+    @lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | rg -i 'postgres|redis|mysql|maria|etserver|:6379|:5432|:3306|:2022' || true
     @echo ""
     @echo "=== probes ==="
     @nc -z -w 2 127.0.0.1 2022 >/dev/null 2>&1 && echo "et :2022 open" || echo "et :2022 closed"
@@ -353,8 +353,9 @@ brew-services-audit:
     fi
     @echo ""
     @echo "=== formula presence (key F2 candidates) ==="
-    @for f in et postgresql@14 postgresql@18 redis mariadb herdr omlx; do \
+    @for f in et postgresql@14 postgresql@18 redis mariadb herdr; do \
       if brew list --formula "$$f" >/dev/null 2>&1; then echo "INSTALLED $$f"; else echo "ABSENT   $$f"; fi; \
     done
+    @echo "omlx: intentionally absent (removed 2026-07-29)"
     @echo ""
     @echo "Full write-up: docs/relay/audits/F2-brew-services-audit.md"

@@ -1,14 +1,11 @@
 # Site-claimed Homebrew packages (source of truth for Merged-Brewfile).
 # Hand-edited. Project with: just brew-project
+# omlx removed 2026-07-29 (operator): formula, tap, weights, brew service gone;
+# do not re-add without explicit sign-off.
 stack: site
 description: >-
   Packages the site repo owns: Goose (E2), SecretSpec (E4), F2 workstation
-  claims (herdr, omlx), and site orchestration tooling.
-
-taps:
-  - name: jundot/omlx
-    url: https://github.com/jundot/omlx
-    note: omlx formula tap (F2 site claim)
+  claim (herdr), and site orchestration tooling.
 
 formulae:
   - name: block-goose-cli
@@ -17,8 +14,6 @@ formulae:
     note: SecretSpec CLI; LiteLLM key injection (E4)
   - name: herdr
     note: F2 site claim — workstation AI workspace manager (UDS)
-  - name: jundot/omlx/omlx
-    note: F2 site claim — local MLX LLM server 127.0.0.1:8000
   - name: jobber
     note: Jobber daemon for scheduled background jobs
   - name: just
