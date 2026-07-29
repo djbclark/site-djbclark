@@ -90,6 +90,10 @@ per-host notes).
    cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
    secretspec set OPENAI_API_KEY
    secretspec set ANTHROPIC_API_KEY
+   secretspec set DEEPSEEK_API_KEY
+   secretspec set GEMINI_API_KEY
+   secretspec set OPENROUTER_API_KEY
+   secretspec set OPENCODE_ZEN_API_KEY
    secretspec check -n --explain   # presence only; no values printed
    ```
 
@@ -104,7 +108,10 @@ per-host notes).
 
    ```bash
    curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
-   # SIMPLE vs multi-step REASONING — tiers differ in the decision log
+   # Prefer funded providers for smoke tests when OpenAI/Anthropic lack credit:
+   curl -fsS http://127.0.0.1:4000/v1/chat/completions \
+     -H 'Content-Type: application/json' \
+     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
    rg 'ComplexityRouter: routing decision' ~/Library/Logs/litellm/stderr.log | tail
    # Linux logs: ~/.local/state/litellm/logs/stderr.log
    ```
@@ -141,11 +148,13 @@ systemctl --user restart com.djbclark.litellm.service
 
 ## Routing and cache
 
-The `smart-router` alias uses the LiteLLM Auto Router v2 tiers documented on
-2026-07-20: SIMPLE `gpt-4o-mini`, MEDIUM `gpt-4o`, COMPLEX
-`claude-sonnet-5`, and REASONING `gpt-5.5`. Responses are cached on disk under
-`~/.litellm/cache` for one hour. Router decisions are greppable in the
-stderr log using `ComplexityRouter: routing decision`.
+The `smart-router` alias uses LiteLLM Auto Router v2 with tiers that prefer
+providers whose keys are commonly funded on this site: SIMPLE `deepseek-chat`,
+MEDIUM `gemini-flash`, COMPLEX `openrouter-auto`, and REASONING
+`deepseek-reasoner`. OpenAI/Anthropic model aliases remain registered for when
+those keys have credit. Responses are cached on disk under `~/.litellm/cache`
+for one hour. Router decisions are greppable in the stderr log using
+`ComplexityRouter: routing decision`.
 
 ## Rollback
 

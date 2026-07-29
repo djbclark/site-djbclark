@@ -73,3 +73,7 @@ litellm_service_path: >-
 # `secretspec run`. They are rendered only into the mode-0600 live unit/plist.
 litellm_openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
 litellm_anthropic_api_key: "{{ lookup('env', 'ANTHROPIC_API_KEY') | default('', true) }}"
+litellm_deepseek_api_key: "{{ lookup('env', 'DEEPSEEK_API_KEY') | default('', true) }}"
+litellm_gemini_api_key: "{{ lookup('env', 'GEMINI_API_KEY') | default('', true) }}"
+litellm_openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY') | default('', true) }}"
+litellm_opencode_zen_api_key: "{{ lookup('env', 'OPENCODE_ZEN_API_KEY') | default('', true) }}"

@@ -50,14 +50,18 @@ secretspec check -n --json | jq -r '.secrets[] | select(.name|test("OPENAI|ANTHR
 
 ## 1. Enter provider keys (you)
 
-LiteLLM Auto Router v2 tiers (see `roles/litellm`):
+LiteLLM Auto Router v2 tiers (see `roles/litellm`; prefers funded providers):
 
 | Tier | Model | Needs |
 | --- | --- | --- |
-| SIMPLE | `gpt-4o-mini` | `OPENAI_API_KEY` |
-| MEDIUM | `gpt-4o` | `OPENAI_API_KEY` |
-| COMPLEX | `claude-sonnet-5` | `ANTHROPIC_API_KEY` |
-| REASONING | `gpt-5.5` | `OPENAI_API_KEY` |
+| SIMPLE | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| MEDIUM | `gemini-flash` | `GEMINI_API_KEY` |
+| COMPLEX | `openrouter-auto` | `OPENROUTER_API_KEY` |
+| REASONING | `deepseek-reasoner` | `DEEPSEEK_API_KEY` |
+
+Also injected when set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENCODE_ZEN_API_KEY` (model aliases `gpt-*`, `claude-sonnet-5`,
+`opencode-zen-flash`).
 
 ### Preferred: SecretSpec CLI
 
@@ -67,6 +71,10 @@ cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
 # Prompts once; stores into dotenv ./.env (mode should stay 0600)
 secretspec set OPENAI_API_KEY
 secretspec set ANTHROPIC_API_KEY   # skip if already resolved
+secretspec set DEEPSEEK_API_KEY
+secretspec set GEMINI_API_KEY
+secretspec set OPENROUTER_API_KEY
+secretspec set OPENCODE_ZEN_API_KEY
 
 # Or one-shot from a value you type at the prompt (still never paste into chat):
 # secretspec set OPENAI_API_KEY
