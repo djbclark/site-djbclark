@@ -6,16 +6,16 @@ set shell := ["bash", "-uc"]
 # sibling path. The upstream justfile preserves this site's ANSIBLE_CONFIG.
 ops_root := env_var_or_default("OPS_ROOT", env_var_or_default("HOME", "") + "/ops")
 stayturgid_root := env_var_or_default("STAYTURGID_ROOT", ops_root + "/stayturgid")
-export ANSIBLE_ROLES_PATH := stayturgid_root + "/ansible/roles"
-export ANSIBLE_COLLECTIONS_PATH := stayturgid_root + "/.ansible/collections:" + stayturgid_root
-
-# Match stayturgid's `hosts` variable.
-hosts := env_var_or_default("hosts", "")
-
 # This site's checkout; exported so product contract tooling (site-sync,
 # validate-identity) never falls back to site-* discovery, which is ambiguous
 # when more than one site-* dir exists under ~/ops.
 site_dir := justfile_directory()
+# Site-owned roles (litellm, goose, …) first; product roles from stayturgid.
+export ANSIBLE_ROLES_PATH := site_dir + "/roles:" + stayturgid_root + "/ansible/roles"
+export ANSIBLE_COLLECTIONS_PATH := stayturgid_root + "/.ansible/collections:" + stayturgid_root
+
+# Match stayturgid's `hosts` variable.
+hosts := env_var_or_default("hosts", "")
 
 # F4: exclusive lock for brew-touching operations (see bin/brew_flock.py).
 # Override: SITE_BREW_LOCK=/path/to/lock just brew-lock -- …
