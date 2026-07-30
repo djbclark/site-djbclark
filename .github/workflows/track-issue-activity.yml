@@ -1,0 +1,137 @@
+# Tracks third-party GitHub issues for activity and notifies via Telegram.
+# Runs on GitHub Actions infra (no Mac dependency).
+#
+# Usage: copy this file and change ISSUE_REPO, ISSUE_NUMBER, and the
+# notification message to track a different issue.
+#
+# Setup: add TELEGRAM_BOT_TOKEN to repo secrets (Settings → Secrets and variables → Actions).
+# Chat/thread targets are hardcoded per-issue below.
+
+name: Track issue activity
+
+on:
+  schedule:
+    # Every hour — fast enough for issue replies, well within API rate limits
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      notify_even_if_unchanged:
+        description: "Send a report even if nothing changed"
+        type: boolean
+        default: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  check-collie-54:
+    name: collie/AltanS #54
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore previous state
+        id: cache-state
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/gh-tracker/collie-54.json
+          key: gh-tracker-collie-54-v1
+          restore-keys: gh-tracker-collie-54-v1
+
+      - name: Fetch issue and compare
+        id: check
+        env:
+          # Change these for another issue
+          ISSUE_REPO: AltanS/collie
+          ISSUE_NUMBER: "54"
+        run: |
+          mkdir -p .cache/gh-tracker
+          state_file=".cache/gh-tracker/collie-54.json"
+
+          # Fetch issue via public API (no auth needed for public repos)
+          response=$(curl -sf "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null || echo '{"state":"unknown"}')
+          comments_response=$(curl -sf "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER/comments?per_page=1" 2>/dev/null || echo '[]')
+
+          new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','unknown'))")
+          new_count=$(echo "$comments_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)")
+          new_updated=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('updated_at',''))")
+
+          echo "state=$new_state" >> "$GITHUB_OUTPUT"
+          echo "comment_count=$new_count" >> "$GITHUB_OUTPUT"
+          echo "updated_at=$new_updated" >> "$GITHUB_OUTPUT"
+          echo "title=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('title',''))")" >> "$GITHUB_OUTPUT"
+
+          # Compare with cached state
+          if [ -f "$state_file" ]; then
+            old_count=$(python3 -c "import json; print(json.load(open('$state_file')).get('comment_count',-1))")
+            old_state=$(python3 -c "import json; print(json.load(open('$state_file')).get('state',''))")
+          else
+            old_count=-1
+            old_state=""
+          fi
+
+          has_changed=false
+          note=""
+          state_change_note=""
+
+          if [ "$new_state" != "$old_state" ] && [ -n "$old_state" ]; then
+            has_changed=true
+            state_change_note="State changed: $old_state → $new_state"
+          fi
+
+          if [ "$new_count" -gt "$old_count" ] && [ "$old_count" -ge 0 ]; then
+            has_changed=true
+            note="$((new_count - old_count)) new comment(s)"
+          fi
+
+          echo "changed=$has_changed" >> "$GITHUB_OUTPUT"
+          echo "note=$note" >> "$GITHUB_OUTPUT"
+          echo "state_change_note=$state_change_note" >> "$GITHUB_OUTPUT"
+
+          # Save current state
+          echo "{\"comment_count\":$new_count,\"state\":\"$new_state\",\"updated_at\":\"$new_updated\"}" > "$state_file"
+
+      - name: Save state cache
+        if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/gh-tracker/collie-54.json
+          key: gh-tracker-collie-54-v1
+
+      - name: Notify via Telegram
+        if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Telegram targets
+          CHAT_ID: "838808636"
+          THREAD_ID: "22158"
+          ISSUE_URL: "https://github.com/AltanS/collie/issues/54"
+        run: |
+          TITLE="${{ steps.check.outputs.title }}"
+          NOTE="${{ steps.check.outputs.note }}"
+          STATE_NOTE="${{ steps.check.outputs.state_change_note }}"
+          STATE="${{ steps.check.outputs.state }}"
+
+          MSG=$(cat <<EOF
+          🔔 <b>collie/AltanS#54</b>
+
+          <b>$TITLE</b>
+
+          Status: <b>$STATE</b>
+          EOF
+          )
+
+          if [ -n "$NOTE" ] && [ "$NOTE" != "null" ]; then
+            MSG="$MSG"$'\n'"Comments: $NOTE"
+          fi
+          if [ -n "$STATE_NOTE" ] && [ "$STATE_NOTE" != "null" ]; then
+            MSG="$MSG"$'\n'"$STATE_NOTE"
+          fi
+
+          MSG="$MSG"$'\n\n'"<a href=\"$ISSUE_URL\">Open on GitHub</a>"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$MSG" \
+              '{chat_id: $ENV.CHAT_ID | tonumber, message_thread_id: $ENV.THREAD_ID | tonumber, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin); print('ok' if r.get('ok') else 'ERROR: '+json.dumps(r,indent=2))"
