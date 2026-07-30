@@ -23,3 +23,10 @@ jobs:
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
+
+  check-apk-updates:
+    cmd: export PATH="{{ site_agents_homebrew_prefix }}/bin:$PATH" && {{ site_agents_home }}/ops/stayturgid/control/bin/check_apk_updates.py
+    time: 0 0 10 * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]
