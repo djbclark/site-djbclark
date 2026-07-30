@@ -331,6 +331,21 @@ herdr-reload:
     herdr server reload-config
     herdr status
 
+# Goose/Aider Herdr agent-state prototype (site-djbclark#12). Herdr has no
+# built-in "kind" for either binary, so these wrappers self-report pane
+# lifecycle over `herdr pane report-agent`/`release-agent` instead of relying
+# on process-name detection. Symlinks the real binaries stay untouched;
+# `goose`/`aider` on PATH keep meaning the upstream CLI everywhere else.
+# Docs: docs/reference/herdr-workstation.md.
+herdr-agents-install:
+    mkdir -p "${HOME}/.local/bin"
+    ln -sfn "{{ site_dir }}/bin/herdr_agent_wrapper.py" "${HOME}/.local/bin/herdr_agent_wrapper.py"
+    ln -sfn "{{ site_dir }}/bin/herdr-goose" "${HOME}/.local/bin/herdr-goose"
+    ln -sfn "{{ site_dir }}/bin/herdr-aider" "${HOME}/.local/bin/herdr-aider"
+    @echo "herdr-goose → $(command -v herdr-goose || true)"
+    @echo "herdr-aider → $(command -v herdr-aider || true)"
+    @echo "Add the [[keys.command]] launcher entries from docs/reference/herdr-workstation.md to ~/.config/herdr/config.toml, then: hreload"
+
 # F2: re-survey homebrew.mxcl services (read-only). Audit doc:
 # docs/relay/audits/F2-brew-services-audit.md — decisions: human/F2-BREW-SERVICES-DECISIONS.md
 brew-services-audit:
