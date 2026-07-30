@@ -17,6 +17,7 @@ Run from repo root:  bin/registry_lint.py   (or: uv run bin/registry_lint.py)
 
 from __future__ import annotations
 
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -81,11 +82,38 @@ def lint_paths(findings: list[str]) -> None:
                 findings.append(f"prefix {p!r} claimed by both {prev} and {stack}")
 
 
+def lint_generated_paths() -> None:
+    """Drift guard for stayturgid#100: reject absolute paths in path-bearing artifacts."""
+    artifacts = [
+        "generated/stayturgid/fragments/grafana/dashboards/provider.yaml",
+        "generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml",
+    ]
+    for rel_path in artifacts:
+        path = REPO / rel_path
+        if not path.exists():
+            continue
+        if not path.is_file():
+            fail(f"{rel_path} exists but is not a regular file")
+            sys.exit(2)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            fail(f"cannot read {rel_path}: {exc}")
+            sys.exit(2)
+        
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if re.match(r'^(?:path:|cd)\s+["\']?/', stripped):
+                fail(f"{rel_path}:{i} contains an absolute path (must use portable ${{OPS_ROOT...}} form)")
+                sys.exit(2)
+
+
 def main() -> int:
     findings: list[str] = []
     try:
         lint_ports(findings)
         lint_paths(findings)
+        lint_generated_paths()
     except (OSError, yaml.YAMLError) as exc:
         fail(str(exc))
         return 2
