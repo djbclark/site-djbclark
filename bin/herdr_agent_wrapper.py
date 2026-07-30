@@ -197,7 +197,7 @@ def run_wrapped(agent: str, real_cmd: list[str]) -> int:
         if not real_cmd:
             print(f"herdr_agent_wrapper: no command given for {agent}", file=sys.stderr)
             return 1
-        os.execvp(real_cmd[0], real_cmd)  # noqa: S606 - intentional exec passthrough
+        os.execvp(real_cmd[0], real_cmd)
         return 1  # unreachable if exec succeeds
 
     pane_id, herdr_bin = ctx
@@ -212,7 +212,7 @@ def run_wrapped(agent: str, real_cmd: list[str]) -> int:
     )
     monitor_thread.start()
 
-    child = subprocess.Popen(real_cmd)  # noqa: S603 - real_cmd is the intended agent binary
+    child = subprocess.Popen(real_cmd)
     try:
         # Some agents (aider: "^C again to exit") swallow the first SIGINT
         # for their own confirm-to-quit UX and keep running. Ctrl+C reaches
