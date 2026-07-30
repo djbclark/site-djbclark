@@ -16,3 +16,10 @@ jobs:
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
+
+  landing-health:
+    cmd: {{ site_agents_landing_health_script }}
+    time: 0 0 * * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]

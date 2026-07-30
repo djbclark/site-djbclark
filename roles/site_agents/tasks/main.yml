@@ -158,6 +158,12 @@
     dest: "{{ site_agents_brew_fast_upgrade_script }}"
     mode: "0755"
 
+- name: Install landing-health script
+  ansible.builtin.template:
+    src: landing-health.sh.j2
+    dest: "{{ site_agents_landing_health_script }}"
+    mode: "0755"
+
 - name: Deploy Jobber configuration
   ansible.builtin.template:
     src: jobber.yaml.j2
