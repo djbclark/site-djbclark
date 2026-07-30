@@ -119,10 +119,11 @@ session, rather than forcing a switch for its own sake.
 **original** (djbclark@gmail.com) and the **new** second Pro
 (djbclark@mit.edu). Any baton recommending a Claude model MUST say which
 account to use (`cswap` account number + email). **Claude Fable 5 is not
-included in either monthly plan and is very expensive per-use as of
-2026-07-20 — do not recommend it, on either account, unless nothing else
-will work.** For reviews/design/escalations that previously defaulted to
-Fable 5, prefer Sonnet 5 at `xhigh` effort or `/code-review ultra` instead.
+included in either monthly plan and is very expensive per-use (confirmed
+still current as of 2026-07-30) — do not recommend it, on either account,
+unless nothing else will work.** For reviews/design/escalations that
+previously defaulted to Fable 5, prefer Sonnet 5 at `xhigh` effort or
+`/code-review ultra` instead.
 
 ## Invariants
 
