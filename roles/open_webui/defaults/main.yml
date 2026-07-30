@@ -1,0 +1,13 @@
+---
+open_webui_label: "com.djbclark.open-webui"
+open_webui_uid: "{{ ansible_facts.user_uid }}"
+open_webui_home: "{{ ansible_env.HOME }}"
+open_webui_plist_path: "{{ open_webui_home }}/Library/LaunchAgents/{{ open_webui_label }}.plist"
+open_webui_data_dir: "{{ open_webui_home }}/.local/share/open-webui"
+open_webui_port: 8085
+open_webui_uv_bin_default: "{{ open_webui_home }}/.local/share/uv/tools/uv/bin/uv"
+open_webui_package_spec: "open-webui"
+open_webui_health_url: "http://127.0.0.1:{{ open_webui_port }}/health"
+open_webui_base_url: "/chat"
+open_webui_openai_api_base_url: "http://127.0.0.1:4000/v1"
+open_webui_openai_api_key: "sk-dummy"

@@ -30,6 +30,7 @@ prefixes:
     - "~/ops/site-djbclark/**"
     - "~/Library/LaunchAgents/com.djbclark.*"   # F1: site_agents + LiteLLM et al.
     - "~/.config/systemd/user/com.djbclark.*"   # E5: Linux user units (LiteLLM et al.)
+    - "~/.local/share/open-webui/**"             # Open WebUI data dir
     - "~/.config/djbclark/**"                   # reserved; not yet populated
     - "~/.local/bin/system-state-backup.sh"      # F1: site_agents role
     - "~/.local/bin/hibernate-disk-check"        # F1: site_agents role

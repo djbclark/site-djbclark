@@ -91,5 +91,27 @@ actions:
       sleep 2
       curl -s -m 5 http://127.0.0.1:4000/health || true
 
+  - id: user_openwebui_status
+    title: "Open WebUI — status & health"
+    icon: "&#129302;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      echo "=== launchctl print gui/$(id -u)/com.djbclark.open-webui ==="
+      launchctl print "gui/$(id -u)/com.djbclark.open-webui" 2>&1 | head -30 || true
+      echo
+      echo "=== http://127.0.0.1:8085/health ==="
+      curl -s -m 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
+
+  - id: user_openwebui_restart
+    title: "Open WebUI — restart service"
+    icon: "&#128260;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      launchctl kickstart -k "gui/$(id -u)/com.djbclark.open-webui"
+      sleep 2
+      curl -s -m 5 http://127.0.0.1:8085/health || true
+
   # user_omlx_* / user_ollama_* removed 2026-07-29 — local inference packages
   # uninstalled; do not re-add restart actions that would brew services start them.

@@ -1,0 +1,65 @@
+---
+- name: Render secret-bearing Open WebUI LaunchAgent
+  ansible.builtin.template:
+    src: open-webui.plist.j2
+    dest: "{{ open_webui_plist_path }}"
+    mode: "0600"
+  register: _open_webui_plist
+  no_log: true
+
+- name: Probe whether the Open WebUI LaunchAgent is loaded
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - print
+      - "gui/{{ open_webui_uid }}/{{ open_webui_label }}"
+  register: _open_webui_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out Open WebUI when its LaunchAgent changed
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootout
+      - "gui/{{ open_webui_uid }}/{{ open_webui_label }}"
+  when:
+    - not ansible_check_mode
+    - _open_webui_launch_state.rc == 0
+    - _open_webui_plist.changed | default(false)
+  register: _open_webui_bootout
+  changed_when: true
+
+- name: Bootstrap Open WebUI when unloaded or after a LaunchAgent change
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - bootstrap
+      - "gui/{{ open_webui_uid }}"
+      - "{{ open_webui_plist_path }}"
+  when:
+    - not ansible_check_mode
+    - >-
+      (_open_webui_launch_state.rc != 0)
+      or (_open_webui_bootout.changed | default(false))
+  register: _open_webui_bootstrap
+  changed_when: true
+  until: _open_webui_bootstrap.rc == 0
+  retries: 5
+  delay: 1
+
+- name: Kickstart Open WebUI after a tool install
+  ansible.builtin.command:
+    argv:
+      - launchctl
+      - kickstart
+      - -k
+      - "gui/{{ open_webui_uid }}/{{ open_webui_label }}"
+  when:
+    - not ansible_check_mode
+    - _open_webui_launch_state.rc == 0
+    - >-
+      (_open_webui_tool_install.changed | default(false))
+    - not (_open_webui_plist.changed | default(false))
+  changed_when: true
