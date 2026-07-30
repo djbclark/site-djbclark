@@ -41,6 +41,16 @@ just site-agents-status         # launchctl print all labels
 
 Playbook targets `localhost` (control node). No secrets required.
 
+### aiuse configuration safety
+
+For a fresh installation, the role seeds
+`~/.config/aiuse/config.toml` with snapshot persistence and automatic history
+learning. It never edits an existing user configuration. A legacy
+`services.yaml` is left alone when it is the only config file, so older aiuse
+installations keep working. If both files exist, the role stops before it
+touches the LaunchAgent; migrate the YAML settings to TOML and remove the YAML
+file first.
+
 ## Manual one-shot
 
 Safe to run by hand; system-state-backup only overwrites capture files on

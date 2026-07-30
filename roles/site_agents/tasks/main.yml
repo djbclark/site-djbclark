@@ -106,29 +106,35 @@
     state: directory
     mode: "0700"
 
-- name: Ensure aiuse services.yaml exists for persist_snapshots
+- name: Inspect aiuse user configuration files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ site_agents_aiuse_config_toml }}"
+    - "{{ site_agents_aiuse_legacy_services_yaml }}"
+  register: site_agents_aiuse_config_files
+
+- name: Refuse conflicting aiuse user configuration files
+  ansible.builtin.assert:
+    that:
+      - not (site_agents_aiuse_config_files.results[0].stat.exists and site_agents_aiuse_config_files.results[1].stat.exists)
+    fail_msg: >-
+      Both {{ site_agents_aiuse_config_toml }} and
+      {{ site_agents_aiuse_legacy_services_yaml }} exist. Move the settings
+      from services.yaml into config.toml, then remove services.yaml before
+      running site-agents-apply.
+
+- name: Seed aiuse TOML configuration for snapshot history
   ansible.builtin.copy:
-    dest: "{{ site_agents_aiuse_services_yaml }}"
+    dest: "{{ site_agents_aiuse_config_toml }}"
     content: |
-      analysis:
-        persist_snapshots: true
-        learn_from_history: auto
+      [analysis]
+      persist_snapshots = true
+      learn_from_history = "auto"
     mode: "0600"
-    force: false
-
-- name: Enable analysis.persist_snapshots in aiuse services.yaml
-  ansible.builtin.lineinfile:
-    path: "{{ site_agents_aiuse_services_yaml }}"
-    regexp: '^(\s*)persist_snapshots:\s*'
-    line: '  persist_snapshots: true'
-    insertafter: '^analysis:'
-
-- name: Enable analysis.learn_from_history auto mode
-  ansible.builtin.lineinfile:
-    path: "{{ site_agents_aiuse_services_yaml }}"
-    regexp: '^(\s*)learn_from_history:\s*'
-    line: '  learn_from_history: auto'
-    insertafter: '^analysis:'
+  when:
+    - not site_agents_aiuse_config_files.results[0].stat.exists
+    - not site_agents_aiuse_config_files.results[1].stat.exists
 
 - name: Render aiuse LaunchAgent
   ansible.builtin.template:
@@ -185,5 +191,3 @@
     _agent_plist_path: "{{ site_agents_jobber_plist }}"
     _agent_plist: "{{ _jobber_plist }}"
     _agent_script: "{{ _jobber_config }}"
-
-
