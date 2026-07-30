@@ -1,11 +1,8 @@
-# Tracks third-party GitHub issues for activity and notifies via Telegram.
-# Runs on GitHub Actions infra (no Mac dependency).
+# Tracks third-party GitHub issues opened by djbclark for activity
+# and notifies via Telegram. Runs on GitHub Actions infra (no Mac dependency).
 #
-# Usage: copy this file and change ISSUE_REPO, ISSUE_NUMBER, and the
-# notification message to track a different issue.
-#
-# Setup: add TELEGRAM_BOT_TOKEN to repo secrets (Settings → Secrets and variables → Actions).
-# Chat/thread targets are hardcoded per-issue below.
+# Add a new issue to the matrix below when you open a new one.
+# Setup: TELEGRAM_BOT_TOKEN must be set as a repo secret.
 
 name: Track issue activity
 
@@ -24,9 +21,25 @@ env:
   GH_TOKEN: ${{ github.token }}
 
 jobs:
-  check-collie-54:
-    name: collie/AltanS #54
+  check-issues:
+    name: ${{ matrix.repo }} #${{ matrix.number }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        issue:
+          - repo: AltanS/collie
+            number: "54"
+            slug: collie-54
+          - repo: KrishnaGupta653/telegcli
+            number: "1"
+            slug: telegcli-1
+          - repo: thedjchi/Shizuku
+            number: "269"
+            slug: shizuku-fork-269
+          - repo: RikkaApps/Shizuku
+            number: "2310"
+            slug: shizuku-2310
     steps:
       - uses: actions/checkout@v4
 
@@ -34,19 +47,18 @@ jobs:
         id: cache-state
         uses: actions/cache/restore@v4
         with:
-          path: .cache/gh-tracker/collie-54.json
-          key: gh-tracker-collie-54-v1
-          restore-keys: gh-tracker-collie-54-v1
+          path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
+          key: gh-tracker-${{ matrix.issue.slug }}-v1
+          restore-keys: gh-tracker-${{ matrix.issue.slug }}-v1
 
       - name: Fetch issue and compare
         id: check
         env:
-          # Change these for another issue
-          ISSUE_REPO: AltanS/collie
-          ISSUE_NUMBER: "54"
+          ISSUE_REPO: ${{ matrix.issue.repo }}
+          ISSUE_NUMBER: ${{ matrix.issue.number }}
+          CACHE_FILE: .cache/gh-tracker/${{ matrix.issue.slug }}.json
         run: |
           mkdir -p .cache/gh-tracker
-          state_file=".cache/gh-tracker/collie-54.json"
 
           # Fetch issue via public API (no auth needed for public repos)
           response=$(curl -sf "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null || echo '{"state":"unknown"}')
@@ -62,9 +74,9 @@ jobs:
           echo "title=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('title',''))")" >> "$GITHUB_OUTPUT"
 
           # Compare with cached state
-          if [ -f "$state_file" ]; then
-            old_count=$(python3 -c "import json; print(json.load(open('$state_file')).get('comment_count',-1))")
-            old_state=$(python3 -c "import json; print(json.load(open('$state_file')).get('state',''))")
+          if [ -f "$CACHE_FILE" ]; then
+            old_count=$(python3 -c "import json; print(json.load(open('$CACHE_FILE')).get('comment_count',-1))")
+            old_state=$(python3 -c "import json; print(json.load(open('$CACHE_FILE')).get('state',''))")
           else
             old_count=-1
             old_state=""
@@ -89,31 +101,32 @@ jobs:
           echo "state_change_note=$state_change_note" >> "$GITHUB_OUTPUT"
 
           # Save current state
-          echo "{\"comment_count\":$new_count,\"state\":\"$new_state\",\"updated_at\":\"$new_updated\"}" > "$state_file"
+          echo "{\"comment_count\":$new_count,\"state\":\"$new_state\",\"updated_at\":\"$new_updated\"}" > "$CACHE_FILE"
 
       - name: Save state cache
         if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
         uses: actions/cache/save@v4
         with:
-          path: .cache/gh-tracker/collie-54.json
-          key: gh-tracker-collie-54-v1
+          path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
+          key: gh-tracker-${{ matrix.issue.slug }}-v1
 
       - name: Notify via Telegram
         if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          # Telegram targets
           CHAT_ID: "838808636"
           THREAD_ID: "22158"
-          ISSUE_URL: "https://github.com/AltanS/collie/issues/54"
+          ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/issues/${{ matrix.issue.number }}"
         run: |
+          REPO="${{ matrix.issue.repo }}"
+          NUM="${{ matrix.issue.number }}"
           TITLE="${{ steps.check.outputs.title }}"
           NOTE="${{ steps.check.outputs.note }}"
           STATE_NOTE="${{ steps.check.outputs.state_change_note }}"
           STATE="${{ steps.check.outputs.state }}"
 
           MSG=$(cat <<EOF
-          🔔 <b>collie/AltanS#54</b>
+          🔔 <b>$REPO#$NUM</b>
 
           <b>$TITLE</b>
 
@@ -134,4 +147,4 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg text "$MSG" \
               '{chat_id: $ENV.CHAT_ID | tonumber, message_thread_id: $ENV.THREAD_ID | tonumber, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin); print('ok' if r.get('ok') else 'ERROR: '+json.dumps(r,indent=2))"
+            | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('description','') if r.get('ok') else 'ERROR: '+json.dumps(r,indent=2))"
