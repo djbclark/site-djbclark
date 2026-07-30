@@ -1,0 +1,195 @@
+# Discovers new third-party issues djbclark is involved in and
+# auto-updates the track-issue-activity.yml matrix to include them.
+# Opens a PR with additions. No local dependencies — runs on GitHub infra.
+
+name: Sync tracked issues
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would change without opening a PR"
+        type: boolean
+        default: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  sync:
+    name: Discover and add new issues
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find third-party issues opened by djbclark
+        id: discover
+        run: |
+          # Find issues I opened in repos I don't own
+          gh search issues --author djbclark --limit 100 \
+            --json repository,number,title,state,url \
+            -t '{{range .}}{{.repository.nameWithOwner}}|||{{.number}}|||{{.title}}|||{{.state}}|||{{.url}}
+{{end}}' \
+          | grep -v 'djbclark/stayturgid\|djbclark/site-djbclark\|djbclark/site-private' \
+          > /tmp/discovered-issues.txt || true
+
+          count=$(wc -l < /tmp/discovered-issues.txt 2>/dev/null || echo 0)
+          echo "Found $count third-party issues"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          cat /tmp/discovered-issues.txt
+
+      - name: Check for new issues against current matrix
+        id: compare
+        run: |
+          # Extract current tracked repos/numbers from the matrix
+          python3 << 'PYEOF'
+import re, json
+
+# Read current workflow
+with open('.github/workflows/track-issue-activity.yml') as f:
+    content = f.read()
+
+# Find tracked issues
+matches = re.findall(r'- repo: (.+?)\n\s+number: "(\d+)"', content)
+tracked = {f"{r}#{n}" for r, n in matches}
+
+# Read discovered issues
+new_issues = []
+with open('/tmp/discovered-issues.txt') as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split('|||')
+        if len(parts) >= 3:
+            repo, num = parts[0], parts[1]
+            key = f"{repo}#{num}"
+            if key not in tracked:
+                new_issues.append({
+                    "repo": repo,
+                    "number": num,
+                    "title": parts[2],
+                    "url": parts[4] if len(parts) > 4 else f"https://github.com/{repo}/issues/{num}"
+                })
+
+# Save for next step
+with open('/tmp/new-issues.json', 'w') as f:
+    json.dump(new_issues, f, indent=2)
+
+print(f"new_count={len(new_issues)}")
+for item in new_issues:
+    print(f"  {item['repo']}#{item['number']} - {item['title']}")
+PYEOF
+
+      - name: Update workflow matrix
+        id: update
+        run: |
+          new_count=$(python3 -c "import json; print(len(json.load(open('/tmp/new-issues.json'))))")
+          if [ "$new_count" -eq 0 ]; then
+            echo "No new issues to add."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          dry_run="${{ github.event.inputs.dry_run }}"
+          if [ "$dry_run" = "true" ]; then
+            echo "updated=false (dry run)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Generate new matrix entries and inject into workflow
+          python3 << 'PYEOF'
+import json, re
+
+with open('/tmp/new-issues.json') as f:
+    new_issues = json.load(f)
+
+with open('.github/workflows/track-issue-activity.yml') as f:
+    content = f.read()
+
+# Generate new YAML entries
+new_entries = ''
+for item in new_issues:
+    repo = item['repo']
+    num = item['number']
+    slug = repo.lower().replace('/', '-').replace('.', '-').replace('_', '-') + '-' + num
+    new_entries += f'          - repo: {repo}\n'
+    new_entries += f'            number: "{num}"\n'
+    new_entries += f'            slug: {slug}\n'
+
+# Insert after the last existing matrix entry (before '    steps:')
+pos = content.rfind('- repo:')
+if pos >= 0:
+    # Find end of that block (next line after the slug entry)
+    lines = content.split('\n')
+    insert_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith('- repo:'):
+            insert_idx = i  # last occurrence
+    
+    # Find the end of the slug line for this entry
+    if insert_idx is not None:
+        eol = insert_idx + 3  # repo + number + slug lines
+        while eol < len(lines) and lines[eol].strip() == '':
+            eol += 1
+        # Insert new entries at eol
+        new_lines = lines[:eol] + [new_entries] + lines[eol:]
+        content = '\n'.join(new_lines)
+
+with open('.github/workflows/track-issue-activity.yml', 'w') as f:
+    f.write(content)
+
+print(f"Added {len(new_issues)} new issue(s) to tracking matrix")
+PYEOF
+
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.update.outputs.updated == 'true'
+        run: |
+          new_count=$(python3 -c "import json; print(len(json.load(open('/tmp/new-issues.json'))))")
+          branch="auto/track-new-issues-$(date +%Y%m%d)"
+
+          git config user.name "djbclark[bot]"
+          git config user.email "131936+djbclark[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add .github/workflows/track-issue-activity.yml
+
+          # Build PR body
+          body="## New third-party issues detected\n\nAuto-added tracking for:\n"
+          python3 -c "
+import json
+with open('/tmp/new-issues.json') as f:
+    items = json.load(f)
+for item in items:
+    print(f\"- [{item['repo']}#{item['number']}]({item['url']}) - {item['title']}\")
+" > /tmp/pr-body.txt
+
+          total=$(python3 << 'PYEOF'
+import re
+with open('.github/workflows/track-issue-activity.yml') as f:
+    content = f.read()
+matches = re.findall(r'- repo:', content)
+print(f"Total tracked: {len(matches)} issues")
+PYEOF
+)
+          echo "" >> /tmp/pr-body.txt
+          echo "$total" >> /tmp/pr-body.txt
+
+          git commit -m "ci: auto-add $new_count new tracked issue(s)" --file /tmp/pr-body.txt
+          git push origin "$branch"
+
+          gh pr create \
+            --repo djbclark/site-djbclark \
+            --base master \
+            --head "$branch" \
+            --title "ci: auto-add $new_count new tracked third-party issues ($(date +%Y-%m-%d))" \
+            --body-file /tmp/pr-body.txt \
+            --label "automated"
+
+          echo "PR created on branch $branch"
