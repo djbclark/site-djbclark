@@ -12,7 +12,7 @@ install to `~/.local/bin`; plists render to
 | hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad | macOS notification when `/` free GB < threshold (default 25) |
 | cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
 | aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
-| jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00) |
+| jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00, `landing-health` hourly) |
 
 ## Jobber Notifications (`jobber-notify`)
 
@@ -21,6 +21,9 @@ Job failures in Jobber trigger `~/.local/bin/jobber-notify`, which implements th
 1. **Option A: macOS Desktop Notifications (`osascript`)** — Native macOS banner alert on job failure.
 2. **Option B: Telegram / Hermes Alerting** — Posts HTML alert with job status, hostname, and error details to Telegram (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_HOME_CHANNEL`).
 3. **Option C: Log Sinks & Filesystem Capture** — Jobber `filesystem` sink + structured JSON records in `~/.local/state/jobber/notifications.log` (14-day retention).
+
+**What 'red' means for landing-health:**
+If the `landing-health` job fails (goes 'red'), it means that at least one service declared as "registered" in the site's `registry/ports.yml` (or flagged with `dashboard: true` in `registry/paths.yml`) is currently unreachable. Check the job output or run `python3 control/landing/discover.py` manually to see which service is down.
 
 
 

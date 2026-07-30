@@ -51,13 +51,14 @@ prefixes:
     - "/opt/homebrew/var/log/herdr.log"
   brew_services:
     # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
+    # Optional 'dashboard: true' flags non-TCP services for dashboard visibility via launchd probes.
     # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
     # Operator keep/kill sign-off: human/F2-BREW-SERVICES-DECISIONS.md
     - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal port 2022; system LaunchDaemon is live; user LaunchAgent removed 2026-07-20 (operator Accept, RESIDUAL-EF) — dual-load noise resolved"}
     - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
-    - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
+    - {label: homebrew.mxcl.herdr,          claimed_by: site,       dashboard: true, note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
     # homebrew.mxcl.omlx — removed 2026-07-29 (operator): formula/tap/weights uninstalled;
     # claim dropped so brew-diff / agents do not treat it as a missing install.
 
