@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: bf0e5b63b7d440fd0bc49ca33545a2289bdd72d2
-synced: '2026-07-30T20:33:25Z'
+product_commit: ddad7e24f6055c3b03ac971852bdda9ae5dc54ae
+synced: '2026-07-29T13:39:18Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -15,7 +15,7 @@ files:
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
   sha256: c53041c7a11a209a34df6dde049e2d85b13b0a157bf2df07bfc0eb11eea51461
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
-  sha256: 74c0b37a064362652850192c4f0e840e324d13feddc73839ca112c90157d5a39
+  sha256: a599a750d31966a04d394e1b53206d88355358f72c311fcc0bbdf09d2d2f5539
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
   sha256: 403b133fafc9db9100a2d96dd8e7837c50b692b106c8dc1df5ecc3c59ae6d60e
 - path: generated/stayturgid/fragments/grafana/dashboards/json/stayturgid-fleet.json
