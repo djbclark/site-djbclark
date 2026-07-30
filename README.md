@@ -112,3 +112,11 @@ noun paths (`/dashboard/`, `/stats/`, and `/opencode/`). Internal
 service health and observability ports remain loopback-only and do not receive
 public route names. D7 adopts this scheme as-is; M1 may revisit the naming as an
 architecture improvement without changing the current route contract.
+
+## Local MTA / Postfix (System Utilities)
+
+macOS provides a built-in Postfix MTA managed by launchd. It is configured to run on-demand for local mail delivery, supporting system utilities like `cron` and `jobber`. The launchd label is `com.apple.postfix.master` on current macOS (older releases through El Capitan used `org.postfix.master`) — confirmed on this control node via `ls /System/Library/LaunchDaemons/ | grep postfix`.
+
+- **Service Status**: Active on-demand, managed by the system LaunchDaemon (not user-configurable without a custom override).
+- **Verification**: `echo "Test" | mail -s "Test" $USER` and check `/var/mail/$USER`.
+- **Note**: Local delivery works out-of-the-box without additional configuration; no `sudo` modifications or passwordless exceptions are required.
