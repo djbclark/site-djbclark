@@ -61,6 +61,12 @@ hosts:
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
          note: "Google Antigravity CLI sidecar listener"}
 
+      # ── SuperBrain (independent local application) ────────────────────────
+      - {port: 5000,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
+         note: "SuperBrain FastAPI service; observed listening 2026-07-30"}
+      - {port: 8443,  bind: "*",         owner: unmanaged, service: superbrain-websub-funnel, status: planned,
+         note: "Dedicated Tailscale Funnel HTTPS listener for /api/youtube/webhook; must not replace the site HTTPS listener on 443"}
+
       # ── site: existing com.djbclark.* agents (no listeners) ──────────────
       # system-state-backup, hibernate-disk-check — no ports.
 
