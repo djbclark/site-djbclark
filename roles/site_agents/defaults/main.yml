@@ -52,7 +52,8 @@ site_agents_cswap_model: "all"
 
 # --- aiuse (quota snapshot collector) ----------------------------------------
 # Periodic `aiuse -q --json` to accumulate ~/.cache/aiuse/snapshots.
-# Enable persist_snapshots + learn_from_history: auto (learns once >= 2 snaps).
+# New installations get a TOML config enabling history. Existing user config is
+# never edited: aiuse owns migration of a legacy YAML-only configuration.
 site_agents_aiuse_label: "com.{{ site_ns }}.aiuse"
 site_agents_aiuse_plist: >-
   {{ site_agents_launchagents_dir }}/{{ site_agents_aiuse_label }}.plist
@@ -61,7 +62,8 @@ site_agents_aiuse_log: "{{ site_agents_state_dir }}/aiuse.log"
 site_agents_aiuse_error_log: "{{ site_agents_state_dir }}/aiuse.error.log"
 site_agents_aiuse_interval_seconds: 3600
 site_agents_aiuse_config_dir: "{{ site_agents_home }}/.config/aiuse"
-site_agents_aiuse_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"
+site_agents_aiuse_config_toml: "{{ site_agents_aiuse_config_dir }}/config.toml"
+site_agents_aiuse_legacy_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"
 
 # --- jobber / brew-fast-upgrade ---------------------------------------------
 site_agents_jobber_label: "homebrew.mxcl.jobber"
@@ -74,5 +76,4 @@ site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
 site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobber.plist"
 site_agents_jobber_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.log"
 site_agents_jobber_error_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.error.log"
-
 
