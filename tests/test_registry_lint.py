@@ -1,11 +1,12 @@
-import unittest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
 import sys
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add bin/ to path so we can import registry_lint
 sys.path.append(str(Path(__file__).parent.parent / "bin"))
 import registry_lint
+
 
 class RegistryLintTest(unittest.TestCase):
     @patch('registry_lint.fail')
