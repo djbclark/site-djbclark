@@ -1,0 +1,66 @@
+---
+- name: Resolve uv binary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    candidates=(
+      "{{ open_webui_uv_bin_default }}"
+      "{{ open_webui_home }}/.local/bin/uv"
+      /opt/homebrew/bin/uv
+      /usr/local/bin/uv
+      /usr/bin/uv
+    )
+    for c in "${candidates[@]}"; do
+      if [[ -x "$c" ]]; then
+        echo "$c"
+        exit 0
+      fi
+    done
+    if command -v uv >/dev/null 2>&1; then
+      command -v uv
+      exit 0
+    fi
+    exit 1
+  args:
+    executable: /bin/bash
+  register: _open_webui_uv_resolve
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Set resolved uv binary
+  ansible.builtin.set_fact:
+    open_webui_uv_bin: "{{ _open_webui_uv_resolve.stdout | trim }}"
+
+- name: Install Open WebUI via uv tool
+  ansible.builtin.command:
+    argv:
+      - "{{ open_webui_uv_bin }}"
+      - tool
+      - install
+      - --reinstall
+      - --python
+      - "3.11"
+      - "{{ open_webui_package_spec }}"
+  register: _open_webui_tool_install
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Ensure Open WebUI data directory exists
+  ansible.builtin.file:
+    path: "{{ open_webui_data_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Manage Darwin LaunchAgent for Open WebUI
+  ansible.builtin.include_tasks: service_darwin.yml
+  when: ansible_facts.os_family == 'Darwin'
+
+- name: Wait for Open WebUI health endpoint
+  ansible.builtin.uri:
+    url: "{{ open_webui_health_url }}"
+    status_code: 200
+  register: _open_webui_health
+  until: _open_webui_health.status == 200
+  retries: 60
+  delay: 2
+  when: not ansible_check_mode

@@ -1,0 +1,13 @@
+---
+- name: Configure the site Open WebUI workspace
+  hosts: all
+  gather_facts: false
+  pre_tasks:
+    - name: Skip Open WebUI on hosts not yet provisioned (no SSH)
+      ansible.builtin.meta: end_host
+      when: (site_host_status | default('online')) == 'offline_unprovisioned'
+
+    - name: Gather facts for provisioned Open WebUI hosts
+      ansible.builtin.setup:
+  roles:
+    - role: open_webui

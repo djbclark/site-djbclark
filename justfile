@@ -133,6 +133,27 @@ litellm-status:
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
 
+# Install/configure Open WebUI.
+# Default limit mac (live).
+open_webui_hosts := env_var_or_default("OPEN_WEBUI_HOSTS", "mac")
+
+open-webui-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/open_webui.yml --limit "{{ open_webui_hosts }}" {{ args }}
+
+open-webui-apply-secrets *args:
+    secretspec run --reason "apply Open WebUI secret" -- just open-webui-apply {{ args }}
+
+open-webui-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/open_webui.yml --limit "{{ open_webui_hosts }}" {{ args }}
+
+open-webui-status:
+    @if launchctl print "gui/$(id -u)/com.djbclark.open-webui" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.open-webui)"; \
+    else \
+      echo "service: not loaded on this host"; \
+    fi
+    @curl -fsS --max-time 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
+
 # Install/configure Goose Desktop + CLI against loopback LiteLLM (Phase E2).
 # Holds the site brew flock (F4) because the role may brew install cask/formula.
 goose-apply *args:
