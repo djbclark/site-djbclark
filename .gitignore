@@ -13,4 +13,7 @@ id_*
 .pytest_cache/
 __pycache__/
 
+# Aider local session state (site-djbclark#12 — herdr-aider wrapper).
+.aider*
+
 # generated/ is intentionally not ignored: site-sync output is reviewable and committed.

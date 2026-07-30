@@ -1,0 +1,6 @@
+#!/bin/sh
+# Launches `goose session` with Herdr sidebar/pane-border state reporting.
+# See docs/reference/herdr-workstation.md and bin/herdr_agent_wrapper.py.
+set -eu
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/herdr_agent_wrapper.py" goose -- goose session "$@"
