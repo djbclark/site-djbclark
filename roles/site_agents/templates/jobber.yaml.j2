@@ -30,3 +30,13 @@ jobs:
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
+
+  # Termux apt layer (pkg) — same hermes path as check-apk-updates; also runs
+  # as a pre-step inside termux_pkg_nightly.py before the 04:15 upgrade.
+  # Mid-day residual catch if nightly was skipped/disabled/failed (#152).
+  check-termux-pkg-updates:
+    cmd: export PATH="{{ site_agents_homebrew_prefix }}/bin:$PATH" && {{ site_agents_home }}/ops/stayturgid/control/bin/check_termux_pkg_updates.py
+    time: 0 0 10 * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]
