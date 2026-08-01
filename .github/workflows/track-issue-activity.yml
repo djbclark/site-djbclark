@@ -40,6 +40,9 @@ jobs:
           - repo: RikkaApps/Shizuku
             number: "2310"
             slug: shizuku-2310
+          - repo: subsy/ralph-tui
+            number: "397"
+            slug: ralph-tui-397
     steps:
       - uses: actions/checkout@v4
 
