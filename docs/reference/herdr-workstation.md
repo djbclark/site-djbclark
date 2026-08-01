@@ -29,30 +29,34 @@ agent. Run agents as the pane’s foreground process.
 1. Press `ctrl+a`, release.
 2. Press the action key.
 
-| Action                                      | Keys                                                             |
-| ------------------------------------------- | ---------------------------------------------------------------- |
-| Help (live bindings)                        | `ctrl+a` then `?`                                                |
-| Settings                                    | `ctrl+a` then `s`                                                |
-| Detach (leave server running)               | `ctrl+a` then `q`                                                |
-| Reload config                               | `ctrl+a` then `Shift+r`, or shell `hreload`                      |
-| New tab                                     | `ctrl+a` then `c`, or **`ctrl+alt+c`**                           |
-| Next / previous tab                         | `ctrl+a` `n` / `p`, or **`ctrl+alt+]`** / **`ctrl+alt+[`**       |
-| Split right / down                          | `ctrl+a` `v` / `-`, or **`ctrl+alt+d`** / **`ctrl+alt+Shift+d`** |
-| Focus pane h/j/k/l                          | `ctrl+a` h/j/k/l, or **`ctrl+alt+`h/j/k/l**                      |
-| Zoom pane                                   | `ctrl+a` `z`, or **`ctrl+alt+z`**                                |
-| Workspace picker                            | `ctrl+a` then `w`                                                |
-| New workspace                               | `ctrl+a` then `Shift+n`                                          |
-| New git worktree workspace                  | `ctrl+a` then `Shift+g`                                          |
-| Toggle sidebar                              | `ctrl+a` then `b`                                                |
-| **Previous / next agent** (attention queue) | `ctrl+a` then `[` / `]`                                          |
-| **Focus agent 1–9**                         | `ctrl+a` then `alt+1`…`alt+9`                                    |
+| Action                                      | Keys                                           |
+| ------------------------------------------- | ---------------------------------------------- |
+| Help (live bindings)                        | `ctrl+a` then `?`                              |
+| Settings                                    | `ctrl+a` then `s`                              |
+| Detach (leave server running)               | `ctrl+a` then `q`                              |
+| Reload config                               | `ctrl+a` then `Shift+r`, or `hreload`          |
+| New tab                                     | `ctrl+a` then `c`                              |
+| Next / previous tab                         | `ctrl+a` then `n` / `p`                        |
+| Split right / down                          | `ctrl+a` then `v` / `-`                        |
+| Focus pane h/j/k/l                          | `ctrl+a` then h/j/k/l                          |
+| Last focused pane                           | `ctrl+a` then `;`                              |
+| Zoom pane                                   | `ctrl+a` then `z`                              |
+| Workspace picker                            | `ctrl+a` then `w`                              |
+| New workspace                               | `ctrl+a` then `Shift+n`                        |
+| Previous / next workspace                   | `ctrl+a` then `Shift+Left` / `Shift+Right`     |
+| Focus workspace 1–9                         | `ctrl+a` then `Shift+1`…`Shift+9`              |
+| New / open / remove git worktree            | `ctrl+a`, then `Shift+g` / `Shift+o` / `alt+d` |
+| Toggle sidebar                              | `ctrl+a` then `b`                              |
+| **Previous / next agent** (attention queue) | `ctrl+a` then `Shift+a` / `a`                  |
+| **Focus agent 1–9**                         | `ctrl+a` then `alt+1`…`alt+9`                  |
 
 Send a literal `ctrl+a` into a pane (readline beginning-of-line, etc.): press
 **`ctrl+a` twice**.
 
-`ctrl+alt+…` chords are dual-bound so they work without the prefix (safe
-across Ghostty/macOS). If a chord does nothing, Ghostty or macOS may own it —
-free it in terminal/OS settings or rebind in Herdr.
+All assigned built-in actions use Herdr 0.7.5 defaults. Only the `ctrl+a`
+prefix and actions that Herdr leaves unset by default are customized. The
+optional choices above follow the most common patterns found in a sample of
+public Herdr configurations while avoiding default and launcher conflicts.
 
 ## Mouse (Ghostty)
 
@@ -103,6 +107,21 @@ command = "herdr-aider"
 description = "start Aider with Herdr agent-state reporting"
 ```
 
+## Pane-moving plugins
+
+Two installed plugins preserve live processes while reorganizing the layout:
+
+| Keys after `ctrl+a` | Action                                                  |
+| ------------------- | ------------------------------------------------------- |
+| `Shift+c`           | Break a pane into a new tab in the current workspace    |
+| `Shift+m`           | Move a complete tab to another or new workspace (drovr) |
+| `m`                 | Move a pane to a tab or new workspace (drovr)           |
+
+These are standard `[[keys.command]]` entries with `type = "plugin_action"`
+and a `description`. Herdr 0.7.5 automatically renders such entries in the
+**custom** group of the live `ctrl+a` then `?` help screen; no Herdr patch or
+upstream PR is needed.
+
 ## Sidebar and attention queue
 
 - **`agent_panel_sort = "priority"`** — blocked / needs-attention agents rise
@@ -112,7 +131,8 @@ description = "start Aider with Herdr agent-state reporting"
 - Pane borders show agent labels when set
   (`show_agent_labels_on_pane_borders = true`).
 
-Use `ctrl+a` `[` / `]` to jump the queue; click an agent row to focus its pane.
+Use `ctrl+a` `Shift+a` / `a` to jump the queue; click an agent row to focus
+its pane.
 
 ## Notifications and sound
 
@@ -302,6 +322,6 @@ hardening pass):
 1. Open Ghostty → `h`.
 2. One **workspace** per project (or worktree per parallel agent).
 3. Launch agents (launcher keys or type in pane).
-4. Watch sidebar priority queue; jump with `ctrl+a` `[` / `]` or mouse.
+4. Watch sidebar priority queue; jump with `ctrl+a` `Shift+a` / `a` or mouse.
 5. Detach with `ctrl+a` `q`; reattach later with `h`.
 6. Full stop only when intended: `hstop`.
