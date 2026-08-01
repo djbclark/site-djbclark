@@ -17,3 +17,7 @@ __pycache__/
 .aider*
 
 # generated/ is intentionally not ignored: site-sync output is reviewable and committed.
+
+# Ralph TUI project config is machine-local (absolute path to the
+# shared ops-djbclark control plane) — not shared repo content.
+.ralph-tui/
