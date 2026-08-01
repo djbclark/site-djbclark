@@ -51,8 +51,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
-          key: gh-tracker-${{ matrix.issue.slug }}-v1
-          restore-keys: gh-tracker-${{ matrix.issue.slug }}-v1
+          # Unique key per run + prefix restore: GitHub caches are immutable,
+          # so a static key could never be overwritten (caused duplicate
+          # notifications). Prefix restore picks the newest saved entry.
+          # v2 prefix: ignore stale v1 caches that predate the fix.
+          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
+          restore-keys: gh-tracker-v2-${{ matrix.issue.slug }}-
 
       - name: Fetch issue and compare
         id: check
@@ -80,9 +84,11 @@ jobs:
           if [ -f "$CACHE_FILE" ]; then
             old_count=$(python3 -c "import json; print(json.load(open('$CACHE_FILE')).get('comment_count',-1))")
             old_state=$(python3 -c "import json; print(json.load(open('$CACHE_FILE')).get('state',''))")
+            echo "had_cache=true" >> "$GITHUB_OUTPUT"
           else
             old_count=-1
             old_state=""
+            echo "had_cache=false" >> "$GITHUB_OUTPUT"
           fi
 
           has_changed=false
@@ -107,11 +113,14 @@ jobs:
           echo "{\"comment_count\":$new_count,\"state\":\"$new_state\",\"updated_at\":\"$new_updated\"}" > "$CACHE_FILE"
 
       - name: Save state cache
-        if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
+        # Save when something changed, OR on first run (no cache yet) to seed
+        # the baseline — otherwise a cold start would never notify again.
+        if: steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
         uses: actions/cache/save@v4
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
-          key: gh-tracker-${{ matrix.issue.slug }}-v1
+          # Unique key per run — caches are immutable; a new key creates a new entry
+          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
 
       - name: Notify via Telegram
         if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
