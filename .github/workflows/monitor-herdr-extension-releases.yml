@@ -1,0 +1,197 @@
+# Monitors the versions declared by the Herdr extensions installed on this
+# workstation. Some of these projects do not publish GitHub Releases or tags,
+# so herdr-plugin.toml is the release/version authority.
+#
+# Setup: TELEGRAM_BOT_TOKEN must be set as a repository secret.
+
+---
+name: Monitor Herdr extension releases
+
+"on":
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: >-
+          Send a test notification to the standing Hermes Telegram topic
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor-herdr-extension-releases
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  check-extensions:
+    name: Check ${{ matrix.extension.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        extension:
+          - name: Collie
+            slug: collie
+            repo: AltanS/collie
+            installed_version: 0.21.0
+          - name: herdr-break-pane
+            slug: herdr-break-pane
+            repo: iuhoay/herdr-break-pane
+            installed_version: 0.1.0
+          - name: drovr
+            slug: drovr
+            repo: AVGVSTVS96/herdr-drovr
+            installed_version: 0.4.8
+
+    steps:
+      - name: Read upstream extension version
+        id: version
+        env:
+          EXTENSION_REPO: ${{ matrix.extension.repo }}
+          INSTALLED_VERSION: ${{ matrix.extension.installed_version }}
+        run: |
+          manifest=$(mktemp)
+          raw_base="https://raw.githubusercontent.com"
+          curl --fail --silent --show-error --location --retry 3 \
+            "${raw_base}/${EXTENSION_REPO}/HEAD/herdr-plugin.toml" \
+            --output "$manifest"
+
+          latest_version=$(python3 - "$manifest" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          manifest = pathlib.Path(sys.argv[1])
+          version = tomllib.loads(manifest.read_text()).get("version")
+          if not isinstance(version, str) or not version.strip():
+              raise SystemExit("herdr-plugin.toml has no non-empty version")
+          print(version.strip())
+          PY
+          )
+
+          echo "latest_version=$latest_version" >> "$GITHUB_OUTPUT"
+          if [ "$latest_version" = "$INSTALLED_VERSION" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "$EXTENSION_REPO remains at $latest_version"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            printf '%s changed: %s -> %s\n' \
+              "$EXTENSION_REPO" "$INSTALLED_VERSION" "$latest_version"
+          fi
+
+      - name: Check whether this release was already reported
+        id: dedupe
+        if: steps.version.outputs.changed == 'true'
+        env:
+          EXTENSION_SLUG: ${{ matrix.extension.slug }}
+          LATEST_VERSION: ${{ steps.version.outputs.latest_version }}
+        run: |
+          title="Herdr extension update: ${EXTENSION_SLUG} ${LATEST_VERSION}"
+          count=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --search "${title} in:title" \
+            --limit 100 \
+            --json title \
+            --jq "[.[] | select(.title == \"$title\")] | length")
+
+          if [ "$count" -eq 0 ]; then
+            echo "new_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_update=false" >> "$GITHUB_OUTPUT"
+            echo "Release was already reported: $title"
+          fi
+
+      - name: Notify via Hermes-style Telegram delivery
+        if: steps.dedupe.outputs.new_update == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          EXTENSION_REPO: ${{ matrix.extension.repo }}
+          INSTALLED_VERSION: ${{ matrix.extension.installed_version }}
+          LATEST_VERSION: ${{ steps.version.outputs.latest_version }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          printf -v text \
+            '🧩 Herdr extension update: %s %s → %s\n%s / %s\n%s' \
+            "$EXTENSION_REPO" "$INSTALLED_VERSION" "$LATEST_VERSION" \
+            "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22082 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the notification."
+
+      - name: Record reported release as a GitHub issue
+        if: steps.dedupe.outputs.new_update == 'true'
+        env:
+          EXTENSION_NAME: ${{ matrix.extension.name }}
+          EXTENSION_SLUG: ${{ matrix.extension.slug }}
+          EXTENSION_REPO: ${{ matrix.extension.repo }}
+          INSTALLED_VERSION: ${{ matrix.extension.installed_version }}
+          LATEST_VERSION: ${{ steps.version.outputs.latest_version }}
+        run: |
+          title="Herdr extension update: ${EXTENSION_SLUG} ${LATEST_VERSION}"
+          body=$(cat <<EOF
+          Upstream ${EXTENSION_NAME} changed from ${INSTALLED_VERSION} to
+          ${LATEST_VERSION}.
+
+          - Extension: https://github.com/${EXTENSION_REPO}
+          - Detection run:
+            https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Update the workstation after reviewing the upstream changes. This
+          issue also prevents duplicate Telegram notifications for this version.
+          EOF
+          )
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --body "$body"
+
+  test-notification:
+    name: Test Telegram delivery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.send_test_notification == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Send test notification to Hermes Telegram topic
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          printf -v text '✅ Herdr extension monitor test\n%s / %s\n%s' \
+            "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22082 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the test notification."
