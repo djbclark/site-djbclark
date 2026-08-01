@@ -25,6 +25,8 @@ formulae:
     note: control_node prereqs (Android mirroring)
   - name: hermes-agent
     note: control_node hermes task
+  - name: rsync
+    note: control_node prereqs (GNU rsync, preferred over ancient macOS system rsync for termux_userland sync tasks)
   # control_node stayturgid_mac_brew_packages_app_stores
   - name: fdroidcl
     note: F-Droid CLI (app stores)
