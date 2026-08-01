@@ -19,7 +19,18 @@ site_ns: djbclark
 # ansible_facts-based arch detection would be wrong in this device-play
 # context. Fails loudly (not silently to system rsync) if the `rsync`
 # control_node brew package isn't actually installed.
-stayturgid_local_rsync_path: "{{ lookup('pipe', 'brew --prefix rsync') }}/bin/rsync"
+stayturgid_local_rsync_path: "{{ lookup('pipe', 'brew --prefix --installed rsync') }}/bin/rsync"
+# ansible.posix.synchronize's action plugin reads task_vars.get('ansible_rsync_path')
+# directly with no templating call (unlike e.g. ansible_user/ansible_password a
+# few lines below it in the same plugin, which are explicitly templated). A
+# plain `key: "{{ expr }}"` var (at any scope — task vars or group_vars, both
+# tested) stays a lazy, unevaluated template reference in Ansible's internal
+# variable representation until something explicitly requests templated
+# evaluation — which this code path never does, so the raw "{{ ... }}" text
+# is passed straight to the rsync invocation. `ansible.builtin.set_fact` in
+# termux_userland's tasks/main.yml resolves this eagerly into a concrete
+# string instead (see the "Resolve local rsync path" task there) — this
+# group_vars value is what that task's `vars:` reference evaluates from.
 
 # Caddy front door (Tailscale MagicDNS). Used by serverapp_caddy own-mode base
 # config; product reverse-proxy routes live in generated fragments.
