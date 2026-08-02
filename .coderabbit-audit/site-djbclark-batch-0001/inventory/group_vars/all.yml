@@ -1,0 +1,92 @@
+---
+# SITE-SPECIFIC overrides for the 'all' group ONLY. Product-default 'all'
+# group_vars (termux paths, shizuku/tailscale package ids, etc.) are
+# generated to generated/stayturgid/inventory/group_vars/all.yml by
+# site-sync and loaded as a lower-precedence inventory source; do not
+# copy them here. Values below override those product defaults.
+# Site Contract v1 / Phase D: site namespace for shared serverapp launchd labels
+# (com.<site_ns>.<app>). Product tooling reads this fact — never hard-code it
+# in stayturgid.
+site_ns: djbclark
+
+# GNU rsync (Homebrew) for the local side of termux_userland's
+# ansible.posix.synchronize tasks, preferred over this Mac's ancient system
+# rsync (2.6.9 / protocol 29 at /usr/bin/rsync) so both ends of the Termux
+# SSH transport speak the same modern protocol (Termux ships rsync 3.x).
+# Genuinely site-specific (this control node's own Homebrew layout), not a
+# product default — `lookup('pipe', ...)` always runs on the control node
+# itself regardless of which inventory host a play's facts belong to, so
+# ansible_facts-based arch detection would be wrong in this device-play
+# context. Fails loudly (not silently to system rsync) if the `rsync`
+# control_node brew package isn't actually installed.
+stayturgid_local_rsync_path: "{{ lookup('pipe', 'brew --prefix --installed rsync') }}/bin/rsync"
+# ansible.posix.synchronize's action plugin reads task_vars.get('ansible_rsync_path')
+# directly with no templating call (unlike e.g. ansible_user/ansible_password a
+# few lines below it in the same plugin, which are explicitly templated). A
+# plain `key: "{{ expr }}"` var (at any scope — task vars or group_vars, both
+# tested) stays a lazy, unevaluated template reference in Ansible's internal
+# variable representation until something explicitly requests templated
+# evaluation — which this code path never does, so the raw "{{ ... }}" text
+# is passed straight to the rsync invocation. `ansible.builtin.set_fact` in
+# termux_userland's tasks/main.yml resolves this eagerly into a concrete
+# string instead (see the "Resolve local rsync path" task there) — this
+# group_vars value is what that task's `vars:` reference evaluates from.
+
+# Caddy front door (Tailscale MagicDNS). Used by serverapp_caddy own-mode base
+# config; product reverse-proxy routes live in generated fragments.
+caddy_public_hostname: mac.greyhound-sidemirror.ts.net
+caddy_short_hostname: mac
+
+# OpenObserve root email for vector→openobserve sink (password via env
+# OPENOBSERVE_ROOT_PASSWORD only — never commit secrets). Matches live OO.
+openobserve_root_email: djbclark@gmail.com
+
+# blackbox_exporter active-check targets (serverapp_victoriametrics scrapes
+# these via /probe with the matching module). Seeded from real inventory
+# (hosts.yml Tailscale IPs) and this Mac's actual listening services
+# (`lsof -iTCP -sTCP:LISTEN`) — not placeholders. Add/remove targets here as
+# the fleet/control-node service set changes; no product code change needed.
+serverapp_victoriametrics_blackbox_targets:
+  # Termux SSH on the three real fleet devices — previously unmonitored
+  # (access_monitor.py checks ADB reachability, not the SSH port itself).
+  ssh_banner:
+    - target: "100.123.218.30:8022"  # s24 (Galaxy S24)
+      labels:
+        machine_name: s24
+    - target: "100.65.230.108:8022"  # p7a (Pixel 7a)
+      labels:
+        machine_name: p7a
+    - target: "100.124.55.39:8022"   # hd8 (Kindle Fire HD 8)
+      labels:
+        machine_name: hd8
+  # Caddy front door. HTTPS target uses the real tailnet hostname, not
+  # 127.0.0.1 — the cert (real Let's Encrypt via Tailscale's cert
+  # integration, confirmed live) is issued for caddy_public_hostname, and
+  # its CN won't match a 127.0.0.1 SNI/Host even though the cert is valid.
+  http_2xx:
+    - target: "127.0.0.1:80"
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:8080"
+      labels:
+        machine_name: localhost
+    - target: "https://mac.greyhound-sidemirror.ts.net"
+      labels:
+        machine_name: mac
+  # Cheap "did the daemon silently die between deploys" check for the other
+  # locally-managed serverapps (redundant with their own health checks at
+  # deploy time, but those don't run continuously between deploys).
+  tcp_connect:
+    - target: "127.0.0.1:3000"  # grafana
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:5080"  # openobserve
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:8428"  # victoriametrics (self; redundant with self-scrape up)
+      labels:
+        machine_name: localhost
+    - target: "127.0.0.1:1337"  # olivetin
+      labels:
+        machine_name: localhost
+

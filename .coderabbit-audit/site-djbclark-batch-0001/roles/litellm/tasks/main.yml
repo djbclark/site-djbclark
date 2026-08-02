@@ -1,0 +1,204 @@
+---
+# Multi-host LiteLLM (E5): Darwin launchd + Linux systemd --user.
+# Unprovisioned hosts are ended in playbooks/litellm.yml pre_tasks (before SSH).
+
+- name: Assert LiteLLM site facts and loopback-only bind
+  ansible.builtin.assert:
+    that:
+      - site_ns is defined
+      - site_ns | length > 0
+      - litellm_bind == '127.0.0.1'
+      - >-
+          (ansible_facts.os_family == 'Darwin')
+          or (ansible_facts.system == 'Linux')
+    fail_msg: >-
+      LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
+      an auth/master-key design), and Darwin or Linux.
+
+- name: Resolve uv binary (Homebrew prefix on Darwin; common paths on Linux)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    candidates=(
+      "{{ litellm_uv_bin_default }}"
+      "{{ litellm_home }}/.local/bin/uv"
+      /opt/homebrew/bin/uv
+      /usr/local/bin/uv
+      /usr/bin/uv
+    )
+    for c in "${candidates[@]}"; do
+      if [[ -x "$c" ]]; then
+        echo "$c"
+        exit 0
+      fi
+    done
+    if command -v uv >/dev/null 2>&1; then
+      command -v uv
+      exit 0
+    fi
+    exit 1
+  args:
+    executable: /bin/bash
+  register: _litellm_uv_resolve
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require uv for the isolated LiteLLM tool install
+  ansible.builtin.assert:
+    that: _litellm_uv_resolve.rc == 0
+    fail_msg: >-
+      Install uv first (Darwin: brew install uv under {{ litellm_homebrew_prefix }};
+      Linux: curl -LsSf https://astral.sh/uv/install.sh | sh). E5 requires
+      `uv tool install litellm[proxy,caching]`.
+
+- name: Set resolved uv binary
+  ansible.builtin.set_fact:
+    litellm_uv_bin: "{{ _litellm_uv_resolve.stdout | trim }}"
+
+- name: Probe installed LiteLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_bin }}"
+      - --version
+  register: _litellm_version_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse installed LiteLLM version
+  ansible.builtin.set_fact:
+    _litellm_current_version: >-
+      {{
+        ((_litellm_version_before.stdout | default(''))
+        ~ ' ' ~ (_litellm_version_before.stderr | default('')))
+        | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
+        | default('0.0.0', true)
+      }}
+
+- name: Probe the disk-cache extra in the LiteLLM tool environment
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_tool_python }}"
+      - -c
+      - import diskcache
+  register: _litellm_cache_extra_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install LiteLLM proxy tool when absent
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_uv_bin }}"
+      - tool
+      - install
+      - --prerelease
+      - allow
+      - "{{ litellm_package_spec }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_version_before.rc != 0
+  register: _litellm_tool_install
+  changed_when: true
+
+- name: Repair LiteLLM when below the version floor or missing disk caching
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_uv_bin }}"
+      - tool
+      - install
+      - --force
+      - --prerelease
+      - allow
+      - "{{ litellm_package_spec }}"
+  when:
+    - not ansible_check_mode
+    - _litellm_version_before.rc == 0
+    - >-
+      (_litellm_current_version is version(litellm_minimum_version, '<'))
+      or (_litellm_cache_extra_before.rc != 0)
+  register: _litellm_tool_repair
+  changed_when: true
+
+- name: Verify installed LiteLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_bin }}"
+      - --version
+  register: _litellm_version_after
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Parse verified LiteLLM version
+  ansible.builtin.set_fact:
+    _litellm_verified_version: >-
+      {{
+        ((_litellm_version_after.stdout | default(''))
+        ~ ' ' ~ (_litellm_version_after.stderr | default('')))
+        | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
+        | default('0.0.0', true)
+      }}
+  when: not ansible_check_mode
+
+- name: Enforce the Auto Router v2 LiteLLM version floor
+  ansible.builtin.assert:
+    that: _litellm_verified_version is version(litellm_minimum_version, '>=')
+    fail_msg: >-
+      LiteLLM {{ _litellm_verified_version }} is below the required
+      {{ litellm_minimum_version }} Auto Router v2 floor.
+  when: not ansible_check_mode
+
+- name: Verify the disk-cache extra after install
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_tool_python }}"
+      - -c
+      - import diskcache
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Ensure LiteLLM runtime directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop: >-
+    {{
+      [
+        {'path': litellm_config_dir, 'mode': '0700'},
+        {'path': litellm_cache_dir, 'mode': '0700'},
+        {'path': litellm_logs_dir, 'mode': '0700'},
+      ]
+      + (
+        [{'path': litellm_home ~ '/Library/LaunchAgents', 'mode': '0755'}]
+        if ansible_facts.os_family == 'Darwin'
+        else [{'path': litellm_systemd_user_dir, 'mode': '0755'}]
+      )
+    }}
+
+- name: Render Auto Router v2 LiteLLM config
+  ansible.builtin.template:
+    src: litellm-config.yaml.j2
+    dest: "{{ litellm_config_path }}"
+    mode: "0600"
+  register: _litellm_config
+
+- name: Manage Darwin LaunchAgent for LiteLLM
+  ansible.builtin.include_tasks: service_darwin.yml
+  when: ansible_facts.os_family == 'Darwin'
+
+- name: Manage Linux systemd user unit for LiteLLM
+  ansible.builtin.include_tasks: service_linux.yml
+  when: ansible_facts.os_family != 'Darwin'
+
+- name: Wait for the LiteLLM models endpoint
+  ansible.builtin.uri:
+    url: "{{ litellm_health_url }}"
+    status_code: 200
+  register: _litellm_health
+  until: _litellm_health.status == 200
+  retries: 60
+  delay: 2
+  when: not ansible_check_mode

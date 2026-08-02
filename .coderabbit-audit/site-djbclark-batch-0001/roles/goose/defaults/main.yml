@@ -1,0 +1,62 @@
+---
+# roles/goose — site-owned Goose Desktop/CLI with local LiteLLM provider (Phase E2)
+# and researched MCP extension templates (Phase E3).
+
+goose_home: "{{ lookup('env', 'HOME') }}"
+goose_config_dir: "{{ goose_home }}/.config/goose"
+goose_config_path: "{{ goose_config_dir }}/config.yaml"
+goose_custom_providers_dir: "{{ goose_config_dir }}/custom_providers"
+goose_custom_provider_path: "{{ goose_custom_providers_dir }}/litellm-local.json"
+
+goose_cask_name: block-goose
+goose_formula_name: block-goose-cli
+goose_app_path: /Applications/Goose.app
+
+goose_provider_id: litellm-local
+goose_model: smart-router
+goose_litellm_base_url: http://127.0.0.1:4000/v1
+
+goose_managed_marker: "# site-djbclark managed (roles/goose)"
+
+# ---------------------------------------------------------------------------
+# E3 MCP extensions (Goose 1.43 config.yaml `extensions:` map).
+# Only VERIFIED packages/endpoints are rendered as real entries. Unverified
+# vendor targets stay as YAML comments / doc stubs — never invent package names.
+# ---------------------------------------------------------------------------
+
+# Official MCP filesystem server (verified npm 2026.7.10).
+# Sources:
+#   https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+#   https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem
+#   Goose 1.43 config docs: type stdio with `cmd` + `args`
+goose_ext_filesystem_enabled: true
+goose_ext_filesystem_timeout: 300
+goose_ext_filesystem_package: "@modelcontextprotocol/server-filesystem"
+goose_ext_filesystem_cmd: npx
+# Allowed roots for the MCP server (CLI args). Prefer narrow paths over all of $HOME.
+goose_ext_filesystem_allowed_dirs:
+  - "{{ goose_home }}/ops"
+  - "{{ goose_home }}/Documents"
+
+# Fieldy remote MCP (streamable HTTP). Verified vendor docs 2026-07-20.
+# Sources:
+#   https://intercom.help/Fieldy/en/articles/15019124-connecting-fieldy-to-claude-chatgpt-and-your-own-apps
+#   https://api.fieldy.ai/mcp
+# Auth: browser OAuth at first connect (Fieldy account email) — human step in E4.
+# Default disabled so Goose sessions do not hang waiting for OAuth until E4.
+goose_ext_fieldy_enabled: false
+goose_ext_fieldy_timeout: 300
+goose_ext_fieldy_uri: https://api.fieldy.ai/mcp
+
+# Shortwave — NO outbound MCP server for Goose (research 2026-07-20).
+# Shortwave is an MCP *client* only (connects TO other MCP servers from Shortwave UI).
+# Sources:
+#   https://www.shortwave.com/docs/how-tos/using-mcp/
+#   https://www.shortwave.com/blog/integrate-ai-with-all-your-apps-mcp/
+# npm @shortwave/mcp-server → 404 (not published). Template: comment stub only.
+goose_ext_shortwave_available: false
+
+# Saner.ai — no MCP server found (research 2026-07-20).
+# No official MCP docs, no npm @saner-ai/mcp-server (404), no PyPI package.
+# Product site: https://www.saner.ai/ — template: comment stub only.
+goose_ext_saner_available: false

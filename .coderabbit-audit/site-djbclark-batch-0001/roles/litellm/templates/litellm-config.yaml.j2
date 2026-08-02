@@ -1,0 +1,105 @@
+# Managed by site-djbclark roles/litellm. Local edits will be overwritten.
+# Auto Router v2 syntax verified against docs.litellm.ai/docs/proxy/auto_routing
+# on 2026-07-20; PyPI's first available Auto Router v2 build is 1.94.0rc1.
+#
+# Provider models are always declared. Unit env injection (plist/systemd) only
+# embeds keys that are non-empty at `just litellm-apply-secrets` time. Prefer
+# working paid/free providers for smart-router tiers; keep OpenAI/Anthropic
+# aliases for when those keys have credit.
+
+model_list:
+  # ── OpenAI (needs OPENAI_API_KEY) ──
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ── Anthropic (needs ANTHROPIC_API_KEY) ──
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── DeepSeek (needs DEEPSEEK_API_KEY) ──
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  - model_name: deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # ── Google Gemini (needs GEMINI_API_KEY) ──
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ── OpenRouter (needs OPENROUTER_API_KEY) ──
+  - model_name: openrouter-auto
+    litellm_params:
+      model: openrouter/openrouter/auto
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # ── OpenCode Zen OpenAI-compatible (needs OPENCODE_ZEN_API_KEY) ──
+  - model_name: opencode-zen-flash
+    litellm_params:
+      model: openai/deepseek-v4-flash-free
+      api_base: https://opencode.ai/zen/v1
+      api_key: os.environ/OPENCODE_ZEN_API_KEY
+
+  # ── Auto Router v2 — tiers prefer keys that are typically funded ──
+  - model_name: smart-router
+    litellm_params:
+      model: auto_router/complexity_router
+      drop_params: true
+      complexity_router_config:
+        tiers:
+          SIMPLE: deepseek-chat
+          MEDIUM: gemini-flash
+          COMPLEX: openrouter-auto
+          REASONING: deepseek-reasoner
+        tier_boundaries:
+          simple_medium: 0.15
+          medium_complex: 0.35
+          complex_reasoning: 0.60
+      complexity_router_default_model: deepseek-chat
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: "{{ litellm_cache_dir }}"
+    ttl: 3600
+  drop_params: true
+  request_timeout: 120
+
+router_settings:
+  num_retries: 2
+  timeout: 120
+  fallbacks:
+    - smart-router: [deepseek-chat, openrouter-auto, opencode-zen-flash]
+    - deepseek-chat: [gemini-flash, openrouter-auto, opencode-zen-flash]
+    - deepseek-reasoner: [openrouter-auto, deepseek-chat]
+    - gemini-flash: [deepseek-chat, openrouter-auto]
+    - openrouter-auto: [deepseek-chat, opencode-zen-flash]
+    - opencode-zen-flash: [deepseek-chat, openrouter-auto]
+    - gpt-4o-mini: [deepseek-chat, gpt-4o]
+    - gpt-4o: [claude-sonnet-5, deepseek-chat, gpt-4o-mini]
+    - claude-sonnet-5: [openrouter-auto, gpt-5.5, gpt-4o]
+    - gpt-5.5: [deepseek-reasoner, claude-sonnet-5, gpt-4o]
+
+# No master_key while the proxy is loopback-only. Never widen litellm_bind
+# (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ site_agents_jobber_label }}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ site_agents_homebrew_prefix }}/opt/jobber/libexec/jobberrunner</string>
+        <string>--unixsocket</string>
+        <string>{{ site_agents_jobber_var_dir }}/cmd.sock</string>
+        <string>{{ site_agents_jobber_config }}</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{ site_agents_jobber_log }}</string>
+    <key>StandardErrorPath</key>
+    <string>{{ site_agents_jobber_error_log }}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ site_agents_home }}/.local/bin:{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{{ site_agents_home }}</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

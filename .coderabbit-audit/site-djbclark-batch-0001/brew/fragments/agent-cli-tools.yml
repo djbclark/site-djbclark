@@ -1,0 +1,38 @@
+# Modern CLI tool replacements for AI-agent shell use (any vendor, any repo).
+# Hand-edited. Project with: just brew-project
+# Policy/rationale: see AGENTS.md "Modern CLI tool policy" section.
+stack: agent-cli-tools
+description: >-
+  Machine-wide modern CLI replacements (rg/fd/bat/sd/eza/hck/delta/jq/yq/xh)
+  plus structural/semantic code search (ast-grep/semgrep) and doc spell-check
+  (typos) that AI coding agents and this operator's shell should prefer over
+  the classic grep/find/cat/sed/ls/awk/cut/diff/jq/curl incumbents. Not owned
+  by one repo's stack — cross-project agent ergonomics.
+
+formulae:
+  - name: ripgrep
+    note: grep replacement — respects .gitignore, faster, saner defaults
+  - name: fd
+    note: find replacement — respects .gitignore, simple glob syntax
+  - name: bat
+    note: cat replacement — line numbers + syntax highlighting
+  - name: sd
+    note: sed replacement — plain regex, no backslash-escaping hell
+  - name: eza
+    note: ls replacement — saner columns/colors, git-aware
+  - name: hck
+    note: awk/cut replacement — simple -f/-d column selection
+  - name: git-delta
+    note: git diff pager — syntax-highlighted, line-numbered hunks
+  - name: jq
+    note: JSON CLI — Homebrew build supersedes older macOS-system /usr/bin/jq on PATH
+  - name: ast-grep
+    note: structural code search+rewrite (AST-aware) — use instead of rg/Grep for code-shape queries
+  - name: semgrep
+    note: structural pattern matching + large security-rule registry — already used by security-review skill
+  - name: yq
+    note: YAML query/edit, jq-style syntax — fits the ansible/registry/brew-fragment YAML these repos have
+  - name: xh
+    note: JSON-friendly HTTP client — pretty-prints/colorizes by default, no manual `| jq` needed for ad-hoc API calls
+  - name: typos-cli
+    note: source/doc spell checker — run before finalizing AGENTS.md/docs edits

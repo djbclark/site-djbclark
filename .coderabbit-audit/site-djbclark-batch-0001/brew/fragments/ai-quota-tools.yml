@@ -1,0 +1,25 @@
+# AI subscription/quota tooling used by aiuse collectors (and ambient monitors).
+# Hand-edited. Project with: just brew-project
+# Full install (all five sources): just install-aiuse-deps
+#   or: ~/src/aiuse/packaging/install-deps.sh
+stack: ai-quota-tools
+description: >-
+  Homebrew pieces of the aiuse data-source set: OpenUsage and CodexBar casks.
+  Also installed by packaging/install-deps.sh / just install-aiuse-deps:
+  cswap (uv tool claude-swap), caut (cargo), tokscale (npx PATH shim).
+
+casks:
+  - name: openusage
+    note: >-
+      OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits.
+      After install: open app once; Settings → Command Line → Install for `openusage` CLI.
+      Used by aiuse collectors.openusage (enabled by default).
+  - name: codexbar
+    note: >-
+      CodexBar.app + codexbar CLI — primary multi-provider live quotas for aiuse.
+      Formula installs CodexBarCLI as `codexbar` on PATH.
+
+# Non-brew (documented; installed by just install-aiuse-deps / packaging/install-deps.sh):
+#   cswap  — uv tool install claude-swap
+#   caut   — cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
+#   tokscale — ~/.local/bin shim: npx --yes tokscale@latest

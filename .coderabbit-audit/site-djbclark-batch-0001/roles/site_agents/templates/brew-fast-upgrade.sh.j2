@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# site-djbclark — brew-fast-upgrade maintenance script
+# Upgrades Homebrew packages under exclusive site advisory lock (Phase F4).
+# Automatically restarts Google Chrome cleanly if it was running and upgraded.
+
+export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+LOCK_BIN="{{ site_agents_home }}/ops/site-djbclark/bin/brew_flock.py"
+
+run_upgrade_and_restart_apps() {
+  local chrome_outdated=0
+  local chrome_running=0
+
+  # Pre-check: is google-chrome cask outdated?
+  if brew outdated --cask google-chrome 2>/dev/null | grep -q "google-chrome"; then
+    chrome_outdated=1
+  fi
+
+  # Pre-check: is Google Chrome currently running?
+  if pgrep -x "Google Chrome" >/dev/null 2>&1; then
+    chrome_running=1
+  fi
+
+  # Run upgrade
+  brew update && brew upgrade
+
+  # Post-check: if Chrome was running and upgraded, restart it gracefully
+  if [ "$chrome_outdated" -eq 1 ] && [ "$chrome_running" -eq 1 ]; then
+    echo "[brew-fast-upgrade] Google Chrome was upgraded while running. Restarting gracefully..."
+
+    # 1. Graceful quit via AppleScript (flushes SQLite/session tabs to disk)
+    osascript -e 'tell application "Google Chrome" to quit' 2>/dev/null || true
+
+    # 2. Wait up to 15s for clean exit
+    local count=0
+    while pgrep -x "Google Chrome" >/dev/null 2>&1; do
+      sleep 1
+      count=$((count + 1))
+      if [ "$count" -ge 15 ]; then
+        echo "[brew-fast-upgrade] Google Chrome did not exit within 15s. Force killing..."
+        pkill -x "Google Chrome" 2>/dev/null || true
+        sleep 2
+        break
+      fi
+    done
+
+    # 3. Relaunch Chrome
+    echo "[brew-fast-upgrade] Relaunching Google Chrome..."
+    open -a "Google Chrome"
+  fi
+}
+
+if [ -f "$LOCK_BIN" ]; then
+  exec "$LOCK_BIN" -- bash -c "$(declare -f run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+else
+  run_upgrade_and_restart_apps
+fi
+

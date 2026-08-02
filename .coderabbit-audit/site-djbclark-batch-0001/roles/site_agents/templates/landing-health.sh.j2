@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# site-djbclark — landing-health verification script
+# Runs network service discovery and fails if any registered service is down.
+
+export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export STAYTURGID_SITE_DIR="{{ site_agents_home }}/ops/site-djbclark"
+export ANSIBLE_CONFIG="{{ site_agents_home }}/ops/site-djbclark/ansible.cfg"
+
+exec python3 "{{ site_agents_home }}/ops/stayturgid/control/landing/discover.py" --health-check

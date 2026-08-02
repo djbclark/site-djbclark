@@ -1,0 +1,129 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
+"""Lint the site registry (registry/ports.yml, registry/paths.yml).
+
+Checks:
+  ports.yml — parses; every entry has port/owner/service/status; no duplicate
+  (port, bind) per host with conflicting owners; ports in valid range.
+  paths.yml — parses; prefixes have exactly one owner (no prefix listed under
+  two stacks).
+
+Exit 0 clean, 1 findings, 2 cannot read/parse.
+Run from repo root:  bin/registry_lint.py   (or: uv run bin/registry_lint.py)
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import yaml
+
+REPO = Path(__file__).resolve().parent.parent
+REQUIRED_PORT_KEYS = {"port", "owner", "service", "status"}
+VALID_STATUS = {"active", "planned", "default-claim"}
+
+
+def fail(msg: str) -> None:
+    print(f"registry-lint: FAIL: {msg}")
+
+
+def lint_ports(findings: list[str]) -> None:
+    data = yaml.safe_load((REPO / "registry" / "ports.yml").read_text())
+    for host, hostdata in (data.get("hosts") or {}).items():
+        seen: dict[tuple[int, str], list[dict]] = defaultdict(list)
+        for entry in hostdata.get("ports") or []:
+            missing = REQUIRED_PORT_KEYS - entry.keys()
+            if missing:
+                findings.append(f"{host}: entry {entry} missing keys {sorted(missing)}")
+                continue
+            port = entry["port"]
+            if not isinstance(port, int) or not 1 <= port <= 65535:
+                findings.append(f"{host}: invalid port {port!r}")
+                continue
+            if entry["status"] not in VALID_STATUS:
+                findings.append(f"{host}: port {port} invalid status {entry['status']!r}")
+            seen[(port, str(entry.get("bind", "*")))].append(entry)
+        for (port, bind), entries in seen.items():
+            if len(entries) > 1:
+                owners = sorted({e["owner"] for e in entries})
+                findings.append(
+                    f"{host}: port {port} bind {bind} claimed {len(entries)}x "
+                    f"(owners: {', '.join(owners)})"
+                )
+        # A wildcard bind covers every address: the same port under both a
+        # wildcard and a specific bind is a real listen conflict even though
+        # the (port, bind) keys differ.
+        by_port: dict[int, set[str]] = defaultdict(set)
+        for port, bind in seen:
+            by_port[port].add(bind)
+        for port, binds in by_port.items():
+            if len(binds) > 1 and binds & {"*", "0.0.0.0", "::"}:
+                findings.append(
+                    f"{host}: port {port} claimed under wildcard and specific binds "
+                    f"({', '.join(sorted(binds))}) — wildcard covers all addresses"
+                )
+
+
+def lint_paths(findings: list[str]) -> None:
+    data = yaml.safe_load((REPO / "registry" / "paths.yml").read_text())
+    owner_by_prefix: dict[str, str] = {}
+    for stack, prefixes in (data.get("prefixes") or {}).items():
+        for p in prefixes:
+            if not isinstance(p, str):  # brew_services entries are dicts
+                continue
+            prev = owner_by_prefix.setdefault(p, stack)
+            if prev != stack:
+                findings.append(f"prefix {p!r} claimed by both {prev} and {stack}")
+
+
+def lint_generated_paths() -> None:
+    """Drift guard for stayturgid#100: reject absolute paths in path-bearing artifacts."""
+    artifacts = [
+        "generated/stayturgid/fragments/grafana/dashboards/provider.yaml",
+        "generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml",
+    ]
+    for rel_path in artifacts:
+        path = REPO / rel_path
+        if not path.exists():
+            continue
+        if not path.is_file():
+            fail(f"{rel_path} exists but is not a regular file")
+            sys.exit(2)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            fail(f"cannot read {rel_path}: {exc}")
+            sys.exit(2)
+        
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if re.match(r'^(?:path:|cd)\s+["\']?/', stripped):
+                fail(f"{rel_path}:{i} contains an absolute path (must use portable ${{OPS_ROOT...}} form)")
+                sys.exit(2)
+
+
+def main() -> int:
+    findings: list[str] = []
+    try:
+        lint_ports(findings)
+        lint_paths(findings)
+        lint_generated_paths()
+    except (OSError, yaml.YAMLError) as exc:
+        fail(str(exc))
+        return 2
+    for f in findings:
+        fail(f)
+    if findings:
+        return 1
+    print("registry-lint: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,79 @@
+---
+# roles/litellm — site-owned, loopback-only LiteLLM proxy (Phase E1 + E5 multi-host).
+
+# Prefer remote facts env so multi-host SSH apply does not use the control
+# node's home. Local connection still resolves correctly.
+litellm_home: >-
+  {{
+    (ansible_facts.get('env') or {}).get('HOME')
+    | default(lookup('env', 'HOME'), true)
+  }}
+litellm_uid: "{{ ansible_facts['user_uid'] }}"
+litellm_label: "com.{{ site_ns }}.litellm"
+litellm_bind: "127.0.0.1"
+litellm_port: 4000
+
+# Auto Router v2 first ships in the 1.94 train. As of 2026-07-20 PyPI's
+# newest stable is 1.93.0 and the first usable 1.94 build is 1.94.0rc1.
+litellm_minimum_version: "1.94.0rc1"
+litellm_package_spec: "litellm[proxy,caching]>=1.94.0rc1,<2"
+litellm_bin: "{{ litellm_home }}/.local/bin/litellm"
+litellm_tool_python: "{{ litellm_home }}/.local/share/uv/tools/litellm/bin/python"
+
+# Homebrew prefix: Apple Silicon /opt/homebrew, Intel /usr/local
+# (same pattern as stayturgid stayturgid_homebrew_prefix).
+litellm_homebrew_prefix: >-
+  {{
+    '/opt/homebrew'
+    if ansible_facts.get('architecture', 'arm64') in ['arm64', 'aarch64']
+    else '/usr/local'
+  }}
+
+# Resolved in tasks (probe) when the default path is missing.
+litellm_uv_bin_default: >-
+  {{
+    (litellm_homebrew_prefix ~ '/bin/uv')
+    if ansible_facts.get('os_family') == 'Darwin'
+    else (litellm_home ~ '/.local/bin/uv')
+  }}
+litellm_uv_bin: "{{ litellm_uv_bin_default }}"
+
+litellm_config_dir: "{{ litellm_home }}/.litellm"
+litellm_config_path: "{{ litellm_config_dir }}/config.yaml"
+litellm_cache_dir: "{{ litellm_config_dir }}/cache"
+
+# Darwin → LaunchAgents + ~/Library/Logs; Linux → systemd --user + XDG state.
+litellm_logs_dir: >-
+  {{
+    (litellm_home ~ '/Library/Logs/litellm')
+    if ansible_facts.get('os_family') == 'Darwin'
+    else (litellm_home ~ '/.local/state/litellm/logs')
+  }}
+litellm_plist_path: "{{ litellm_home }}/Library/LaunchAgents/{{ litellm_label }}.plist"
+litellm_systemd_user_dir: "{{ litellm_home }}/.config/systemd/user"
+litellm_unit_path: "{{ litellm_systemd_user_dir }}/{{ litellm_label }}.service"
+litellm_health_url: "http://{{ litellm_bind }}:{{ litellm_port }}/v1/models"
+
+# PATH for the managed service env (Homebrew first on Darwin).
+litellm_service_path: >-
+  {{
+    (
+      litellm_homebrew_prefix ~ '/bin:'
+      ~ litellm_homebrew_prefix ~ '/sbin:'
+      ~ '/usr/local/bin:/usr/bin:/bin:'
+      ~ litellm_home ~ '/.local/bin'
+    )
+    if ansible_facts.get('os_family') == 'Darwin'
+    else (
+      litellm_home ~ '/.local/bin:/usr/local/bin:/usr/bin:/bin'
+    )
+  }}
+
+# Values enter Ansible from the ambient environment, normally through
+# `secretspec run`. They are rendered only into the mode-0600 live unit/plist.
+litellm_openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
+litellm_anthropic_api_key: "{{ lookup('env', 'ANTHROPIC_API_KEY') | default('', true) }}"
+litellm_deepseek_api_key: "{{ lookup('env', 'DEEPSEEK_API_KEY') | default('', true) }}"
+litellm_gemini_api_key: "{{ lookup('env', 'GEMINI_API_KEY') | default('', true) }}"
+litellm_openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY') | default('', true) }}"
+litellm_opencode_zen_api_key: "{{ lookup('env', 'OPENCODE_ZEN_API_KEY') | default('', true) }}"

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ open_webui_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ open_webui_home }}/.local/share/uv/tools/open-webui/bin/open-webui</string>
+        <string>serve</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>{{ open_webui_port }}</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ open_webui_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>DATA_DIR</key>
+        <string>{{ open_webui_data_dir }}</string>
+        <key>OPENAI_API_BASE_URL</key>
+        <string>{{ open_webui_openai_api_base_url }}</string>
+        <key>OPENAI_API_KEY</key>
+        <string>{{ open_webui_openai_api_key }}</string>
+        <key>WEBUI_BASE_URL</key>
+        <string>{{ open_webui_base_url }}</string>
+        <key>WEBUI_SECRET_KEY</key>
+        <string>{{ lookup('env', 'WEBUI_SECRET_KEY') }}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{ open_webui_home }}/Library/Logs/{{ open_webui_label }}.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ open_webui_home }}/Library/Logs/{{ open_webui_label }}.error.log</string>
+</dict>
+</plist>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ site_agents_cswap_label }}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ site_agents_bin_dir }}/cswap</string>
+        <string>auto</string>
+        <string>--threshold</string>
+        <string>{{ site_agents_cswap_threshold }}</string>
+        <string>--interval</string>
+        <string>{{ site_agents_cswap_interval }}</string>
+        <string>--cooldown</string>
+        <string>{{ site_agents_cswap_cooldown }}</string>
+        <string>--model</string>
+        <string>{{ site_agents_cswap_model }}</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>{{ site_agents_cswap_log }}</string>
+    <key>StandardErrorPath</key>
+    <string>{{ site_agents_cswap_error_log }}</string>
+</dict>
+</plist>

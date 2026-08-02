@@ -1,0 +1,117 @@
+# Site-local OliveTin actions (merged by stayturgid site-sync into
+# ~/.config/djbclark/olivetin/config.yaml). Action ids MUST be user_-prefixed.
+# Product actions stay in generated/stayturgid/fragments/olivetin/.
+#
+# Herdr is UDS-only (no TCP port in registry/ports.yml). These buttons manage
+# the brew services LaunchAgent that keeps `herdr server` running.
+
+actions:
+  - id: user_herdr_status
+    title: "Herdr — status"
+    icon: "&#128202;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      echo "=== brew services info herdr ==="
+      brew services info herdr || true
+      echo
+      echo "=== herdr status ==="
+      herdr status || true
+      echo
+      echo "=== socket ==="
+      ls -la "${HOME}/.config/herdr/herdr.sock" 2>&1 || true
+      echo
+      echo "=== launchctl (homebrew.mxcl.herdr) ==="
+      launchctl print "gui/$(id -u)/homebrew.mxcl.herdr" 2>&1 | head -40 || true
+
+  - id: user_herdr_start
+    title: "Herdr — brew services start"
+    icon: "&#9654;"
+    timeout: 120
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services start herdr
+      sleep 1
+      brew services info herdr
+      herdr status
+
+  - id: user_herdr_stop
+    title: "Herdr — brew services stop"
+    icon: "&#9209;"
+    timeout: 120
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services stop herdr
+      sleep 1
+      brew services info herdr || true
+      herdr status || true
+
+  - id: user_herdr_restart
+    title: "Herdr — brew services restart"
+    icon: "&#128260;"
+    timeout: 180
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      brew services restart herdr
+      sleep 2
+      brew services info herdr
+      herdr status
+
+  - id: user_herdr_reload_config
+    title: "Herdr — reload config (no process restart)"
+    icon: "&#128260;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      herdr server reload-config
+      herdr status
+
+  - id: user_litellm_status
+    title: "LiteLLM Proxy — status & health"
+    icon: "&#129302;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      echo "=== launchctl print gui/$(id -u)/com.djbclark.litellm ==="
+      launchctl print "gui/$(id -u)/com.djbclark.litellm" 2>&1 | head -30 || true
+      echo
+      echo "=== http://127.0.0.1:4000/health ==="
+      curl -s -m 5 http://127.0.0.1:4000/health || echo "HTTP 4000 not responding"
+      echo
+      echo "=== http://127.0.0.1:4000/v1/models ==="
+      curl -s -m 5 http://127.0.0.1:4000/v1/models | head -30 || echo "Models endpoint failed"
+
+  - id: user_litellm_restart
+    title: "LiteLLM Proxy — restart service"
+    icon: "&#128260;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      launchctl kickstart -k "gui/$(id -u)/com.djbclark.litellm"
+      sleep 2
+      curl -s -m 5 http://127.0.0.1:4000/health || true
+
+  - id: user_openwebui_status
+    title: "Open WebUI — status & health"
+    icon: "&#129302;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      echo "=== launchctl print gui/$(id -u)/com.djbclark.open-webui ==="
+      launchctl print "gui/$(id -u)/com.djbclark.open-webui" 2>&1 | head -30 || true
+      echo
+      echo "=== http://127.0.0.1:8085/health ==="
+      curl -s -m 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
+
+  - id: user_openwebui_restart
+    title: "Open WebUI — restart service"
+    icon: "&#128260;"
+    timeout: 60
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      launchctl kickstart -k "gui/$(id -u)/com.djbclark.open-webui"
+      sleep 2
+      curl -s -m 5 http://127.0.0.1:8085/health || true
+
+  # user_omlx_* / user_ollama_* removed 2026-07-29 — local inference packages
+  # uninstalled; do not re-add restart actions that would brew services start them.

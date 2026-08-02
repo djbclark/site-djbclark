@@ -1,0 +1,20 @@
+---
+# Site-owned LiteLLM proxy (Phase E1 + E5 multi-host).
+# Default limit: mac (live control node). Planned hosts in site_litellm
+# with site_host_status=offline_unprovisioned end before gather_facts/SSH.
+# Examples:
+#   just litellm-apply
+#   LITELLM_HOSTS=mac-mini-intel just litellm-apply
+#   LITELLM_HOSTS=site_litellm just litellm-apply
+- name: Configure the site LiteLLM proxy
+  hosts: site_litellm
+  gather_facts: false
+  pre_tasks:
+    - name: Skip LiteLLM on hosts not yet provisioned (no SSH)
+      ansible.builtin.meta: end_host
+      when: (site_host_status | default('online')) == 'offline_unprovisioned'
+
+    - name: Gather facts for provisioned LiteLLM hosts
+      ansible.builtin.setup:
+  roles:
+    - role: litellm

@@ -1,0 +1,193 @@
+---
+# Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
+# hibernate-disk-check. Darwin only.
+
+- name: Assert site_agents prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Darwin'
+      - site_ns is defined
+      - site_ns | length > 0
+    fail_msg: >-
+      site_agents supports macOS control-node deployment only; requires site_ns.
+
+- name: Ensure runtime directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ site_agents_bin_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_state_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_jobber_state_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_jobber_var_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_launchagents_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_system_state_var_dir }}", mode: "0755"}
+    - {path: "{{ site_agents_system_state_home_mirror }}", mode: "0755"}
+    - {path: "{{ site_agents_homebrew_prefix }}/var/log", mode: "0755"}
+
+
+- name: Install system-state-backup script
+  ansible.builtin.template:
+    src: system-state-backup.sh.j2
+    dest: "{{ site_agents_system_state_script }}"
+    mode: "0755"
+  register: _system_state_script
+
+- name: Install hibernate-disk-check script
+  ansible.builtin.copy:
+    src: hibernate-disk-check
+    dest: "{{ site_agents_hibernate_script }}"
+    mode: "0755"
+  register: _hibernate_script
+
+- name: Render system-state-backup LaunchAgent
+  ansible.builtin.template:
+    src: system-state-backup.plist.j2
+    dest: "{{ site_agents_system_state_plist }}"
+    mode: "0644"
+  register: _system_state_plist
+
+- name: Render hibernate-disk-check LaunchAgent
+  ansible.builtin.template:
+    src: hibernate-disk-check.plist.j2
+    dest: "{{ site_agents_hibernate_plist }}"
+    mode: "0644"
+  register: _hibernate_plist
+
+- name: Manage system-state-backup LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_system_state_label }}"
+    _agent_plist_path: "{{ site_agents_system_state_plist }}"
+    _agent_plist: "{{ _system_state_plist }}"
+    _agent_script: "{{ _system_state_script }}"
+
+- name: Render cswap-auto LaunchAgent
+  ansible.builtin.template:
+    src: cswap-auto.plist.j2
+    dest: "{{ site_agents_cswap_plist }}"
+    mode: "0644"
+  register: _cswap_plist
+
+- name: Manage hibernate-disk-check LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_hibernate_label }}"
+    _agent_plist_path: "{{ site_agents_hibernate_plist }}"
+    _agent_plist: "{{ _hibernate_plist }}"
+    _agent_script: "{{ _hibernate_script }}"
+
+- name: Manage cswap-auto LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_cswap_label }}"
+    _agent_plist_path: "{{ site_agents_cswap_plist }}"
+    _agent_plist: "{{ _cswap_plist }}"
+    _agent_script: "{{ site_agents_cswap_plist }}"
+
+- name: Assert aiuse binary is present
+  ansible.builtin.stat:
+    path: "{{ site_agents_aiuse_bin }}"
+  register: _aiuse_bin_stat
+
+- name: Fail when aiuse is missing from PATH install location
+  ansible.builtin.assert:
+    that:
+      - _aiuse_bin_stat.stat.exists
+    fail_msg: >-
+      {{ site_agents_aiuse_bin }} not found.
+      Install with: pipx install aiuse   (or brew tap djbclark/aiuse && brew install aiuse,
+      then symlink/copy into ~/.local/bin or override site_agents_aiuse_bin).
+
+- name: Ensure aiuse config directory exists
+  ansible.builtin.file:
+    path: "{{ site_agents_aiuse_config_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Inspect aiuse user configuration files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ site_agents_aiuse_config_toml }}"
+    - "{{ site_agents_aiuse_legacy_services_yaml }}"
+  register: site_agents_aiuse_config_files
+
+- name: Refuse conflicting aiuse user configuration files
+  ansible.builtin.assert:
+    that:
+      - not (site_agents_aiuse_config_files.results[0].stat.exists and site_agents_aiuse_config_files.results[1].stat.exists)
+    fail_msg: >-
+      Both {{ site_agents_aiuse_config_toml }} and
+      {{ site_agents_aiuse_legacy_services_yaml }} exist. Move the settings
+      from services.yaml into config.toml, then remove services.yaml before
+      running site-agents-apply.
+
+- name: Seed aiuse TOML configuration for snapshot history
+  ansible.builtin.copy:
+    dest: "{{ site_agents_aiuse_config_toml }}"
+    content: |
+      [analysis]
+      persist_snapshots = true
+      learn_from_history = "auto"
+    mode: "0600"
+  when:
+    - not site_agents_aiuse_config_files.results[0].stat.exists
+    - not site_agents_aiuse_config_files.results[1].stat.exists
+
+- name: Render aiuse LaunchAgent
+  ansible.builtin.template:
+    src: aiuse.plist.j2
+    dest: "{{ site_agents_aiuse_plist }}"
+    mode: "0644"
+  register: _aiuse_plist
+
+- name: Manage aiuse LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_aiuse_label }}"
+    _agent_plist_path: "{{ site_agents_aiuse_plist }}"
+    _agent_plist: "{{ _aiuse_plist }}"
+    _agent_script: "{{ site_agents_aiuse_plist }}"
+
+- name: Install jobber-notify script
+  ansible.builtin.template:
+    src: jobber-notify.py.j2
+    dest: "{{ site_agents_jobber_notify_script }}"
+    mode: "0755"
+  register: _jobber_notify_script
+
+- name: Install brew-fast-upgrade script
+  ansible.builtin.template:
+    src: brew-fast-upgrade.sh.j2
+    dest: "{{ site_agents_brew_fast_upgrade_script }}"
+    mode: "0755"
+
+- name: Install landing-health script
+  ansible.builtin.template:
+    src: landing-health.sh.j2
+    dest: "{{ site_agents_landing_health_script }}"
+    mode: "0755"
+
+- name: Deploy Jobber configuration
+  ansible.builtin.template:
+    src: jobber.yaml.j2
+    dest: "{{ site_agents_jobber_config }}"
+    mode: "0600"
+  register: _jobber_config
+
+- name: Render Jobber LaunchAgent plist
+  ansible.builtin.template:
+    src: jobber.plist.j2
+    dest: "{{ site_agents_jobber_plist }}"
+    mode: "0644"
+  register: _jobber_plist
+
+- name: Manage Jobber LaunchAgent
+  ansible.builtin.include_tasks: launchagent.yml
+  vars:
+    _agent_label: "{{ site_agents_jobber_label }}"
+    _agent_plist_path: "{{ site_agents_jobber_plist }}"
+    _agent_plist: "{{ _jobber_plist }}"
+    _agent_script: "{{ _jobber_config }}"

@@ -1,0 +1,124 @@
+# Site port registry — authority for listen-port allocation across the site.
+# See docs/plans/site-djbclark-step1-segmentation-architecture-v1.md §4.
+#
+# owner: stayturgid | site | brew-services | unmanaged (observed; not yet adopted)
+# status: active (observed listening 2026-07-18) | planned | default-claim
+# Products declare defaults in their role defaults; THIS file is the site
+# authority. Lint: every effective listen port must appear here exactly once
+# per host; collisions fail CI.
+#
+# Seeded 2026-07-18 from netstat, launchd plists, and role defaults on mac.
+
+hosts:
+  mac:
+    ports:
+      # ── stayturgid (control node) ────────────────────────────────────────
+      - {port: 80,    bind: "*",         owner: site, service: caddy-http-redirect, status: active,
+         note: "Phase D1: com.djbclark.caddy; legacy plist archived and removed in D7"}
+      - {port: 443,   bind: "*",         owner: site, service: caddy-https,         status: active,
+         note: "Phase D1: site-owned Tailscale TLS front door mac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
+      - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
+         note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
+      - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
+      - {port: 4097,  bind: "127.0.0.1", owner: stayturgid, service: fleet-dashboard,     status: active,
+         note: "D7 coverage audit: retained until post-D8 telemetry gives Grafana equivalent device signal and replaces dashboard actions/stats/errors"}
+      - {port: 4317,  bind: "127.0.0.1", owner: site, service: vector-otlp-grpc,    status: active,
+         note: "Phase D2: com.djbclark.vector OTLP gRPC; legacy plist archived and removed in D7"}
+      - {port: 4318,  bind: "0.0.0.0",   owner: site, service: vector-otlp-http,    status: active,
+         note: "Phase D2: com.djbclark.vector OTLP HTTP; intentionally non-loopback — fleet devices push OTLP (registry documents why; 0.0.0.0 stays)"}
+      - {port: 8686,  bind: "127.0.0.1", owner: site, service: vector-api,          status: active,
+         note: "Phase D2: com.djbclark.vector GraphQL/API health (http://127.0.0.1:8686/health); loopback only"}
+      - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
+      - {port: 5080,  bind: "127.0.0.1", owner: site, service: openobserve-http,    status: active,
+         note: "Phase D3: com.djbclark.openobserve HTTP; data dir unchanged ~/.local/share/openobserve/data; legacy plist archived and removed in D7"}
+      - {port: 5081,  bind: "127.0.0.1", owner: site, service: openobserve-grpc,    status: active,
+         note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
+      - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
+         note: "Phase D1: com.djbclark.caddy health; D4 fixed landing.py default 8080→8088 (no longer collides)"}
+      - {port: 8088,  bind: "127.0.0.1", owner: site, service: landing,             status: active,
+         note: "Phase D4: com.djbclark.landing + landing-discover; legacy plists archived and removed in D7"}
+
+      # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
+      - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: active,
+         note: "Phase D5: com.djbclark.grafana; provisioning from generated/stayturgid/fragments/grafana; Fleet Control Room dashboard"}
+      - {port: 8428,  bind: "127.0.0.1", owner: site, service: victoriametrics,  status: active,
+         note: "Phase D5: com.djbclark.victoriametrics; data under ~/.config/djbclark/victoriametrics/data"}
+      - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: active,
+         note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
+
+      # ── site: AI stack & local services ──────────────────────────────────
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
+         note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
+      - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
+         note: "Open WebUI private AI workspace; proxied by Caddy at /chat/*"}
+      - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
+         note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
+      # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
+      - {port: 9115,  bind: "127.0.0.1", owner: site, service: blackbox-exporter, status: active,
+         note: "Prometheus Blackbox Exporter endpoint"}
+      - {port: 53837, bind: "127.0.0.1", owner: site, service: antigravity-agy-ipc, status: active,
+         note: "Google Antigravity CLI daemon IPC"}
+      - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
+         note: "Google Antigravity CLI sidecar listener"}
+
+      # ── SuperBrain (independent local application) ────────────────────────
+      - {port: 5000,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
+         note: "SuperBrain FastAPI service; observed listening 2026-07-30"}
+      - {port: 8443,  bind: "*",         owner: unmanaged, service: superbrain-websub-funnel, status: active,
+         note: "Dedicated Tailscale Funnel HTTPS listener for /api/youtube/webhook; must not replace the site HTTPS listener on 443"}
+
+      # ── site: existing com.djbclark.* agents (no listeners) ──────────────
+      # system-state-backup, hibernate-disk-check — no ports.
+
+      # ── brew-services / F2 audit (docs/relay/audits/F2-brew-services-audit.md)
+      # redis (6379): stopped + uninstalled 2026-07-20 (operator Accept, RESIDUAL-EF) — claim dropped.
+      #
+      # UDS-only (no TCP listen — cannot appear as a ports.yml row; claim lives in
+      # registry/paths.yml brew_services + site prefixes for ~/.config/herdr/**):
+      #   herdr — homebrew.mxcl.herdr → ~/.config/herdr/herdr.sock (agent multiplexer server)
+      # Dashboard: OliveTin actions user_herdr_* (olivetin/user-actions.yaml).
+      # omlx :8000 — uninstalled 2026-07-29 (operator); brew claim + service removed;
+      # do not reclaim without sign-off.
+      - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
+      - {port: 3283,  bind: "*",         owner: unmanaged, service: apple-remote-desktop, status: active}
+      - {port: 445,   bind: "*",         owner: unmanaged, service: smb,          status: active}
+      - {port: 88,    bind: "*",         owner: unmanaged, service: kerberos-macos, status: active}
+      - {port: 17500, bind: "*",         owner: unmanaged, service: dropbox-lansync, status: active}
+      - {port: 17600, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-helper, status: active}
+      - {port: 17603, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-api,    status: active}
+      - {port: 7265,  bind: "127.0.0.1", owner: unmanaged, service: raycast-helper,       status: active}
+      - {port: 44438, bind: "127.0.0.1", owner: unmanaged, service: zed-editor-helper,     status: active}
+      - {port: 59869, bind: "*",         owner: unmanaged, service: logi-options-daemon,  status: active}
+      - {port: 5938,  bind: "*",         owner: unmanaged, service: teamviewer,   status: active}
+      - {port: 8021,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9000,  bind: "*",         owner: unmanaged, service: photosync,    status: active,
+         note: "F2: PhotoSync app (not homebrew.mxcl)"}
+      - {port: 9350,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 9999,  bind: "127.0.0.1", owner: unmanaged, service: TODO-identify, status: active,
+         note: "F2: java process observed; still TODO-identify app name"}
+      - {port: 3031,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
+      - {port: 15220, bind: "*",         owner: unmanaged, service: octoclip,     status: active,
+         note: "F2: Octoclip app (not homebrew.mxcl)"}
+      # postgresql@14: formula gone; orphaned agent removed 2026-07-20 (operator Accept, RESIDUAL-EF).
+      # postgresql@18 installed, service none. mariadb installed, service none, 3306 free.
+      # Register 5432/3306 only when a service is adopted and started.
+
+  # E5: Intel Mac mini — same loopback LiteLLM port claim; host offline/unprovisioned
+  # on the tailnet as of 2026-07-20. status planned until first successful apply.
+  mac-mini-intel:
+    ports:
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy, status: planned,
+         note: "E5: com.djbclark.litellm launchd; Homebrew /usr/local (Intel); loopback until auth story"}
+
+  # E5: first Linux VPS slot — systemd user unit, not launchd. Rename or add
+  # vps-* hosts in inventory + here when additional VPS identities exist.
+  vps-primary:
+    ports:
+      - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy, status: planned,
+         note: "E5: com.djbclark.litellm systemd --user; loopback until master key + Tailscale bind design"}
+
+# ── Fleet device ports (android; stayturgid product defaults, for reference)
+fleet_defaults:
+  - {port: 5555,  service: adb-wireless}
+  - {port: 8022,  service: termux-sshd}
+  - {port: 65000, service: firerpa}

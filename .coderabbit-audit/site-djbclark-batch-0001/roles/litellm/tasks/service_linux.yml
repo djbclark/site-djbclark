@@ -1,0 +1,46 @@
+---
+# Linux: systemd --user unit com.<site_ns>.litellm (no root network bind).
+
+- name: Render secret-bearing LiteLLM systemd user unit
+  ansible.builtin.template:
+    src: litellm.service.j2
+    dest: "{{ litellm_unit_path }}"
+    mode: "0600"
+  register: _litellm_unit
+  no_log: true
+
+- name: Reload systemd user daemon after unit change
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - daemon-reload
+  when:
+    - not ansible_check_mode
+    - _litellm_unit.changed | default(false)
+  changed_when: true
+
+- name: Enable and start LiteLLM user unit
+  ansible.builtin.systemd:
+    name: "{{ litellm_label }}.service"
+    enabled: true
+    state: started
+    scope: user
+    daemon_reload: false
+  when: not ansible_check_mode
+  register: _litellm_systemd_start
+
+- name: Restart LiteLLM user unit after tool/config/unit change
+  ansible.builtin.systemd:
+    name: "{{ litellm_label }}.service"
+    state: restarted
+    scope: user
+  when:
+    - not ansible_check_mode
+    - >-
+      (_litellm_config.changed | default(false))
+      or (_litellm_tool_install.changed | default(false))
+      or (_litellm_tool_repair.changed | default(false))
+      or (_litellm_unit.changed | default(false))
+  # unit change already may have needed start; restart ensures new env/config
+  changed_when: true

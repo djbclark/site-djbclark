@@ -1,0 +1,29 @@
+# Human handoff directory
+
+Tasks **only a human can do** — credentials, on-device confirmation, deploy
+approval. Agents read **`HANDOFF-HUMAN.md`** before asking you to act; you record
+outcomes in **`RESPONSES.md`**.
+
+**Device preference for agents:** **s24** → **hd8** → **p7a** when one host suffices
+([docs/handoff.md](../docs/handoff.md) § Agent conventions).
+
+## Workflow
+
+1. Open **`HANDOFF-HUMAN.md`** — prioritized operator checklist + session notes.
+2. Complete items; record in **`RESPONSES.md`** (from `RESPONSES.md.example`).
+3. Tell the agent: _"Read human/RESPONSES.md"_ — it continues automation.
+
+Agent work menu: [docs/options.md](https://github.com/djbclark/stayturgid/blob/master/docs/options.md). Do not put secrets in git.
+
+## Files
+
+| File                   | Who edits                        | In git     |
+| ---------------------- | -------------------------------- | ---------- |
+| `HANDOFF-HUMAN.md`     | Agent (task list, session notes) | yes        |
+| `API-KEYS-E4.md`       | Agent (SecretSpec / LiteLLM / Fieldy first-run) | yes |
+| `F2-BREW-SERVICES-DECISIONS.md` | Operator keep/kill sign-off (F2 audit) | yes |
+| `RESPONSES.md.example` | Template                         | yes        |
+| `RESPONSES.md`         | **You** (outcomes, approvals)    | gitignored |
+
+**Phase E4 keys:** complete [`API-KEYS-E4.md`](API-KEYS-E4.md) before expecting
+Goose/LiteLLM completions or Fieldy OAuth.

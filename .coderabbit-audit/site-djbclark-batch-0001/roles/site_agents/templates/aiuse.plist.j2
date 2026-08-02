@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ site_agents_aiuse_label }}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ site_agents_aiuse_bin }}</string>
+        <string>-q</string>
+        <string>--json</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>{{ site_agents_aiuse_interval_seconds }}</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{ site_agents_aiuse_log }}</string>
+    <key>StandardErrorPath</key>
+    <string>{{ site_agents_aiuse_error_log }}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ site_agents_home }}/.local/bin:{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{{ site_agents_home }}</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

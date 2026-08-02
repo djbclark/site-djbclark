@@ -1,0 +1,20 @@
+---
+# Site-private identity denylist for `just validate-identity` (stayturgid).
+#
+# Merged into the drift scan by control/bin/validate_site_identity.py when
+# this overlay is active. These regexes catch near-miss identity leaks —
+# historical or alternate addresses in this site's ranges that are NOT in the
+# live inventory (the validator derives live literals from inventory itself).
+#
+# Derived from inventory/hosts.yml + group_vars/stayturgid.yml:
+#   - 192.168.68.0/24  — primary LAN (s24, p7a, control node)
+#   - 192.168.1.0/24   — secondary LAN (hd8 device_lan_ip)
+#   - 100.64.0.0/10    — Tailscale CGNAT range (all management IPs)
+#     (trailing (?!/) exempts CIDR *range* notation like "100.64.0.0/10",
+#     which is generic ACL config, not a host identity; the leading lookahead
+#     exempts 100.100.100.100, Tailscale's public MagicDNS/coordination
+#     address, which is a product constant, not site identity)
+patterns:
+  - '\b192\.168\.68\.\d{1,3}\b'
+  - '\b192\.168\.1\.\d{1,3}\b'
+  - '\b(?!100\.100\.100\.100\b)100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d{1,3}\.\d{1,3}\b(?!/)'

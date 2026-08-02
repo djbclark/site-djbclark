@@ -1,0 +1,72 @@
+# Site path/namespace registry — authority for prefix ownership across the site.
+# See docs/plans/site-djbclark-step1-segmentation-architecture-v1.md §4.
+#
+# Rules:
+#   - Single writer per file. Generated files carry a generated header and are
+#     never hand-edited.
+#   - Shared append-only files (~/.ssh/authorized_keys) are touched only via
+#     per-stack marked blocks; ~/.ssh/config.d/ uses per-stack fragment files.
+#   - Private-inside-public nesting is forbidden (step1 decision 6).
+#
+# Seeded 2026-07-18 (post Big Move to ~/ops).
+
+base_dir:
+  path: ~/ops                # plain directory, never itself a git repo
+  env_var: OPS_ROOT          # contract-level override for other sites
+  checkouts:
+    - ~/ops/stayturgid       # public product (github.com/djbclark/stayturgid)
+    - ~/ops/site-djbclark    # private site repo (github.com/djbclark/site-djbclark)
+  scratch: ~/ops/scratch     # stale checkouts parked here; deletion = operator call
+
+prefixes:
+  stayturgid:
+    - "~/ops/stayturgid/**"
+    - "~/Library/LaunchAgents/com.stayturgid.*"
+    - "~/.config/stayturgid/**"
+    - "~/Library/Logs/stayturgid*"
+    - "~/.ssh/config.d/stayturgid"          # generated SSH fragment
+    - "~/.ssh/authorized_keys"              # marked block only (ET fleet keys)
+  site:
+    - "~/ops/site-djbclark/**"
+    - "~/Library/LaunchAgents/com.djbclark.*"   # F1: site_agents + LiteLLM et al.
+    - "~/.config/systemd/user/com.djbclark.*"   # E5: Linux user units (LiteLLM et al.)
+    - "~/.local/share/open-webui/**"             # Open WebUI data dir
+    - "~/.config/djbclark/**"                   # reserved; not yet populated
+    - "~/.local/bin/system-state-backup.sh"      # F1: site_agents role
+    - "~/.local/bin/hibernate-disk-check"        # F1: site_agents role
+    - "~/.local/state/hibernate-disk-check.*"    # F1: hibernate-disk-check logs/state
+    - "~/.local/state/litellm/**"               # E5: Linux LiteLLM logs/state
+    - "~/ai-stack/**"                           # AI-stack runtime dir (step0), if kept
+    - "~/.litellm/**"                           # LiteLLM config/cache (step0)
+    - "~/system-state/**"                       # F1: system-state-backup mirror output
+    - "/opt/homebrew/var/system-state/**"       # F1: arm64 canonical capture dir
+    - "/opt/homebrew/var/log/system-state-backup.log"
+    - "/usr/local/var/system-state/**"          # F1: Intel canonical capture dir
+    - "/usr/local/var/log/system-state-backup.log"
+    # F4 Merged-Brewfile (source: brew/fragments; projection under generated/)
+    - "~/ops/site-djbclark/brew/**"
+    - "~/ops/site-djbclark/generated/Merged-Brewfile"
+    # herdr (homebrew.mxcl.herdr): config, UDS sockets, session state — no TCP port
+    - "~/.config/herdr/**"
+    - "/opt/homebrew/var/log/herdr.log"
+  brew_services:
+    # homebrew.mxcl.* labels — each claimed by exactly one stack when adopted.
+    # Optional 'dashboard: true' flags non-TCP services for dashboard visibility via launchd probes.
+    # F2 audit 2026-07-20: docs/relay/audits/F2-brew-services-audit.md
+    # Operator keep/kill sign-off: human/F2-BREW-SERVICES-DECISIONS.md
+    - {label: homebrew.mxcl.et,             claimed_by: stayturgid, note: "Eternal Terminal port 2022; system LaunchDaemon is live; user LaunchAgent removed 2026-07-20 (operator Accept, RESIDUAL-EF) — dual-load noise resolved"}
+    - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
+    - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
+    - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
+    - {label: homebrew.mxcl.herdr,          claimed_by: site,       dashboard: true, note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
+    # homebrew.mxcl.omlx — removed 2026-07-29 (operator): formula/tap/weights uninstalled;
+    # claim dropped so brew-diff / agents do not treat it as a missing install.
+
+known_gaps:
+  # Observed during the 2026-07-18 survey; resolve during phased work.
+  - "com.stayturgid.landing / landing-discover plists are hand-managed, not
+     Ansible-templated (patched by hand after the Big Move; fold into
+     control_node agents tasks or the Phase D landing adapter role)"
+  - "LaunchDaemons (system domain): RustDesk, TeamViewer, Zoom, Adobe —
+     still unmanaged"
+  - "stayturgid repo-root .env should relocate to ~/.config/stayturgid/"

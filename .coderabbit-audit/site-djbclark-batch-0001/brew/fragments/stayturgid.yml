@@ -1,0 +1,51 @@
+# Stayturgid product Homebrew claims (mirrored into the site Merged-Brewfile).
+# Hand-edited when product package lists change; not auto-synced from the
+# product checkout yet (future: site-sync could emit a fragment).
+# Sources: stayturgid control_node defaults + serverapp_* homebrew tasks.
+stack: stayturgid
+description: >-
+  Formulae/casks stayturgid roles install on the control node (prereqs,
+  serverapps, ET).
+
+taps:
+  - name: vectordotdev/brew
+    note: vector formula (serverapp_vector)
+
+formulae:
+  # control_node stayturgid_mac_brew_packages_base
+  - name: python
+    note: control_node prereqs (may resolve as python@N on live)
+  - name: uv
+    note: control_node prereqs + LiteLLM uv tool path
+  - name: git
+    note: control_node prereqs
+  - name: ansible
+    note: control_node prereqs
+  - name: scrcpy
+    note: control_node prereqs (Android mirroring)
+  - name: hermes-agent
+    note: control_node hermes task
+  - name: rsync
+    note: control_node prereqs (GNU rsync, preferred over ancient macOS system rsync for termux_userland sync tasks)
+  # control_node stayturgid_mac_brew_packages_app_stores
+  - name: fdroidcl
+    note: F-Droid CLI (app stores)
+  - name: apkeep
+    note: APK download CLI (app stores)
+  # serverapps (own-mode install when absent)
+  - name: caddy
+    note: serverapp_caddy
+  - name: grafana
+    note: serverapp_grafana
+  - name: victoriametrics
+    note: serverapp_victoriametrics
+  - name: vectordotdev/brew/vector
+    note: serverapp_vector
+  # brew services claimed by stayturgid in registry/paths.yml
+  - name: et
+    note: Eternal Terminal (homebrew.mxcl.et); stayturgid fleet
+
+casks:
+  # Listed as homebrew formula name in stayturgid defaults; live snapshot is cask.
+  - name: android-platform-tools
+    note: control_node prereqs (ADB); live Brewfile records as cask

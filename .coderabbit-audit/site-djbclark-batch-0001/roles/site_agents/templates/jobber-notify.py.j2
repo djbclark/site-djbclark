@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Jobber failure notification handler.
+
+Implements:
+  - Option A: macOS Desktop Notifications (osascript)
+  - Option B: Telegram / Hermes Alerting (HTTP POST to Telegram Bot API)
+  - Option C: Log Sinks & Filesystem Capture (structured notifications log)
+"""
+
+from datetime import datetime
+import json
+import os
+import socket
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+
+def load_env():
+    """Load environment variables from site .env if available."""
+    env = dict(os.environ)
+    env_file = os.path.expanduser("{{ site_agents_home }}/ops/site-djbclark/.env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in env:
+                            env[k] = v
+        except Exception:
+            pass
+    return env
+
+
+def parse_jobber_input():
+    """Parse Jobber JSON record from stdin or environment fallback."""
+    data = {}
+    if not sys.stdin.isatty():
+        try:
+            raw = sys.stdin.read()
+            if raw.strip():
+                data = json.loads(raw)
+        except Exception:
+            pass
+
+    job_obj = data.get("job", {})
+    job_name = job_obj.get("name") or os.environ.get("JOB_NAME") or "Unknown Job"
+    status = (
+        data.get("status")
+        or job_obj.get("status")
+        or os.environ.get("JOB_STATUS")
+        or "Failed"
+    )
+    start_time = (
+        data.get("startTime")
+        or os.environ.get("JOB_START_TIME")
+        or datetime.now().isoformat()
+    )
+
+    stdout = data.get("stdout", "")
+    stderr = data.get("stderr", "")
+    err_msg = data.get("errMessage", "")
+
+    error_snippet = (
+        stderr.strip()
+        or stdout.strip()
+        or err_msg
+        or os.environ.get("JOB_ERROR")
+        or "No output logged."
+    )
+
+    if len(error_snippet) > 1500:
+        error_snippet = error_snippet[-1500:]
+
+    return {
+        "job_name": job_name,
+        "status": status,
+        "start_time": start_time,
+        "stdout": stdout,
+        "stderr": stderr,
+        "err_msg": err_msg,
+        "error_snippet": error_snippet,
+        "raw_data": data,
+    }
+
+
+def send_desktop_notification(info):
+    """Option A: macOS Desktop Notification via osascript."""
+    job_name = info["job_name"]
+    status = info["status"]
+    snippet = info["error_snippet"].replace('"', '\\"').replace("\n", " ")
+    if len(snippet) > 120:
+        snippet = snippet[:117] + "..."
+
+    title = f"Jobber Alert: {job_name}"
+    subtitle = f"Status: {status}"
+    script = f'display notification "{snippet}" with title "{title}" subtitle "{subtitle}"'
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def send_telegram_notification(info, env):
+    """Option B: Telegram / Hermes Alerting."""
+    bot_token = env.get("TELEGRAM_BOT_TOKEN")
+    chat_id = env.get("TELEGRAM_HOME_CHANNEL") or env.get("TELEGRAM_ALLOWED_USERS")
+    if not bot_token or not chat_id:
+        return
+
+    chat_ids = [c.strip() for c in chat_id.split(",") if c.strip()]
+    if not chat_ids:
+        return
+
+    hostname = socket.gethostname()
+    job_name = info["job_name"]
+    status = info["status"]
+    time_str = info["start_time"]
+    snippet = info["error_snippet"]
+
+    snippet_html = (
+        snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+    msg = (
+        f"🚨 <b>Jobber Failure Alert</b>\n"
+        f"<b>Job:</b> <code>{job_name}</code>\n"
+        f"<b>Status:</b> {status}\n"
+        f"<b>Host:</b> {hostname}\n"
+        f"<b>Time:</b> {time_str}\n\n"
+        f"<b>Error output:</b>\n"
+        f"<pre>{snippet_html}</pre>"
+    )
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    for cid in chat_ids:
+        payload = {
+            "chat_id": cid,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        try:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=req_data, headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                pass
+        except Exception as e:
+            sys.stderr.write(f"Failed to send Telegram notification to {cid}: {e}\n")
+
+
+def log_notification(info, env):
+    """Option C: Log Sinks & Filesystem Capture."""
+    state_dir = os.path.expanduser("{{ site_agents_jobber_state_dir }}")
+    os.makedirs(state_dir, exist_ok=True)
+    log_file = os.path.join(state_dir, "notifications.log")
+
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "hostname": socket.gethostname(),
+        "job": info["job_name"],
+        "status": info["status"],
+        "start_time": info["start_time"],
+        "error_snippet": info["error_snippet"],
+    }
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
+def main():
+    env = load_env()
+    info = parse_jobber_input()
+
+    log_notification(info, env)
+    send_desktop_notification(info)
+    send_telegram_notification(info, env)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,23 @@
+# Secret values and local credentials. Declarations remain committed.
+.env
+*.env
+*.pem
+*.key
+*.crt
+id_*
+
+# Local caches and editor state.
+.DS_Store
+.ansible/
+.claude/
+.pytest_cache/
+__pycache__/
+
+# Aider local session state (site-djbclark#12 — herdr-aider wrapper).
+.aider*
+
+# generated/ is intentionally not ignored: site-sync output is reviewable and committed.
+
+# Ralph TUI project config is machine-local (absolute path to the
+# shared ops-djbclark control plane) — not shared repo content.
+.ralph-tui/
