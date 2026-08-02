@@ -55,10 +55,11 @@ brew "git"  # [stayturgid] control_node prereqs
 brew "grafana"  # [stayturgid] serverapp_grafana
 brew "hermes-agent"  # [stayturgid] control_node hermes task
 brew "python"  # [stayturgid] control_node prereqs (may resolve as python@N on live)
+brew "rsync"  # [stayturgid] control_node prereqs (GNU rsync, preferred over ancient macOS system rsync for termux_userland sync tasks)
 brew "scrcpy"  # [stayturgid] control_node prereqs (Android mirroring)
 brew "uv"  # [stayturgid] control_node prereqs + LiteLLM uv tool path
 brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 1 taps, 31 formulae, 4 casks across 4 stack(s)
+# summary: 1 taps, 32 formulae, 4 casks across 4 stack(s)
