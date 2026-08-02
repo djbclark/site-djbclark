@@ -1,0 +1,180 @@
+# Monitors anomalyco/opencode#21960 ("SessionRetry.policy() retries
+# forever with no max attempt count") and its known related PRs, since
+# this bug causes `opencode run` to hang indefinitely on a retryable error
+# (e.g. a 429 from an exhausted OpenCode Go quota) with no config
+# override available. See ~/.config/ralph-tui/config.toml's opencode-go
+# entry for where this blocks real usage.
+#
+# Setup: TELEGRAM_BOT_TOKEN must be set as a repository secret (shared
+# with monitor-herdr-extension-releases.yml).
+
+---
+name: Monitor opencode retry-cap bug
+
+"on":
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: >-
+          Send a test notification to the standing Hermes Telegram topic
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor-opencode-retry-bug
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  check-issue:
+    name: Check opencode#21960 and related PRs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Read current upstream state
+        id: state
+        run: |
+          issue_state=$(gh issue view 21960 --repo anomalyco/opencode \
+            --json state --jq .state)
+          echo "issue_state=$issue_state" >> "$GITHUB_OUTPUT"
+
+          # Known related PRs proposing a maxAttempts/retry-cap config, as
+          # of the last check. A new PR merging OR any of these merging is
+          # the real "fixed" signal — the issue closing alone isn't
+          # trustworthy (a near-identical earlier issue, #25733, auto-closed
+          # as stale without ever being fixed).
+          merged_any="false"
+          for pr in 25805 26676 38958; do
+            merged_at=$(gh pr view "$pr" --repo anomalyco/opencode \
+              --json mergedAt --jq .mergedAt 2>/dev/null || echo "null")
+            if [ "$merged_at" != "null" ] && [ -n "$merged_at" ]; then
+              merged_any="true"
+              echo "PR #$pr merged at $merged_at"
+            fi
+          done
+          echo "merged_any=$merged_any" >> "$GITHUB_OUTPUT"
+
+          if [ "$issue_state" = "CLOSED" ] || [ "$merged_any" = "true" ]; then
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check whether this resolution was already reported
+        id: dedupe
+        if: steps.state.outputs.resolved == 'true'
+        run: |
+          title="opencode retry-cap bug (anomalyco/opencode#21960) resolved"
+          count=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --search "${title} in:title" \
+            --limit 100 \
+            --json title \
+            --jq "[.[] | select(.title == \"$title\")] | length")
+
+          if [ "$count" -eq 0 ]; then
+            echo "new_resolution=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_resolution=false" >> "$GITHUB_OUTPUT"
+            echo "Resolution was already reported: $title"
+          fi
+
+      - name: Notify via Hermes Telegram topic
+        if: steps.dedupe.outputs.new_resolution == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ISSUE_STATE: ${{ steps.state.outputs.issue_state }}
+          MERGED_ANY: ${{ steps.state.outputs.merged_any }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          issue_url="https://github.com/anomalyco/opencode/issues/21960"
+          printf -v text '%s\n%s\n%s\n%s / %s\n%s' \
+            "🔧 opencode retry-cap bug may be resolved" \
+            "issue state: ${ISSUE_STATE}, fix PR merged: ${MERGED_ANY}" \
+            "$issue_url" "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22082 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the notification."
+
+      - name: Record resolution as a GitHub issue
+        if: steps.dedupe.outputs.new_resolution == 'true'
+        env:
+          ISSUE_STATE: ${{ steps.state.outputs.issue_state }}
+          MERGED_ANY: ${{ steps.state.outputs.merged_any }}
+        run: |
+          title="opencode retry-cap bug (anomalyco/opencode#21960) resolved"
+          body=$(cat <<EOF
+          Upstream state changed: issue state is now ${ISSUE_STATE}, a
+          known related fix PR merged: ${MERGED_ANY}.
+
+          - Issue: https://github.com/anomalyco/opencode/issues/21960
+          - We confirmed this bug live 2026-08-02 (opencode-go quota
+            exhaustion triggers an uncapped retry loop, hanging \`opencode
+            run\` indefinitely) and posted a confirming comment:
+            https://github.com/anomalyco/opencode/issues/21960#issuecomment-5158778654
+          - Detection run:
+            https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Re-verify the fix actually shipped in a released opencode version
+          (not just merged to a dev branch) before re-enabling the
+          opencode-go entry in ~/.config/ralph-tui/config.toml — see that
+          file's own comment for the exact re-enable conditions. This issue
+          also prevents duplicate Telegram notifications for this
+          resolution.
+          EOF
+          )
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --body "$body"
+
+  test-notification:
+    name: Test Telegram delivery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.send_test_notification == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Send test notification to Hermes Telegram topic
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          printf -v text '✅ opencode retry-cap bug monitor test\n%s / %s\n%s' \
+            "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22082 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the test notification."
