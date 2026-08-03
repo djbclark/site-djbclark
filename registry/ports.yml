@@ -13,6 +13,13 @@
 #   load_caddy_proxied_ports() for the consumer side. New optional fields
 #   like this one never need a schema/contract_version bump; only renaming,
 #   retyping, or removing an EXISTING field does.
+# tailscale_serve_port: optional -- for a loopback backend exposed via
+#   `tailscale serve --https=<port>` directly (bypassing Caddy entirely),
+#   the external HTTPS port it's reachable on. Same skip-list purpose as
+#   caddy_path but for this different exposure mechanism -- some apps
+#   (e.g. open-webui, which has no reverse-proxy-subpath support at all)
+#   need to be served from their own root rather than a Caddy path.
+#   Consumed by control/landing/discover.py's load_tailscale_serve_ports().
 # Products declare defaults in their role defaults; THIS file is the site
 # authority. Lint: every effective listen port must appear here exactly once
 # per host; collisions fail CI.
@@ -68,8 +75,8 @@ hosts:
          caddy_path: "/litellm/*",
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
-         caddy_path: "/chat/*",
-         note: "Open WebUI private AI workspace; proxied by Caddy at /chat/*"}
+         tailscale_serve_port: 8086,
+         note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
          note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.

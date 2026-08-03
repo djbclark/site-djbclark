@@ -1,5 +1,0 @@
-# Open WebUI
-# proxied directly without handle_path as Open WebUI handles /chat
-handle /chat/* {
-	reverse_proxy 127.0.0.1:8085
-}
