@@ -28,6 +28,21 @@ REPO = Path(__file__).resolve().parent.parent
 REQUIRED_PORT_KEYS = {"port", "owner", "service", "status"}
 VALID_STATUS = {"active", "planned", "default-claim"}
 
+# Site-owned Ansible roles that declare their own port default, each
+# cross-checked against the registry/ports.yml entry with the matching
+# `service` name (any host). Catches the same drift class that motivated
+# registry/ports.yml's caddy_path field: two independently hand-maintained
+# literals silently disagreeing (litellm_port/open_webui_port had no
+# automated check at all until this lint was added, 2026-08-03).
+# stayturgid-owned roles get an equivalent guarantee from stayturgid's own
+# control/site_contract/generate_registry_seeds.py --check; these two
+# site-djbclark-owned roles aren't covered by that generator (it only
+# resolves file paths inside the stayturgid repo).
+ROLE_DEFAULT_PORT_SOURCES: list[dict[str, str]] = [
+    {"file": "roles/litellm/defaults/main.yml", "yaml_key": "litellm_port", "service": "litellm-proxy"},
+    {"file": "roles/open_webui/defaults/main.yml", "yaml_key": "open_webui_port", "service": "open-webui"},
+]
+
 
 def fail(msg: str) -> None:
     print(f"registry-lint: FAIL: {msg}")
@@ -68,6 +83,47 @@ def lint_ports(findings: list[str]) -> None:
                     f"{host}: port {port} claimed under wildcard and specific binds "
                     f"({', '.join(sorted(binds))}) — wildcard covers all addresses"
                 )
+
+
+def lint_role_default_ports(findings: list[str]) -> None:
+    ports_data = yaml.safe_load((REPO / "registry" / "ports.yml").read_text())
+    hosts = ports_data.get("hosts") or {}
+
+    for spec in ROLE_DEFAULT_PORT_SOURCES:
+        path = REPO / spec["file"]
+        try:
+            role_defaults = yaml.safe_load(path.read_text())
+        except (OSError, yaml.YAMLError) as exc:
+            findings.append(f"role defaults {spec['file']}: cannot read/parse: {exc}")
+            continue
+        if not isinstance(role_defaults, dict) or spec["yaml_key"] not in role_defaults:
+            findings.append(f"role defaults {spec['file']}: missing key {spec['yaml_key']!r}")
+            continue
+        role_port = role_defaults[spec["yaml_key"]]
+        if not isinstance(role_port, int) or isinstance(role_port, bool):
+            findings.append(
+                f"role defaults {spec['file']}: {spec['yaml_key']} is not a plain integer "
+                f"({role_port!r}) -- the registry drift lint needs a literal, not a Jinja expression"
+            )
+            continue
+
+        matched = False
+        for host, hostdata in hosts.items():
+            for entry in hostdata.get("ports") or []:
+                if entry.get("service") != spec["service"]:
+                    continue
+                matched = True
+                if entry.get("port") != role_port:
+                    findings.append(
+                        f"{spec['file']}: {spec['yaml_key']}={role_port} does not match "
+                        f"registry/ports.yml host {host!r} service {spec['service']!r} "
+                        f"port={entry.get('port')!r} -- keep the role default and the registry entry in sync"
+                    )
+        if not matched:
+            findings.append(
+                f"{spec['file']}: no registry/ports.yml entry found for service {spec['service']!r} "
+                f"(role default {spec['yaml_key']}={role_port})"
+            )
 
 
 def lint_paths(findings: list[str]) -> None:
@@ -112,6 +168,7 @@ def main() -> int:
     findings: list[str] = []
     try:
         lint_ports(findings)
+        lint_role_default_ports(findings)
         lint_paths(findings)
         lint_generated_paths()
     except (OSError, yaml.YAMLError) as exc:
