@@ -91,7 +91,7 @@
       - "http://127.0.0.1:{{ open_webui_port }}"
   vars:
     _open_webui_serve_key: "{{ caddy_public_hostname }}:{{ open_webui_serve_port }}"
-    _open_webui_serve_doc: "{{ _open_webui_serve_status.stdout | from_json }}"
+    _open_webui_serve_doc: "{{ (_open_webui_serve_status.stdout | from_json) | default({}, true) }}"
   changed_when: >-
     (_open_webui_serve_doc.get('Web', {}).get(_open_webui_serve_key, {})
      .get('Handlers', {}).get('/', {}).get('Proxy', ''))
