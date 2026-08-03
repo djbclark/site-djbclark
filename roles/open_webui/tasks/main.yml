@@ -64,3 +64,18 @@
   retries: 60
   delay: 2
   when: not ansible_check_mode
+
+- name: Ensure Open WebUI is exposed via tailscale serve
+  # Open WebUI has no reverse-proxy-subpath support (confirmed upstream
+  # limitation, 2026-08-03) -- served from its own root via a dedicated
+  # tailscale serve HTTPS port instead of a Caddy subpath. Idempotent:
+  # re-running this with the same target is a harmless no-op.
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - serve
+      - --bg
+      - "--https={{ open_webui_serve_port }}"
+      - "http://127.0.0.1:{{ open_webui_port }}"
+  changed_when: true
+  when: not ansible_check_mode

@@ -8,6 +8,14 @@ open_webui_port: 8085
 open_webui_uv_bin_default: "{{ open_webui_home }}/.local/share/uv/tools/uv/bin/uv"
 open_webui_package_spec: "open-webui"
 open_webui_health_url: "http://127.0.0.1:{{ open_webui_port }}/health"
-open_webui_base_url: "/chat"
+# Real external URL: exposed via `tailscale serve --https={{ open_webui_serve_port }}`
+# directly (registry/ports.yml tailscale_serve_port), not a Caddy subpath --
+# Open WebUI has no reverse-proxy-subpath support (confirmed upstream
+# limitation, 2026-08-03), so the previous "/chat" path value here served a
+# broken bundle (absolute-root asset paths like /_app/*, /static/* 404'd
+# under any subpath). WEBUI_BASE_URL needs the real reachable base URL for
+# things like OAuth redirect URIs and links in generated content.
+open_webui_serve_port: 8086
+open_webui_base_url: "https://{{ caddy_public_hostname }}:{{ open_webui_serve_port }}"
 open_webui_openai_api_base_url: "http://127.0.0.1:4000/v1"
 open_webui_openai_api_key: "sk-dummy"
