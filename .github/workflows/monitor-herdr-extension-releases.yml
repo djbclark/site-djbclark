@@ -39,7 +39,7 @@ jobs:
           - name: Collie
             slug: collie
             repo: AltanS/collie
-            installed_version: 0.22.0
+            installed_version: 0.23.0
           - name: herdr-break-pane
             slug: herdr-break-pane
             repo: iuhoay/herdr-break-pane
