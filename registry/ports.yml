@@ -9,10 +9,10 @@
 #   means "not Caddy-proxied", changing nothing for any existing reader.
 #   Consumed by control/landing/discover.py (stayturgid) to skip a
 #   Caddy-fronted backend's raw-port entry once its real HTTPS route is
-#   already shown on the dashboard -- see that file's CADDY_PROXIED_PORTS
-#   derivation for the consumer side. New optional fields like this one
-#   never need a schema/contract_version bump; only renaming, retyping, or
-#   removing an EXISTING field does.
+#   already shown on the dashboard -- see that file's
+#   load_caddy_proxied_ports() for the consumer side. New optional fields
+#   like this one never need a schema/contract_version bump; only renaming,
+#   retyping, or removing an EXISTING field does.
 # Products declare defaults in their role defaults; THIS file is the site
 # authority. Lint: every effective listen port must appear here exactly once
 # per host; collisions fail CI.
