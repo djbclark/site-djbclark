@@ -67,9 +67,23 @@ jobs:
         run: |
           mkdir -p .cache/gh-tracker
 
-          # Fetch issue via public API (no auth needed for public repos)
-          response=$(curl -sf "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null || echo '{"state":"unknown"}')
-          comments_response=$(curl -sf "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER/comments?per_page=1" 2>/dev/null || echo '[]')
+          # Fetch issue via public API (no auth needed for public repos).
+          # --retry: transient API hiccups (rate limits, 5xx) must NOT be
+          # treated as real state changes — retry first, then skip if still down.
+          response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null) || response=""
+          comments_response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER/comments?per_page=1" 2>/dev/null) || comments_response=""
+
+          # If either fetch failed after retries, skip silently: no notification,
+          # no cache write. Keep the last known good state for the next run.
+          if [ -z "$response" ] || [ -z "$comments_response" ]; then
+            echo "API fetch failed for $ISSUE_REPO#$ISSUE_NUMBER after retries — skipping (no notification, cache untouched)"
+            echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
 
           new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','unknown'))")
           new_count=$(echo "$comments_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)")
@@ -115,7 +129,8 @@ jobs:
       - name: Save state cache
         # Save when something changed, OR on first run (no cache yet) to seed
         # the baseline — otherwise a cold start would never notify again.
-        if: steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
+        # Never save when the fetch failed (would poison the cache with bad state).
+        if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
         uses: actions/cache/save@v4
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
@@ -123,7 +138,7 @@ jobs:
           key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
 
       - name: Notify via Telegram
-        if: steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true)
+        if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "838808636"
