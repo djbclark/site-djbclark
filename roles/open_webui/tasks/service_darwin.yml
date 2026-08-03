@@ -1,4 +1,18 @@
 ---
+- name: Ensure WEBUI_SECRET_KEY is actually present before rendering the LaunchAgent
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'WEBUI_SECRET_KEY') | length > 0
+    fail_msg: >-
+      WEBUI_SECRET_KEY is empty/unset in the ansible process environment.
+      Run this via `just open-webui-apply-secrets` (wraps with `secretspec
+      run`), not `just open-webui-apply` directly -- the latter used to
+      silently render an empty secret into the LaunchAgent template, which
+      Open WebUI then refuses to start with ("hard requirement when
+      authentication is enabled"), crash-looping with the service down.
+      Confirmed real 2026-08-03: this exact mistake took Open WebUI down
+      live during a routine coordinated-release deploy.
+
 - name: Render secret-bearing Open WebUI LaunchAgent
   ansible.builtin.template:
     src: open-webui.plist.j2
