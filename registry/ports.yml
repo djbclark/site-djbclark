@@ -3,6 +3,16 @@
 #
 # owner: stayturgid | site | brew-services | unmanaged (observed; not yet adopted)
 # status: active (observed listening 2026-07-18) | planned | default-claim
+# caddy_path: optional -- the Caddy route(s) this loopback backend is
+#   reverse_proxy'd under (a string, or a list of strings for one backend
+#   serving multiple routes, e.g. fleet-dashboard). Purely additive: absence
+#   means "not Caddy-proxied", changing nothing for any existing reader.
+#   Consumed by control/landing/discover.py (stayturgid) to skip a
+#   Caddy-fronted backend's raw-port entry once its real HTTPS route is
+#   already shown on the dashboard -- see that file's CADDY_PROXIED_PORTS
+#   derivation for the consumer side. New optional fields like this one
+#   never need a schema/contract_version bump; only renaming, retyping, or
+#   removing an EXISTING field does.
 # Products declare defaults in their role defaults; THIS file is the site
 # authority. Lint: every effective listen port must appear here exactly once
 # per host; collisions fail CI.
@@ -19,8 +29,10 @@ hosts:
          note: "Phase D1: site-owned Tailscale TLS front door mac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
       - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
          note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
-      - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active}
+      - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active,
+         caddy_path: "/opencode/*"}
       - {port: 4097,  bind: "127.0.0.1", owner: stayturgid, service: fleet-dashboard,     status: active,
+         caddy_path: ["/dashboard/*", "/stats/*"],
          note: "D7 coverage audit: retained until post-D8 telemetry gives Grafana equivalent device signal and replaces dashboard actions/stats/errors"}
       - {port: 4317,  bind: "127.0.0.1", owner: site, service: vector-otlp-grpc,    status: active,
          note: "Phase D2: com.djbclark.vector OTLP gRPC; legacy plist archived and removed in D7"}
@@ -30,26 +42,33 @@ hosts:
          note: "Phase D2: com.djbclark.vector GraphQL/API health (http://127.0.0.1:8686/health); loopback only"}
       - {port: 5037,  bind: "127.0.0.1", owner: stayturgid, service: adb-server,          status: active}
       - {port: 5080,  bind: "127.0.0.1", owner: site, service: openobserve-http,    status: active,
+         caddy_path: "/oo/*",
          note: "Phase D3: com.djbclark.openobserve HTTP; data dir unchanged ~/.local/share/openobserve/data; legacy plist archived and removed in D7"}
       - {port: 5081,  bind: "127.0.0.1", owner: site, service: openobserve-grpc,    status: active,
          note: "Phase D3: com.djbclark.openobserve gRPC; site-owned with HTTP"}
       - {port: 8080,  bind: "127.0.0.1", owner: site, service: caddy-health,        status: active,
          note: "Phase D1: com.djbclark.caddy health; D4 fixed landing.py default 8080→8088 (no longer collides)"}
       - {port: 8088,  bind: "127.0.0.1", owner: site, service: landing,             status: active,
+         caddy_path: "/",
          note: "Phase D4: com.djbclark.landing + landing-discover; legacy plists archived and removed in D7"}
 
       # ── O-V-G-O completion (install under SITE ownership — Phase D) ──────
       - {port: 3000,  bind: "127.0.0.1", owner: site, service: grafana,          status: active,
+         caddy_path: "/grafana/*",
          note: "Phase D5: com.djbclark.grafana; provisioning from generated/stayturgid/fragments/grafana; Fleet Control Room dashboard"}
       - {port: 8428,  bind: "127.0.0.1", owner: site, service: victoriametrics,  status: active,
+         caddy_path: "/vm/*",
          note: "Phase D5: com.djbclark.victoriametrics; data under ~/.config/djbclark/victoriametrics/data"}
       - {port: 1337,  bind: "127.0.0.1", owner: site, service: olivetin,         status: active,
+         caddy_path: "/olivetin/*",
          note: "Phase D5: com.djbclark.olivetin; empty-actions bootstrap; full inventory→actions projection is D6"}
 
       # ── site: AI stack & local services ──────────────────────────────────
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
+         caddy_path: "/litellm/*",
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
+         caddy_path: "/chat/*",
          note: "Open WebUI private AI workspace; proxied by Caddy at /chat/*"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
          note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
