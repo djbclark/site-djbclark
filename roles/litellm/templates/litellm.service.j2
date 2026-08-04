@@ -20,6 +20,7 @@ StandardError=append:{{ litellm_logs_dir }}/stderr.log
 Environment=HOME={{ litellm_home }}
 Environment=PATH={{ litellm_service_path }}
 Environment=LITELLM_LOG=INFO
+Environment=SERVER_ROOT_PATH={{ litellm_server_root_path }}
 {% if litellm_openai_api_key | length > 0 %}
 Environment=OPENAI_API_KEY={{ litellm_openai_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
 {% endif %}

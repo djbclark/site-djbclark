@@ -13,6 +13,18 @@ litellm_label: "com.{{ site_ns }}.litellm"
 litellm_bind: "127.0.0.1"
 litellm_port: 4000
 
+# Caddy fronts this proxy at /litellm/* with the path prefix stripped before
+# forwarding (handle_path — LiteLLM's own FastAPI routes, e.g. the custom
+# Swagger asset mount `app.mount("/swagger", ...)`, are registered at their
+# bare paths and never see the prefix; see proxy_server.py). SERVER_ROOT_PATH
+# is the app-side knob (read via litellm.proxy.utils.get_server_root_path())
+# that tells LiteLLM what its externally-visible prefix is, purely so it
+# generates correct absolute links (Swagger JS/CSS URLs, the OpenAPI
+# "servers" entry, /ui redirects) — it does not change what paths the proxy
+# itself listens on. Must keep the trailing slash: proxy_server.py builds
+# swagger asset URLs as `server_root_path + "swagger/..."` with no separator.
+litellm_server_root_path: "/litellm/"
+
 # Auto Router v2 first ships in the 1.94 train. As of 2026-07-20 PyPI's
 # newest stable is 1.93.0 and the first usable 1.94 build is 1.94.0rc1.
 litellm_minimum_version: "1.94.0rc1"
