@@ -9,7 +9,7 @@ files:
 - path: generated/stayturgid/fragments/.keep
   sha256: f7d7428aead7a842bcd7726a44ed681db0539abeed0715a99e0426bf0909d4bc
 - path: generated/stayturgid/fragments/caddy/stayturgid.caddy
-  sha256: 0ad7b61e18ca06a33092a660ebfb313a2ce36580a2479d4b6be204b615c48563
+  sha256: 6d83ed579bd577c03b78811fdc40bbd819d882c2014cc58c2ec7c3072f70f1be
 - path: generated/stayturgid/fragments/vector/stayturgid_sources.yaml
   sha256: 7774ffac6078f5fd046521fa3593c055b6608a2af465fa9843cc3fefc8ff514c
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
