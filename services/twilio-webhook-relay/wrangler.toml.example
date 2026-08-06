@@ -1,0 +1,13 @@
+name = "twilio-webhook-relay"
+main = "src/worker.mjs"
+compatibility_date = "2026-08-01"
+
+[[kv_namespaces]]
+binding = "IDEMPOTENCY"
+id = "replace-with-production-kv-namespace-id"
+preview_id = "replace-with-preview-kv-namespace-id"
+
+[vars]
+# Set the public Hermes relay target here only if it is non-sensitive.
+# Store TWILIO_AUTH_TOKEN and FORWARD_TOKEN with `wrangler secret put`.
+FORWARD_URL = "https://replace-with-public-forward-target.example/webhook"
