@@ -100,6 +100,12 @@ class StatusTests(unittest.TestCase):
             bridge.do_status("hermes-gemini", 10, runner=runner)
         self.assertEqual(ctx.exception.error_type, bridge.ErrorType.LOGIN_REQUIRED)
 
+    def test_status_login_required_list_shape(self) -> None:
+        runner = SequenceRunner([cp(stdout=json.dumps([{"Status": "Disconnected", "Login": False}]))])
+        with self.assertRaises(bridge.BridgeError) as ctx:
+            bridge.do_status("hermes-gemini", 10, runner=runner)
+        self.assertEqual(ctx.exception.error_type, bridge.ErrorType.LOGIN_REQUIRED)
+
     def test_status_login_required_string_variant(self) -> None:
         runner = SequenceRunner([cp(stdout=json.dumps({"Login": "logged out"}))])
         with self.assertRaises(bridge.BridgeError) as ctx:
