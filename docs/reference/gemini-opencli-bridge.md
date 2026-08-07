@@ -173,7 +173,7 @@ this wrapper to clean up.
 | Variable                                | Default                              | Purpose                                  |
 | ----------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | `GEMINI_BRIDGE_PROFILE`                   | `hermes-gemini`                       | opencli `--profile` / bound session name  |
-| `GEMINI_BRIDGE_OPENCLI_BIN`               | (resolved via `PATH`)                 | explicit path to the `opencli` binary     |
+- `GEMINI_BRIDGE_OPENCLI_BIN`               | (PATH, then `/opt/homebrew/bin/opencli`, then `/usr/local/bin/opencli`) | explicit binary override or automatic macOS Homebrew discovery |
 | `GEMINI_BRIDGE_STATE_DIR`                 | `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/gemini-bridge` | lock file + audit log dir |
 | `GEMINI_BRIDGE_CAPTURE_CONTENT`           | unset (off)                           | `1` to opt into a bounded response preview in the audit log |
 | `GEMINI_BRIDGE_CAPTURE_CONTENT_MAX_CHARS` | `200` (only used when capture is on)  | preview length in chars; must be a positive integer `<= 4096` (`HARD_MAX_CAPTURE_CHARS`) or the value is rejected and no preview is captured for that call |
@@ -193,11 +193,7 @@ redaction by default.
 
 ## Known gaps / next steps
 
-- `gemini status`/`gemini read`/`gemini ask -f json` field-name guesses
-  (`Login`, `Role`, `Text`, `response`) are based on opencli's table column
-  names, not a live JSON sample — confirm against real output on first live
-  use and adjust `_extract_turns`/`_extract_ask_response`/`do_status` if the
-  actual keys differ.
+- OpenCLI 1.8.6 returns the `ask` response but does not append that turn to the visible `read` snapshot. The bridge first waits briefly for propagation; if the snapshot remains unchanged, it accepts only a nonempty response that differs from the current last assistant response and marks ownership as `ask_response_delta`. Exact stale echoes still fail closed.
 - No `gemini_bind`/`gemini_unbind` lifecycle commands yet (binding is a
   manual `opencli browser <profile> bind` step per the setup above) — the
   issue lists these as optional for a later phase.
