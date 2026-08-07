@@ -86,6 +86,8 @@ hosts:
          note: "Google Antigravity CLI daemon IPC"}
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
          note: "Google Antigravity CLI sidecar listener"}
+      - {port: 18765, bind: "127.0.0.1", owner: site, service: signal-cli-daemon, status: active,
+         note: "Hermes Signal transport; launchd ai.hermes.signal-cli, signal-cli daemon --http. Linked secondary device (never `signal-cli register` — that seizes the number's Signal account). Deliberately moved off 8080 on 2026-08-07: it collided with caddy-health, which this registry already records as having caused one prior collision. Pick an unusual port and claim it HERE before binding — 'free right now per lsof' is what made 8080 look safe."}
 
       # ── SuperBrain (independent local application) ────────────────────────
       - {port: 5000,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
