@@ -96,6 +96,8 @@ hosts:
          note: "/opt/homebrew/opt/moshi-hook/bin/moshi-hook serve, via brew services (homebrew.mxcl.moshi-hook). KEEP — confirmed wanted by the operator 2026-08-07: the Moshi mobile app is in active use and this daemon is its agent bridge. What was retired 2026-07-30 was only the Moshi *webhook* ping path in favour of `hermes send`; that retirement never applied to moshi-hook itself, and the tap formula (rjyo/moshi) is not deprecated. Do not reclaim."}
       - {port: 18765, bind: "127.0.0.1", owner: site, service: signal-cli-daemon, status: active,
          note: "Hermes Signal transport; launchd ai.hermes.signal-cli, signal-cli daemon --http. Linked secondary device (never `signal-cli register` — that seizes the number's Signal account). Deliberately moved off 8080 on 2026-08-07: it collided with caddy-health, which this registry already records as having caused one prior collision. Pick an unusual port and claim it HERE before binding — 'free right now per lsof' is what made 8080 look safe."}
+      - {port: 19825, bind: "127.0.0.1", owner: site, service: opencli-browser-bridge, status: default-claim,
+         note: "site-djbclark#105: @jackwener/opencli's own micro-daemon (its hardcoded default port), auto-started on demand by the `opencli` CLI -- not a launchd service we manage. Backs bin/gemini_opencli_bridge.py (Hermes gemini_status/gemini_read/gemini_ask). See docs/reference/gemini-opencli-bridge.md."}
 
       # ── SuperBrain (independent local application) ────────────────────────
       - {port: 5000,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
