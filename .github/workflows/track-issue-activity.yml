@@ -43,6 +43,9 @@ jobs:
           - repo: subsy/ralph-tui
             number: "397"
             slug: ralph-tui-397
+          - repo: osolmaz/telegram-bot-mux
+            number: "2"
+            slug: telegram-bot-mux-2
     steps:
       - uses: actions/checkout@v4
 
