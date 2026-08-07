@@ -361,8 +361,11 @@ def do_status(profile: str, timeout: float, runner: Runner = run_opencli) -> Bri
     result = runner(args, timeout=timeout)
     _raise_if_failed(result)
     parsed = _parse_json_output(result.stdout)
-    if isinstance(parsed, dict):
-        login_value = parsed.get("Login", parsed.get("login"))
+    records = [parsed] if isinstance(parsed, dict) else parsed if isinstance(parsed, list) else []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        login_value = record.get("Login", record.get("login"))
         if login_value is False or (
             isinstance(login_value, str)
             and login_value.strip().lower() in ("false", "no", "not logged in", "logged out")
