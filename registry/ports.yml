@@ -143,13 +143,12 @@ hosts:
       # These bind a fresh high port per invocation, so a fixed row here would
       # be wrong and would churn the lint on every restart. Do not add rows for
       # them; do not assume a port they happened to hold is free for a
-      # long-running service either. Observed at the 2026-08-07 reconcile:
-      #   agy (Antigravity) CLI sessions — e.g. 50844/50845, 61031/61032.
-      #     Contrast the fixed 53837/53838 rows above, which were NOT listening
-      #     at reconcile time: agy's actual ports drift per session.
-      #   maestro MCP (java, ~/.maestro/lib) — e.g. 10000/10001/10002.
-      #   happy daemon (node .../happy/dist/index.mjs daemon start-sync)
-      #     — e.g. 55089/55093/55094.
+      # long-running service either. `bin/registry_lint.py --reconcile`
+      # matches live listeners against `ephemeral_processes` below (by
+      # command-line substring, not port number) instead of flagging them as
+      # undeclared drift. Contrast the fixed 53837/53838 rows above, which
+      # were NOT listening at the 2026-08-07 reconcile: agy's actual ports
+      # drift per session, unlike a real fixed-port service.
 
       - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
       - {port: 3283,  bind: "*",         owner: unmanaged, service: apple-remote-desktop, status: active}
@@ -174,6 +173,19 @@ hosts:
       # postgresql@14: formula gone; orphaned agent removed 2026-07-20 (operator Accept, RESIDUAL-EF).
       # postgresql@18 installed, service none. mariadb installed, service none, 3306 free.
       # Register 5432/3306 only when a service is adopted and started.
+
+    # Per-session agent tooling that binds a fresh high port every run —
+    # matched by `bin/registry_lint.py --reconcile` against each live
+    # listener's full command line (substring match), not a fixed port
+    # number. See the EPHEMERAL comment above `ports:` for why these have
+    # no port rows. Observed at the 2026-08-07 reconcile (site-djbclark#107).
+    ephemeral_processes:
+      - pattern: "agy"
+        note: "Antigravity (agy) CLI sessions -- observed 50844/50845, 61031/61032"
+      - pattern: "maestro.cli.AppKt mcp"
+        note: "Maestro MCP server (java, ~/.maestro/lib) -- one process per active MCP client connection; observed 10000/10001/10002"
+      - pattern: "happy/dist/index.mjs"
+        note: "happy CLI daemon (node) -- observed 55089/55093/55094"
 
   # E5: Intel Mac mini — same loopback LiteLLM port claim; host offline/unprovisioned
   # on the tailnet as of 2026-07-20. status planned until first successful apply.

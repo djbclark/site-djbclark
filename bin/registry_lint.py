@@ -13,11 +13,22 @@ Checks:
 
 Exit 0 clean, 1 findings, 2 cannot read/parse.
 Run from repo root:  bin/registry_lint.py   (or: uv run bin/registry_lint.py)
+
+--reconcile mode (site-djbclark#107): diffs registry/ports.yml's `mac` host
+against this machine's actual TCP listeners (`lsof`). Opt-in and advisory
+only — never part of the default lint gate above, and always exits 0 — since
+the default path also runs in CI, where the host's listeners are meaningless,
+and several legitimately-ephemeral listeners (see `ephemeral_processes` in
+ports.yml) would otherwise churn it every run.
+Run from repo root:  bin/registry_lint.py --reconcile
 """
 
 from __future__ import annotations
 
+import argparse
 import re
+import shutil
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -164,7 +175,131 @@ def lint_generated_paths() -> None:
                 sys.exit(2)
 
 
+def live_listen_ports() -> dict[int, list[tuple[str, str]]]:
+    """Return {port: [(pid, command), ...]} for this machine's live TCP
+    listeners, via `lsof -F` (machine-readable field output -- robust to the
+    column-width variation in lsof's default human-readable format)."""
+    proc = subprocess.run(
+        ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    ports: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    pid = command = None
+    for line in proc.stdout.splitlines():
+        tag, value = line[0], line[1:]
+        if tag == "p":
+            pid = value
+        elif tag == "c":
+            command = value
+        elif tag == "n" and pid is not None and command is not None:
+            m = re.search(r":(\d+)$", value)
+            if m:
+                ports[int(m.group(1))].append((pid, command))
+    return ports
+
+
+def pid_cmdline(pid: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["ps", "-p", pid, "-o", "command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return ""
+
+
+def reconcile(host: str = "mac") -> int:
+    """Diff registry/ports.yml[host] against this machine's real listeners.
+    Advisory only (site-djbclark#107): always returns 0, never participates
+    in the default lint gate's exit code."""
+    if sys.platform != "darwin" or shutil.which("lsof") is None:
+        print("registry-reconcile: skipped (requires macOS + lsof)")
+        return 0
+
+    data = yaml.safe_load((REPO / "registry" / "ports.yml").read_text())
+    hostdata = (data.get("hosts") or {}).get(host)
+    if hostdata is None:
+        print(f"registry-reconcile: no host {host!r} in registry/ports.yml")
+        return 0
+
+    declared: dict[int, dict] = {e["port"]: e for e in hostdata.get("ports") or [] if "port" in e}
+    ephemeral_patterns = [e["pattern"] for e in hostdata.get("ephemeral_processes") or []]
+
+    try:
+        live = live_listen_ports()
+    except (subprocess.CalledProcessError, OSError) as exc:
+        print(f"registry-reconcile: could not run lsof: {exc}")
+        return 0
+
+    # Advisory note per the release-vs-deployed-skew case in #107: this
+    # checkout's registry/ports.yml may lag origin/master (e.g. running from
+    # a deploy checkout still on an older release), which would otherwise
+    # read as false "live but undeclared" drift.
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        origin_master = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--short", "origin/master"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if head and origin_master and head != origin_master:
+            print(
+                f"registry-reconcile: NOTE this checkout ({head}) differs from "
+                f"origin/master ({origin_master}) -- undeclared-live findings below "
+                f"may reflect release/branch lag rather than real drift"
+            )
+    except (subprocess.CalledProcessError, OSError):
+        pass  # advisory only; not knowing origin/master is not itself a finding
+
+    undeclared: list[str] = []
+    for port, holders in sorted(live.items()):
+        if port in declared:
+            continue
+        cmdlines = [pid_cmdline(pid) or cmd for pid, cmd in holders]
+        if any(pat in cmdline for pat in ephemeral_patterns for cmdline in cmdlines):
+            continue
+        who = ", ".join(sorted(set(cmdlines))) or "?"
+        undeclared.append(f"{port} ({who})")
+
+    stale: list[str] = []
+    for port, entry in sorted(declared.items()):
+        if entry.get("status") == "active" and port not in live:
+            stale.append(f"{port} ({entry.get('service', '?')})")
+
+    print(f"registry-reconcile: host={host!r} declared={len(declared)} live={len(live)}")
+    if undeclared:
+        print("  live but undeclared (possible new/unregistered listener):")
+        for line in undeclared:
+            print(f"    - {line}")
+    if stale:
+        print("  declared status:active but not currently listening (stale claim):")
+        for line in stale:
+            print(f"    - {line}")
+    if not undeclared and not stale:
+        print("  no differences found")
+    return 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="diff registry/ports.yml against this machine's live TCP listeners (advisory, always exits 0)",
+    )
+    parser.add_argument("--host", default="mac", help="host key in registry/ports.yml to reconcile against (default: mac)")
+    args = parser.parse_args()
+
+    if args.reconcile:
+        return reconcile(args.host)
+
     findings: list[str] = []
     try:
         lint_ports(findings)
