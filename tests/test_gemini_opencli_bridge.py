@@ -69,9 +69,18 @@ class ResolveOpencliBinTests(unittest.TestCase):
     def test_daemon_unavailable_when_binary_missing(self) -> None:
         with mock.patch.dict(os.environ, {"PATH": "", "GEMINI_BRIDGE_OPENCLI_BIN": ""}, clear=False):
             del os.environ["GEMINI_BRIDGE_OPENCLI_BIN"]
-            with self.assertRaises(bridge.BridgeError) as ctx:
-                bridge.resolve_opencli_bin()
+            with mock.patch.object(bridge.os, "access", return_value=False):
+                with self.assertRaises(bridge.BridgeError) as ctx:
+                    bridge.resolve_opencli_bin()
             self.assertEqual(ctx.exception.error_type, bridge.ErrorType.DAEMON_UNAVAILABLE)
+
+    def test_standard_homebrew_fallback_is_used(self) -> None:
+        with mock.patch.dict(os.environ, {"PATH": ""}, clear=False):
+            with mock.patch.object(bridge.shutil, "which", return_value=None):
+                with mock.patch.object(
+                    bridge.os, "access", side_effect=lambda path, mode: path == "/opt/homebrew/bin/opencli"
+                ):
+                    self.assertEqual(bridge.resolve_opencli_bin(), "/opt/homebrew/bin/opencli")
 
     def test_override_env_var_used_verbatim(self) -> None:
         with mock.patch.dict(os.environ, {"GEMINI_BRIDGE_OPENCLI_BIN": "/opt/custom/opencli"}):
@@ -169,14 +178,27 @@ class AskTests(unittest.TestCase):
             [
                 cp(stdout=json.dumps(turns)),  # baseline read
                 cp(stdout=json.dumps({"response": "old reply"})),  # ask (echoes stale text)
-                cp(stdout=json.dumps(turns)),  # post-ask read: unchanged conversation
+                *[cp(stdout=json.dumps(turns)) for _ in range(40)],  # unchanged post-ask reads
             ]
         )
         with self.assertRaises(bridge.BridgeError) as ctx:
             bridge.do_ask("hermes-gemini", "marker", ask_timeout=30, read_timeout=10, runner=runner)
         self.assertEqual(ctx.exception.error_type, bridge.ErrorType.STALE_RESPONSE)
 
-    def test_ask_rejects_when_latest_turn_is_not_assistant(self) -> None:
+    def test_ask_accepts_nonduplicate_response_when_opencli_read_does_not_persist(self) -> None:
+        turns = [{"Role": "user", "Text": "marker"}, {"Role": "model", "Text": "old reply"}]
+        runner = SequenceRunner(
+            [
+                cp(stdout=json.dumps(turns)),
+                cp(stdout=json.dumps({"response": "new reply"})),
+                *[cp(stdout=json.dumps(turns)) for _ in range(40)],
+            ]
+        )
+        result = bridge.do_ask("hermes-gemini", "marker", ask_timeout=30, read_timeout=10, runner=runner)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["ownership"], "ask_response_delta")
+        self.assertEqual(result.data["response"], "new reply")
+
         baseline = [{"Role": "user", "Text": "marker"}]
         after = baseline + [{"Role": "user", "Text": "an echoed user turn, not a reply"}]
         runner = SequenceRunner(
@@ -306,7 +328,14 @@ class PromptArgumentSafetyTests(unittest.TestCase):
         self.assertIn(dangerous, called_cmd)
         self.assertFalse(run_mock.call_args.kwargs.get("shell", False))  # shell=True never passed
 
-    def test_run_opencli_timeout_maps_to_typed_error(self) -> None:
+    def test_run_opencli_adds_homebrew_parent_to_child_path(self) -> None:
+        with mock.patch.object(bridge, "resolve_opencli_bin", return_value="/opt/homebrew/bin/opencli"):
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=False):
+                with mock.patch("subprocess.run", return_value=cp(stdout="{}")) as run_mock:
+                    bridge.run_opencli(["gemini", "status"], timeout=5)
+        child_path = run_mock.call_args.kwargs["env"]["PATH"]
+        self.assertEqual(child_path, "/opt/homebrew/bin:/usr/bin")
+
         with mock.patch.object(bridge, "resolve_opencli_bin", return_value="/usr/bin/opencli"):
             with mock.patch(
                 "subprocess.run",
@@ -514,7 +543,9 @@ class ExtractHelpersTests(unittest.TestCase):
     def test_extract_ask_response_string_shape(self) -> None:
         self.assertEqual(bridge._extract_ask_response("plain text reply"), "plain text reply")
 
-    def test_extract_ask_response_missing_key_is_ui_mismatch(self) -> None:
+    def test_extract_ask_response_list_shape_from_opencli_1_8_6(self) -> None:
+        self.assertEqual(bridge._extract_ask_response([{"response": "PONG"}]), "PONG")
+
         with self.assertRaises(bridge.BridgeError) as ctx:
             bridge._extract_ask_response({"nope": "nothing useful"})
         self.assertEqual(ctx.exception.error_type, bridge.ErrorType.UI_MISMATCH)

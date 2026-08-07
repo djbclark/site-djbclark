@@ -47,10 +47,16 @@ from pathlib import Path
 from typing import Any, Callable
 
 DEFAULT_PROFILE = "hermes-gemini"
+DEFAULT_OPENCLI_PATHS = (
+    "/opt/homebrew/bin/opencli",
+    "/usr/local/bin/opencli",
+)
 DEFAULT_LOCK_TIMEOUT = 10.0
 DEFAULT_STATUS_TIMEOUT = 20.0
 DEFAULT_READ_TIMEOUT = 20.0
 DEFAULT_ASK_TIMEOUT = 60.0
+POST_ASK_SETTLE_TIMEOUT = 3.0
+POST_ASK_POLL_INTERVAL = 0.1
 # Wall-clock margin the wrapper's own subprocess timeout adds on top of the
 # opencli-side --timeout budget it passes through for `ask`, so opencli gets
 # a fair chance to hit its own timeout and report a clean error first.
@@ -204,19 +210,27 @@ def resolve_opencli_bin() -> str:
     if override:
         return override
     found = shutil.which("opencli")
-    if not found:
-        raise BridgeError(
-            ErrorType.DAEMON_UNAVAILABLE,
-            "opencli CLI not found on PATH; install the pinned release first "
-            "(docs/reference/gemini-opencli-bridge.md)",
-        )
-    return found
+    if found:
+        return found
+    for candidate in DEFAULT_OPENCLI_PATHS:
+        if os.access(candidate, os.X_OK):
+            return candidate
+    raise BridgeError(
+        ErrorType.DAEMON_UNAVAILABLE,
+        "opencli CLI not found on PATH or standard Homebrew locations; install the pinned release first "
+        "(docs/reference/gemini-opencli-bridge.md)",
+    )
 
 
 def run_opencli(args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
     """Invoke opencli as an argv list -- never shell=True, never string-joined."""
     opencli_bin = resolve_opencli_bin()
     cmd = [opencli_bin, *args]
+    env = os.environ.copy()
+    opencli_parent = str(Path(opencli_bin).parent)
+    if opencli_bin in DEFAULT_OPENCLI_PATHS:
+        current_path = env.get("PATH", "")
+        env["PATH"] = opencli_parent + (os.pathsep + current_path if current_path else "")
     try:
         return subprocess.run(
             cmd,
@@ -225,6 +239,7 @@ def run_opencli(args: list[str], *, timeout: float) -> subprocess.CompletedProce
             timeout=timeout,
             check=False,
             shell=False,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         raise BridgeError(
@@ -307,8 +322,15 @@ def _extract_ask_response(parsed: Any) -> str:
     if isinstance(parsed, str):
         return parsed
     if isinstance(parsed, dict):
+        candidates = [parsed]
+    elif isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+        # OpenCLI 1.8.6 returns gemini ask -f json as [{"response": "..."}].
+        candidates = [parsed[0]]
+    else:
+        candidates = []
+    for candidate in candidates:
         for key in ("response", "Response", "text", "Text"):
-            value = parsed.get(key)
+            value = candidate.get(key)
             if isinstance(value, str):
                 return value
     raise BridgeError(ErrorType.UI_MISMATCH, "unexpected 'gemini ask' JSON shape")
@@ -362,6 +384,15 @@ def do_read(profile: str, timeout: float, runner: Runner = run_opencli) -> Bridg
     return BridgeResult(ok=True, command="read", data={"turns": turns, "turn_count": len(turns)})
 
 
+def _latest_assistant_text(turns: list[dict]) -> str:
+    for turn in reversed(turns):
+        role = str(turn.get("Role") or turn.get("role") or "").lower()
+        if role in ("model", "assistant", "gemini"):
+            value = turn.get("Text", turn.get("text", ""))
+            return value if isinstance(value, str) else ""
+    return ""
+
+
 def do_ask(
     profile: str,
     prompt: str,
@@ -399,12 +430,33 @@ def do_ask(
     response_text = _extract_ask_response(ask_parsed)
 
     after_turns = _invoke_read(profile, read_timeout, runner)
+    settle_deadline = time.monotonic() + POST_ASK_SETTLE_TIMEOUT
     after_count, after_hash = _fingerprint_turns(after_turns)
+    while (
+        (after_count <= baseline_count or after_hash is None or after_hash == baseline_hash)
+        and time.monotonic() < settle_deadline
+    ):
+        time.sleep(POST_ASK_POLL_INTERVAL)
+        after_turns = _invoke_read(profile, read_timeout, runner)
+        after_count, after_hash = _fingerprint_turns(after_turns)
 
     if after_count <= baseline_count or after_hash is None or after_hash == baseline_hash:
-        raise BridgeError(
-            ErrorType.STALE_RESPONSE,
-            "gemini read after ask did not show a new turn; response may be stale",
+        # OpenCLI 1.8.6 returns the ask response but does not append the turn
+        # to the visible read snapshot. Accept only a nonempty response that
+        # is not an exact echo of the current last assistant turn; repeated
+        # stale responses continue to fail closed.
+        if (
+            not response_text.strip()
+            or response_text.strip() == _latest_assistant_text(baseline_turns).strip()
+        ):
+            raise BridgeError(
+                ErrorType.STALE_RESPONSE,
+                "gemini read after ask did not show a new turn; response may be stale",
+            )
+        return BridgeResult(
+            ok=True,
+            command="ask",
+            data={"response": response_text, "turn_count": after_count, "ownership": "ask_response_delta"},
         )
     last_role = str(after_turns[-1].get("Role") or after_turns[-1].get("role") or "").lower()
     if last_role and last_role not in ("model", "assistant", "gemini"):
