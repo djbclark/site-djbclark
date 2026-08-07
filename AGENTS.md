@@ -61,6 +61,7 @@ Topology background:
 | [`docs/reference/herdr-workstation.md`](docs/reference/herdr-workstation.md)           | Multi-vendor Herdr workstation usage (keys, mouse, agents, worktrees) — config is on-box `~/.config/herdr/` | When Herdr config/workflow changes |
 | [`docs/reference/herdr-brew-service.md`](docs/reference/herdr-brew-service.md)         | Herdr brew service (persistent server), registry claim, OliveTin dashboard actions            | When service/registry changes |
 | [`docs/reference/kimi-k3-routing-research.md`](docs/reference/kimi-k3-routing-research.md) | Decision doc: Kimi K3 as a Herdr-routable model (issue #36) — trial, not standing infra yet   | Rare; revisit after a real trial |
+| [`docs/reference/gemini-opencli-bridge.md`](docs/reference/gemini-opencli-bridge.md) | Hermes-facing localhost Gemini bridge via OpenCLI (issue #105) — install, bind, security boundary | When OpenCLI version/setup changes |
 | [`docs/operations/sessions/`](docs/operations/sessions/)                               | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups       | Each handoff             |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
 | [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
