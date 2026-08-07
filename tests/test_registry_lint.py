@@ -1,3 +1,5 @@
+import contextlib
+import io
 import sys
 import tempfile
 import textwrap
@@ -123,6 +125,133 @@ class RegistryRoleDefaultPortsTest(unittest.TestCase):
                 registry_lint.lint_role_default_ports(findings)
             self.assertEqual(len(findings), 1)
             self.assertIn("no registry/ports.yml entry found for service 'litellm-proxy'", findings[0])
+
+
+class RegistryReconcileTest(unittest.TestCase):
+    """site-djbclark#107: --reconcile diffs registry/ports.yml against real
+    lsof listeners. subprocess.run is mocked for lsof/ps/git so these tests
+    don't depend on this machine's actual live ports."""
+
+    LSOF_OUTPUT = (
+        "p100\n" "cjava\n" "f10\n" "n127.0.0.1:10001\n"
+        "p200\n" "cnode\n" "f5\n" "n127.0.0.1:20000\n"
+        "p300\n" "cjava\n" "f7\n" "n127.0.0.1:30000\n"
+    )
+    CMDLINES = {
+        "100": "java -classpath ~/.maestro/lib/* maestro.cli.AppKt mcp",
+        "200": "node someOtherServer.js",
+        "300": "java -classpath ~/.maestro/lib/* maestro.cli.AppKt mcp",
+    }
+
+    def _write_repo(self, tmp: Path) -> None:
+        (tmp / "registry").mkdir(parents=True)
+        (tmp / "registry" / "ports.yml").write_text(
+            textwrap.dedent(
+                """\
+                hosts:
+                  mac:
+                    ports:
+                      - {port: 10001, bind: "127.0.0.1", owner: unmanaged, service: maestro-mcp, status: active}
+                      - {port: 9000, bind: "127.0.0.1", owner: site, service: stale-service, status: active}
+                      - {port: 9001, bind: "127.0.0.1", owner: site, service: planned-thing, status: default-claim}
+                    ephemeral_processes:
+                      - pattern: "maestro.cli.AppKt mcp"
+                        note: "test"
+                """
+            )
+        )
+
+    def _mock_subprocess_run(self, cmd, **_kwargs):
+        result = MagicMock()
+        if cmd[0] == "lsof":
+            result.stdout = self.LSOF_OUTPUT
+        elif cmd[0] == "ps":
+            pid = cmd[cmd.index("-p") + 1]
+            result.stdout = self.CMDLINES.get(pid, "") + "\n"
+        elif cmd[0] == "git":
+            result.stdout = "abc123\n"
+        else:
+            result.stdout = ""
+        return result
+
+    def _run_reconcile(self, tmp: Path) -> str:
+        buf = io.StringIO()
+        with patch("registry_lint.REPO", tmp), \
+             patch("registry_lint.sys.platform", "darwin"), \
+             patch("registry_lint.shutil.which", return_value="/usr/sbin/lsof"), \
+             patch("registry_lint.subprocess.run", side_effect=self._mock_subprocess_run), \
+             contextlib.redirect_stdout(buf):
+            exit_code = registry_lint.reconcile("mac")
+        self.assertEqual(exit_code, 0)  # always advisory, never fails
+        return buf.getvalue()
+
+    def test_declared_and_live_port_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            output = self._run_reconcile(tmp)
+        self.assertNotIn("10001", output)
+
+    def test_undeclared_non_ephemeral_port_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            output = self._run_reconcile(tmp)
+        self.assertIn("live but undeclared", output)
+        self.assertIn("20000", output)
+
+    def test_undeclared_ephemeral_port_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            output = self._run_reconcile(tmp)
+        # 30000 matches the ephemeral_processes pattern via its cmdline
+        self.assertNotIn("30000", output)
+
+    def test_declared_active_but_not_listening_flagged_stale(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            output = self._run_reconcile(tmp)
+        self.assertIn("stale claim", output)
+        self.assertIn("9000", output)
+
+    def test_declared_default_claim_not_listening_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            output = self._run_reconcile(tmp)
+        # status: default-claim (not active) -- absence is expected, not stale
+        self.assertNotIn("9001", output)
+
+    def test_no_lsof_skips_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp)
+            with patch("registry_lint.REPO", tmp), \
+                 patch("registry_lint.shutil.which", return_value=None):
+                exit_code = registry_lint.reconcile("mac")
+            self.assertEqual(exit_code, 0)
+
+    def test_reconcile_flag_routes_to_reconcile_not_default_lint(self):
+        with patch("registry_lint.sys.argv", ["registry_lint.py", "--reconcile"]), \
+             patch("registry_lint.reconcile", return_value=0) as mock_reconcile, \
+             patch("registry_lint.lint_ports") as mock_lint_ports:
+            exit_code = registry_lint.main()
+        mock_reconcile.assert_called_once_with("mac")
+        mock_lint_ports.assert_not_called()
+        self.assertEqual(exit_code, 0)
+
+    def test_no_flag_routes_to_default_lint_not_reconcile(self):
+        with patch("registry_lint.sys.argv", ["registry_lint.py"]), \
+             patch("registry_lint.reconcile") as mock_reconcile, \
+             patch("registry_lint.lint_ports"), \
+             patch("registry_lint.lint_role_default_ports"), \
+             patch("registry_lint.lint_paths"), \
+             patch("registry_lint.lint_generated_paths"):
+            exit_code = registry_lint.main()
+        mock_reconcile.assert_not_called()
+        self.assertEqual(exit_code, 0)
 
 
 if __name__ == '__main__':
