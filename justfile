@@ -395,3 +395,24 @@ brew-services-audit:
     @echo "omlx: intentionally absent (removed 2026-07-29)"
     @echo ""
     @echo "Full write-up: docs/relay/audits/F2-brew-services-audit.md"
+
+# Full procedure — exact Arq glob/regex exclusions, pitfalls, verification —
+# lives in the system-maintenance skill at
+# ~/.hermes/skills/system-maintenance/SKILL.md (out of tree). Background:
+# memory/project_arq_backup_paused.md in site-private.
+# Replaces the old cache-cleaner.
+# Reclaim disk space: APFS local snapshots + brew cache.
+maintenance:
+    @echo "=== system-maintenance ==="
+    @echo "Full procedure: ~/.hermes/skills/system-maintenance/SKILL.md"
+    tmutil thinlocalsnapshots / 200000000000 || true
+    brew cleanup -s --prune=all
+    @echo ""
+    @echo "Not automated — run manually if still short on space:"
+    @echo "  - Arq: Clear Cache (UI)"
+    @echo "  - OmniDiskSweeper"
+    @echo "  - colima prune"
+    @echo ""
+    @echo "Verify: df -h /System/Volumes/Data && tmutil listlocalsnapshots /"
+    @echo "Also confirm Arq's exclusions are still present in the UI — they"
+    @echo "are set by hand and are not asserted by anything in this repo."
