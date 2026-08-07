@@ -93,7 +93,7 @@ hosts:
       - {port: 14000, bind: "127.0.0.1", owner: site, service: litellm-uv-tool, status: active,
          note: "uv-tool litellm (~/.local/share/uv/tools/litellm) — distinct from the :4000 litellm-proxy row above; both were live at the 2026-08-07 reconcile"}
       - {port: 24543, bind: "127.0.0.1", owner: site, service: moshi-hook, status: active,
-         note: "/opt/homebrew/opt/moshi-hook/bin/moshi-hook serve. NOTE: the Moshi *webhook* notification path was retired 2026-07-30 in favour of `hermes send`, but this daemon is still running and listening. Confirm whether it is still wanted before reclaiming."}
+         note: "/opt/homebrew/opt/moshi-hook/bin/moshi-hook serve, via brew services (homebrew.mxcl.moshi-hook). KEEP — confirmed wanted by the operator 2026-08-07: the Moshi mobile app is in active use and this daemon is its agent bridge. What was retired 2026-07-30 was only the Moshi *webhook* ping path in favour of `hermes send`; that retirement never applied to moshi-hook itself, and the tap formula (rjyo/moshi) is not deprecated. Do not reclaim."}
       - {port: 18765, bind: "127.0.0.1", owner: site, service: signal-cli-daemon, status: active,
          note: "Hermes Signal transport; launchd ai.hermes.signal-cli, signal-cli daemon --http. Linked secondary device (never `signal-cli register` — that seizes the number's Signal account). Deliberately moved off 8080 on 2026-08-07: it collided with caddy-health, which this registry already records as having caused one prior collision. Pick an unusual port and claim it HERE before binding — 'free right now per lsof' is what made 8080 look safe."}
 
@@ -113,18 +113,22 @@ hosts:
       # registry/paths.yml brew_services + site prefixes for ~/.config/herdr/**):
       #   herdr — homebrew.mxcl.herdr → ~/.config/herdr/herdr.sock (agent multiplexer server)
       # Dashboard: OliveTin actions user_herdr_* (olivetin/user-actions.yaml).
-      # ⚠️ UNRESOLVED as of the 2026-08-07 reconcile: port 8000 IS listening again,
-      # despite the sign-off requirement recorded immediately below. It is
-      # stayturgid's control/bin/firerpa_mcp.py --transport streamable-http, and it
-      # is bound to the Tailscale address 100.113.53.87 — i.e. reachable over the
-      # tailnet, not loopback-only. It is also being run out of a task worktree
-      # (~/src/ops-worktrees/main/stayturgid/), not a deploy checkout.
-      # Deliberately NOT given a row here: claiming it would silently grant the
-      # sign-off the note below requires. Needs an operator decision — either
-      # bless it with a proper row (and justify the non-loopback bind, as the
-      # 4318 vector-otlp-http row does), or move it off 8000.
-      # omlx :8000 — uninstalled 2026-07-29 (operator); brew claim + service removed;
-      # do not reclaim without sign-off.
+      # omlx :8000 — uninstalled 2026-07-29 (operator); brew claim + service removed.
+      # The "do not reclaim without sign-off" hold that replaced it was RESOLVED on
+      # 2026-08-07: the operator explicitly signed off on reassigning 8000 to
+      # firerpa-mcp (row below), keeping the tailnet bind. The hold is therefore
+      # discharged, not bypassed — 8000 is now a claimed port like any other, and
+      # any FUTURE reassignment needs its own sign-off.
+      - {port: 8000,  bind: "100.113.53.87", owner: stayturgid, service: firerpa-mcp, status: active,
+         note: "stayturgid control/bin/firerpa_mcp.py --transport streamable-http. Intentionally non-loopback, same rationale class as the 4318 vector-otlp-http row: this is an MCP server for fleet devices and off-host agents, so it binds the Tailscale address (100.113.53.87) rather than 0.0.0.0 — tailnet-reachable but never LAN- or internet-exposed, which is strictly tighter than 4318's 0.0.0.0. Bearer-token auth via `secretspec get firerpa_mcp_token`. Operator sign-off 2026-08-07 discharged the omlx reclaim hold above. ⚠️ Observed running from a TASK WORKTREE (~/src/ops-worktrees/main/stayturgid/), not a deploy checkout — that is a process deviation this row records but does not bless; see note below."}
+      # ⚠️ Open, tracked separately from the port claim: the firerpa-mcp process
+      # observed at the 2026-08-07 reconcile (and still at 2026-08-07 follow-up,
+      # PID 4829, up since 2026-08-02) is launched by hand out of
+      # ~/src/ops-worktrees/main/stayturgid/ — a reference checkout — rather than
+      # from ${OPS_ROOT}/stayturgid under a released ops-vX.Y.Z. It therefore runs
+      # code that no release pins, and a `git checkout` in that worktree silently
+      # changes what a live tailnet service is serving. Claiming the port does not
+      # endorse that launch path; it should become a proper managed service.
       # ── third-party desktop apps (unmanaged; observed 2026-08-07 reconcile) ─
       - {port: 6463,  bind: "127.0.0.1", owner: unmanaged, service: discord-rpc,  status: active,
          note: "Discord desktop RPC/IPC listener"}
