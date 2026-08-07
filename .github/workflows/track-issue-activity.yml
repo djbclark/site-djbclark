@@ -57,9 +57,10 @@ jobs:
           # Unique key per run + prefix restore: GitHub caches are immutable,
           # so a static key could never be overwritten (caused duplicate
           # notifications). Prefix restore picks the newest saved entry.
-          # v2 prefix: ignore stale v1 caches that predate the fix.
-          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
-          restore-keys: gh-tracker-v2-${{ matrix.issue.slug }}-
+          # v3 prefix: ignore v1/v2 caches that used an unreliable page-length
+          # comment count instead of GitHub's authoritative issue comment count.
+          key: gh-tracker-v3-${{ matrix.issue.slug }}-${{ github.run_id }}
+          restore-keys: gh-tracker-v3-${{ matrix.issue.slug }}-
 
       - name: Fetch issue and compare
         id: check
@@ -70,18 +71,16 @@ jobs:
         run: |
           mkdir -p .cache/gh-tracker
 
-          # Fetch issue via public API (no auth needed for public repos).
-          # --retry: transient API hiccups (rate limits, 5xx) must NOT be
-          # treated as real state changes — retry first, then skip if still down.
+          # Fetch the issue once. GitHub's issue payload includes the authoritative
+          # total comment count; do not use a per_page=1 comments response as a
+          # count, because that stops detecting comments after the first one.
           response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
             "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null) || response=""
-          comments_response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
-            "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER/comments?per_page=1" 2>/dev/null) || comments_response=""
 
-          # If either fetch failed after retries, skip silently: no notification,
+          # If the fetch failed after retries, skip silently: no notification,
           # no cache write. Keep the last known good state for the next run.
-          if [ -z "$response" ] || [ -z "$comments_response" ]; then
-            echo "API fetch failed for $ISSUE_REPO#$ISSUE_NUMBER after retries — skipping (no notification, cache untouched)"
+          if [ -z "$response" ]; then
+
             echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -89,7 +88,7 @@ jobs:
           echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
 
           new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','unknown'))")
-          new_count=$(echo "$comments_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)")
+          new_count=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('comments',0))")
           new_updated=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('updated_at',''))")
 
           echo "state=$new_state" >> "$GITHUB_OUTPUT"
