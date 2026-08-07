@@ -86,6 +86,14 @@ hosts:
          note: "Google Antigravity CLI daemon IPC"}
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
          note: "Google Antigravity CLI sidecar listener"}
+      - {port: 3002,  bind: "127.0.0.1", owner: site, service: hermes-jina-firecrawl-proxy, status: active,
+         note: "~/.hermes/scripts/jina-firecrawl-proxy.py; observed listening 2026-08-07 reconcile"}
+      - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
+         note: "bun ~/.collie/bridge/index.ts; observed listening 2026-08-07 reconcile"}
+      - {port: 14000, bind: "127.0.0.1", owner: site, service: litellm-uv-tool, status: active,
+         note: "uv-tool litellm (~/.local/share/uv/tools/litellm) — distinct from the :4000 litellm-proxy row above; both were live at the 2026-08-07 reconcile"}
+      - {port: 24543, bind: "127.0.0.1", owner: site, service: moshi-hook, status: active,
+         note: "/opt/homebrew/opt/moshi-hook/bin/moshi-hook serve. NOTE: the Moshi *webhook* notification path was retired 2026-07-30 in favour of `hermes send`, but this daemon is still running and listening. Confirm whether it is still wanted before reclaiming."}
       - {port: 18765, bind: "127.0.0.1", owner: site, service: signal-cli-daemon, status: active,
          note: "Hermes Signal transport; launchd ai.hermes.signal-cli, signal-cli daemon --http. Linked secondary device (never `signal-cli register` — that seizes the number's Signal account). Deliberately moved off 8080 on 2026-08-07: it collided with caddy-health, which this registry already records as having caused one prior collision. Pick an unusual port and claim it HERE before binding — 'free right now per lsof' is what made 8080 look safe."}
 
@@ -105,8 +113,40 @@ hosts:
       # registry/paths.yml brew_services + site prefixes for ~/.config/herdr/**):
       #   herdr — homebrew.mxcl.herdr → ~/.config/herdr/herdr.sock (agent multiplexer server)
       # Dashboard: OliveTin actions user_herdr_* (olivetin/user-actions.yaml).
+      # ⚠️ UNRESOLVED as of the 2026-08-07 reconcile: port 8000 IS listening again,
+      # despite the sign-off requirement recorded immediately below. It is
+      # stayturgid's control/bin/firerpa_mcp.py --transport streamable-http, and it
+      # is bound to the Tailscale address 100.113.53.87 — i.e. reachable over the
+      # tailnet, not loopback-only. It is also being run out of a task worktree
+      # (~/src/ops-worktrees/main/stayturgid/), not a deploy checkout.
+      # Deliberately NOT given a row here: claiming it would silently grant the
+      # sign-off the note below requires. Needs an operator decision — either
+      # bless it with a proper row (and justify the non-loopback bind, as the
+      # 4318 vector-otlp-http row does), or move it off 8000.
       # omlx :8000 — uninstalled 2026-07-29 (operator); brew claim + service removed;
       # do not reclaim without sign-off.
+      # ── third-party desktop apps (unmanaged; observed 2026-08-07 reconcile) ─
+      - {port: 6463,  bind: "127.0.0.1", owner: unmanaged, service: discord-rpc,  status: active,
+         note: "Discord desktop RPC/IPC listener"}
+      - {port: 23373, bind: "127.0.0.1", owner: unmanaged, service: beeper-desktop, status: active}
+      - {port: 58906, bind: "*",         owner: unmanaged, service: popclip,      status: active}
+      - {port: 53,    bind: "*",         owner: unmanaged, service: colima-lima-dns, status: active,
+         note: "limactl hostagent DNS for the colima VM"}
+      - {port: 50450, bind: "127.0.0.1", owner: unmanaged, service: colima-lima-usernet, status: active,
+         note: "limactl usernet gateway for the colima VM"}
+
+      # ── EPHEMERAL / per-session listeners — deliberately NOT claimed ────────
+      # These bind a fresh high port per invocation, so a fixed row here would
+      # be wrong and would churn the lint on every restart. Do not add rows for
+      # them; do not assume a port they happened to hold is free for a
+      # long-running service either. Observed at the 2026-08-07 reconcile:
+      #   agy (Antigravity) CLI sessions — e.g. 50844/50845, 61031/61032.
+      #     Contrast the fixed 53837/53838 rows above, which were NOT listening
+      #     at reconcile time: agy's actual ports drift per session.
+      #   maestro MCP (java, ~/.maestro/lib) — e.g. 10000/10001/10002.
+      #   happy daemon (node .../happy/dist/index.mjs daemon start-sync)
+      #     — e.g. 55089/55093/55094.
+
       - {port: 5900,  bind: "*",         owner: unmanaged, service: macos-screen-sharing, status: active}
       - {port: 3283,  bind: "*",         owner: unmanaged, service: apple-remote-desktop, status: active}
       - {port: 445,   bind: "*",         owner: unmanaged, service: smb,          status: active}
