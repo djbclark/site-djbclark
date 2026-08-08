@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ hindsight_label }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ hindsight_api_bin }}</string>
+    <string>--host</string><string>{{ hindsight_bind }}</string>
+    <string>--port</string><string>{{ hindsight_port | string }}</string>
+    <string>--log-level</string><string>info</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>WorkingDirectory</key><string>{{ hindsight_home }}/.hindsight</string>
+  <key>StandardOutPath</key><string>{{ hindsight_logs_dir }}/stdout.log</string>
+  <key>StandardErrorPath</key><string>{{ hindsight_logs_dir }}/stderr.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{ hindsight_home }}</string>
+    <key>CODEX_HOME</key><string>{{ hindsight_codex_home }}</string>
+    <key>HINDSIGHT_API_HOST</key><string>{{ hindsight_bind }}</string>
+    <key>HINDSIGHT_API_PORT</key><string>{{ hindsight_port | string }}</string>
+    <key>HINDSIGHT_API_LLM_PROVIDER</key><string>openai-codex</string>
+    <key>PATH</key><string>{{ hindsight_service_path }}</string>
+  </dict>
+</dict>
+</plist>

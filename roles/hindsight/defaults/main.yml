@@ -1,0 +1,18 @@
+---
+# Site-owned Hindsight API. Loopback-only until an authenticated remote design exists.
+hindsight_home: "{{ (ansible_facts.get('env') or {}).get('HOME') | default(lookup('env', 'HOME'), true) }}"
+hindsight_bind: "127.0.0.1"
+hindsight_port: 8888
+hindsight_version: "0.9.0"
+hindsight_package_spec: "hindsight-all=={{ hindsight_version }}"
+hindsight_venv: "{{ hindsight_home }}/.hindsight/venv"
+hindsight_api_bin: "{{ hindsight_venv }}/bin/hindsight-api"
+hindsight_codex_home: "{{ hindsight_home }}/.hindsight/codex"
+hindsight_codex_auth: "{{ hindsight_codex_home }}/auth.json"
+hindsight_data_dir: "{{ hindsight_home }}/.hindsight/data"
+hindsight_logs_dir: "{{ hindsight_home }}/Library/Logs/hindsight"
+hindsight_plist_dir: "{{ hindsight_home }}/Library/LaunchAgents"
+hindsight_label: "com.{{ site_ns }}.hindsight-api"
+hindsight_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_label }}.plist"
+hindsight_health_url: "http://{{ hindsight_bind }}:{{ hindsight_port }}/health"
+hindsight_service_path: "{{ hindsight_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

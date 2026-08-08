@@ -1,0 +1,98 @@
+---
+- name: Assert Hindsight is loopback-only and Darwin is supported
+  ansible.builtin.assert:
+    that:
+      - hindsight_bind == '127.0.0.1'
+      - ansible_facts.os_family == 'Darwin'
+    fail_msg: Hindsight remains loopback-only and currently supports the managed macOS host only.
+
+- name: Resolve uv
+  ansible.builtin.command: command -v uv
+  register: _hindsight_uv
+  changed_when: false
+  check_mode: false
+
+- name: Require uv
+  ansible.builtin.assert:
+    that: _hindsight_uv.rc == 0
+    fail_msg: Install uv before applying the Hindsight role.
+
+- name: Require dedicated Codex authentication before service bootstrap
+  ansible.builtin.stat:
+    path: "{{ hindsight_codex_auth }}"
+  register: _hindsight_codex_auth
+
+- name: Refuse unsafe Hindsight startup without dedicated auth
+  ansible.builtin.assert:
+    that:
+      - _hindsight_codex_auth.stat.exists
+      - _hindsight_codex_auth.stat.mode == '0600'
+    fail_msg: >-
+      Missing or unsafe {{ hindsight_codex_auth }}. Run CODEX_HOME={{ hindsight_codex_home }}
+      codex auth login; credentials are never copied into Hermes or Git.
+
+- name: Ensure Hindsight directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ hindsight_home }}/.hindsight"
+    - "{{ hindsight_data_dir }}"
+    - "{{ hindsight_codex_home }}"
+    - "{{ hindsight_logs_dir }}"
+    - "{{ hindsight_plist_dir }}"
+
+- name: Create isolated Hindsight virtual environment
+  ansible.builtin.command:
+    argv: ["{{ _hindsight_uv.stdout | trim }}", "venv", "{{ hindsight_venv }}", "--python", "3.11"]
+  args:
+    creates: "{{ hindsight_venv }}/bin/python"
+  when: not ansible_check_mode
+
+- name: Install pinned Hindsight bundle
+  ansible.builtin.command:
+    argv: ["{{ _hindsight_uv.stdout | trim }}", "pip", "install", "--python", "{{ hindsight_venv }}/bin/python", "{{ hindsight_package_spec }}"]
+  register: _hindsight_install
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Render Hindsight LaunchAgent
+  ansible.builtin.template:
+    src: hindsight.plist.j2
+    dest: "{{ hindsight_plist_path }}"
+    mode: "0600"
+  register: _hindsight_plist
+
+- name: Probe Hindsight LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ hindsight_label }}"]
+  register: _hindsight_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out changed Hindsight LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ hindsight_label }}"]
+  when:
+    - not ansible_check_mode
+    - _hindsight_plist.changed
+    - _hindsight_loaded.rc == 0
+
+- name: Bootstrap Hindsight LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ hindsight_plist_path }}"]
+  when:
+    - not ansible_check_mode
+    - _hindsight_loaded.rc != 0 or _hindsight_plist.changed
+
+- name: Wait for Hindsight health
+  ansible.builtin.uri:
+    url: "{{ hindsight_health_url }}"
+    status_code: 200
+  register: _hindsight_health
+  until: _hindsight_health.status == 200
+  retries: 30
+  delay: 5
+  when: not ansible_check_mode
