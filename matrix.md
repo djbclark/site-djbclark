@@ -51,6 +51,7 @@ Checked 2026-08-08. Workspace: `feature/hindsight-deployment-92`.
 - Synthetic cleanup: **PASS** — all smoke-test banks deleted; bank list is empty.
 - Hermes plugin external wiring: **PASS (isolated fixture)** — `local_external`, loopback URL, `auto_retain=false`, tools mode; active Hermes config unchanged.
 - Hermes provider hook round-trip: **PASS** — actual `queue_prefetch()` → asynchronous recall → `prefetch()` returned the synthetic marker; test bank deleted.
+- Hermes production provider activation: **DEPLOYED/PASS** — `memory.provider=hindsight`; native config `local_external` at loopback; dynamic `hermes-{profile}-{workspace}` bank template; auto-recall enabled, auto-retain intentionally disabled; activated provider recalled a synthetic marker; test bank deleted.
 - Hindsight service contract: **PASS (deployed)** — launchd-managed `com.djbclark.hindsight-api`, loopback `127.0.0.1:8888`, pinned venv, dedicated-auth gate, no `--replace`, 30-second throttle.
 - Hindsight MCP: **PASS** — initialize + tools/list returned bank-scoped MCP server 0.9.0 with 29 tools.
 - Claude Code MCP: **DEPLOYED/PASS** — user-scoped `hindsight-shared` endpoint connected.
