@@ -54,9 +54,10 @@ Checked 2026-08-08. Workspace: `feature/hindsight-deployment-92`.
 - Hindsight service contract: **PASS (deployed)** — launchd-managed `com.djbclark.hindsight-api`, loopback `127.0.0.1:8888`, pinned venv, dedicated-auth gate, no `--replace`, 30-second throttle.
 - Hindsight MCP: **PASS** — initialize + tools/list returned bank-scoped MCP server 0.9.0 with 29 tools.
 - Claude Code MCP: **DEPLOYED/PASS** — user-scoped `hindsight-shared` endpoint connected.
+- Claude Code Hindsight plugin: **DEPLOYED/PASS** — official `hindsight-memory@hindsight` 0.7.5 installed; external API config at `~/.hindsight/claude-code.json`; SessionStart health and UserPromptSubmit recall hooks passed live; `autoRetain=false` intentionally retained for rollout safety.
 - Codex MCP: **DEPLOYED** — global `hindsight-shared` URL registered; CLI reports local HTTP auth as unsupported, expected for open loopback endpoint.
 - MCP → API cross-client round-trip: **PASS** — `sync_retain` via MCP, recall via API, document cleanup HTTP 200.
-- Hermes ↔ Claude Code/Herdr round-trip: **PENDING** — Claude/Herdr hook adapter still needs implementation.
+- Hermes ↔ Claude Code/Herdr round-trip: **PASS** — Hermes provider hook recalled an API-written synthetic marker; Claude UserPromptSubmit hook recalled an API-written marker; all synthetic data deleted.
 - Failure/retry and restore: **PASS** — Hindsight LaunchAgent booted out; Hermes provider returned empty safely; role restored healthy service.
 
 ## Acceptance gates
