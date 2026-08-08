@@ -1,0 +1,7 @@
+---
+# Local Hindsight service. Default limit is the live mac host only.
+- name: Configure local Hindsight API
+  hosts: site_hindsight
+  gather_facts: true
+  roles:
+    - role: hindsight

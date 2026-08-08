@@ -133,6 +133,24 @@ litellm-status:
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
 
+# Install/configure local Hindsight memory service for #92. Opt-in and
+# deliberately separate from LiteLLM; no Hermes provider mutation occurs here.
+hindsight_hosts := env_var_or_default("HINDSIGHT_HOSTS", "mac")
+
+hindsight-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/hindsight.yml --limit "{{ hindsight_hosts }}" {{ args }}
+
+hindsight-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/hindsight.yml --limit "{{ hindsight_hosts }}" {{ args }}
+
+hindsight-status:
+    @if launchctl print "gui/$(id -u)/com.djbclark.hindsight-api" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.hindsight-api)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.hindsight-api)"; \
+    fi
+    @curl -fsS --max-time 5 http://127.0.0.1:8888/health || echo "HTTP 8888 not responding"
+
 # Install/configure Open WebUI.
 # Default limit mac (live).
 open_webui_hosts := env_var_or_default("OPEN_WEBUI_HOSTS", "mac")

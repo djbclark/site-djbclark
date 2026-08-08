@@ -74,6 +74,8 @@ hosts:
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          caddy_path: "/litellm/*",
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
+      - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: planned,
+         note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only"}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
          tailscale_serve_port: 8086,
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}

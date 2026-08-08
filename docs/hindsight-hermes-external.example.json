@@ -1,0 +1,15 @@
+{
+  "mode": "local_external",
+  "api_url": "http://127.0.0.1:8888",
+  "api_key": "",
+  "bank_id": "hermes",
+  "bank_id_template": "hermes-{workspace}",
+  "recall_budget": "mid",
+  "memory_mode": "hybrid",
+  "auto_recall": true,
+  "auto_retain": false,
+  "retain_async": true,
+  "retain_source": "hermes",
+  "recall_types": ["observation", "world", "experience"],
+  "timeout": 30
+}
