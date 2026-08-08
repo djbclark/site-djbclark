@@ -434,4 +434,18 @@ maintenance:
     @echo "Verify: df -h /System/Volumes/Data && tmutil listlocalsnapshots /"
     @echo "Also confirm Arq's exclusions are still present in the UI — they"
     @echo "are set by hand and are not asserted by anything in this repo."
+
+# Hindsight retention pilot. These commands only manage the local candidate
+# ledger; promotion emits a payload and never writes to Hindsight implicitly.
+hindsight-candidate-propose:
+    python3 bin/hindsight_memory_candidates.py propose
+
+hindsight-candidate-list status="pending":
+    python3 bin/hindsight_memory_candidates.py list --status "{{ status }}"
+
+hindsight-candidate-review id decision content="":
+    if test -n "{{ content }}"; then python3 bin/hindsight_memory_candidates.py review "{{ id }}" "{{ decision }}" --content "{{ content }}"; else python3 bin/hindsight_memory_candidates.py review "{{ id }}" "{{ decision }}"; fi
+
+hindsight-candidate-payload id:
+    python3 bin/hindsight_memory_candidates.py payload "{{ id }}"
 ralph_herdr_supervisor = "$(dirname "$0")/ralph_herdr_supervisor.py"
