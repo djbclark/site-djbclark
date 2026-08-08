@@ -416,3 +416,4 @@ maintenance:
     @echo "Verify: df -h /System/Volumes/Data && tmutil listlocalsnapshots /"
     @echo "Also confirm Arq's exclusions are still present in the UI — they"
     @echo "are set by hand and are not asserted by anything in this repo."
+ralph_herdr_supervisor = "$(dirname "$0")/ralph_herdr_supervisor.py"
