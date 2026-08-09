@@ -88,8 +88,6 @@ hosts:
          note: "Google Antigravity CLI daemon IPC"}
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
          note: "Google Antigravity CLI sidecar listener"}
-      - {port: 3002,  bind: "127.0.0.1", owner: site, service: hermes-jina-firecrawl-proxy, status: active,
-         note: "~/.hermes/scripts/jina-firecrawl-proxy.py; observed listening 2026-08-07 reconcile"}
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
          note: "bun ~/.collie/bridge/index.ts; observed listening 2026-08-07 reconcile"}
       - {port: 14000, bind: "127.0.0.1", owner: site, service: litellm-uv-tool, status: active,

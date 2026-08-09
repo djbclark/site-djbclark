@@ -448,4 +448,9 @@ hindsight-candidate-review id decision content="":
 
 hindsight-candidate-payload id:
     python3 bin/hindsight_memory_candidates.py payload "{{ id }}"
-ralph_herdr_supervisor = "$(dirname "$0")/ralph_herdr_supervisor.py"
+
+# Herdr reporter helpers (added by lifecycle reporter release)
+ralph-herdr-supervisor:
+  @echo "Usage: ./bin/ralph_herdr_supervisor.py [options]"
+herdr-lifecycle-reporter-test:
+  @echo "Usage: HERDR_REPORTER_MODE=positive ./bin/herdr_lifecycle.py working --message test"
