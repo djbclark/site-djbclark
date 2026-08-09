@@ -46,6 +46,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from opencli_profile_lease import LeaseBusy, ProfileLease
+
 DEFAULT_PROFILE = "hermes-gemini"
 DEFAULT_OPENCLI_PATHS = (
     "/opt/homebrew/bin/opencli",
@@ -614,7 +617,17 @@ def build_parser() -> argparse.ArgumentParser:
             "--lock-timeout",
             type=float,
             default=DEFAULT_LOCK_TIMEOUT,
-            help="seconds to wait for the per-profile session lock (default: %(default)s)",
+            help="seconds to wait for the physical-profile and session locks (default: %(default)s)",
+        )
+        p.add_argument(
+            "--owner",
+            default=os.environ.get("GEMINI_BRIDGE_OWNER", "hermes"),
+            help="topic/process label recorded in lock diagnostics (default: %(default)s)",
+        )
+        p.add_argument(
+            "--lease-state-dir",
+            default=os.environ.get("OPENCLI_PROFILE_LEASE_STATE_DIR"),
+            help="shared physical-profile lease directory (default: XDG state)",
         )
 
     p_status = sub.add_parser("status", help="check Gemini login/availability")
@@ -635,8 +648,22 @@ def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     start = time.monotonic()
     try:
-        with SessionLock(args.profile, args.lock_timeout):
-            result = _run_command(args)
+        with ProfileLease(
+            args.profile,
+            args.owner,
+            f"gemini-{args.command}",
+            args.lock_timeout,
+            state_dir=args.lease_state_dir,
+        ):
+            with SessionLock(args.profile, args.lock_timeout):
+                result = _run_command(args)
+    except LeaseBusy as exc:
+        result = BridgeResult(
+            ok=False,
+            command=args.command,
+            error_type=ErrorType.LOCK_BUSY,
+            error_message=str(exc),
+        )
     except BridgeError as exc:
         result = BridgeResult(
             ok=False, command=args.command, error_type=exc.error_type, error_message=exc.message

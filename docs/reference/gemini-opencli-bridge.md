@@ -103,11 +103,22 @@ mode is hit live, and tighten them if needed.
   the one bound Gemini tab/session rather than whichever tab happens to be
   active.
 - **No stolen focus**: every call passes `--window background`.
-- **Per-session lock**: `bin/gemini_opencli_bridge.py` takes an exclusive
+- **Physical-profile lease**: before touching opencli, the wrapper takes a
+  shared exclusive lease keyed by the explicit OpenCLI Browser Bridge profile
+  under `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/opencli-profile-leases`.
+  This is the outer lock and protects against different Hermes topics using the
+  same physical Chrome/Brave profile. Contention fails closed with `lock_busy`
+  and bounded owner metadata; the kernel releases the flock after a crash.
+- **Per-session lock**: inside that lease, `bin/gemini_opencli_bridge.py` takes an exclusive
   `fcntl.flock` on `~/.local/state/site-djbclark/gemini-bridge/<profile>.lock`
   before touching opencli, with a bounded wait (`--lock-timeout`, default
   10s) — the same pattern as `bin/brew_flock.py` / `bin/ops_release_lock.py`.
-  Concurrent Dan + Hermes calls serialize instead of racing.
+  Concurrent calls for the same visible conversation serialize instead of
+  racing. Brave and Chrome profiles can proceed independently.
+- **Shared broker for other callers**: future Hermes/OpenCLI integrations must
+  use `bin/opencli_profile_lease.py run --profile ... --owner ... --purpose ...
+  -- <command>` rather than invoking raw `opencli` directly. The broker holds
+  the same physical-profile lease for the child process.
 - **Response ownership**: `ask` reads the conversation before and after
   sending the prompt and only accepts the reply if a genuinely new,
   assistant-authored turn appears; otherwise it raises `stale_response`. A
@@ -127,6 +138,7 @@ daemon on first use and it stays up in the background. Operator commands:
 opencli daemon status              # is the daemon up, is the extension connected
 opencli doctor                     # full connectivity diagnosis
 bin/gemini_opencli_bridge.py status   # is the bound Gemini session logged in
+bin/opencli_profile_lease.py status --profile <profile> # who owns a profile lease?
 opencli daemon stop                 # stop the daemon (Dan-only, e.g. before revoking)
 ```
 
@@ -173,8 +185,10 @@ this wrapper to clean up.
 | Variable                                | Default                              | Purpose                                  |
 | ----------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | `GEMINI_BRIDGE_PROFILE`                   | `hermes-gemini`                       | opencli `--profile` / bound session name  |
-- `GEMINI_BRIDGE_OPENCLI_BIN`               | (PATH, then `/opt/homebrew/bin/opencli`, then `/usr/local/bin/opencli`) | explicit binary override or automatic macOS Homebrew discovery |
+| `GEMINI_BRIDGE_OWNER`                     | `hermes`                              | topic/process label in physical-profile lease diagnostics |
+| `GEMINI_BRIDGE_OPENCLI_BIN`               | (PATH, then `/opt/homebrew/bin/opencli`, then `/usr/local/bin/opencli`) | explicit binary override or automatic macOS Homebrew discovery |
 | `GEMINI_BRIDGE_STATE_DIR`                 | `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/gemini-bridge` | lock file + audit log dir |
+| `OPENCLI_PROFILE_LEASE_STATE_DIR`         | `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/opencli-profile-leases` | shared physical-profile lease dir |
 | `GEMINI_BRIDGE_CAPTURE_CONTENT`           | unset (off)                           | `1` to opt into a bounded response preview in the audit log |
 | `GEMINI_BRIDGE_CAPTURE_CONTENT_MAX_CHARS` | `200` (only used when capture is on)  | preview length in chars; must be a positive integer `<= 4096` (`HARD_MAX_CAPTURE_CHARS`) or the value is rejected and no preview is captured for that call |
 
@@ -182,9 +196,11 @@ this wrapper to clean up.
 
 ```bash
 python3 -m unittest tests.test_gemini_opencli_bridge -v
+python3 -m unittest tests.test_opencli_profile_lease -v
 ```
 
-Covers: response-ownership/stale-response rejection, session-lock contention
+Covers: physical-profile lease contention and owner metadata, distinct-profile
+concurrency, response-ownership/stale-response rejection, session-lock contention
 and serialization (no interleaving), every typed failure state (login
 required, quota/challenge, daemon unavailable, timeout, UI mismatch/malformed
 JSON, lock busy), prompt-argument safety (shell metacharacters passed as a
