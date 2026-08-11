@@ -7,7 +7,42 @@ set -euo pipefail
 
 export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+LOG_DIR="{{ site_agents_state_dir }}/brew-fast-upgrade"
+LOG_FILE="$LOG_DIR/run.log"
+mkdir -p "$LOG_DIR"
+# Keep at most four 5 MiB files (~20 MiB total), including the active log.
+if [ -f "$LOG_FILE" ] && [ "$(stat -f '%z' "$LOG_FILE")" -ge 5242880 ]; then
+  for n in 3 2 1; do
+    [ -f "$LOG_FILE.$n" ] && mv -f "$LOG_FILE.$n" "$LOG_FILE.$((n + 1))"
+  done
+  mv -f "$LOG_FILE" "$LOG_FILE.1"
+fi
+exec > >(tee -a "$LOG_FILE") 2>&1
+STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+trap 'rc=$?; echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc"' EXIT
+echo "[$STARTED_AT] started; scheduled/manual Jobber invocation"
+
 LOCK_BIN="{{ site_agents_home }}/ops/site-djbclark/bin/brew_flock.py"
+
+run_brew_update() {
+  local update_output
+  local update_rc
+
+  # cfengine-local is intentionally a remote-less local tap. Keep its
+  # expected Homebrew warning out of the nightly log, but preserve all other
+  # update output and failures.
+  update_output="$(brew update 2>&1)" || {
+    update_rc=$?
+    echo "$update_output"
+    return "$update_rc"
+  }
+  while IFS= read -r line; do
+    case "$line" in
+      "Warning: No remote 'origin' in "*"/Library/Taps/cfengine-local/homebrew-cfengine, skipping update!") ;;
+      *) echo "$line" ;;
+    esac
+  done <<< "$update_output"
+}
 
 run_upgrade_and_restart_apps() {
   local chrome_outdated=0
@@ -24,7 +59,27 @@ run_upgrade_and_restart_apps() {
   fi
 
   # Run upgrade
-  brew update && brew upgrade
+  run_brew_update && brew upgrade
+
+  # A successful brew invocation is not enough: fail visibly if any
+  # non-pinned formula or cask remains outdated.
+  local remaining_outdated
+  remaining_outdated="$(
+    {
+      brew outdated --formula 2>/dev/null
+      brew outdated --cask 2>/dev/null
+    } | while IFS= read -r item; do
+      if ! brew list --pinned 2>/dev/null | grep -Fqx "$item"; then
+        echo "$item"
+      fi
+    done
+  )"
+  if [ -n "$remaining_outdated" ]; then
+    echo "[brew-fast-upgrade] ERROR: non-pinned outdated items remain:"
+    echo "$remaining_outdated"
+    return 1
+  fi
+  echo "[brew-fast-upgrade] Verification passed: no non-pinned outdated items remain."
 
   # Post-check: if Chrome was running and upgraded, restart it gracefully
   if [ "$chrome_outdated" -eq 1 ] && [ "$chrome_running" -eq 1 ]; then
@@ -53,8 +108,11 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  exec "$LOCK_BIN" -- bash -c "$(declare -f run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  rc=$?
 else
   run_upgrade_and_restart_apps
+  rc=$?
 fi
+exit "$rc"
 
