@@ -184,6 +184,42 @@ python3 ~/src/ops-worktrees/main/site-djbclark/bin/deploy_ops_release.py \
   --ops-root "${OPS_ROOT:-$HOME/ops}" deploy 1.0.0
 ```
 
+### Canonical SecretSpec runtime store
+
+The only final live manifest/provider store is
+`/var/db/stayturgid-secrets/`. Durable declarations are reviewed in the tracked
+`site-private/secretspec.toml.example`; sibling `secretspec.toml` symlinks point
+to that example. Every wrapper `source-add` must be mirrored into the example
+through a task-worktree PR and coordinated release. The fixed
+`source-template-check` operation reports only match/mismatch and never prints
+manifest content or secret values.
+
+The tracked-to-ignored checkout transition is handled without reading the
+protected legacy file. The deployer verifies that the target release removes
+and ignores that path and adds the tracked example, then atomically renames the
+legacy file into a non-symlink Git-private backup directory, advances the
+checkout, and renames it back temporarily. Backup and recovery use
+inode/device metadata plus dir-fd-relative no-follow operations. An interrupted
+run recovers the validated backup before preflight and fails closed on any
+incomplete, planted, or conflicting state.
+
+Because the deployed older tool cannot pass preflight while the tracked path is
+dirty/unreadable, perform this one transition with the deployer from the exact
+published transition tag, using the same `--ops-root` bootstrap form shown for
+Codex preferences above. Then complete the privileged cutover in this order:
+
+1. Run the old installed wrapper's `source-publish` once so `/var/db` contains
+   the final source state.
+2. Install the new release wrapper at
+   `/usr/local/libexec/stayturgid-secretspec-wrapper.sh` as `root:wheel 0755`.
+3. Run `source-check` and `source-template-check` through that installed wrapper.
+4. Remove the now-ignored legacy checkout `secretspec.toml` and `.env` files.
+5. Verify ordinary lifecycle operations use `/var/db` and all deploy checkouts
+   are clean.
+
+Until step 2, the deployer restores the ignored checkout file so the old wrapper
+continues working; that is a compatibility bridge, not the final architecture.
+
 ## Live memory exception
 
 `site-private/memory/` remains live data committed directly to `master`.
