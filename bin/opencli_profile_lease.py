@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_LOCK_TIMEOUT = 10.0
+METADATA_PUBLICATION_GRACE = 0.2
+METADATA_RETRY_INTERVAL = 0.01
 MAX_METADATA_TEXT = 160
 
 
@@ -72,6 +74,17 @@ def _read_metadata(fd: int) -> dict[str, Any]:
         return {}
 
 
+def _read_busy_metadata(fd: int) -> dict[str, Any]:
+    """Wait briefly for a lock holder to publish its diagnostic metadata."""
+
+    deadline = time.monotonic() + METADATA_PUBLICATION_GRACE
+    while True:
+        owner = _read_metadata(fd)
+        if owner or time.monotonic() >= deadline:
+            return owner
+        time.sleep(METADATA_RETRY_INTERVAL)
+
+
 class ProfileLease:
     """Exclusive process-scoped lease for one physical OpenCLI profile."""
 
@@ -111,7 +124,7 @@ class ProfileLease:
                     os.close(fd)
                     raise
                 if time.monotonic() >= deadline:
-                    owner = _read_metadata(fd)
+                    owner = _read_busy_metadata(fd)
                     os.close(fd)
                     raise LeaseBusy(self.profile, owner, self.timeout) from exc
                 time.sleep(0.05)
@@ -162,7 +175,7 @@ def profile_status(profile: str, *, state_dir: str | None = None) -> dict[str, A
         except OSError as exc:
             if exc.errno not in (errno.EACCES, errno.EAGAIN):
                 raise
-            return {"profile": profile, "busy": True, "owner": _read_metadata(fd)}
+            return {"profile": profile, "busy": True, "owner": _read_busy_metadata(fd)}
         return {"profile": profile, "busy": False, "owner": None}
     finally:
         try:
