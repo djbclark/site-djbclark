@@ -3,9 +3,11 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "bin" / "opencli_profile_lease.py"
@@ -25,6 +27,54 @@ class ProfileLeaseTests(unittest.TestCase):
             self.assertEqual(ctx.exception.owner["owner"], "topic-bluehost")
             self.assertEqual(ctx.exception.owner["purpose"], "bluehost")
             self.assertEqual(ctx.exception.owner["profile"], "brave-bluehost")
+
+    def test_busy_reader_waits_for_holder_metadata_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as state:
+            write_started = threading.Event()
+            release_write = threading.Event()
+            metadata_published = threading.Event()
+            release_holder = threading.Event()
+            holder_errors: list[BaseException] = []
+            real_write = lease.os.write
+
+            def delayed_write(fd: int, data: bytes) -> int:
+                write_started.set()
+                if not release_write.wait(1):
+                    raise TimeoutError("test did not release metadata write")
+                written = real_write(fd, data)
+                metadata_published.set()
+                return written
+
+            def hold() -> None:
+                try:
+                    with lease.ProfileLease(
+                        "brave-bluehost", "topic-bluehost", "bluehost", 1, state_dir=state
+                    ):
+                        if not metadata_published.wait(1) or not release_holder.wait(1):
+                            raise TimeoutError("test did not release lease holder")
+                except BaseException as exc:  # surfaced in the main test thread
+                    holder_errors.append(exc)
+
+            with patch.object(lease.os, "write", side_effect=delayed_write):
+                thread = threading.Thread(target=hold)
+                thread.start()
+                self.assertTrue(write_started.wait(1))
+                timer = threading.Timer(0.05, release_write.set)
+                timer.start()
+                try:
+                    with self.assertRaises(lease.LeaseBusy) as ctx:
+                        with lease.ProfileLease(
+                            "brave-bluehost", "topic-gemini", "gemini", 0, state_dir=state
+                        ):
+                            pass
+                finally:
+                    release_write.set()
+                    release_holder.set()
+                    timer.cancel()
+                    thread.join(1)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(holder_errors, [])
+            self.assertEqual(ctx.exception.owner["owner"], "topic-bluehost")
 
     def test_distinct_profiles_do_not_contend(self) -> None:
         with tempfile.TemporaryDirectory() as state:
