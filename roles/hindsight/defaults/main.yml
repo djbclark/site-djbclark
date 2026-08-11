@@ -6,6 +6,8 @@ hindsight_port: 8888
 hindsight_version: "0.9.0"
 hindsight_package_spec: "hindsight-all=={{ hindsight_version }}"
 hindsight_venv: "{{ hindsight_home }}/.hindsight/venv"
+hindsight_candidate_ledger_dir: "{{ hindsight_home }}/.hindsight/bin"
+hindsight_candidate_ledger_path: "{{ hindsight_candidate_ledger_dir }}/hindsight_memory_candidates.py"
 hindsight_api_bin: "{{ hindsight_venv }}/bin/hindsight-api"
 hindsight_codex_home: "{{ hindsight_home }}/.hindsight/codex"
 hindsight_codex_auth: "{{ hindsight_codex_home }}/auth.json"

@@ -1,6 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
+import shutil
 import sqlite3
+import stat
+import subprocess
 
 import pytest
 
@@ -166,3 +170,40 @@ def test_mark_promoted_is_idempotent_and_blocks_repromotion_payload(tmp_path: Pa
     with pytest.raises(ValueError, match="already promoted"):
         ledger.payload(candidate["id"])
     ledger.close()
+
+
+def test_hindsight_role_installs_the_canonical_candidate_ledger():
+    repo = Path(__file__).resolve().parents[1]
+    tasks = (repo / "roles/hindsight/tasks/main.yml").read_text()
+    defaults = (repo / "roles/hindsight/defaults/main.yml").read_text()
+
+    assert 'hindsight_candidate_ledger_dir: "{{ hindsight_home }}/.hindsight/bin"' in defaults
+    assert 'hindsight_candidate_ledger_path: "{{ hindsight_candidate_ledger_dir }}/hindsight_memory_candidates.py"' in defaults
+    assert 'src: "{{ role_path }}/../../bin/hindsight_memory_candidates.py"' in tasks
+    assert 'dest: "{{ hindsight_candidate_ledger_path }}"' in tasks
+    assert 'mode: "0700"' in tasks
+
+
+def test_hindsight_role_deploys_exact_ledger_idempotently(tmp_path: Path):
+    ansible = shutil.which("ansible-playbook")
+    if not ansible:
+        pytest.skip("ansible-playbook is not installed")
+    repo = Path(__file__).resolve().parents[1]
+    command = [
+        ansible,
+        "-i", "site_hindsight,",
+        "-c", "local",
+        "--tags", "hindsight_candidate_ledger",
+        "-e", f"hindsight_home={tmp_path}",
+        "playbooks/hindsight.yml",
+    ]
+    first = subprocess.run(command, cwd=repo, text=True, capture_output=True, check=True)
+    deployed = tmp_path / ".hindsight/bin/hindsight_memory_candidates.py"
+    source = repo / "bin/hindsight_memory_candidates.py"
+    assert deployed.is_file()
+    assert stat.S_IMODE(deployed.stat().st_mode) == 0o700
+    assert hashlib.sha256(deployed.read_bytes()).digest() == hashlib.sha256(source.read_bytes()).digest()
+    assert "changed=2" in first.stdout
+
+    second = subprocess.run(command, cwd=repo, text=True, capture_output=True, check=True)
+    assert "changed=0" in second.stdout

@@ -6,6 +6,10 @@ LaunchAgent `com.<site_ns>.hindsight-api` on `127.0.0.1:8888`.
 The role is intentionally fail-closed:
 
 - Hindsight is pinned to `0.9.0` in an isolated `~/.hindsight/venv`.
+- The canonical candidate-ledger CLI is installed from
+  `bin/hindsight_memory_candidates.py` to
+  `~/.hindsight/bin/hindsight_memory_candidates.py` with mode `0700`; the role
+  is the authoritative deployment path for that runtime copy.
 - Codex authentication must already exist at `~/.hindsight/codex/auth.json`
   with mode `0600`.
 - Credentials are never copied into Hermes, Ansible variables, plist templates,
