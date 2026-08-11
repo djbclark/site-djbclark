@@ -43,6 +43,20 @@
     - "{{ hindsight_logs_dir }}"
     - "{{ hindsight_plist_dir }}"
 
+- name: Ensure Hindsight candidate-ledger directory exists
+  ansible.builtin.file:
+    path: "{{ hindsight_candidate_ledger_dir }}"
+    state: directory
+    mode: "0700"
+  tags: [hindsight_candidate_ledger]
+
+- name: Install canonical Hindsight candidate ledger
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../bin/hindsight_memory_candidates.py"
+    dest: "{{ hindsight_candidate_ledger_path }}"
+    mode: "0700"
+  tags: [hindsight_candidate_ledger]
+
 - name: Create isolated Hindsight virtual environment
   ansible.builtin.command:
     argv: ["{{ _hindsight_uv.stdout | trim }}", "venv", "{{ hindsight_venv }}", "--python", "3.11"]
