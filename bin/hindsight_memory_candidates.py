@@ -26,7 +26,7 @@ SECRET_PATTERNS = [
 TRANSIENT_PATTERNS = [
     re.compile(r"(?i)\b(todo|maybe|i think|probably|brainstorm|temporary|scratch)\b"),
 ]
-ALLOWED_KINDS = {"preference", "decision", "project_fact", "convention", "correction", "lesson"}
+ALLOWED_KINDS = {"preference", "fact", "lesson"}
 
 
 def now_iso() -> str:
@@ -81,8 +81,32 @@ class CandidateLedger:
           expires_at TEXT,
           rejection_reason TEXT,
           reviewed_at TEXT,
+          promoted_at TEXT,
+          promotion_operation_id TEXT,
           UNIQUE(operation_id, content_hash)
         )""")
+        existing_columns = {
+            row[1] for row in self.db.execute("PRAGMA table_info(candidates)").fetchall()
+        }
+        for column, definition in (
+            ("promoted_at", "TEXT"),
+            ("promotion_operation_id", "TEXT"),
+        ):
+            if column not in existing_columns:
+                self.db.execute(f"ALTER TABLE candidates ADD COLUMN {column} {definition}")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS candidate_sequence (
+          name TEXT PRIMARY KEY,
+          next_id INTEGER NOT NULL
+        )""")
+        next_id = self.db.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM candidates").fetchone()[0]
+        self.db.execute(
+            "INSERT OR IGNORE INTO candidate_sequence (name, next_id) VALUES ('candidates', ?)",
+            (next_id,),
+        )
+        self.db.execute(
+            "UPDATE candidate_sequence SET next_id=MAX(next_id, ?) WHERE name='candidates'",
+            (next_id,),
+        )
         self.db.commit()
 
     def close(self) -> None:
@@ -115,13 +139,28 @@ class CandidateLedger:
             "operation_id": operation_id, "expires_at": expires,
         }
         try:
-            cur = self.db.execute("INSERT INTO candidates (status,content,content_hash,kind,scope,client,agent,project,workspace,session_id,source_message_ids,source_uri,captured_at,policy_version,confidence,sensitivity,origin,operation_id,expires_at) VALUES (:status,:content,:content_hash,:kind,:scope,:client,:agent,:project,:workspace,:session_id,:source_message_ids,:source_uri,:captured_at,:policy_version,:confidence,:sensitivity,:origin,:operation_id,:expires_at)", row)
+            self.db.execute("BEGIN IMMEDIATE")
+            candidate_id = self.db.execute(
+                "SELECT next_id FROM candidate_sequence WHERE name='candidates'"
+            ).fetchone()[0]
+            row["id"] = candidate_id
+            self.db.execute(
+                "INSERT INTO candidates (id,status,content,content_hash,kind,scope,client,agent,project,workspace,session_id,source_message_ids,source_uri,captured_at,policy_version,confidence,sensitivity,origin,operation_id,expires_at) VALUES (:id,:status,:content,:content_hash,:kind,:scope,:client,:agent,:project,:workspace,:session_id,:source_message_ids,:source_uri,:captured_at,:policy_version,:confidence,:sensitivity,:origin,:operation_id,:expires_at)",
+                row,
+            )
+            self.db.execute(
+                "UPDATE candidate_sequence SET next_id=? WHERE name='candidates'",
+                (candidate_id + 1,),
+            )
             self.db.commit()
-            row["id"] = cur.lastrowid
             return row
         except sqlite3.IntegrityError:
+            self.db.rollback()
             existing = self.db.execute("SELECT id,status,content_hash FROM candidates WHERE content_hash=?", (row["content_hash"],)).fetchone()
             return {"status": "duplicate", "id": existing["id"], "content_hash": existing["content_hash"]}
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list(self, status: str = "pending") -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM candidates WHERE status=? ORDER BY id", (status,)).fetchall()
@@ -133,17 +172,48 @@ class CandidateLedger:
         row = self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone()
         if row is None:
             raise KeyError(candidate_id)
+        current_status = row["status"]
+        can_review = current_status == "pending"
+        can_reapprove = current_status == "rejected" and decision == "approved"
+        if not (can_review or can_reapprove):
+            raise ValueError(
+                f"candidate is already {current_status}; only pending candidates can be reviewed, "
+                "except rejected candidates may be approved"
+            )
         content = edited_content.strip() if edited_content else row["content"]
         if decision == "approved":
             safe, reasons = redact_or_reject(content)
             if safe is None or reasons:
                 raise ValueError("edited content failed admission: " + ",".join(reasons))
             content = safe
-        self.db.execute("UPDATE candidates SET status=?, content=?, reviewed_at=? WHERE id=?", (decision, content, now_iso(), candidate_id))
+        rejection_reason = None if decision == "approved" else row["rejection_reason"]
+        self.db.execute(
+            "UPDATE candidates SET status=?, content=?, rejection_reason=?, reviewed_at=? WHERE id=?",
+            (decision, content, rejection_reason, now_iso(), candidate_id),
+        )
         self.db.commit()
         return dict(self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone())
 
+    def reclassify(self, candidate_id: int, kind: str, note: str | None = None) -> dict[str, Any]:
+        if kind not in ALLOWED_KINDS:
+            raise ValueError(f"kind must be one of {sorted(ALLOWED_KINDS)}, got {kind!r}")
+        row = self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone()
+        if row is None:
+            raise KeyError(candidate_id)
+        old_kind = row["kind"]
+        self.db.execute("UPDATE candidates SET kind=? WHERE id=?", (kind, candidate_id))
+        self.db.commit()
+        result = dict(self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone())
+        result["_old_kind"] = old_kind
+        result["_note"] = note
+        return result
+
     def payload(self, candidate_id: int) -> dict[str, Any]:
+        existing = self.db.execute("SELECT status FROM candidates WHERE id=?", (candidate_id,)).fetchone()
+        if existing is None:
+            raise KeyError(candidate_id)
+        if existing["status"] == "promoted":
+            raise ValueError("candidate is already promoted")
         row = self.db.execute("SELECT * FROM candidates WHERE id=? AND status='approved'", (candidate_id,)).fetchone()
         if row is None:
             raise ValueError("candidate must be approved before promotion")
@@ -152,6 +222,21 @@ class CandidateLedger:
             "operation_id": row["operation_id"], "context": "approved-memory-candidate",
             "metadata": {"client": row["client"], "agent": row["agent"], "project": row["project"], "session_id": row["session_id"], "source_uri": row["source_uri"], "policy_version": row["policy_version"], "origin": row["origin"], "expires_at": row["expires_at"]},
         }
+
+    def mark_promoted(self, candidate_id: int, promotion_operation_id: str) -> dict[str, Any]:
+        row = self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone()
+        if row is None:
+            raise KeyError(candidate_id)
+        if row["status"] == "promoted":
+            return dict(row)
+        if row["status"] != "approved":
+            raise ValueError(f"candidate is {row['status']}, not approved")
+        self.db.execute(
+            "UPDATE candidates SET status='promoted', promoted_at=?, promotion_operation_id=? WHERE id=?",
+            (now_iso(), promotion_operation_id, candidate_id),
+        )
+        self.db.commit()
+        return dict(self.db.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone())
 
 
 def main() -> int:
