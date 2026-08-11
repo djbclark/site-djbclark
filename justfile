@@ -58,6 +58,9 @@ inventory-check:
 hostnames-audit:
     bin/check_hostnames.py
 
+test:
+    PYTHONPATH=. uv run --with pytest --with pyyaml pytest -q
+
 lint:
     bin/registry_lint.py
     python3 -m unittest discover -s tests -v
@@ -451,6 +454,6 @@ hindsight-candidate-payload id:
 
 # Herdr reporter helpers (added by lifecycle reporter release)
 ralph-herdr-supervisor:
-  @echo "Usage: ./bin/ralph_herdr_supervisor.py [options]"
+    @echo "Usage: ./bin/ralph_herdr_supervisor.py [options]"
 herdr-lifecycle-reporter-test:
-  @echo "Usage: HERDR_REPORTER_MODE=positive ./bin/herdr_lifecycle.py working --message test"
+    @echo "Usage: HERDR_REPORTER_MODE=positive ./bin/herdr_lifecycle.py working --message test"
