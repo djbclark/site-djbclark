@@ -46,6 +46,9 @@ jobs:
           - repo: osolmaz/telegram-bot-mux
             number: "2"
             slug: telegram-bot-mux-2
+          - repo: cachix/secretspec
+            number: "64"
+            slug: secretspec-64
     steps:
       - uses: actions/checkout@v4
 
