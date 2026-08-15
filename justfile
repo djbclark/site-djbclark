@@ -61,9 +61,15 @@ hostnames-audit:
 test:
     PYTHONPATH=. uv run --with pytest --with pyyaml pytest -q
 
+# Runs the unittest suite under the same interpreter the `test` recipe uses.
+# `unittest discover` imports every tests/test_*.py, including the pytest-based
+# ones, so a bare `python3` here failed on `import pytest` before a single test
+# ran. Note this comment sits outside the recipe body on purpose: `set shell`
+# above is `bash -uc`, under which a comment-only recipe line runs no command
+# and exits 1, failing the recipe.
 lint:
     bin/registry_lint.py
-    python3 -m unittest discover -s tests -v
+    PYTHONPATH=. uv run --with pytest --with pyyaml python -m unittest discover -s tests -v
 
 # Serialize multi-agent release cut/deploy (see docs/OPS-RELEASES.md § locking).
 # State dir: ~/.local/state/site-djbclark/ (ops-release.lock + ops-release.claim.json)
