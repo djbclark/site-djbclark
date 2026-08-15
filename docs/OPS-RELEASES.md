@@ -186,39 +186,33 @@ python3 ~/src/ops-worktrees/main/site-djbclark/bin/deploy_ops_release.py \
 
 ### Canonical SecretSpec runtime store
 
-The only final live manifest/provider store is
-`/var/db/stayturgid-secrets/`. Durable declarations are reviewed in the tracked
-`site-private/secretspec.toml.example`; sibling `secretspec.toml` symlinks point
-to that example. Every wrapper `source-add` must be mirrored into the example
-through a task-worktree PR and coordinated release. The fixed
-`source-template-check` operation reports only match/mismatch and never prints
-manifest content or secret values.
+The only live manifest/provider store is `/var/db/sudo-secretspec/`, owned by
+the `_sudo_secretspec` service identity with mode `0700` and reached only
+through the root-owned `sudo-secretspec` broker. Durable declarations are
+reviewed in the tracked `site-private/secretspec.toml.example`; sibling
+`secretspec.toml` symlinks point to that example. Every `sudo-secretspec add`
+must be mirrored into the example through a task-worktree PR and coordinated
+release. The `sudo-secretspec template-check` operation reports only
+match/mismatch and never prints manifest content or secret values.
 
-The tracked-to-ignored checkout transition is handled without reading the
-protected legacy file. The deployer verifies that the target release removes
-and ignores that path and adds the tracked example, then atomically renames the
-legacy file into a non-symlink Git-private backup directory, advances the
-checkout, and renames it back temporarily. Backup and recovery use
-inode/device metadata plus dir-fd-relative no-follow operations. An interrupted
-run recovers the validated backup before preflight and fails closed on any
-incomplete, planted, or conflicting state.
+No runtime secret file remains in any Git checkout, so a release no longer has
+to bridge one. The `_secretspec` wrapper boundary and its
+`/var/db/stayturgid-secrets` store were retired on 2026-08-15; the legacy
+directory is locked `root:wheel 0000` and holds no live role. Deploying a
+release performs no privileged SecretSpec cutover.
 
-Because the deployed older tool cannot pass preflight while the tracked path is
-dirty/unreadable, perform this one transition with the deployer from the exact
-published transition tag, using the same `--ops-root` bootstrap form shown for
-Codex preferences above. Then complete the privileged cutover in this order:
+Boundary changes are installed out of band, from a real TTY, not by the
+deployer:
 
-1. Run the old installed wrapper's `source-publish` once so `/var/db` contains
-   the final source state.
-2. Install the new release wrapper at
-   `/usr/local/libexec/stayturgid-secretspec-wrapper.sh` as `root:wheel 0755`.
-3. Run `source-check` and `source-template-check` through that installed wrapper.
-4. Remove the now-ignored legacy checkout `secretspec.toml` and `.env` files.
-5. Verify ordinary lifecycle operations use `/var/db` and all deploy checkouts
-   are clean.
+```bash
+brew upgrade frdminc/sudo-secretspec/sudo-secretspec
+sudo-secretspec install --adopt-existing
+sudo-secretspec doctor
+```
 
-Until step 2, the deployer restores the ignored checkout file so the old wrapper
-continues working; that is a compatibility bridge, not the final architecture.
+`install` authenticates every time (`timestamp_timeout=0`) and cannot prompt
+from a backgrounded process. Pass `--adopt-existing` whenever a vault already
+exists: without it, `install` truncates `<vault>/.env`.
 
 ## Live memory exception
 
