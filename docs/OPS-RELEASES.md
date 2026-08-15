@@ -205,7 +205,7 @@ Boundary changes are installed out of band, from a real TTY, not by the
 deployer:
 
 ```bash
-brew upgrade djbclark/sudo-secretspec/sudo-secretspec
+brew upgrade frdminc/sudo-secretspec/sudo-secretspec
 sudo-secretspec install --adopt-existing
 sudo-secretspec doctor
 ```
