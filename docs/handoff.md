@@ -394,8 +394,8 @@ shizuku_server` alongside port 5555 `ss` check (port alone is not sufficient).
 
 **Headless API use:**
 
-- `HEADLESS_START` (djbclark/Shizuku) — starts Shizuku daemon + wireless ADB, no UI
-- `HEADLESS_STATUS` (djbclark/Shizuku) — returns server state; pgrep fallback on Samsung
+- `HEADLESS_START` (frdminc/Shizuku) — starts Shizuku daemon + wireless ADB, no UI
+- `HEADLESS_STATUS` (frdminc/Shizuku) — returns server state; pgrep fallback on Samsung
 - `FleetProfileActivity` (djbclark/AutoJs6 + djbclark/Obtainium) — SharedPreferences via intent
 - `obtainium://apps` (djbclark/Obtainium) — headless catalog import with auto-confirm
 - `obtainium://update` (djbclark/Obtainium) — headless update check with auto-install
