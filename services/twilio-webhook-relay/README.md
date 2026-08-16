@@ -34,15 +34,15 @@ status-transition idempotency, and method rejection.
 
    ```bash
    # The exact secret injection command depends on the deployment environment.
-   # Values must originate from secretspec and must not be pasted into shell history.
-   secretspec get TWILIO_AUTH_TOKEN --reason "deploy daycare-phone webhook relay" \
+   # Values must originate from sudo-secretspec and must not be pasted into shell history.
+   sudo-secretspec get TWILIO_AUTH_TOKEN --reason "deploy daycare-phone webhook relay" \
      | wrangler secret put TWILIO_AUTH_TOKEN
-   secretspec get TWILIO_FORWARD_TOKEN --reason "deploy daycare-phone webhook relay" \
+   sudo-secretspec get TWILIO_FORWARD_TOKEN --reason "deploy daycare-phone webhook relay" \
      | wrangler secret put FORWARD_TOKEN
    ```
 
    `TWILIO_FORWARD_TOKEN` is a future declaration if the forwarding target needs
-   bearer authentication; declare it with `secretspec add` before using it.
+   bearer authentication; declare it with `sudo-secretspec add` before using it.
 4. Deploy with Wrangler from this directory:
 
    ```bash

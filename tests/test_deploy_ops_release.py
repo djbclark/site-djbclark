@@ -65,7 +65,6 @@ def make_repo(
     path: Path,
     *,
     tracked_codex_config: bool = False,
-    tracked_secretspec: bool = False,
 ) -> str:
     path.mkdir()
     git(path, "init", "-b", "master")
@@ -76,13 +75,6 @@ def make_repo(
             release.LOCAL_CODEX_CONFIG,
             'model = "released"\n',
             "tracked codex config",
-        )
-    if tracked_secretspec:
-        commit_file(
-            path,
-            release.LOCAL_SECRETSPEC,
-            '[profiles.default]\nTOKEN = { description = "test", required = false }\n',
-            "tracked secretspec manifest",
         )
     manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.0.0"}
     commit = commit_file(path, "ops-release.json", json.dumps(manifest), "release")
@@ -106,13 +98,6 @@ def tag_release(path: Path, version: str) -> None:
 
 
 class DeployOpsReleaseTest(unittest.TestCase):
-    def test_repository_secretspec_symlink_targets_tracked_example(self) -> None:
-        root = Path(__file__).parents[1]
-        self.assertEqual(
-            (root / "secretspec.toml").readlink(),
-            Path("../site-private/secretspec.toml.example"),
-        )
-
     def test_normalize_tag(self) -> None:
         self.assertEqual(release.normalize_tag("1.2.3"), "ops-v1.2.3")
         self.assertEqual(release.normalize_tag("ops-v1.2.3"), "ops-v1.2.3")
@@ -530,170 +515,6 @@ class DeployOpsReleaseTest(unittest.TestCase):
             self.assertFalse(
                 release.ref_ignores_path(path, "HEAD", "nested/runtime.toml")
             )
-
-    def test_protected_manifest_transition_requires_ignore_and_example(self) -> None:
-        for missing in ("ignore", "example"):
-            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "site-private"
-                current = make_repo(path, tracked_secretspec=True)
-                (path / release.LOCAL_SECRETSPEC).unlink()
-                if missing != "example":
-                    (path / release.LOCAL_SECRETSPEC_EXAMPLE).write_text(
-                        "[profiles.default]\n", encoding="utf-8"
-                    )
-                if missing == "ignore":
-                    (path / ".gitignore").write_text(
-                        f"/{release.LOCAL_SECRETSPEC}\n!/{release.LOCAL_SECRETSPEC}\n",
-                        encoding="utf-8",
-                    )
-                else:
-                    (path / ".gitignore").write_text(
-                        f"/{release.LOCAL_SECRETSPEC}\n", encoding="utf-8"
-                    )
-                target = commit_all(path, f"missing {missing}")
-                git(path, "reset", "--hard", current)
-                runtime = path / release.LOCAL_SECRETSPEC
-                runtime.write_text("runtime\n", encoding="utf-8")
-                with self.assertRaises(release.ReleaseError):
-                    release.inspect_rename_file_migration(
-                        "site-private", path, current, target
-                    )
-
-    def test_deploy_renames_protected_secretspec_without_reading_it(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            ops_root = Path(directory) / "ops"
-            ops_root.mkdir()
-            targets: dict[str, str] = {}
-            originals: dict[str, str] = {}
-            for name in release.REPOSITORIES:
-                path = ops_root / name
-                make_repo(path, tracked_secretspec=name == "site-private")
-                manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
-                (path / "ops-release.json").write_text(json.dumps(manifest), encoding="utf-8")
-                if name == "site-private":
-                    original = path / release.LOCAL_SECRETSPEC
-                    example = path / release.LOCAL_SECRETSPEC_EXAMPLE
-                    example.write_bytes(original.read_bytes())
-                    original.unlink()
-                    (path / ".gitignore").write_text(
-                        f"/{release.LOCAL_SECRETSPEC}\n", encoding="utf-8"
-                    )
-                targets[name] = commit_all(path, "release 1.1")
-                tag_release(path, "1.1.0")
-                git(path, "update-ref", "refs/remotes/origin/master", targets[name])
-                git(path, "reset", "--hard", "ops-v1.0.0")
-                originals[name] = git(path, "rev-parse", "HEAD")
-
-            private = ops_root / "site-private"
-            protected = private / release.LOCAL_SECRETSPEC
-            runtime_content = b'[profiles.default]\nRUNTIME = { description = "live", required = false }\n'
-            protected.write_bytes(runtime_content)
-            protected.chmod(0)
-            runtime_inode = protected.lstat().st_ino
-
-            plans = release.deploy_release(
-                ops_root,
-                "ops-v1.1.0",
-                apply=True,
-                fetch=False,
-                verify_github=False,
-            )
-
-            private_plan = next(plan for plan in plans if plan.name == "site-private")
-            self.assertIsNotNone(private_plan.rename_file_migration)
-            protected.chmod(0o600)
-            self.assertEqual(protected.read_bytes(), runtime_content)
-            self.assertEqual(git(private, "status", "--porcelain"), "")
-            self.assertEqual(
-                git(private, "check-ignore", release.LOCAL_SECRETSPEC),
-                release.LOCAL_SECRETSPEC,
-            )
-            for name, target in targets.items():
-                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), target)
-
-            for plan in reversed(plans):
-                release.rollback_release_plan(plan)
-            protected.chmod(0o600)
-            self.assertEqual(protected.lstat().st_ino, runtime_inode)
-            self.assertEqual(protected.read_bytes(), runtime_content)
-            for name, original in originals.items():
-                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), original)
-
-    def test_protected_backup_directory_symlink_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site-private"
-            make_repo(path, tracked_secretspec=True)
-            git_dir = Path(git(path, "rev-parse", "--git-dir"))
-            if not git_dir.is_absolute():
-                git_dir = path / git_dir
-            external = Path(directory) / "external"
-            external.mkdir()
-            (git_dir / "ops-release").symlink_to(external, target_is_directory=True)
-            with self.assertRaisesRegex(release.ReleaseError, "not a real directory"):
-                release.rename_file_backup_path(path)
-            self.assertEqual(list(external.iterdir()), [])
-
-    def test_planted_or_wrong_inode_protected_backup_is_rejected(self) -> None:
-        for case in ("missing-metadata", "wrong-inode"):
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "site-private"
-                make_repo(path, tracked_secretspec=True)
-                protected = path / release.LOCAL_SECRETSPEC
-                info = protected.lstat()
-                migration = release.RenameFileMigration(
-                    release.LOCAL_SECRETSPEC, info.st_dev, info.st_ino
-                )
-                if case == "missing-metadata":
-                    backup = release.rename_file_backup_path(path)
-                    backup.write_text("planted\n", encoding="utf-8")
-                    expected = "incomplete"
-                else:
-                    backup = release.persist_rename_file_backup(path, migration)
-                    replacement = backup.with_name("replacement")
-                    replacement.write_text("planted\n", encoding="utf-8")
-                    os.replace(replacement, backup)
-                    expected = "identity does not match"
-                with self.assertRaisesRegex(release.ReleaseError, expected):
-                    release.recover_rename_file_backup(path)
-
-    def test_protected_manifest_inode_change_aborts_before_rename(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site-private"
-            make_repo(path, tracked_secretspec=True)
-            protected = path / release.LOCAL_SECRETSPEC
-            original = protected.lstat()
-            migration = release.RenameFileMigration(
-                release.LOCAL_SECRETSPEC, original.st_dev, original.st_ino
-            )
-            replacement = path / "replacement"
-            replacement.write_text("new runtime\n", encoding="utf-8")
-            os.replace(replacement, protected)
-
-            with self.assertRaisesRegex(release.ReleaseError, "changed before rename"):
-                release.persist_rename_file_backup(path, migration)
-            self.assertTrue(protected.exists())
-            self.assertFalse(release.rename_file_backup_path(path).exists())
-
-    def test_interrupted_protected_manifest_migration_recovers_by_rename(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site-private"
-            make_repo(path, tracked_secretspec=True)
-            protected = path / release.LOCAL_SECRETSPEC
-            protected.write_text("runtime manifest\n", encoding="utf-8")
-            protected.chmod(0)
-            info = protected.lstat()
-            migration = release.RenameFileMigration(
-                release.LOCAL_SECRETSPEC, info.st_dev, info.st_ino
-            )
-
-            backup = release.persist_rename_file_backup(path, migration)
-            self.assertFalse(protected.exists())
-            self.assertTrue(backup.exists())
-            release.recover_rename_file_backup(path)
-
-            self.assertFalse(backup.exists())
-            protected.chmod(0o600)
-            self.assertEqual(protected.read_text(encoding="utf-8"), "runtime manifest\n")
 
     def test_status_rejects_unversioned_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

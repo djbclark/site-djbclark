@@ -40,7 +40,7 @@ Planned hosts set `site_host_status: offline_unprovisioned` so the role
 4. Apply with keys (from the control node or on-host SecretSpec):
 
    ```bash
-   LITELLM_HOSTS=mac-mini-intel secretspec run --reason "LiteLLM mini" -- just litellm-apply
+   LITELLM_HOSTS=mac-mini-intel sudo-secretspec run --reason "LiteLLM mini" -- just litellm-apply
    # or: just litellm-apply -- --limit vps-primary
    ```
 
@@ -63,8 +63,8 @@ just litellm-status
 # All inventory members (skips offline_unprovisioned; fails on bad SSH if online)
 LITELLM_HOSTS=site_litellm just litellm-apply
 
-# Secrets from site dotenv (E4 pattern)
-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+# Secrets via sudo-secretspec (E4 pattern)
+sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 # or: just litellm-apply-secrets
 ```
 
@@ -74,34 +74,28 @@ Provider completions need real keys. **Never commit keys.** Full operator
 checklist: [`human/API-KEYS-E4.md`](../../human/API-KEYS-E4.md) (includes E5
 per-host notes).
 
-1. SecretSpec user defaults (local, not git) must use the 0.16 `[defaults]`
-   table — bare top-level `provider = "dotenv"` is ignored:
+1. No provider config to set up — `sudo-secretspec` resolves everything from
+   its own vault automatically. There is no `~/.config/secretspec/config.toml`
+   to maintain and no manifest path to specify.
 
-   ```toml
-   # ~/.config/secretspec/config.toml
-   [defaults]
-   provider = "dotenv"
-   profile = "default"
-   ```
-
-2. Store values in the site dotenv (gitignored `*.env` / `.env`, mode 0600):
+2. Set each key through the broker (each prompts for the value, no echo):
 
    ```bash
-   cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
-   secretspec set OPENAI_API_KEY
-   secretspec set ANTHROPIC_API_KEY
-   secretspec set DEEPSEEK_API_KEY
-   secretspec set GEMINI_API_KEY
-   secretspec set OPENROUTER_API_KEY
-   secretspec set OPENCODE_ZEN_API_KEY
-   secretspec check -n --explain   # presence only; no values printed
+   sudo-secretspec set OPENAI_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set ANTHROPIC_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set DEEPSEEK_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set GEMINI_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set OPENROUTER_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set OPENCODE_ZEN_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec check --reason "verify LiteLLM provider keys" </dev/null
    ```
 
-3. Inject at apply time (keys are not read live from SecretSpec by the daemon).
-   Values render only into the mode-0600 LaunchAgent or systemd unit:
+3. Inject at apply time (keys are not read live from the broker by the
+   daemon). Values render only into the mode-0600 LaunchAgent or systemd
+   unit:
 
    ```bash
-   secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+   sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
    ```
 
 4. Verify (expect 200 once the matching key is in the unit):

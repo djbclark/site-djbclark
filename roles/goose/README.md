@@ -40,7 +40,7 @@ key.
 this role. Operator checklist: [`human/API-KEYS-E4.md`](../../human/API-KEYS-E4.md).
 
 ```bash
-# After keys are in the LiteLLM LaunchAgent (secretspec run → just litellm-apply):
+# After keys are in the LiteLLM LaunchAgent (sudo-secretspec run → just litellm-apply):
 goose info -v    # litellm-local / smart-router
 goose run --no-session -t "Reply with exactly the word PONG and nothing else."
 ```
