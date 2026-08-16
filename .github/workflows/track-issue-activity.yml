@@ -52,6 +52,12 @@ jobs:
           - repo: NorthernTechHQ/libntech
             number: "290"
             slug: libntech-290
+          - repo: cfengine/core
+            number: "6293"
+            slug: cfengine-core-6293
+          - repo: cfengine/core
+            number: "6294"
+            slug: cfengine-core-6294
     steps:
       - uses: actions/checkout@v4
 
