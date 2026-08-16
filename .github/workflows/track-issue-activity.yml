@@ -49,6 +49,9 @@ jobs:
           - repo: cachix/secretspec
             number: "64"
             slug: secretspec-64
+          - repo: NorthernTechHQ/libntech
+            number: "290"
+            slug: libntech-290
     steps:
       - uses: actions/checkout@v4
 
