@@ -15,8 +15,8 @@ Last updated: **2026-07-20** (E4 SecretSpec / LiteLLM keys checklist)
 
 | Area | Status |
 | --- | --- |
-| SecretSpec operational | User `~/.config/secretspec/config.toml` uses `[defaults]` dotenv + default profile; site `.env` 0600 gitignored |
-| LiteLLM LaunchAgent keys | `ANTHROPIC_API_KEY` injected via `secretspec run -- just litellm-apply`; `OPENAI_API_KEY` still **human** if not set |
+| sudo-secretspec operational | Root-owned vault at `/var/db/sudo-secretspec/`; no config file or manifest path to maintain |
+| LiteLLM LaunchAgent keys | `ANTHROPIC_API_KEY` injected via `sudo-secretspec run -- just litellm-apply`; `OPENAI_API_KEY` still **human** if not set |
 | Completions / Goose | Proven with Anthropic (+ router fallbacks); full SIMPLE OpenAI path needs your OpenAI key |
 | Fieldy | Still `enabled: false`; enable + browser OAuth when ready — see `API-KEYS-E4.md` |
 | Shortwave / Saner | No Goose MCP — out of scope |

@@ -28,9 +28,6 @@ RELEASE_FILE = "ops-release.json"
 LOCAL_CODEX_CONFIG = "codex/config.toml"
 LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
 LOCAL_CODEX_CONFIG_BACKUP = "ops-release/codex-config.toml.backup"
-LOCAL_SECRETSPEC = "secretspec.toml"
-LOCAL_SECRETSPEC_EXAMPLE = f"{LOCAL_SECRETSPEC}.example"
-LOCAL_SECRETSPEC_BACKUP = "ops-release/secretspec.toml.backup"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 EX_TEMPFAIL = 75
 
@@ -47,15 +44,6 @@ class LocalFileMigration:
 
 
 @dataclass(frozen=True)
-class RenameFileMigration:
-    """A tracked file becoming ignored runtime state, preserved without reading."""
-
-    relative_path: str
-    device: int
-    inode: int
-
-
-@dataclass(frozen=True)
 class ReleasePlan:
     name: str
     path: Path
@@ -65,7 +53,6 @@ class ReleasePlan:
     memory_ahead: bool = False
     memory_rebase_from: str | None = None
     local_file_migration: LocalFileMigration | None = None
-    rename_file_migration: RenameFileMigration | None = None
 
 
 def run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -246,238 +233,7 @@ def inspect_local_file_migration(
     )
 
 
-def inspect_rename_file_migration(
-    name: str,
-    path: Path,
-    current_commit: str,
-    target_commit: str,
-) -> RenameFileMigration | None:
-    if (
-        name != "site-private"
-        or not ref_tracks_path(path, current_commit, LOCAL_SECRETSPEC)
-        or ref_tracks_path(path, target_commit, LOCAL_SECRETSPEC)
-    ):
-        return None
-    if not ref_ignores_path(path, target_commit, LOCAL_SECRETSPEC):
-        raise ReleaseError(
-            f"{name} target removes {LOCAL_SECRETSPEC} without ignoring it"
-        )
-    if not ref_tracks_path(path, target_commit, LOCAL_SECRETSPEC_EXAMPLE):
-        raise ReleaseError(
-            f"{name} target removes {LOCAL_SECRETSPEC} without a tracked "
-            f"{LOCAL_SECRETSPEC_EXAMPLE}"
-        )
-    if git(path, "diff", "--cached", "--name-only", "--", LOCAL_SECRETSPEC):
-        raise ReleaseError(
-            f"{name} {LOCAL_SECRETSPEC} is staged; unstage it before deployment"
-        )
-    local_path = path / LOCAL_SECRETSPEC
-    try:
-        info = local_path.lstat()
-    except FileNotFoundError as exc:
-        raise ReleaseError(f"{name} cannot preserve missing {LOCAL_SECRETSPEC}") from exc
-    if not stat.S_ISREG(info.st_mode) or local_path.is_symlink():
-        raise ReleaseError(
-            f"{name} cannot preserve non-regular {LOCAL_SECRETSPEC}"
-        )
-    if not os.access(local_path.parent, os.W_OK | os.X_OK):
-        raise ReleaseError(
-            f"{name} cannot rename protected {LOCAL_SECRETSPEC}; "
-            "the checkout directory is not writable"
-        )
-    return RenameFileMigration(LOCAL_SECRETSPEC, info.st_dev, info.st_ino)
 
-
-def rename_file_backup_dir(path: Path) -> Path:
-    raw = git(path, "rev-parse", "--git-dir")
-    git_dir = Path(raw)
-    if not git_dir.is_absolute():
-        git_dir = path / git_dir
-    try:
-        git_dir = git_dir.resolve(strict=True)
-    except (FileNotFoundError, RuntimeError) as exc:
-        raise ReleaseError(f"{path.name} has an invalid Git directory") from exc
-    if not git_dir.is_dir():
-        raise ReleaseError(f"{path.name} Git directory is not a directory")
-    backup_dir = git_dir / "ops-release"
-    if os.path.lexists(backup_dir):
-        info = backup_dir.lstat()
-        if not stat.S_ISDIR(info.st_mode) or backup_dir.is_symlink():
-            raise ReleaseError(f"{path.name} protected backup directory is not a real directory")
-    else:
-        backup_dir.mkdir(mode=0o700)
-    info = backup_dir.lstat()
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
-        raise ReleaseError(f"{path.name} protected backup directory has unsafe ownership or mode")
-    return backup_dir
-
-
-def rename_file_backup_path(path: Path) -> Path:
-    return rename_file_backup_dir(path) / Path(LOCAL_SECRETSPEC_BACKUP).name
-
-
-def rename_file_backup_metadata_path(path: Path) -> Path:
-    return rename_file_backup_path(path).with_suffix(".metadata.json")
-
-
-def _open_directory_nofollow(path: Path) -> int:
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError as exc:
-        raise ReleaseError(f"unsafe directory for protected manifest operation: {path}") from exc
-    info = os.fstat(descriptor)
-    if not stat.S_ISDIR(info.st_mode):
-        os.close(descriptor)
-        raise ReleaseError(f"unsafe directory for protected manifest operation: {path}")
-    return descriptor
-
-
-def _stat_at(descriptor: int, name: str) -> os.stat_result | None:
-    try:
-        return os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-
-
-def _rename_backup_metadata(migration: RenameFileMigration) -> bytes:
-    return (
-        json.dumps(
-            {
-                "schema": 1,
-                "relative_path": migration.relative_path,
-                "device": migration.device,
-                "inode": migration.inode,
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    ).encode("utf-8")
-
-
-def _write_exclusive_at(descriptor: int, name: str, content: bytes) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    file_descriptor = os.open(name, flags, 0o600, dir_fd=descriptor)
-    try:
-        os.write(file_descriptor, content)
-        os.fsync(file_descriptor)
-    finally:
-        os.close(file_descriptor)
-
-
-def _read_metadata_at(descriptor: int, name: str) -> dict[str, Any]:
-    file_descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
-    try:
-        raw = os.read(file_descriptor, 4097)
-    finally:
-        os.close(file_descriptor)
-    if len(raw) > 4096:
-        raise ReleaseError("protected manifest backup metadata is oversized")
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ReleaseError("protected manifest backup metadata is invalid") from exc
-    if not isinstance(value, dict):
-        raise ReleaseError("protected manifest backup metadata is invalid")
-    return value
-
-
-def _validated_backup_migration(path: Path, descriptor: int) -> RenameFileMigration | None:
-    backup_name = Path(LOCAL_SECRETSPEC_BACKUP).name
-    metadata_name = rename_file_backup_metadata_path(path).name
-    backup_info = _stat_at(descriptor, backup_name)
-    metadata_info = _stat_at(descriptor, metadata_name)
-    if backup_info is None and metadata_info is None:
-        return None
-    if backup_info is None or metadata_info is None:
-        raise ReleaseError(f"{path.name} has an incomplete protected manifest backup")
-    if not stat.S_ISREG(backup_info.st_mode) or not stat.S_ISREG(metadata_info.st_mode):
-        raise ReleaseError(f"{path.name} protected manifest backup is not regular")
-    value = _read_metadata_at(descriptor, metadata_name)
-    try:
-        migration = RenameFileMigration(
-            str(value["relative_path"]), int(value["device"]), int(value["inode"])
-        )
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ReleaseError(f"{path.name} protected manifest backup metadata is invalid") from exc
-    if migration.relative_path != LOCAL_SECRETSPEC or (
-        backup_info.st_dev,
-        backup_info.st_ino,
-    ) != (migration.device, migration.inode):
-        raise ReleaseError(f"{path.name} protected manifest backup identity does not match")
-    return migration
-
-
-def persist_rename_file_backup(path: Path, migration: RenameFileMigration) -> Path:
-    if Path(migration.relative_path).name != migration.relative_path:
-        raise ReleaseError("protected manifest path must be a single filename")
-    backup_dir = rename_file_backup_dir(path)
-    source_descriptor = _open_directory_nofollow(path)
-    backup_descriptor = _open_directory_nofollow(backup_dir)
-    backup_name = Path(LOCAL_SECRETSPEC_BACKUP).name
-    metadata_name = rename_file_backup_metadata_path(path).name
-    try:
-        info = _stat_at(source_descriptor, migration.relative_path)
-        if info is None:
-            raise ReleaseError(f"{path.name} protected manifest disappeared before rename")
-        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (
-            migration.device,
-            migration.inode,
-        ):
-            raise ReleaseError(f"{path.name} protected manifest changed before rename")
-        if _stat_at(backup_descriptor, backup_name) or _stat_at(backup_descriptor, metadata_name):
-            raise ReleaseError(f"{path.name} has an unrecovered protected manifest backup")
-        _write_exclusive_at(backup_descriptor, metadata_name, _rename_backup_metadata(migration))
-        try:
-            os.rename(
-                migration.relative_path,
-                backup_name,
-                src_dir_fd=source_descriptor,
-                dst_dir_fd=backup_descriptor,
-            )
-            os.fsync(backup_descriptor)
-        except OSError:
-            os.unlink(metadata_name, dir_fd=backup_descriptor)
-            raise
-    except OSError as exc:
-        raise ReleaseError(f"{path.name} could not preserve protected manifest: {exc}") from exc
-    finally:
-        os.close(backup_descriptor)
-        os.close(source_descriptor)
-    return backup_dir / backup_name
-
-
-def restore_rename_file_backup(path: Path) -> bool:
-    backup_dir = rename_file_backup_dir(path)
-    source_descriptor = _open_directory_nofollow(path)
-    backup_descriptor = _open_directory_nofollow(backup_dir)
-    backup_name = Path(LOCAL_SECRETSPEC_BACKUP).name
-    metadata_name = rename_file_backup_metadata_path(path).name
-    try:
-        migration = _validated_backup_migration(path, backup_descriptor)
-        if migration is None:
-            return False
-        if _stat_at(source_descriptor, migration.relative_path) is not None:
-            raise ReleaseError(
-                f"{path.name} cannot recover {migration.relative_path}: both target and backup exist"
-            )
-        os.rename(
-            backup_name,
-            migration.relative_path,
-            src_dir_fd=backup_descriptor,
-            dst_dir_fd=source_descriptor,
-        )
-        os.unlink(metadata_name, dir_fd=backup_descriptor)
-        os.fsync(backup_descriptor)
-        os.fsync(source_descriptor)
-        return True
-    finally:
-        os.close(backup_descriptor)
-        os.close(source_descriptor)
-
-
-def recover_rename_file_backup(path: Path) -> None:
-    if restore_rename_file_backup(path):
-        print(f"{path.name}: recovered protected {LOCAL_SECRETSPEC} from interrupted deploy")
 
 def write_file_atomically(target: Path, content: bytes, mode: int) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -606,15 +362,9 @@ def inspect_release(
         current_commit,
         target_commit,
     )
-    rename_file_migration = inspect_rename_file_migration(
-        name,
-        path,
-        current_commit,
-        target_commit,
-    )
     allowed_dirty_paths = tuple(
         migration.relative_path
-        for migration in (local_file_migration, rename_file_migration)
+        for migration in (local_file_migration,)
         if migration
     )
     require_clean_master(path, allowed_dirty_paths=allowed_dirty_paths)
@@ -667,13 +417,11 @@ def inspect_release(
         memory_ahead,
         memory_rebase_from,
         local_file_migration,
-        rename_file_migration,
     )
 
 
 def apply_release_plan(plan: ReleasePlan) -> None:
     migration = plan.local_file_migration
-    rename_migration = plan.rename_file_migration
     backup: Path | None = None
     if migration:
         backup = persist_local_file_backup(plan.path, migration)
@@ -685,8 +433,6 @@ def apply_release_plan(plan: ReleasePlan) -> None:
             migration.relative_path,
             cwd=plan.path,
         )
-    if rename_migration:
-        persist_rename_file_backup(plan.path, rename_migration)
     try:
         if plan.memory_rebase_from:
             run(
@@ -700,11 +446,6 @@ def apply_release_plan(plan: ReleasePlan) -> None:
         elif not plan.memory_ahead:
             run("git", "merge", "--ff-only", plan.target_commit, cwd=plan.path)
     finally:
-        if rename_migration:
-            if not restore_rename_file_backup(plan.path):
-                raise ReleaseError(
-                    f"{plan.name} lost protected {rename_migration.relative_path} backup"
-                )
         if migration:
             restore_local_file(plan.path, migration)
             if not local_file_matches(plan.path, migration):
@@ -727,24 +468,14 @@ def apply_release_plan(plan: ReleasePlan) -> None:
         raise ReleaseError(
             f"{plan.name} did not preserve local {migration.relative_path}"
         )
-    if rename_migration:
-        protected = plan.path / rename_migration.relative_path
-        if not protected.exists() or protected.is_symlink():
-            raise ReleaseError(
-                f"{plan.name} did not restore protected "
-                f"{rename_migration.relative_path}"
-            )
     require_clean_master(plan.path)
 
 
 def rollback_release_plan(plan: ReleasePlan) -> None:
     migration = plan.local_file_migration
-    rename_migration = plan.rename_file_migration
     local_backup: Path | None = None
     if migration:
         local_backup = persist_local_file_backup(plan.path, migration)
-    if rename_migration:
-        persist_rename_file_backup(plan.path, rename_migration)
     if migration:
         local_target = plan.path / migration.relative_path
         if os.path.lexists(local_target):
@@ -758,15 +489,6 @@ def rollback_release_plan(plan: ReleasePlan) -> None:
         if result.returncode != 0:
             raise ReleaseError(f"{plan.name} rollback reset failed")
     finally:
-        if rename_migration:
-            generated = plan.path / rename_migration.relative_path
-            if os.path.lexists(generated):
-                info = generated.lstat()
-                if not stat.S_ISREG(info.st_mode) or generated.is_symlink():
-                    raise ReleaseError(f"{plan.name} rollback created unsafe protected path")
-                generated.unlink()
-            if not restore_rename_file_backup(plan.path):
-                raise ReleaseError(f"{plan.name} rollback lost protected manifest backup")
         if migration:
             restore_local_file(plan.path, migration)
             if local_backup:
@@ -786,7 +508,6 @@ def deploy_release(
     private_path = ops_root / "site-private"
     if private_path.exists():
         recover_local_file_backup(private_path)
-        recover_rename_file_backup(private_path)
     plans = [
         inspect_release(ops_root, name, tag, fetch=fetch, verify_github=verify_github)
         for name in REPOSITORIES
@@ -800,10 +521,6 @@ def deploy_release(
             details.append("existing memory commits")
         if plan.local_file_migration:
             details.append(f"preserved local {plan.local_file_migration.relative_path}")
-        if plan.rename_file_migration:
-            details.append(
-                f"preserved protected {plan.rename_file_migration.relative_path}"
-            )
         suffix = "".join(f" + {detail}" for detail in details)
         print(f"{plan.name}: {action} {plan.tag} ({plan.target_commit[:12]}){suffix}")
     if not apply:
@@ -811,7 +528,7 @@ def deploy_release(
     for plan in plans:
         allowed_dirty_paths = tuple(
             migration.relative_path
-            for migration in (plan.local_file_migration, plan.rename_file_migration)
+            for migration in (plan.local_file_migration,)
             if migration
         )
         require_clean_master(
@@ -830,29 +547,11 @@ def deploy_release(
                 f"{plan.name} {plan.local_file_migration.relative_path} "
                 "changed after release preflight; nothing was deployed"
             )
-        if plan.rename_file_migration:
-            protected = plan.path / plan.rename_file_migration.relative_path
-            try:
-                protected_info = protected.lstat()
-            except FileNotFoundError as exc:
-                raise ReleaseError(
-                    f"{plan.name} protected manifest disappeared after preflight"
-                ) from exc
-            if (
-                not stat.S_ISREG(protected_info.st_mode)
-                or protected.is_symlink()
-                or (protected_info.st_dev, protected_info.st_ino)
-                != (plan.rename_file_migration.device, plan.rename_file_migration.inode)
-            ):
-                raise ReleaseError(
-                    f"{plan.name} protected manifest changed after preflight"
-                )
     apply_plans = sorted(
         plans,
         key=lambda plan: (
             plan.memory_rebase_from is None,
             plan.local_file_migration is not None,
-            plan.rename_file_migration is not None,
         ),
     )
     attempted: list[ReleasePlan] = []

@@ -22,4 +22,3 @@ __pycache__/
 # shared ops-djbclark control plane) — not shared repo content.
 .ralph-tui/
 .secrets/
-*.local.secretspec.toml

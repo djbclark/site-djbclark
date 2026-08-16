@@ -115,17 +115,17 @@ ops-memory-sync:
 # Install/configure loopback LiteLLM (E1 + E4 keys + E5 multi-host).
 # Default limit mac (live). Other hosts: --limit mac-mini-intel|vps-primary|site_litellm
 # Keys: human/API-KEYS-E4.md — never commit secrets.
-# secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+# sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 litellm_hosts := env_var_or_default("LITELLM_HOSTS", "mac")
 
 litellm-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
 
-# Apply with SecretSpec injection from site .env (requires TELEGRAM_BOT_TOKEN
-# resolved because it is required in secretspec.toml; OPENAI/ANTHROPIC optional
-# until set). Same limit as litellm-apply (LITELLM_HOSTS / default m1-air).
+# Apply with sudo-secretspec injection (requires TELEGRAM_BOT_TOKEN resolved,
+# it's required; OPENAI/ANTHROPIC optional until set). Same limit as
+# litellm-apply (LITELLM_HOSTS / default m1-air).
 litellm-apply-secrets *args:
-    secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
+    sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
 
 litellm-check *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
@@ -168,7 +168,7 @@ open-webui-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/open_webui.yml --limit "{{ open_webui_hosts }}" {{ args }}
 
 open-webui-apply-secrets *args:
-    secretspec run --reason "apply Open WebUI secret" -- just open-webui-apply {{ args }}
+    sudo-secretspec run --reason "apply Open WebUI secret" -- just open-webui-apply {{ args }}
 
 open-webui-check *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/open_webui.yml --limit "{{ open_webui_hosts }}" {{ args }}

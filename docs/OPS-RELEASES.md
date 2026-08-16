@@ -188,12 +188,10 @@ python3 ~/src/ops-worktrees/main/site-djbclark/bin/deploy_ops_release.py \
 
 The only live manifest/provider store is `/var/db/sudo-secretspec/`, owned by
 the `_sudo_secretspec` service identity with mode `0700` and reached only
-through the root-owned `sudo-secretspec` broker. Durable declarations are
-reviewed in the tracked `site-private/secretspec.toml.example`; sibling
-`secretspec.toml` symlinks point to that example. Every `sudo-secretspec add`
-must be mirrored into the example through a task-worktree PR and coordinated
-release. The `sudo-secretspec template-check` operation reports only
-match/mismatch and never prints manifest content or secret values.
+through the root-owned `sudo-secretspec` broker. There is no tracked
+declarations file and no manifest path for any caller to know or specify —
+`sudo-secretspec add`/`set`/`check`/`schema` against the runtime manifest are
+the only record, and nothing needs mirroring into a release.
 
 No runtime secret file remains in any Git checkout, so a release no longer has
 to bridge one. The `_secretspec` wrapper boundary and its

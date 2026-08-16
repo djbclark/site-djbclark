@@ -58,7 +58,7 @@ systemd user unit mode 0600). Checklist:
 [`human/API-KEYS-E4.md`](human/API-KEYS-E4.md).
 
 ```bash
-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
+sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
 See `roles/litellm/README.md` for multi-host, routing, verification, rollback.
