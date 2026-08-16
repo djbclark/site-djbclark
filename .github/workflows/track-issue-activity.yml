@@ -1,7 +1,10 @@
-# Tracks third-party GitHub issues opened by djbclark for activity
-# and notifies via Telegram. Runs on GitHub Actions infra (no Mac dependency).
+# Tracks third-party GitHub issues (and Discussions) opened by djbclark for
+# activity and notifies via Telegram. Runs on GitHub Actions infra (no Mac
+# dependency).
 #
-# Add a new issue to the matrix below when you open a new one.
+# Add a new issue to the matrix below when you open a new one. Discussions
+# aren't covered by the REST Issues API, so give those entries `type:
+# discussion` — everything else defaults to `type: issue`.
 # Setup: TELEGRAM_BOT_TOKEN must be set as a repo secret.
 
 name: Track issue activity
@@ -58,6 +61,14 @@ jobs:
           - repo: cfengine/core
             number: "6294"
             slug: cfengine-core-6294
+          - repo: cfengine/core
+            number: "6295"
+            slug: cfengine-core-6295
+            type: discussion
+          - repo: cfengine/core
+            number: "6296"
+            slug: cfengine-core-6296
+            type: discussion
     steps:
       - uses: actions/checkout@v4
 
@@ -79,34 +90,67 @@ jobs:
         env:
           ISSUE_REPO: ${{ matrix.issue.repo }}
           ISSUE_NUMBER: ${{ matrix.issue.number }}
+          ISSUE_TYPE: ${{ matrix.issue.type || 'issue' }}
           CACHE_FILE: .cache/gh-tracker/${{ matrix.issue.slug }}.json
         run: |
           mkdir -p .cache/gh-tracker
 
-          # Fetch the issue once. GitHub's issue payload includes the authoritative
-          # total comment count; do not use a per_page=1 comments response as a
-          # count, because that stops detecting comments after the first one.
-          response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
-            "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null) || response=""
+          if [ "$ISSUE_TYPE" = "discussion" ]; then
+            # Discussions aren't in the REST Issues API at all (confirmed: a
+            # discussion number 404s there) - GraphQL is the only route.
+            owner="${ISSUE_REPO%%/*}"
+            repo="${ISSUE_REPO##*/}"
+            response=$(gh api graphql -f query='
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  discussion(number: $number) {
+                    title
+                    closed
+                    updatedAt
+                    comments { totalCount }
+                  }
+                }
+              }' -f owner="$owner" -f repo="$repo" -F number="$ISSUE_NUMBER" 2>/dev/null) || response=""
 
-          # If the fetch failed after retries, skip silently: no notification,
-          # no cache write. Keep the last known good state for the next run.
-          if [ -z "$response" ]; then
+            found=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('data',{}).get('repository',{}).get('discussion') else 'no')" 2>/dev/null) || found="no"
 
-            echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            if [ -z "$response" ] || [ "$found" != "yes" ]; then
+              echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
+
+            new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']['repository']['discussion']; print('closed' if d['closed'] else 'open')")
+            new_count=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']['repository']['discussion']; print(d['comments']['totalCount'])")
+            new_updated=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']['repository']['discussion']; print(d['updatedAt'])")
+            new_title=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']['repository']['discussion']; print(d['title'])")
+          else
+            # Fetch the issue once. GitHub's issue payload includes the authoritative
+            # total comment count; do not use a per_page=1 comments response as a
+            # count, because that stops detecting comments after the first one.
+            response=$(curl -sf --retry 3 --retry-delay 2 --retry-all-errors \
+              "https://api.github.com/repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null) || response=""
+
+            # If the fetch failed after retries, skip silently: no notification,
+            # no cache write. Keep the last known good state for the next run.
+            if [ -z "$response" ]; then
+              echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
+
+            new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','unknown'))")
+            new_count=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('comments',0))")
+            new_updated=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('updated_at',''))")
+            new_title=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('title',''))")
           fi
-          echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
-
-          new_state=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','unknown'))")
-          new_count=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('comments',0))")
-          new_updated=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('updated_at',''))")
 
           echo "state=$new_state" >> "$GITHUB_OUTPUT"
           echo "comment_count=$new_count" >> "$GITHUB_OUTPUT"
           echo "updated_at=$new_updated" >> "$GITHUB_OUTPUT"
-          echo "title=$(echo "$response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('title',''))")" >> "$GITHUB_OUTPUT"
+          echo "title=$new_title" >> "$GITHUB_OUTPUT"
 
           # Compare with cached state
           if [ -f "$CACHE_FILE" ]; then
@@ -157,7 +201,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "838808636"
           THREAD_ID: "22158"
-          ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/issues/${{ matrix.issue.number }}"
+          ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/${{ (matrix.issue.type || 'issue') == 'discussion' && 'discussions' || 'issues' }}/${{ matrix.issue.number }}"
         run: |
           REPO="${{ matrix.issue.repo }}"
           NUM="${{ matrix.issue.number }}"
