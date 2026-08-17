@@ -175,6 +175,39 @@ class DeployOpsReleaseTest(unittest.TestCase):
 
             release.status(ops_root, fetch=False, verify_github=False)
 
+    def test_status_allows_only_site_djbclark_research_after_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            for name in release.REPOSITORIES:
+                make_repo(ops_root / name)
+            commit_file(
+                ops_root / "site-djbclark",
+                "research/autonomy/notes.md",
+                "notes\n",
+                "research",
+            )
+
+            release.status(ops_root, fetch=False, verify_github=False)
+
+    def test_status_rejects_data_dir_of_wrong_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            for name in release.REPOSITORIES:
+                make_repo(ops_root / name)
+            commit_file(
+                ops_root / "stayturgid",
+                "research/autonomy/notes.md",
+                "notes\n",
+                "research",
+            )
+
+            with self.assertRaisesRegex(
+                release.ReleaseError, "unversioned code/config"
+            ):
+                release.status(ops_root, fetch=False, verify_github=False)
+
     def test_deploy_preserves_site_private_memory_after_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
@@ -205,7 +238,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             )
 
             self.assertTrue(
-                next(plan for plan in plans if plan.name == "site-private").memory_ahead
+                next(plan for plan in plans if plan.name == "site-private").data_ahead
             )
             self.assertEqual(
                 git(ops_root / "site-private", "rev-parse", "HEAD"), memory_commit
@@ -251,7 +284,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             )
 
             private_plan = next(plan for plan in plans if plan.name == "site-private")
-            self.assertEqual(private_plan.memory_rebase_from, "ops-v1.0.0")
+            self.assertEqual(private_plan.data_rebase_from, "ops-v1.0.0")
             private_head = git(ops_root / "site-private", "rev-parse", "HEAD")
             self.assertNotEqual(private_head, memory_commit)
             self.assertTrue(
@@ -545,30 +578,66 @@ class DeployOpsReleaseTest(unittest.TestCase):
             ):
                 release.status(ops_root, fetch=False, verify_github=False)
 
-    def test_memory_sync_accepts_only_memory_remote_drift(self) -> None:
+    def make_data_sync_repos(self, ops_root: Path) -> None:
+        for name in release.DATA_DIRS:
+            path = ops_root / name
+            make_repo(path)
+            git(
+                path,
+                "update-ref",
+                "refs/remotes/origin/master",
+                git(path, "rev-parse", "HEAD"),
+            )
+
+    def test_memory_sync_accepts_only_data_remote_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
-            path = ops_root / "site-private"
-            make_repo(path)
-            released = git(path, "rev-parse", "HEAD")
-            memory_commit = commit_file(path, "memory/fact.md", "fact\n", "memory")
-            git(path, "update-ref", "refs/remotes/origin/master", memory_commit)
-            git(path, "reset", "--hard", released)
+            self.make_data_sync_repos(ops_root)
+            data_commits: dict[str, str] = {}
+            for name, prefix in release.DATA_DIRS.items():
+                path = ops_root / name
+                released = git(path, "rev-parse", "HEAD")
+                data_commits[name] = commit_file(
+                    path, f"{prefix}fact.md", "fact\n", "data"
+                )
+                git(
+                    path,
+                    "update-ref",
+                    "refs/remotes/origin/master",
+                    data_commits[name],
+                )
+                git(path, "reset", "--hard", released)
 
             release.memory_sync(ops_root, fetch=False, verify_github=False)
 
-            self.assertEqual(git(path, "rev-parse", "HEAD"), memory_commit)
+            for name, commit in data_commits.items():
+                self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), commit)
 
     def test_memory_sync_rejects_unreleased_remote_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
+            self.make_data_sync_repos(ops_root)
             path = ops_root / "site-private"
-            make_repo(path)
             released = git(path, "rev-parse", "HEAD")
             code_commit = commit_file(path, "AGENTS.md", "changed\n", "code")
             git(path, "update-ref", "refs/remotes/origin/master", code_commit)
+            git(path, "reset", "--hard", released)
+
+            with self.assertRaisesRegex(release.ReleaseError, "unreleased code/config"):
+                release.memory_sync(ops_root, fetch=False, verify_github=False)
+
+    def test_memory_sync_rejects_cross_repo_data_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ops_root = Path(directory) / "ops"
+            ops_root.mkdir()
+            self.make_data_sync_repos(ops_root)
+            # memory/ is site-private's data dir, not site-djbclark's
+            path = ops_root / "site-djbclark"
+            released = git(path, "rev-parse", "HEAD")
+            drift = commit_file(path, "memory/fact.md", "fact\n", "data")
+            git(path, "update-ref", "refs/remotes/origin/master", drift)
             git(path, "reset", "--hard", released)
 
             with self.assertRaisesRegex(release.ReleaseError, "unreleased code/config"):

@@ -141,10 +141,11 @@ relevant command(s) from the now-advanced `~/ops/stayturgid` checkout:
   `serverapp_*` role, `just site-serverapps` must be run explicitly or the
   change won't reach the running service.
 
-For `site-private`, post-release `memory/` commits are preserved. If a valid
-local memory-only commit diverged from the requested later release, the gate
-rebases only that verified memory-only range onto the release before advancing
-the other two checkouts.
+For the data-directory exceptions (`site-private/memory/`,
+`site-djbclark/research/` — see `DATA_DIRS` in `bin/deploy_ops_release.py`),
+post-release data commits are preserved. If a valid local data-only commit
+diverged from the requested later release, the gate rebases only that verified
+data-only range onto the release before advancing the other checkouts.
 
 ### Local Codex preferences
 
@@ -212,9 +213,17 @@ sudo-secretspec doctor
 from a backgrounded process. Pass `--adopt-existing` whenever a vault already
 exists: without it, `install` truncates `<vault>/.env`.
 
-## Live memory exception
+## Live data-directory exceptions
 
-`site-private/memory/` remains live data committed directly to `master`.
+Two directories are live data committed directly to `master` in place,
+exempt from the worktree/PR/release flow (the `DATA_DIRS` mapping in
+`bin/deploy_ops_release.py` is the machine-readable authority):
+
+| Repo | Directory | Contents |
+|---|---|---|
+| `site-private` | `memory/` | Agent memory (one fact per file, handoffs) |
+| `site-djbclark` | `research/` | Research/plan document packages (**public repo** — no secrets, no private-only context) |
+
 Agents must run:
 
 ```bash
@@ -222,11 +231,11 @@ cd "${OPS_ROOT:-$HOME/ops}/site-djbclark"
 just ops-memory-sync
 ```
 
-before writing memory. The command fetches `site-private` and refuses to sync
-if any remote change since its latest coordinated release touches a path
-outside `memory/`. This prevents an ordinary memory rebase from silently
-deploying unreleased code or configuration.
+before writing to either directory. The command fetches each data-dir repo
+and refuses to sync if any remote change since its latest coordinated release
+touches a path outside that repo's data directory. This prevents an ordinary
+data rebase from silently deploying unreleased code or configuration.
 
-After the guarded sync, make one memory-only commit, push immediately, and
-leave the tree clean. `just ops-release-status` permits `site-private` to be
-ahead of its release only by `memory/` paths.
+After the guarded sync, make one data-only commit, push immediately, and
+leave the tree clean. `just ops-release-status` permits each repo to be
+ahead of its release only by its own data-directory paths.
