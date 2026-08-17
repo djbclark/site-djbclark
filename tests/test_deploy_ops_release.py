@@ -642,3 +642,117 @@ class DeployOpsReleaseTest(unittest.TestCase):
 
             with self.assertRaisesRegex(release.ReleaseError, "unreleased code/config"):
                 release.memory_sync(ops_root, fetch=False, verify_github=False)
+
+
+def completed(args: tuple[str, ...], returncode: int, stdout: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args, returncode, stdout, "")
+
+
+class VerifyGithubReleaseTest(unittest.TestCase):
+    """Release verification must not depend on the REST get-by-tag index.
+
+    See verify_github_release's docstring: that index 404'd for a release
+    that existed, so `gh release list` is primary and by-tag is fallback.
+    """
+
+    def fake_run(
+        self,
+        *,
+        list_payload: object | None = None,
+        list_rc: int = 0,
+        view_payload: object | None = None,
+        view_rc: int = 0,
+    ):
+        calls: list[tuple[str, ...]] = []
+
+        def _run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            if "list" in args:
+                body = "" if list_payload is None else json.dumps(list_payload)
+                return completed(args, list_rc, body)
+            if "view" in args:
+                body = "" if view_payload is None else json.dumps(view_payload)
+                return completed(args, view_rc, body)
+            raise AssertionError(f"unexpected command: {args}")
+
+        return _run, calls
+
+    def test_accepts_release_found_via_list_without_using_by_tag(self) -> None:
+        _run, calls = self.fake_run(
+            list_payload=[
+                {"tagName": "ops-v1.3.26", "isDraft": False, "isPrerelease": False},
+                {"tagName": "ops-v1.3.25", "isDraft": False, "isPrerelease": False},
+            ],
+            # by-tag is the broken endpoint; make it fail loudly if consulted
+            view_rc=1,
+        )
+        with patch.object(release, "run", _run):
+            release.verify_github_release("site-private", "ops-v1.3.25", Path("."))
+        self.assertTrue(any("list" in call for call in calls))
+        self.assertFalse(any("view" in call for call in calls))
+
+    def test_list_lookup_includes_drafts(self) -> None:
+        _run, calls = self.fake_run(list_payload=[])
+        with patch.object(release, "run", _run), self.assertRaises(release.ReleaseError):
+            release.verify_github_release("site-private", "ops-v1.3.25", Path("."))
+        list_call = next(call for call in calls if "list" in call)
+        self.assertNotIn("--exclude-drafts", list_call)
+        self.assertNotIn("--exclude-pre-releases", list_call)
+
+    def test_falls_back_to_by_tag_when_outside_list_window(self) -> None:
+        _run, calls = self.fake_run(
+            list_payload=[
+                {"tagName": "ops-v9.9.9", "isDraft": False, "isPrerelease": False}
+            ],
+            view_payload={
+                "tagName": "ops-v1.0.0",
+                "isDraft": False,
+                "isPrerelease": False,
+            },
+        )
+        with patch.object(release, "run", _run):
+            release.verify_github_release("stayturgid", "ops-v1.0.0", Path("."))
+        self.assertTrue(any("view" in call for call in calls))
+
+    def test_rejects_draft_found_via_list(self) -> None:
+        _run, _ = self.fake_run(
+            list_payload=[
+                {"tagName": "ops-v1.3.25", "isDraft": True, "isPrerelease": False}
+            ],
+            view_rc=1,
+        )
+        with patch.object(release, "run", _run):
+            with self.assertRaisesRegex(release.ReleaseError, "not a published stable"):
+                release.verify_github_release("site-private", "ops-v1.3.25", Path("."))
+
+    def test_rejects_prerelease_found_via_list(self) -> None:
+        _run, _ = self.fake_run(
+            list_payload=[
+                {"tagName": "ops-v1.3.25", "isDraft": False, "isPrerelease": True}
+            ],
+            view_rc=1,
+        )
+        with patch.object(release, "run", _run):
+            with self.assertRaisesRegex(release.ReleaseError, "not a published stable"):
+                release.verify_github_release("site-private", "ops-v1.3.25", Path("."))
+
+    def test_raises_when_neither_lookup_finds_the_release(self) -> None:
+        _run, _ = self.fake_run(list_payload=[], view_rc=1)
+        with patch.object(release, "run", _run):
+            with self.assertRaisesRegex(release.ReleaseError, "has no GitHub release"):
+                release.verify_github_release("site-private", "ops-v1.3.25", Path("."))
+
+    def test_survives_unparseable_list_output(self) -> None:
+        def _run(*args: str, cwd: Path, check: bool = True):
+            if "list" in args:
+                return completed(args, 0, "not json")
+            return completed(
+                args,
+                0,
+                json.dumps(
+                    {"tagName": "ops-v1.3.25", "isDraft": False, "isPrerelease": False}
+                ),
+            )
+
+        with patch.object(release, "run", _run):
+            release.verify_github_release("site-private", "ops-v1.3.25", Path("."))

@@ -37,6 +37,7 @@ LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
 LOCAL_CODEX_CONFIG_BACKUP = "ops-release/codex-config.toml.backup"
 TAG_RE = re.compile(r"^ops-v(?P<version>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 EX_TEMPFAIL = 75
+RELEASE_LIST_LIMIT = 100
 
 
 class ReleaseError(RuntimeError):
@@ -321,22 +322,80 @@ def local_file_matches(path: Path, migration: LocalFileMigration) -> bool:
     )
 
 
-def verify_github_release(name: str, tag: str, path: Path) -> None:
-    result = run(
-        "gh",
-        "release",
-        "view",
-        tag,
-        "--repo",
-        f"djbclark/{name}",
-        "--json",
-        "tagName,isDraft,isPrerelease",
-        cwd=path,
-        check=False,
-    )
+def _release_json(result: subprocess.CompletedProcess[str]) -> object | None:
     if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def release_via_list(name: str, tag: str, path: Path) -> dict | None:
+    """Look the release up through `gh release list` (GraphQL-backed)."""
+    payload = _release_json(
+        run(
+            "gh",
+            "release",
+            "list",
+            "--repo",
+            f"djbclark/{name}",
+            "--limit",
+            str(RELEASE_LIST_LIMIT),
+            "--json",
+            "tagName,isDraft,isPrerelease",
+            cwd=path,
+            check=False,
+        )
+    )
+    if not isinstance(payload, list):
+        return None
+    for entry in payload:
+        if isinstance(entry, dict) and entry.get("tagName") == tag:
+            return entry
+    return None
+
+
+def release_via_tag(name: str, tag: str, path: Path) -> dict | None:
+    """Look the release up through `gh release view` (REST get-by-tag)."""
+    payload = _release_json(
+        run(
+            "gh",
+            "release",
+            "view",
+            tag,
+            "--repo",
+            f"djbclark/{name}",
+            "--json",
+            "tagName,isDraft,isPrerelease",
+            cwd=path,
+            check=False,
+        )
+    )
+    return payload if isinstance(payload, dict) else None
+
+
+def verify_github_release(name: str, tag: str, path: Path) -> None:
+    """Require `tag` to be a published, stable GitHub release for the repo.
+
+    `gh release list` is the primary lookup because it resolves through
+    GraphQL. The obvious alternative, `gh release view <tag>`, goes through
+    the REST get-release-by-tag endpoint, whose tag->release index was
+    observed 404ing for a release that demonstrably existed: on 2026-08-17
+    ops-v1.3.25 on the private repo djbclark/site-private read fine by
+    numeric id and via GraphQL but 404'd by tag, which made deploy, status
+    and memory-sync a coin flip. By-tag is kept only as a fallback, for a
+    release older than RELEASE_LIST_LIMIT.
+
+    Drafts and pre-releases are deliberately left in the listing (no
+    --exclude-drafts) so an unpublished release is rejected explicitly
+    rather than looking like no release at all.
+    """
+    release = release_via_list(name, tag, path)
+    if release is None:
+        release = release_via_tag(name, tag, path)
+    if release is None:
         raise ReleaseError(f"djbclark/{name} has no GitHub release for {tag}")
-    release = json.loads(result.stdout)
     if (
         release.get("tagName") != tag
         or release.get("isDraft")

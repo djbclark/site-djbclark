@@ -100,6 +100,29 @@ resolving its exact scope, then retry the coordinated cut. Keep or refresh
 the claim until the suite is either fully published+deployed or explicitly
 abandoned (`claim end --force`).
 
+### How release existence is verified
+
+`deploy_ops_release.py` checks each release with `gh release list`
+(GraphQL-backed), not `gh release view <tag>`. GitHub's REST
+get-release-by-tag index went bad for the private repo `djbclark/site-private`
+on 2026-08-17: `ops-v1.3.25` was readable by numeric id and via GraphQL but
+404'd by tag, intermittently and then consistently. That made
+`ops-release-deploy`, `ops-release-status` and `ops-memory-sync` a coin flip
+— 1.3.25 only deployed on the 11th attempt. By-tag is retained purely as a
+fallback for releases older than the `gh release list` window
+(`RELEASE_LIST_LIMIT`).
+
+If a release verification failure ever looks suspicious, check whether the
+release really is missing before touching it:
+
+```bash
+gh release list --repo djbclark/<repo> --limit 5 \
+  --json tagName,isDraft,isPrerelease,isLatest
+```
+
+Never delete and recreate a release, and never bypass the gate, to work
+around a lookup that is merely failing to *find* a release that exists.
+
 ## Deploying
 
 From the released `site-djbclark` checkout:
