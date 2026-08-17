@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Research complete — adoption plan, not yet executed |
 | **Evidence date** | 2026-08-16 — GitHub figures via `gh api`; hands-on tests run that day |
-| **Source package** | `~/src/autonomy-research/` (research handoff: requirements, verified findings, open questions, three external AI panel answers) |
+| **Source package** | [`research/autonomy/`](../../research/autonomy/) (research handoff: requirements, verified findings, open questions, three external AI panel answers) |
 | **Produced by** | Claude Fable 5 session, from a Claude Opus 5 research handoff |
 
 
