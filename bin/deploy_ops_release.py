@@ -24,6 +24,13 @@ from pathlib import Path
 from typing import Any, Self
 
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
+# Live-data directories (operational data, not code/config) a deploy checkout
+# may carry ahead of the released tag via direct-to-master commits made in
+# place. Everything else still requires the worktree/PR/release flow.
+DATA_DIRS = {
+    "site-private": "memory/",
+    "site-djbclark": "research/",
+}
 RELEASE_FILE = "ops-release.json"
 LOCAL_CODEX_CONFIG = "codex/config.toml"
 LOCAL_CODEX_CONFIG_EXAMPLE = f"{LOCAL_CODEX_CONFIG}.example"
@@ -50,8 +57,8 @@ class ReleasePlan:
     tag: str
     current_commit: str
     target_commit: str
-    memory_ahead: bool = False
-    memory_rebase_from: str | None = None
+    data_ahead: bool = False
+    data_rebase_from: str | None = None
     local_file_migration: LocalFileMigration | None = None
 
 
@@ -377,27 +384,29 @@ def inspect_release(
         )
     if not is_ancestor(path, target_commit, remote_master):
         raise ReleaseError(f"{name} {tag} is not reachable from origin/master")
-    memory_ahead = False
-    memory_rebase_from = None
+    data_ahead = False
+    data_rebase_from = None
+    data_prefix = DATA_DIRS.get(name)
     if not is_ancestor(path, current_commit, target_commit):
         if (
-            name == "site-private"
+            data_prefix
             and is_ancestor(path, target_commit, current_commit)
             and all(
-                item.startswith("memory/") for item in changed_paths(path, tag, "HEAD")
+                item.startswith(data_prefix)
+                for item in changed_paths(path, tag, "HEAD")
             )
         ):
-            memory_ahead = True
-        elif name == "site-private":
+            data_ahead = True
+        elif data_prefix:
             prior_tag = latest_release_tag(path, current_commit)
             require_annotated_tag(path, prior_tag)
-            memory_paths = changed_paths(path, prior_tag, current_commit)
+            data_paths = changed_paths(path, prior_tag, current_commit)
             if (
                 is_ancestor(path, prior_tag, target_commit)
-                and memory_paths
-                and all(item.startswith("memory/") for item in memory_paths)
+                and data_paths
+                and all(item.startswith(data_prefix) for item in data_paths)
             ):
-                memory_rebase_from = prior_tag
+                data_rebase_from = prior_tag
             else:
                 raise ReleaseError(
                     f"{name} cannot fast-forward from {current_commit[:12]} to {tag}"
@@ -414,8 +423,8 @@ def inspect_release(
         tag,
         current_commit,
         target_commit,
-        memory_ahead,
-        memory_rebase_from,
+        data_ahead,
+        data_rebase_from,
         local_file_migration,
     )
 
@@ -434,16 +443,16 @@ def apply_release_plan(plan: ReleasePlan) -> None:
             cwd=plan.path,
         )
     try:
-        if plan.memory_rebase_from:
+        if plan.data_rebase_from:
             run(
                 "git",
                 "rebase",
                 "--onto",
                 plan.target_commit,
-                plan.memory_rebase_from,
+                plan.data_rebase_from,
                 cwd=plan.path,
             )
-        elif not plan.memory_ahead:
+        elif not plan.data_ahead:
             run("git", "merge", "--ff-only", plan.target_commit, cwd=plan.path)
     finally:
         if migration:
@@ -455,10 +464,11 @@ def apply_release_plan(plan: ReleasePlan) -> None:
             if backup:
                 backup.unlink()
     deployed = git(plan.path, "rev-parse", "HEAD")
-    if plan.memory_ahead or plan.memory_rebase_from:
+    if plan.data_ahead or plan.data_rebase_from:
+        data_prefix = DATA_DIRS[plan.name]
         drift = changed_paths(plan.path, plan.tag, "HEAD")
         valid = is_ancestor(plan.path, plan.target_commit, deployed) and all(
-            item.startswith("memory/") for item in drift
+            item.startswith(data_prefix) for item in drift
         )
     else:
         valid = deployed == plan.target_commit
@@ -515,10 +525,10 @@ def deploy_release(
     for plan in plans:
         action = "would deploy" if not apply else "deploying"
         details = []
-        if plan.memory_rebase_from:
-            details.append(f"rebased memory commits after {plan.memory_rebase_from}")
-        elif plan.memory_ahead:
-            details.append("existing memory commits")
+        if plan.data_rebase_from:
+            details.append(f"rebased data commits after {plan.data_rebase_from}")
+        elif plan.data_ahead:
+            details.append("existing data-dir commits")
         if plan.local_file_migration:
             details.append(f"preserved local {plan.local_file_migration.relative_path}")
         suffix = "".join(f" + {detail}" for detail in details)
@@ -550,7 +560,7 @@ def deploy_release(
     apply_plans = sorted(
         plans,
         key=lambda plan: (
-            plan.memory_rebase_from is None,
+            plan.data_rebase_from is None,
             plan.local_file_migration is not None,
         ),
     )
@@ -629,10 +639,11 @@ def status(
         if not changed:
             print(f"{name}: {tag}")
             continue
-        if name == "site-private" and all(
-            item.startswith("memory/") for item in changed
-        ):
-            print(f"{name}: {tag} + {len(changed)} memory-only path(s)")
+        data_prefix = DATA_DIRS.get(name)
+        if data_prefix and all(item.startswith(data_prefix) for item in changed):
+            print(
+                f"{name}: {tag} + {len(changed)} data-only path(s) under {data_prefix}"
+            )
             continue
         failed = True
         print(
@@ -658,31 +669,35 @@ def memory_sync(
     fetch: bool = True,
     verify_github: bool = True,
 ) -> None:
-    path = ops_root / "site-private"
-    require_clean_master(path)
-    if fetch:
-        run("git", "fetch", "origin", "--prune", "--tags", cwd=path)
-    tag = latest_release_tag(path)
-    require_annotated_tag(path, tag)
-    if verify_github:
-        verify_github_release("site-private", tag, path)
-    local_non_memory = [
-        item
-        for item in changed_paths(path, tag, "HEAD")
-        if not item.startswith("memory/")
-    ]
-    if local_non_memory:
-        raise ReleaseError(
-            f"local master contains unversioned code/config after {tag}: {', '.join(local_non_memory)}"
+    for name, data_prefix in DATA_DIRS.items():
+        path = ops_root / name
+        require_clean_master(path)
+        if fetch:
+            run("git", "fetch", "origin", "--prune", "--tags", cwd=path)
+        tag = latest_release_tag(path)
+        require_annotated_tag(path, tag)
+        if verify_github:
+            verify_github_release(name, tag, path)
+        local_non_data = [
+            item
+            for item in changed_paths(path, tag, "HEAD")
+            if not item.startswith(data_prefix)
+        ]
+        if local_non_data:
+            raise ReleaseError(
+                f"{name}: local master contains unversioned code/config after {tag}: {', '.join(local_non_data)}"
+            )
+        changed = changed_paths(path, tag, "origin/master")
+        non_data = [item for item in changed if not item.startswith(data_prefix)]
+        if non_data:
+            raise ReleaseError(
+                f"{name}: origin/master contains unreleased code/config after {tag}: {', '.join(non_data)}"
+            )
+        run("git", "rebase", "origin/master", cwd=path)
+        print(
+            f"{name}: synchronized {len(changed)} data-only path(s) under "
+            f"{data_prefix} after {tag}"
         )
-    changed = changed_paths(path, tag, "origin/master")
-    non_memory = [item for item in changed if not item.startswith("memory/")]
-    if non_memory:
-        raise ReleaseError(
-            f"origin/master contains unreleased code/config after {tag}: {', '.join(non_memory)}"
-        )
-    run("git", "rebase", "origin/master", cwd=path)
-    print(f"site-private: synchronized {len(changed)} memory-only path(s) after {tag}")
 
 
 def default_lock_path() -> Path:
@@ -827,7 +842,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     deploy_parser.add_argument("version")
     subparsers.add_parser("status", help="verify deployed code/config is versioned")
     subparsers.add_parser(
-        "memory-sync", help="sync site-private only when remote drift is memory-only"
+        "memory-sync",
+        help=(
+            "sync data dirs (site-private memory/, site-djbclark research/) "
+            "only when remote drift is data-only"
+        ),
     )
     return parser.parse_args(argv)
 

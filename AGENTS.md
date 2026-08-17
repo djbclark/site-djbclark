@@ -102,6 +102,22 @@ flock helpers (`bin/ops_release_lock.py`). See
 [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md). Development synchronization
 inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
 
+### `research/` — data-directory exception (added 2026-08-17)
+
+`research/` holds research/plan document packages and is **live data, not
+code**: like `site-private/memory/`, it is exempt from the
+branch/PR/worktree/release flow. Commit changes to it directly to `master`,
+in place, in the `~/ops/site-djbclark` deploy checkout — run
+`just ops-memory-sync` first (it now guards both data dirs), make a
+research-only commit, push immediately, leave the tree clean. The exemption
+is enforced by the `DATA_DIRS` mapping in `bin/deploy_ops_release.py`; it is
+narrow — everything else in this repo still uses the release flow.
+
+**This repo is public.** Nothing containing secrets or private-only context
+may land under `research/`; that material belongs in `site-private`. Each
+package gets its own subdirectory (first: `research/autonomy/`, the
+2026-08-16 unattended-continuous-AI-coding plan).
+
 ### Modern CLI tool policy (any vendor AI, any of the three repos)
 
 Homebrew-installed machine-wide, decided 2026-07-24 by testing candidates
