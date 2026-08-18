@@ -25,3 +25,4 @@ material belongs in `site-private`.
 | Directory | What it is |
 |---|---|
 | [`autonomy/`](autonomy/) | The 2026-08-16 plan for unattended continuous AI coding (beads + ralph-orchestrator + verification judge + quota gate; zeroshot trial). Start at its `README.md`, final decisions in `04-final-plan.md`. |
+| [`cfengine-community-review-coverage/`](cfengine-community-review-coverage/) | 2026-08-18 idea: whitespace-only C minification to fit more of `cfengine/core` under ultrareview's line cap, spread across contributors. **Idea stage, not started** — open premises unverified. |
