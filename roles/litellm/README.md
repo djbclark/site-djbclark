@@ -185,11 +185,13 @@ balance while returning plausible responses. With a single model and no
 fallbacks there is nothing to silently substitute. Do not re-add a fallback
 chain without reading `templates/litellm-config.yaml.j2`'s header.
 
-ClinePass is reached through the LiteLLM **git checkout**'s provider entry,
-which handles Cline's `{"data": {"choices": …}}` response envelope and re-adds
-the `modelType/` prefix LiteLLM strips from the model id. A stock PyPI LiteLLM
-does not have that provider — which is what the tool-install drift guard in
-`tasks/main.yml` exists to catch.
+ClinePass is reached through the LiteLLM **git checkout**'s `clinepass`
+provider module (`litellm/llms/clinepass/`), which unwraps Cline's
+`{"data": {"choices": …}}` non-streaming response envelope and re-adds the
+`modelType/` prefix LiteLLM strips from the model id. Streaming responses are
+not enveloped, so they need neither. A stock PyPI LiteLLM does not have that
+provider — which is what the tool-install drift guard in `tasks/main.yml`
+exists to catch.
 
 Responses are cached on disk under `~/.litellm/cache` for one hour.
 
