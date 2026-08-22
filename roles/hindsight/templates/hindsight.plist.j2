@@ -24,7 +24,28 @@
     <key>CODEX_HOME</key><string>{{ hindsight_codex_home }}</string>
     <key>HINDSIGHT_API_HOST</key><string>{{ hindsight_bind }}</string>
     <key>HINDSIGHT_API_PORT</key><string>{{ hindsight_port | string }}</string>
-    <key>HINDSIGHT_API_LLM_PROVIDER</key><string>openai-codex</string>
+{#- Every LLM setting is rendered from role defaults so this template is the
+    single source of truth for the running service. The plist previously drifted
+    from the role by hand, which meant applying the role silently reverted the
+    service's model configuration. #}
+    <key>HINDSIGHT_API_LLM_PROVIDER</key><string>{{ hindsight_llm_provider }}</string>
+    <key>HINDSIGHT_API_LLM_BASE_URL</key><string>{{ hindsight_llm_base_url }}</string>
+    <key>HINDSIGHT_API_LLM_MODEL</key><string>{{ hindsight_llm_model }}</string>
+    <key>HINDSIGHT_API_LLM_API_KEY</key><string>{{ hindsight_llm_api_key_placeholder }}</string>
+    <key>HINDSIGHT_API_REFLECT_LLM_PROVIDER</key><string>{{ hindsight_reflect_llm_provider }}</string>
+    <key>HINDSIGHT_API_REFLECT_LLM_BASE_URL</key><string>{{ hindsight_reflect_llm_base_url }}</string>
+    <key>HINDSIGHT_API_REFLECT_LLM_MODEL</key><string>{{ hindsight_reflect_llm_model }}</string>
+    <key>HINDSIGHT_API_REFLECT_LLM_API_KEY</key><string>{{ hindsight_llm_api_key_placeholder }}</string>
+    <key>HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS</key><string>{{ hindsight_reflect_max_context_tokens | string }}</string>
+    <key>HINDSIGHT_API_REFLECT_MAX_ITERATIONS</key><string>{{ hindsight_reflect_max_iterations | string }}</string>
+    <key>HINDSIGHT_API_EMBEDDINGS_PROVIDER</key><string>{{ hindsight_embeddings_provider }}</string>
+    <key>HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL</key><string>{{ hindsight_embeddings_local_model }}</string>
+    <key>HINDSIGHT_API_RERANKER_PROVIDER</key><string>{{ hindsight_reranker_provider }}</string>
+    <key>HINDSIGHT_API_RECALL_BUDGET_FIXED_LOW</key><string>{{ hindsight_recall_budget_low | string }}</string>
+    <key>HINDSIGHT_API_RECALL_BUDGET_FIXED_MID</key><string>{{ hindsight_recall_budget_mid | string }}</string>
+    <key>HINDSIGHT_API_RECALL_BUDGET_FIXED_HIGH</key><string>{{ hindsight_recall_budget_high | string }}</string>
+    <key>HINDSIGHT_API_RECALL_INCLUDE_CHUNKS</key><string>{{ hindsight_recall_include_chunks | string | lower }}</string>
+    <key>TOKENIZERS_PARALLELISM</key><string>false</string>
     <key>PATH</key><string>{{ hindsight_service_path }}</string>
   </dict>
 </dict>

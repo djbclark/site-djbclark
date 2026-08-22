@@ -18,3 +18,42 @@ hindsight_label: "com.{{ site_ns }}.hindsight-api"
 hindsight_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_label }}.plist"
 hindsight_health_url: "http://{{ hindsight_bind }}:{{ hindsight_port }}/health"
 hindsight_service_path: "{{ hindsight_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# LLM backend. Hindsight talks to the site-local LiteLLM proxy (roles/litellm)
+# rather than a hosted API, so no provider key is embedded here or in the
+# rendered plist. The proxy serves exactly one model, clinepass-deepseek, and
+# holds the only real credential in its own mode-0600 unit.
+#
+# Provider is "openai" (not "clinepass"/"litellm"): Hindsight's factory routes
+# openai to OpenAICompatibleLLM, which is what an OpenAI-compatible proxy needs.
+# See create_llm_provider() in hindsight_api/engine/llm_wrapper.py.
+hindsight_llm_provider: "openai"
+hindsight_llm_base_url: "http://127.0.0.1:4000/v1"
+hindsight_llm_model: "clinepass-deepseek"
+
+# Not a secret. Hindsight's requires_api_key() rejects an empty key for the
+# openai provider, and the proxy sets no general_settings.master_key, so it
+# accepts any bearer token. This placeholder satisfies the client-side check
+# without putting a credential in a tracked template.
+hindsight_llm_api_key_placeholder: "sk-litellm-local"
+
+# Reflect (the deep-reasoning path) goes through the same proxy. It has no
+# usable default base_url once the provider is "openai", so it must be set
+# explicitly rather than inherited.
+hindsight_reflect_llm_provider: "{{ hindsight_llm_provider }}"
+hindsight_reflect_llm_base_url: "{{ hindsight_llm_base_url }}"
+hindsight_reflect_llm_model: "{{ hindsight_llm_model }}"
+hindsight_reflect_max_context_tokens: 30000
+hindsight_reflect_max_iterations: 4
+
+# Embeddings stay local (no API cost, no egress); reranking is reciprocal-rank
+# fusion, which needs no model at all.
+hindsight_embeddings_provider: "local"
+hindsight_embeddings_local_model: "BAAI/bge-small-en-v1.5"
+hindsight_reranker_provider: "rrf"
+
+# Recall budgets, in facts per tier.
+hindsight_recall_budget_low: 50
+hindsight_recall_budget_mid: 150
+hindsight_recall_budget_high: 400
+hindsight_recall_include_chunks: false
