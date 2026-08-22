@@ -123,10 +123,21 @@
     - _hindsight_plist.changed
     - _hindsight_loaded.rc == 0
 
+# launchd does not finish tearing the job down before `bootout` returns, so a
+# bootstrap issued immediately after loses the race and fails with
+# `rc=5 Bootstrap failed: 5: Input/output error` -- observed on the ops-v1.4.1
+# apply, which left Hindsight down. Re-running the identical command by hand a
+# moment later succeeded, which is what identifies it as a teardown race rather
+# than a bad plist. Retry rather than sleeping a fixed amount.
 - name: Bootstrap Hindsight LaunchAgent
   ansible.builtin.command:
     argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ hindsight_plist_path }}"]
-  changed_when: true
+  register: _hindsight_bootstrap
+  changed_when: _hindsight_bootstrap.rc == 0
+  failed_when: _hindsight_bootstrap.rc != 0
+  until: _hindsight_bootstrap.rc == 0
+  retries: 10
+  delay: 3
   when:
     - not ansible_check_mode
     - _hindsight_loaded.rc != 0 or _hindsight_plist.changed

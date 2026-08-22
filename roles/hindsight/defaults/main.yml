@@ -46,6 +46,18 @@ hindsight_reflect_llm_model: "{{ hindsight_llm_model }}"
 hindsight_reflect_max_context_tokens: 30000
 hindsight_reflect_max_iterations: 4
 
+# Must exceed roles/litellm's request_timeout (600s), or Hindsight hangs up
+# first and the proxy's longer timeout buys nothing. Keep this the larger of
+# the two whenever either moves.
+hindsight_llm_timeout: 660
+
+# ClinePass honours reasoning_effort -- low vs high measurably changes the
+# request the upstream builds. The saving on this model is unproven (reasoning
+# tokens barely moved on a small prompt), so this is a cheap, reversible
+# default rather than a load-bearing optimisation. Reflect deliberately does
+# not set it: that path is where reasoning earns its cost.
+hindsight_llm_reasoning_effort: "low"
+
 # Embeddings stay local (no API cost, no egress); reranking is reciprocal-rank
 # fusion, which needs no model at all.
 hindsight_embeddings_provider: "local"
