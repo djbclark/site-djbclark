@@ -31,7 +31,14 @@ model_list:
   # Reached through the ClinePass provider in the LiteLLM git checkout
   # (~/src/litellm), which handles two Cline-specific quirks: the
   # {"data": {"choices": ...}} response envelope, and re-adding the
-  # `modelType/` prefix that LiteLLM strips from the model id.
+  # `modelType/` qualifier that LiteLLM strips from the model id.
+  #
+  # The `clinepass/` below is LiteLLM's PROVIDER ROUTING prefix and is stripped
+  # before the request is built. The provider module then re-adds Cline's
+  # CATALOG namespace, which is the hyphenated `cline-pass/`. Two different
+  # strings; see roles/litellm/README.md. Getting the catalog namespace wrong
+  # does not error — the API validates only the shape of a model id — it
+  # silently resolves to a different model snapshot.
   #
   # max_tokens is pinned high on purpose. deepseek-v4-flash is a reasoning
   # model — measured 360 reasoning tokens out of 417 completion tokens — and at
@@ -40,12 +47,19 @@ model_list:
   # outage rather than a config error.
   #
   # Raised 4000 -> {{ litellm_max_tokens }} on 2026-08-22. 4000 was not a safety
-  # margin, it was a silent truncator: the same prompt returned
-  # completion_tokens=4000 (exactly the cap) while still reporting
-  # finish_reason "stop", and at 32000 stopped naturally at 3849 — for 25% LESS
+  # margin, it was a truncator: the same prompt returned completion_tokens=4000
+  # (exactly the cap), and at 32000 stopped naturally at 3849 — for 25% LESS
   # money, because it was no longer burning 2015 reasoning tokens fighting the
   # ceiling. max_tokens is a ceiling, not a reservation; short answers cost the
   # same either way.
+  #
+  # Correction (2026-08-22, later the same day): the original note here also
+  # claimed the API reported finish_reason "stop" on that truncated response.
+  # Re-probing the live API — streaming and non-streaming, caps of 2000 and
+  # 4000, both model namespaces — could NOT reproduce that; every capped
+  # response correctly returned "length". The provider module still carries a
+  # conservative correction as a safety net, but do not treat the misreport as
+  # a currently-observable behaviour.
   - model_name: clinepass-deepseek
     litellm_params:
       model: clinepass/deepseek-v4-flash
