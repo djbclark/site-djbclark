@@ -108,13 +108,13 @@ per-host notes).
 
 2. Set each key through the broker (each prompts for the value, no echo):
 
+   ClinePass is the only backend this proxy serves, so `CLINE_API_KEY` is the
+   only key it needs. (It is already declared and set; this is the rotation
+   command, not a first-run step. The five other provider keys this list used
+   to carry were dropped on 2026-08-21 along with their `model_list` entries.)
+
    ```bash
-   sudo-secretspec set OPENAI_API_KEY --reason "LiteLLM provider key"
-   sudo-secretspec set ANTHROPIC_API_KEY --reason "LiteLLM provider key"
-   sudo-secretspec set DEEPSEEK_API_KEY --reason "LiteLLM provider key"
-   sudo-secretspec set GEMINI_API_KEY --reason "LiteLLM provider key"
-   sudo-secretspec set OPENROUTER_API_KEY --reason "LiteLLM provider key"
-   sudo-secretspec set OPENCODE_ZEN_API_KEY --reason "LiteLLM provider key"
+   sudo-secretspec set CLINE_API_KEY --reason "LiteLLM provider key"
    sudo-secretspec check --reason "verify LiteLLM provider keys" </dev/null
    ```
 

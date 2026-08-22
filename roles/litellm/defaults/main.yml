@@ -85,4 +85,11 @@ litellm_service_path: >-
 # OPENROUTER/OPENCODE_ZEN vars were removed on 2026-08-21 along with their
 # model_list entries — keeping them would embed live secrets in a mode-0600
 # file for backends nothing can route to.
-litellm_clinepass_api_key: "{{ lookup('env', 'CLINEPASS_API_KEY') | default('', true) }}"
+#
+# The vault name is CLINE_API_KEY (declared, described "ClinePass API Key"),
+# not CLINEPASS_API_KEY: the credential already existed, so this reuses it
+# rather than declaring a fourth copy of the same secret. The name the daemon
+# itself reads stays CLINEPASS_API_KEY — that is the unit/plist env var and
+# the `os.environ/` reference in litellm-config.yaml.j2, independent of what
+# the credential is called in the vault.
+litellm_clinepass_api_key: "{{ lookup('env', 'CLINE_API_KEY') | default('', true) }}"
