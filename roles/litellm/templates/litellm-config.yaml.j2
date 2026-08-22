@@ -38,11 +38,19 @@ model_list:
   # max_tokens=600 the reasoning consumed the entire budget, so Cline returned
   # HTTP 500 "empty response content". Lowering this will look like a provider
   # outage rather than a config error.
+  #
+  # Raised 4000 -> {{ litellm_max_tokens }} on 2026-08-22. 4000 was not a safety
+  # margin, it was a silent truncator: the same prompt returned
+  # completion_tokens=4000 (exactly the cap) while still reporting
+  # finish_reason "stop", and at 32000 stopped naturally at 3849 — for 25% LESS
+  # money, because it was no longer burning 2015 reasoning tokens fighting the
+  # ceiling. max_tokens is a ceiling, not a reservation; short answers cost the
+  # same either way.
   - model_name: clinepass-deepseek
     litellm_params:
       model: clinepass/deepseek-v4-flash
       api_key: os.environ/CLINEPASS_API_KEY
-      max_tokens: 4000
+      max_tokens: {{ litellm_max_tokens }}
 
 litellm_settings:
   cache: true
@@ -51,11 +59,19 @@ litellm_settings:
     disk_cache_dir: "{{ litellm_cache_dir }}"
     ttl: 3600
   drop_params: true
-  request_timeout: 120
+  # Measured throughput is ~33 tokens/sec (8406 completion tokens took 256s), so
+  # the timeout — not max_tokens — is what actually caps answer length. At the
+  # old 120s a request could not exceed ~4000 tokens no matter what max_tokens
+  # said, which is why the two must be raised together.
+  request_timeout: {{ litellm_request_timeout }}
 
 router_settings:
-  num_retries: 2
-  timeout: 120
+  # Dropped 2 -> {{ litellm_num_retries }} alongside the longer timeout: at
+  # {{ litellm_request_timeout }}s per attempt, two retries put the worst case
+  # near {{ (litellm_request_timeout | int) * 3 // 60 }} minutes on a single
+  # call.
+  num_retries: {{ litellm_num_retries }}
+  timeout: {{ litellm_request_timeout }}
   # No `fallbacks:` key, deliberately — see the header comment.
 
 # No master_key while the proxy is loopback-only. Never widen litellm_bind

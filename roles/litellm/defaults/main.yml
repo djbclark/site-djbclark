@@ -93,3 +93,10 @@ litellm_service_path: >-
 # the `os.environ/` reference in litellm-config.yaml.j2, independent of what
 # the credential is called in the vault.
 litellm_clinepass_api_key: "{{ lookup('env', 'CLINE_API_KEY') | default('', true) }}"
+
+# Generation ceiling and the timeout that actually enforces it. See the
+# rationale block in templates/litellm-config.yaml.j2 — these three are one
+# decision, not three independent knobs.
+litellm_max_tokens: 16000
+litellm_request_timeout: 600
+litellm_num_retries: 1
