@@ -188,10 +188,27 @@ chain without reading `templates/litellm-config.yaml.j2`'s header.
 ClinePass is reached through the LiteLLM **git checkout**'s `clinepass`
 provider module (`litellm/llms/clinepass/`), which unwraps Cline's
 `{"data": {"choices": …}}` non-streaming response envelope and re-adds the
-`modelType/` prefix LiteLLM strips from the model id. Streaming responses are
+`modelType/` qualifier LiteLLM strips from the model id. Streaming responses are
 not enveloped, so they need neither. A stock PyPI LiteLLM does not have that
 provider — which is what the tool-install drift guard in `tasks/main.yml`
 exists to catch.
+
+Note the two prefixes are **different strings** and it matters:
+
+| Prefix | Whose it is | Where it appears |
+|---|---|---|
+| `clinepass/` | LiteLLM's provider routing prefix | `model:` in this role's config; stripped before the HTTP request is built |
+| `cline-pass/` | Cline's catalog namespace | re-added by the provider module on the outbound request |
+
+Until 2026-08-22 the module re-added `clinepass/`, a namespace that does not
+exist. It failed **silently** because the API validates only the *shape* of a
+model id — `totallybogus/deepseek-v4-flash` also returns HTTP 200. It was not
+harmless, though: an unrecognised namespace resolved `deepseek-v4-flash` to the
+date-pinned `deepseek/deepseek-v4-flash-0731`, while the correct `cline-pass/`
+resolves it to `deepseek/deepseek-v4-flash`. So this proxy was quietly serving
+a different model snapshot than the one Hermes talks to. Verified against the
+live API and fixed in the fork; do not "simplify" the two prefixes back into
+one.
 
 Responses are cached on disk under `~/.litellm/cache` for one hour.
 
