@@ -15,149 +15,100 @@
       LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
       an auth/master-key design), and Darwin or Linux.
 
-- name: Resolve uv binary (Homebrew prefix on Darwin; common paths on Linux)
-  ansible.builtin.shell: |
-    set -euo pipefail
-    candidates=(
-      "{{ litellm_uv_bin_default }}"
-      "{{ litellm_home }}/.local/bin/uv"
-      /opt/homebrew/bin/uv
-      /usr/local/bin/uv
-      /usr/bin/uv
-    )
-    for c in "${candidates[@]}"; do
-      if [[ -x "$c" ]]; then
-        echo "$c"
-        exit 0
-      fi
-    done
-    if command -v uv >/dev/null 2>&1; then
-      command -v uv
-      exit 0
-    fi
-    exit 1
-  args:
-    executable: /bin/bash
-  register: _litellm_uv_resolve
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-- name: Require uv for the isolated LiteLLM tool install
-  ansible.builtin.assert:
-    that: _litellm_uv_resolve.rc == 0
-    fail_msg: >-
-      Install uv first (Darwin: brew install uv under {{ litellm_homebrew_prefix }};
-      Linux: curl -LsSf https://astral.sh/uv/install.sh | sh). E5 requires
-      `uv tool install litellm[proxy,caching]`.
-
-- name: Set resolved uv binary
-  ansible.builtin.set_fact:
-    litellm_uv_bin: "{{ _litellm_uv_resolve.stdout | trim }}"
+# ── The LiteLLM *install* is deliberately not managed here ───────────────────
+#
+# This host runs LiteLLM from a git checkout (a fork of BerriAI/litellm) at
+# {{ litellm_source_dir }}, so local provider work can be contributed upstream.
+# It is installed by hand, outside Ansible:
+#
+#   uv tool install --editable "{{ litellm_source_dir }}[proxy,caching]"
+#
+# Ansible has no way to express a git-checkout source today, and the
+# `uv tool install <pypi-spec>` install/repair tasks that used to live here
+# would silently overwrite that editable checkout with an upstream PyPI build
+# — reverting local providers with no error surfaced anywhere. This role now
+# only ever *verifies* the runtime; it owns the config file and the service
+# unit, and never mutates the binary, the shim, or the tool environment.
 
 - name: Probe installed LiteLLM version
   ansible.builtin.command:
     argv:
       - "{{ litellm_bin }}"
       - --version
-  register: _litellm_version_before
+  register: _litellm_version_probe
   changed_when: false
   failed_when: false
   check_mode: false
+
+- name: Require a working LiteLLM install
+  ansible.builtin.assert:
+    that: _litellm_version_probe.rc == 0
+    fail_msg: >-
+      No runnable LiteLLM at {{ litellm_bin }}. This role does not install it —
+      install the git checkout by hand with:
+      uv tool install --editable "{{ litellm_source_dir }}[proxy,caching]"
 
 - name: Parse installed LiteLLM version
   ansible.builtin.set_fact:
     _litellm_current_version: >-
       {{
-        ((_litellm_version_before.stdout | default(''))
-        ~ ' ' ~ (_litellm_version_before.stderr | default('')))
+        ((_litellm_version_probe.stdout | default(''))
+        ~ ' ' ~ (_litellm_version_probe.stderr | default('')))
         | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
         | default('0.0.0', true)
       }}
 
-- name: Probe the disk-cache extra in the LiteLLM tool environment
+- name: Enforce the Auto Router v2 LiteLLM version floor
+  ansible.builtin.assert:
+    that: _litellm_current_version is version(litellm_minimum_version, '>=')
+    fail_msg: >-
+      LiteLLM {{ _litellm_current_version }} is below the required
+      {{ litellm_minimum_version }} Auto Router v2 floor. Update the checkout at
+      {{ litellm_source_dir }} and reinstall it by hand — this role will not
+      install over it.
+
+- name: Resolve the package directory backing the LiteLLM tool install
   ansible.builtin.command:
     argv:
       - "{{ litellm_tool_python }}"
       - -c
-      - import diskcache
-  register: _litellm_cache_extra_before
+      - "import litellm, pathlib; print(pathlib.Path(litellm.__file__).resolve().parent)"
+  register: _litellm_pkg_dir
   changed_when: false
   failed_when: false
   check_mode: false
 
-- name: Install LiteLLM proxy tool when absent
-  ansible.builtin.command:
-    argv:
-      - "{{ litellm_uv_bin }}"
-      - tool
-      - install
-      - --prerelease
-      - allow
-      - "{{ litellm_package_spec }}"
-  when:
-    - not ansible_check_mode
-    - _litellm_version_before.rc != 0
-  register: _litellm_tool_install
-  changed_when: true
-
-- name: Repair LiteLLM when below the version floor or missing disk caching
-  ansible.builtin.command:
-    argv:
-      - "{{ litellm_uv_bin }}"
-      - tool
-      - install
-      - --force
-      - --prerelease
-      - allow
-      - "{{ litellm_package_spec }}"
-  when:
-    - not ansible_check_mode
-    - _litellm_version_before.rc == 0
-    - >-
-      (_litellm_current_version is version(litellm_minimum_version, '<'))
-      or (_litellm_cache_extra_before.rc != 0)
-  register: _litellm_tool_repair
-  changed_when: true
-
-- name: Verify installed LiteLLM version
-  ansible.builtin.command:
-    argv:
-      - "{{ litellm_bin }}"
-      - --version
-  register: _litellm_version_after
-  changed_when: false
-  check_mode: false
-  when: not ansible_check_mode
-
-- name: Parse verified LiteLLM version
-  ansible.builtin.set_fact:
-    _litellm_verified_version: >-
-      {{
-        ((_litellm_version_after.stdout | default(''))
-        ~ ' ' ~ (_litellm_version_after.stderr | default('')))
-        | regex_search('[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-z]+[0-9]+)?')
-        | default('0.0.0', true)
-      }}
-  when: not ansible_check_mode
-
-- name: Enforce the Auto Router v2 LiteLLM version floor
+- name: Require the tool install to still point at the git checkout
   ansible.builtin.assert:
-    that: _litellm_verified_version is version(litellm_minimum_version, '>=')
+    that:
+      - _litellm_pkg_dir.rc == 0
+      - (_litellm_pkg_dir.stdout | trim) == (litellm_source_dir ~ '/litellm')
     fail_msg: >-
-      LiteLLM {{ _litellm_verified_version }} is below the required
-      {{ litellm_minimum_version }} Auto Router v2 floor.
-  when: not ansible_check_mode
+      The LiteLLM tool environment resolves to
+      "{{ _litellm_pkg_dir.stdout | default('<probe failed>') | trim }}",
+      not the expected checkout "{{ litellm_source_dir }}/litellm". Something
+      reinstalled LiteLLM from PyPI, which drops any provider only present in
+      the fork. Reinstall with:
+      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching]"
 
-- name: Verify the disk-cache extra after install
+- name: Verify the disk-cache extra is present in the LiteLLM tool environment
   ansible.builtin.command:
     argv:
       - "{{ litellm_tool_python }}"
       - -c
       - import diskcache
+  register: _litellm_cache_extra
   changed_when: false
+  failed_when: false
   check_mode: false
-  when: not ansible_check_mode
+
+- name: Require the disk-cache extra
+  ansible.builtin.assert:
+    that: _litellm_cache_extra.rc == 0
+    fail_msg: >-
+      `import diskcache` failed in {{ litellm_tool_python }}, so the configured
+      disk cache would not work. Reinstall the checkout including extras:
+      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching]"
 
 - name: Ensure LiteLLM runtime directories exist
   ansible.builtin.file:

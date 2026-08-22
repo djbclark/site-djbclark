@@ -73,7 +73,7 @@ hosts:
       # ── site: AI stack & local services ──────────────────────────────────
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          caddy_path: "/litellm/*",
-         note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1)"}
+         note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1). Runs from the git checkout ~/src/litellm (fork of BerriAI/litellm) installed by hand as a uv tool -- roles/litellm verifies that install but never performs it."}
       - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: planned,
          note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only"}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
@@ -90,8 +90,10 @@ hosts:
          note: "Google Antigravity CLI sidecar listener"}
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
          note: "bun ~/.collie/bridge/index.ts; observed listening 2026-08-07 reconcile"}
-      - {port: 14000, bind: "127.0.0.1", owner: site, service: litellm-uv-tool, status: active,
-         note: "uv-tool litellm (~/.local/share/uv/tools/litellm) — distinct from the :4000 litellm-proxy row above; both were live at the 2026-08-07 reconcile"}
+      # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
+      # stale. There was never a second proxy: the uv-tool install IS what
+      # serves the :4000 litellm-proxy row above, so the two were the same
+      # process recorded twice. Verified nothing listens on 14000.
       - {port: 24543, bind: "127.0.0.1", owner: site, service: moshi-hook, status: active,
          note: "/opt/homebrew/opt/moshi-hook/bin/moshi-hook serve, via brew services (homebrew.mxcl.moshi-hook). KEEP — confirmed wanted by the operator 2026-08-07: the Moshi mobile app is in active use and this daemon is its agent bridge. What was retired 2026-07-30 was only the Moshi *webhook* ping path in favour of `hermes send`; that retirement never applied to moshi-hook itself, and the tap formula (rjyo/moshi) is not deprecated. Do not reclaim."}
       - {port: 18765, bind: "127.0.0.1", owner: site, service: signal-cli-daemon, status: active,

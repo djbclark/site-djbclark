@@ -13,7 +13,11 @@ goose_formula_name: block-goose-cli
 goose_app_path: /Applications/Goose.app
 
 goose_provider_id: litellm-local
-goose_model: smart-router
+# Tracks the only model_list entry roles/litellm now serves. The former
+# `smart-router` Auto Router v2 alias was removed on 2026-08-21 when the proxy
+# was narrowed to ClinePass only; pointing at it would render a config naming a
+# model the proxy no longer exposes.
+goose_model: clinepass-deepseek
 goose_litellm_base_url: http://127.0.0.1:4000/v1
 
 goose_managed_marker: "# site-djbclark managed (roles/goose)"

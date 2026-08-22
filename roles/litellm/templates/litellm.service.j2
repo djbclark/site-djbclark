@@ -21,23 +21,11 @@ Environment=HOME={{ litellm_home }}
 Environment=PATH={{ litellm_service_path }}
 Environment=LITELLM_LOG=INFO
 Environment=SERVER_ROOT_PATH={{ litellm_server_root_path }}
-{% if litellm_openai_api_key | length > 0 %}
-Environment=OPENAI_API_KEY={{ litellm_openai_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
-{% endif %}
-{% if litellm_anthropic_api_key | length > 0 %}
-Environment=ANTHROPIC_API_KEY={{ litellm_anthropic_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
-{% endif %}
-{% if litellm_deepseek_api_key | length > 0 %}
-Environment=DEEPSEEK_API_KEY={{ litellm_deepseek_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
-{% endif %}
-{% if litellm_gemini_api_key | length > 0 %}
-Environment=GEMINI_API_KEY={{ litellm_gemini_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
-{% endif %}
-{% if litellm_openrouter_api_key | length > 0 %}
-Environment=OPENROUTER_API_KEY={{ litellm_openrouter_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
-{% endif %}
-{% if litellm_opencode_zen_api_key | length > 0 %}
-Environment=OPENCODE_ZEN_API_KEY={{ litellm_opencode_zen_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+{# Only CLINEPASS_API_KEY is injected: the proxy serves ClinePass and nothing
+   else, so embedding any other provider key here would put a live secret in
+   this unit for a backend no model_list entry can reach. #}
+{% if litellm_clinepass_api_key | length > 0 %}
+Environment=CLINEPASS_API_KEY={{ litellm_clinepass_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
 {% endif %}
 
 [Install]

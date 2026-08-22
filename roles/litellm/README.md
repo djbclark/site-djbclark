@@ -1,8 +1,7 @@
 # LiteLLM role
 
-This role installs `litellm[proxy,caching]>=1.94.0rc1,<2` with `uv`, renders
-the current Auto Router v2 configuration, and keeps the **loopback-only** proxy
-running as:
+This role renders the current Auto Router v2 configuration and keeps the
+**loopback-only** proxy running as:
 
 | OS | Service | Unit path |
 | --- | --- | --- |
@@ -10,6 +9,35 @@ running as:
 | Linux | systemd **user** unit `com.<site_ns>.litellm.service` | `~/.config/systemd/user/…service` |
 
 Port **4000** on `127.0.0.1` (registry: `litellm-proxy` per host).
+
+## The install is NOT managed by this role
+
+Since 2026-08-21 LiteLLM runs from a **git checkout** — a fork of
+`BerriAI/litellm` at `~/src/litellm` — so provider work done here can be
+contributed upstream. It is installed by hand:
+
+```bash
+uv tool install --editable "$HOME/src/litellm[proxy,caching]"
+```
+
+That keeps the same `~/.local/bin/litellm` shim the service unit already
+points at, so the unit itself is unchanged.
+
+This role deliberately performs **no install step**. It previously ran
+`uv tool install <pypi-spec>`, including a "repair" task that reinstalled
+whenever the version floor or the `diskcache` import check failed — which
+would silently replace the editable checkout with an upstream PyPI build and
+drop any fork-only provider, with no error surfaced anywhere. Ansible has no
+way to express a git-checkout source today, so the install lives outside it.
+
+What the role does instead is *verify*, failing loudly with remediation
+instructions if any of these drift:
+
+- `litellm --version` runs and meets `litellm_minimum_version`
+- the tool environment's `litellm` package still resolves to
+  `{{ litellm_source_dir }}/litellm` (this is the guard that catches a PyPI
+  reinstall)
+- `import diskcache` succeeds in the tool environment
 
 The prerelease floor is deliberate: on 2026-07-20 PyPI's newest stable release
 is 1.93.0, while Auto Router v2 first appears in the 1.94 train and the newest
@@ -102,11 +130,12 @@ per-host notes).
 
    ```bash
    curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
-   # Prefer funded providers for smoke tests when OpenAI/Anthropic lack credit:
+   # Expect exactly: clinepass-deepseek
+   # There is no fallback chain, so a failure here is a real ClinePass failure
+   # and never a silent substitution by another provider.
    curl -fsS http://127.0.0.1:4000/v1/chat/completions \
      -H 'Content-Type: application/json' \
-     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
-   rg 'ComplexityRouter: routing decision' ~/Library/Logs/litellm/stderr.log | tail
+     -d '{"model":"clinepass-deepseek","messages":[{"role":"user","content":"ping"}]}'
    # Linux logs: ~/.local/state/litellm/logs/stderr.log
    ```
 
@@ -142,13 +171,27 @@ systemctl --user restart com.djbclark.litellm.service
 
 ## Routing and cache
 
-The `smart-router` alias uses LiteLLM Auto Router v2 with tiers that prefer
-providers whose keys are commonly funded on this site: SIMPLE `deepseek-chat`,
-MEDIUM `gemini-flash`, COMPLEX `openrouter-auto`, and REASONING
-`deepseek-reasoner`. OpenAI/Anthropic model aliases remain registered for when
-those keys have credit. Responses are cached on disk under `~/.litellm/cache`
-for one hour. Router decisions are greppable in the stderr log using
-`ComplexityRouter: routing decision`.
+Since 2026-08-21 the proxy serves exactly one model, `clinepass-deepseek`
+(`clinepass/deepseek-v4-flash`), and has **no fallback chain**. The former
+`smart-router` Auto Router v2 alias and the DeepSeek / OpenRouter /
+OpenCode-Zen / OpenAI / Anthropic / Gemini entries were all removed.
+
+That is a safety property, not just simplification. LiteLLM's router silently
+falls back whenever a model's `api_key` env var is unset or empty, with no
+error surfaced to the caller — on 2026-08-02 this proxy served `claude-sonnet-5`
+and `gpt-4o` requests from `google/gemini-3.5-flash-lite` via OpenRouter, and
+`gpt-5.5`/`gpt-4o-mini`/`gemini-flash` from opencode-zen, spending real prepaid
+balance while returning plausible responses. With a single model and no
+fallbacks there is nothing to silently substitute. Do not re-add a fallback
+chain without reading `templates/litellm-config.yaml.j2`'s header.
+
+ClinePass is reached through the LiteLLM **git checkout**'s provider entry,
+which handles Cline's `{"data": {"choices": …}}` response envelope and re-adds
+the `modelType/` prefix LiteLLM strips from the model id. A stock PyPI LiteLLM
+does not have that provider — which is what the tool-install drift guard in
+`tasks/main.yml` exists to catch.
+
+Responses are cached on disk under `~/.litellm/cache` for one hour.
 
 ## Rollback
 
