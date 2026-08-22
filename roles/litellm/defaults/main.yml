@@ -28,9 +28,15 @@ litellm_server_root_path: "/litellm/"
 # Auto Router v2 first ships in the 1.94 train. As of 2026-07-20 PyPI's
 # newest stable is 1.93.0 and the first usable 1.94 build is 1.94.0rc1.
 litellm_minimum_version: "1.94.0rc1"
-litellm_package_spec: "litellm[proxy,caching]>=1.94.0rc1,<2"
 litellm_bin: "{{ litellm_home }}/.local/bin/litellm"
 litellm_tool_python: "{{ litellm_home }}/.local/share/uv/tools/litellm/bin/python"
+
+# LiteLLM runs from a git checkout (fork of BerriAI/litellm) so provider work
+# here can be contributed upstream. The install is performed by hand — see the
+# banner comment in tasks/main.yml — and this role only verifies it. There is
+# deliberately no package spec: nothing in this role may install over the
+# checkout, because a PyPI build silently drops fork-only providers.
+litellm_source_dir: "{{ litellm_home }}/src/litellm"
 
 # Homebrew prefix: Apple Silicon /opt/homebrew, Intel /usr/local
 # (same pattern as stayturgid stayturgid_homebrew_prefix).
@@ -40,15 +46,6 @@ litellm_homebrew_prefix: >-
     if ansible_facts.get('architecture', 'arm64') in ['arm64', 'aarch64']
     else '/usr/local'
   }}
-
-# Resolved in tasks (probe) when the default path is missing.
-litellm_uv_bin_default: >-
-  {{
-    (litellm_homebrew_prefix ~ '/bin/uv')
-    if ansible_facts.get('os_family') == 'Darwin'
-    else (litellm_home ~ '/.local/bin/uv')
-  }}
-litellm_uv_bin: "{{ litellm_uv_bin_default }}"
 
 litellm_config_dir: "{{ litellm_home }}/.litellm"
 litellm_config_path: "{{ litellm_config_dir }}/config.yaml"
@@ -83,9 +80,16 @@ litellm_service_path: >-
 
 # Values enter Ansible from the ambient environment, normally through
 # `secretspec run`. They are rendered only into the mode-0600 live unit/plist.
-litellm_openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
-litellm_anthropic_api_key: "{{ lookup('env', 'ANTHROPIC_API_KEY') | default('', true) }}"
-litellm_deepseek_api_key: "{{ lookup('env', 'DEEPSEEK_API_KEY') | default('', true) }}"
-litellm_gemini_api_key: "{{ lookup('env', 'GEMINI_API_KEY') | default('', true) }}"
-litellm_openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY') | default('', true) }}"
-litellm_opencode_zen_api_key: "{{ lookup('env', 'OPENCODE_ZEN_API_KEY') | default('', true) }}"
+# ClinePass is the only backend this proxy serves, so it is the only key that
+# is ever rendered into the unit/plist. The OPENAI/ANTHROPIC/DEEPSEEK/GEMINI/
+# OPENROUTER/OPENCODE_ZEN vars were removed on 2026-08-21 along with their
+# model_list entries — keeping them would embed live secrets in a mode-0600
+# file for backends nothing can route to.
+#
+# The vault name is CLINE_API_KEY (declared, described "ClinePass API Key"),
+# not CLINEPASS_API_KEY: the credential already existed, so this reuses it
+# rather than declaring a fourth copy of the same secret. The name the daemon
+# itself reads stays CLINEPASS_API_KEY — that is the unit/plist env var and
+# the `os.environ/` reference in litellm-config.yaml.j2, independent of what
+# the credential is called in the vault.
+litellm_clinepass_api_key: "{{ lookup('env', 'CLINE_API_KEY') | default('', true) }}"

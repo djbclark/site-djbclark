@@ -1,84 +1,48 @@
 # Managed by site-djbclark roles/litellm. Local edits will be overwritten.
-# Auto Router v2 syntax verified against docs.litellm.ai/docs/proxy/auto_routing
-# on 2026-07-20; PyPI's first available Auto Router v2 build is 1.94.0rc1.
 #
-# IMPORTANT — model_name is NOT a billing guarantee. litellm's router
-# silently falls back through router_settings.fallbacks whenever a model's
-# own api_key env var is unset/empty, with NO error surfaced to the caller.
-# That means a model_name like "claude-sonnet-5" or "gpt-4o" here does NOT
-# mean requests actually reach Anthropic/OpenAI — if OPENAI_API_KEY /
-# ANTHROPIC_API_KEY / GEMINI_API_KEY are unset (the common case on this box,
-# since those are paid-API-only credentials this operator doesn't fund),
-# every request against those model_names is silently served by whichever
-# *other* backend's key actually exists (opencode-zen-flash / deepseek-chat /
-# openrouter-auto), including real prepaid $ spend on OpenRouter, with a
-# response that looks legitimate. Confirmed 2026-08-02: `claude-sonnet-5` on
-# this proxy was actually served by google/gemini-3.5-flash-lite via
-# OpenRouter, `gpt-4o` the same, `gpt-5.5`/`gpt-4o-mini`/`gemini-flash` all
-# served by opencode-zen's deepseek-v4-flash-free. None of them ever reached
-# their named vendor.
+# This proxy serves ClinePass and nothing else (operator decision 2026-08-21).
 #
-# litellm also CANNOT bridge Claude Pro / ChatGPT Plus / Gemini/Antigravity
-# *subscription* plans for Hermes-originated (API-key) traffic — the only
-# supported subscription bridge is `forward_client_headers_to_llm_api`, which
-# requires the first-party subscription CLI itself (e.g. `claude`) to be the
-# one making the request through litellm, forwarding its own OAuth session.
-# A bare api_key model_list entry can only ever reach the vendor's *metered*
-# API, never a subscription. See docs.litellm.ai/docs/tutorials/
-# claude_code_max_subscription and djbclark/aiuse#24 for the investigation
-# that surfaced this (aiuse's own dual-schema footgun, unrelated but found
-# in the same audit).
+# WHY ONLY ONE MODEL — the history is worth keeping, because the old multi-
+# provider config was actively dangerous. LiteLLM's router silently falls back
+# through router_settings.fallbacks whenever a model's own api_key env var is
+# unset or empty, with NO error surfaced to the caller. Confirmed 2026-08-02:
+# `claude-sonnet-5` on this proxy was actually served by
+# google/gemini-3.5-flash-lite via OpenRouter, `gpt-4o` the same, and
+# `gpt-5.5`/`gpt-4o-mini`/`gemini-flash` were all served by opencode-zen's
+# deepseek-v4-flash-free. None ever reached its named vendor, and some of that
+# misrouting spent real prepaid OpenRouter balance while returning responses
+# that looked legitimate.
 #
-# Given no OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY are funded on
-# this box, those three vendors' model_list entries are removed below rather
-# than kept as non-functional decoys. Re-add them (with real funded keys) if
-# that ever changes — see git history for the prior entries.
+# A single model with NO fallbacks makes that class of bug impossible: there is
+# nothing to silently substitute, so a ClinePass failure surfaces as an error.
+# Do not add a fallback chain here without re-reading the paragraph above.
 #
-# Provider models are always declared. Unit env injection (plist/systemd) only
-# embeds keys that are non-empty at `just litellm-apply-secrets` time. Prefer
-# working paid/free providers for smart-router tiers.
+# ClinePass is also the only monthly subscription whose terms permit this use.
+# Verified 2026-08-21 against docs.cline.bot: "You can use ClinePass models from
+# your own scripts, apps, or automation through the Cline API." Anthropic banned
+# subscription OAuth for third-party tools in Feb 2026, z.ai's coding plan
+# excludes general API use, and GitHub Models caps at 8K input. See
+# site-private memory/reference_llm_gateway_subscription_compatibility.md.
+#
+# Keys are injected into the mode-0600 unit/plist by `just litellm-apply-secrets`
+# and are never written into this file.
 
 model_list:
-  # ── DeepSeek (needs DEEPSEEK_API_KEY) — funded, verified reaches DeepSeek ──
-  - model_name: deepseek-chat
+  # Reached through the ClinePass provider in the LiteLLM git checkout
+  # (~/src/litellm), which handles two Cline-specific quirks: the
+  # {"data": {"choices": ...}} response envelope, and re-adding the
+  # `modelType/` prefix that LiteLLM strips from the model id.
+  #
+  # max_tokens is pinned high on purpose. deepseek-v4-flash is a reasoning
+  # model — measured 360 reasoning tokens out of 417 completion tokens — and at
+  # max_tokens=600 the reasoning consumed the entire budget, so Cline returned
+  # HTTP 500 "empty response content". Lowering this will look like a provider
+  # outage rather than a config error.
+  - model_name: clinepass-deepseek
     litellm_params:
-      model: deepseek/deepseek-chat
-      api_key: os.environ/DEEPSEEK_API_KEY
-
-  - model_name: deepseek-reasoner
-    litellm_params:
-      model: deepseek/deepseek-reasoner
-      api_key: os.environ/DEEPSEEK_API_KEY
-
-  # ── OpenRouter (needs OPENROUTER_API_KEY) — funded, prepaid $ balance ──
-  - model_name: openrouter-auto
-    litellm_params:
-      model: openrouter/openrouter/auto
-      api_key: os.environ/OPENROUTER_API_KEY
-
-  # ── OpenCode Zen OpenAI-compatible (needs OPENCODE_ZEN_API_KEY) — funded, free tier ──
-  - model_name: opencode-zen-flash
-    litellm_params:
-      model: openai/deepseek-v4-flash-free
-      api_base: https://opencode.ai/zen/v1
-      api_key: os.environ/OPENCODE_ZEN_API_KEY
-
-  # ── Auto Router v2 — tiers only reference funded, verified-working models ──
-  - model_name: smart-router
-    litellm_params:
-      model: auto_router/complexity_router
-      drop_params: true
-      complexity_router_config:
-        tiers:
-          SIMPLE: deepseek-chat
-          MEDIUM: opencode-zen-flash
-          COMPLEX: openrouter-auto
-          REASONING: deepseek-reasoner
-        tier_boundaries:
-          simple_medium: 0.15
-          medium_complex: 0.35
-          complex_reasoning: 0.60
-      complexity_router_default_model: deepseek-chat
+      model: clinepass/deepseek-v4-flash
+      api_key: os.environ/CLINEPASS_API_KEY
+      max_tokens: 4000
 
 litellm_settings:
   cache: true
@@ -92,12 +56,7 @@ litellm_settings:
 router_settings:
   num_retries: 2
   timeout: 120
-  fallbacks:
-    - smart-router: [deepseek-chat, openrouter-auto, opencode-zen-flash]
-    - deepseek-chat: [openrouter-auto, opencode-zen-flash]
-    - deepseek-reasoner: [openrouter-auto, deepseek-chat]
-    - openrouter-auto: [deepseek-chat, opencode-zen-flash]
-    - opencode-zen-flash: [deepseek-chat, openrouter-auto]
+  # No `fallbacks:` key, deliberately — see the header comment.
 
 # No master_key while the proxy is loopback-only. Never widen litellm_bind
 # (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).

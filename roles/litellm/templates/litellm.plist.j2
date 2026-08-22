@@ -37,29 +37,12 @@
         <string>INFO</string>
         <key>SERVER_ROOT_PATH</key>
         <string>{{ litellm_server_root_path }}</string>
-{% if litellm_openai_api_key | length > 0 %}
-        <key>OPENAI_API_KEY</key>
-        <string>{{ litellm_openai_api_key | e }}</string>
-{% endif %}
-{% if litellm_anthropic_api_key | length > 0 %}
-        <key>ANTHROPIC_API_KEY</key>
-        <string>{{ litellm_anthropic_api_key | e }}</string>
-{% endif %}
-{% if litellm_deepseek_api_key | length > 0 %}
-        <key>DEEPSEEK_API_KEY</key>
-        <string>{{ litellm_deepseek_api_key | e }}</string>
-{% endif %}
-{% if litellm_gemini_api_key | length > 0 %}
-        <key>GEMINI_API_KEY</key>
-        <string>{{ litellm_gemini_api_key | e }}</string>
-{% endif %}
-{% if litellm_openrouter_api_key | length > 0 %}
-        <key>OPENROUTER_API_KEY</key>
-        <string>{{ litellm_openrouter_api_key | e }}</string>
-{% endif %}
-{% if litellm_opencode_zen_api_key | length > 0 %}
-        <key>OPENCODE_ZEN_API_KEY</key>
-        <string>{{ litellm_opencode_zen_api_key | e }}</string>
+{# Only CLINEPASS_API_KEY is injected: the proxy serves ClinePass and nothing
+   else, so embedding any other provider key here would put a live secret in
+   this file for a backend no model_list entry can reach. #}
+{% if litellm_clinepass_api_key | length > 0 %}
+        <key>CLINEPASS_API_KEY</key>
+        <string>{{ litellm_clinepass_api_key | e }}</string>
 {% endif %}
     </dict>
 </dict>
