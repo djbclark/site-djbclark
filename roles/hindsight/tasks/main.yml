@@ -17,10 +17,14 @@
     that: _hindsight_uv.rc == 0
     fail_msg: Install uv before applying the Hindsight role.
 
+# Only the openai-codex provider reads ~/.hindsight/codex/auth.json. Under the
+# default proxy-backed provider there is no such file to gate on, and asserting
+# on it would fail a host that is correctly configured.
 - name: Require dedicated Codex authentication before service bootstrap
   ansible.builtin.stat:
     path: "{{ hindsight_codex_auth }}"
   register: _hindsight_codex_auth
+  when: hindsight_llm_provider == 'openai-codex'
 
 - name: Refuse unsafe Hindsight startup without dedicated auth
   ansible.builtin.assert:
@@ -30,6 +34,30 @@
     fail_msg: >-
       Missing or unsafe {{ hindsight_codex_auth }}. Run CODEX_HOME={{ hindsight_codex_home }}
       codex auth login; credentials are never copied into Hermes or Git.
+  when: hindsight_llm_provider == 'openai-codex'
+
+# The proxy is the only backend under the default provider, so a Hindsight that
+# cannot reach it is dead on arrival. Fail here with a clear cause rather than
+# 30 health-check retries against a service that will never answer.
+- name: Verify the LiteLLM proxy serves the configured Hindsight model
+  ansible.builtin.uri:
+    url: "{{ hindsight_llm_base_url }}/models"
+    return_content: true
+  register: _hindsight_proxy_models
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: hindsight_llm_provider != 'openai-codex'
+
+- name: Refuse to configure Hindsight against an unreachable model
+  ansible.builtin.assert:
+    that:
+      - _hindsight_proxy_models.status == 200
+      - hindsight_llm_model in (_hindsight_proxy_models.json.data | map(attribute='id') | list)
+    fail_msg: >-
+      {{ hindsight_llm_base_url }}/models did not serve {{ hindsight_llm_model }}
+      (status {{ _hindsight_proxy_models.status | default('none') }}). Apply roles/litellm first.
+  when: hindsight_llm_provider != 'openai-codex'
 
 - name: Ensure Hindsight directories exist
   ansible.builtin.file:
@@ -89,6 +117,7 @@
 - name: Boot out changed Hindsight LaunchAgent
   ansible.builtin.command:
     argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ hindsight_label }}"]
+  changed_when: true
   when:
     - not ansible_check_mode
     - _hindsight_plist.changed
@@ -97,6 +126,7 @@
 - name: Bootstrap Hindsight LaunchAgent
   ansible.builtin.command:
     argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ hindsight_plist_path }}"]
+  changed_when: true
   when:
     - not ansible_check_mode
     - _hindsight_loaded.rc != 0 or _hindsight_plist.changed
