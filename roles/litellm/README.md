@@ -130,7 +130,7 @@ per-host notes).
 
    ```bash
    curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
-   # Expect exactly: clinepass-deepseek
+   # Expect exactly: clinepass-deepseek,clinepass-minimax-m3,clinepass-kimi-k3
    # There is no fallback chain, so a failure here is a real ClinePass failure
    # and never a silent substitution by another provider.
    curl -fsS http://127.0.0.1:4000/v1/chat/completions \
@@ -171,10 +171,14 @@ systemctl --user restart com.djbclark.litellm.service
 
 ## Routing and cache
 
-Since 2026-08-21 the proxy serves exactly one model, `clinepass-deepseek`
-(`clinepass/deepseek-v4-flash`), and has **no fallback chain**. The former
-`smart-router` Auto Router v2 alias and the DeepSeek / OpenRouter /
-OpenCode-Zen / OpenAI / Anthropic / Gemini entries were all removed.
+Since 2026-08-21 the proxy serves ClinePass only and has **no fallback
+chain**. The former `smart-router` Auto Router v2 alias and the DeepSeek /
+OpenRouter / OpenCode-Zen / OpenAI / Anthropic / Gemini entries were all
+removed. On 2026-08-22 two more ClinePass models (`clinepass-minimax-m3`,
+`clinepass-kimi-k3`) joined `clinepass-deepseek` so Hermes's non-streaming
+MoA slots could leave the pay-per-token DeepSeek account; all three entries
+reach the same subscription through the same key, so the single-provider
+safety property is unchanged.
 
 That is a safety property, not just simplification. LiteLLM's router silently
 falls back whenever a model's `api_key` env var is unset or empty, with no

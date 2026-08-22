@@ -17,6 +17,12 @@
 # nothing to silently substitute, so a ClinePass failure surfaces as an error.
 # Do not add a fallback chain here without re-reading the paragraph above.
 #
+# 2026-08-22: additional ClinePass models were added for Hermes's MoA slots
+# (retiring the pay-per-token DeepSeek account). The invariant above is one
+# PROVIDER and no fallback chain, not literally one model — every entry below
+# reaches the same ClinePass subscription through the same key, so there is
+# still nothing to silently substitute.
+#
 # ClinePass is also the only monthly subscription whose terms permit this use.
 # Verified 2026-08-21 against docs.cline.bot: "You can use ClinePass models from
 # your own scripts, apps, or automation through the Cline API." Anthropic banned
@@ -63,6 +69,25 @@ model_list:
   - model_name: clinepass-deepseek
     litellm_params:
       model: clinepass/deepseek-v4-flash
+      api_key: os.environ/CLINEPASS_API_KEY
+      max_tokens: {{ litellm_max_tokens }}
+
+  # Added 2026-08-22 for Hermes's non-streaming callers (MoA slots, auxiliary
+  # tasks), which cannot talk to ClinePass directly — the data envelope kills
+  # non-streaming calls — and so must come through this proxy. Model choice is
+  # from the 2026-08-22 bake-off (site-private memory, handoff ed68):
+  # minimax-m3 matched deepseek-v4-pro on all prompts at 2-5x the speed and a
+  # quarter of the tokens; kimi-k3 is the strong-reasoning pick and modulates
+  # reasoning_effort strongly (59 -> 169 reasoning tokens low -> high).
+  - model_name: clinepass-minimax-m3
+    litellm_params:
+      model: clinepass/minimax-m3
+      api_key: os.environ/CLINEPASS_API_KEY
+      max_tokens: {{ litellm_max_tokens }}
+
+  - model_name: clinepass-kimi-k3
+    litellm_params:
+      model: clinepass/kimi-k3
       api_key: os.environ/CLINEPASS_API_KEY
       max_tokens: {{ litellm_max_tokens }}
 
