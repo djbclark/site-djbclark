@@ -82,10 +82,14 @@ Topology background:
 
 ### Versioned deploy releases
 
-The three `${OPS_ROOT:-~/ops}` deploy checkouts advance only to coordinated
-stable GitHub Releases tagged `ops-vMAJOR.MINOR.PATCH`; never deploy with a raw
-`git pull origin master`. This repo owns the release/deploy procedure and
-guarded memory synchronization:
+**Retired 2026-08-23 by operator decision.** The `${OPS_ROOT:-~/ops}`
+checkouts are now worked in directly with ordinary git (edit, commit to
+`master`, push). Coordinated `ops-vMAJOR.MINOR.PATCH` releases and
+`just ops-memory-sync` are no longer required — the latter's release-gating
+precondition is exactly what was retired, and it had been failing for this
+repo because of it. See "Where work happens" in `~/CLAUDE.md`.
+
+This repo still owns the release/deploy tooling, now optional:
 
 ```bash
 just ops-release-claim-status
