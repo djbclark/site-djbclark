@@ -469,6 +469,16 @@ Phase B retains original images, audio, video, and documents in the CAS with MIM
 
 ### Phase B — lossless evidence foundation
 
+> **Started 2026-08-23.** The schema and deterministic source-coordinate
+> event IDs (first bullet) are implemented in `bin/hindsight_s1.py` with
+> `tests/test_hindsight_s1.py` (20 tests) and are live on
+> `~/.hindsight/candidates.sqlite3`; raw bytes are content-addressed under
+> `~/.hindsight/cas/`. `verify` runs the integrity/foreign-key/hash checks
+> and `snapshot` produces a consistent backup via `VACUUM INTO`. The first
+> `ingest_gap` is recorded: Claude Code garbage-collected session
+> transcripts from 2026-08-15..19. Remaining: Claude tail adapter, live
+> Hermes sink, backfill, attachments, trigram/neighbor retrieval.
+
 - Add raw-object/event/conversation/gap schema and deterministic source-coordinate event IDs to the Phase A control database.
 - Retain raw producer bytes first; build versioned normalized projections second.
 - Backfill surviving Hermes/Claude transcripts, `MEMORY`/`USER`, candidate stores, Hindsight export, and existing memory inventory idempotently; record historical gaps.
