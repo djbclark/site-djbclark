@@ -1,15 +1,24 @@
 # Coordinated ops releases
 
+> **Status: OPTIONAL since 2026-08-23.** This procedure is no longer the
+> required deploy path. Work happens directly in `${OPS_ROOT:-~/ops}` with
+> ordinary git — edit, commit to `master`, push. See "Where work happens" in
+> `~/CLAUDE.md` for the decision and the tradeoff accepted.
+>
+> Everything below still works, and cutting a release is still a good way to
+> mark a known-good point across the suite. It is a tool now, not a gate. The
+> one piece that was actively harmful has been changed rather than kept:
+> `just ops-memory-sync` no longer refuses to sync when `origin/master`
+> carries unreleased code — it is now a plain fetch-and-rebase of the repos.
+
 The three repositories under `${OPS_ROOT:-~/ops}` are one deployed suite:
 
 - `stayturgid`
 - `site-djbclark`
 - `site-private`
 
-Development continues on `master` in task workspaces under
-`~/src/ops-worktrees/`. Deployment checkouts do **not** pull arbitrary
-`master` commits. They advance only to a coordinated, published stable GitHub
-release named `ops-vMAJOR.MINOR.PATCH`.
+When you do cut a release, all three advance together to a coordinated,
+published stable GitHub release named `ops-vMAJOR.MINOR.PATCH`.
 
 ## Release contract
 

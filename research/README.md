@@ -7,7 +7,8 @@ commits made in place in the `~/ops/site-djbclark` deploy checkout:
 
 ```bash
 cd "${OPS_ROOT:-$HOME/ops}/site-djbclark"
-just ops-memory-sync        # guarded sync of both data dirs, run first
+just ops-memory-sync        # optional: fetch+rebase all three repos first
+                            # (plain `git pull --rebase` here does the same)
 # edit research/..., then one research-only commit, push immediately
 ```
 

@@ -728,35 +728,18 @@ def memory_sync(
     fetch: bool = True,
     verify_github: bool = True,
 ) -> None:
-    for name, data_prefix in DATA_DIRS.items():
+    # The release-gating this used to do was retired on 2026-08-23 along with the
+    # coordinated-release regime: it refused to sync whenever origin/master held
+    # any unreleased change outside the data dir, which by then described normal
+    # operation and blocked memory writes outright. What remains is the part that
+    # was always useful — bring every repo up to date before writing.
+    for name in DATA_DIRS:
         path = ops_root / name
         require_clean_master(path)
         if fetch:
             run("git", "fetch", "origin", "--prune", "--tags", cwd=path)
-        tag = latest_release_tag(path)
-        require_annotated_tag(path, tag)
-        if verify_github:
-            verify_github_release(name, tag, path)
-        local_non_data = [
-            item
-            for item in changed_paths(path, tag, "HEAD")
-            if not item.startswith(data_prefix)
-        ]
-        if local_non_data:
-            raise ReleaseError(
-                f"{name}: local master contains unversioned code/config after {tag}: {', '.join(local_non_data)}"
-            )
-        changed = changed_paths(path, tag, "origin/master")
-        non_data = [item for item in changed if not item.startswith(data_prefix)]
-        if non_data:
-            raise ReleaseError(
-                f"{name}: origin/master contains unreleased code/config after {tag}: {', '.join(non_data)}"
-            )
         run("git", "rebase", "origin/master", cwd=path)
-        print(
-            f"{name}: synchronized {len(changed)} data-only path(s) under "
-            f"{data_prefix} after {tag}"
-        )
+        print(f"{name}: synchronized with origin/master")
 
 
 def default_lock_path() -> Path:

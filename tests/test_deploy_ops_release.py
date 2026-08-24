@@ -589,7 +589,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 git(path, "rev-parse", "HEAD"),
             )
 
-    def test_memory_sync_accepts_only_data_remote_drift(self) -> None:
+    def test_memory_sync_syncs_data_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
@@ -614,7 +614,11 @@ class DeployOpsReleaseTest(unittest.TestCase):
             for name, commit in data_commits.items():
                 self.assertEqual(git(ops_root / name, "rev-parse", "HEAD"), commit)
 
-    def test_memory_sync_rejects_unreleased_remote_code(self) -> None:
+    def test_memory_sync_syncs_code_drift_too(self) -> None:
+        # Until 2026-08-23 this raised: memory-sync refused whenever origin/master
+        # held any unreleased change outside the data dir. The coordinated-release
+        # regime that justified the gate is retired, so a code commit on the remote
+        # is now just something to rebase onto.
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
@@ -625,22 +629,19 @@ class DeployOpsReleaseTest(unittest.TestCase):
             git(path, "update-ref", "refs/remotes/origin/master", code_commit)
             git(path, "reset", "--hard", released)
 
-            with self.assertRaisesRegex(release.ReleaseError, "unreleased code/config"):
-                release.memory_sync(ops_root, fetch=False, verify_github=False)
+            release.memory_sync(ops_root, fetch=False, verify_github=False)
 
-    def test_memory_sync_rejects_cross_repo_data_prefix(self) -> None:
+            self.assertEqual(git(path, "rev-parse", "HEAD"), code_commit)
+
+    def test_memory_sync_requires_clean_tree(self) -> None:
+        # The one guard that survives: never rebase over uncommitted work.
         with tempfile.TemporaryDirectory() as directory:
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
             self.make_data_sync_repos(ops_root)
-            # memory/ is site-private's data dir, not site-djbclark's
-            path = ops_root / "site-djbclark"
-            released = git(path, "rev-parse", "HEAD")
-            drift = commit_file(path, "memory/fact.md", "fact\n", "data")
-            git(path, "update-ref", "refs/remotes/origin/master", drift)
-            git(path, "reset", "--hard", released)
+            (ops_root / "site-private" / "AGENTS.md").write_text("dirty\n")
 
-            with self.assertRaisesRegex(release.ReleaseError, "unreleased code/config"):
+            with self.assertRaises(release.ReleaseError):
                 release.memory_sync(ops_root, fetch=False, verify_github=False)
 
 

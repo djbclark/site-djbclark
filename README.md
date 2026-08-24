@@ -25,12 +25,13 @@ and
 
 ## Versioned deployments
 
-The three `${OPS_ROOT:-~/ops}` checkouts deploy as one coordinated suite and
-advance only to published `ops-vMAJOR.MINOR.PATCH` releases. Use
-`just ops-release-check`, `just ops-release-deploy`, and
-`just ops-release-status`; do not pull deploy checkouts directly from
-`master`. The guarded `just ops-memory-sync` command is the sole data-only
-exception for `site-private/memory/`.
+**Optional since 2026-08-23.** The `${OPS_ROOT:-~/ops}` checkouts are worked
+in directly with ordinary git — edit, commit to `master`, push. Coordinated
+`ops-vMAJOR.MINOR.PATCH` releases still exist as a way to mark a known-good
+point across all three repos (`just ops-release-check`,
+`just ops-release-deploy`, `just ops-release-status`), but they are no longer
+required to deploy. `just ops-memory-sync` is now a plain fetch-and-rebase of
+the repos, not a release-gated one.
 
 Full release, rollback, and verification policy:
 [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md).
