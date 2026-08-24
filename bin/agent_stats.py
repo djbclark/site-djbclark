@@ -98,6 +98,22 @@ def connect() -> sqlite3.Connection:
     CREATE TABLE IF NOT EXISTS config_value (
       sample_id INTEGER REFERENCES sample(id) ON DELETE CASCADE,
       key TEXT NOT NULL, value TEXT, expected TEXT, drifted INTEGER);
+    -- Scheduled agent jobs cost tokens on a timer, so a job quietly pointed at
+    -- an expensive or protected pool is a recurring leak. Inventoried each
+    -- sample so a change of mode/model shows up as history, not a surprise.
+    CREATE TABLE IF NOT EXISTS cron_job (
+      sample_id INTEGER REFERENCES sample(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, mode TEXT, model TEXT, schedule TEXT, costs_tokens INTEGER);
+    -- Deliberate changes we are measuring. Best guess first, then refine from
+    -- what actually happened — an experiment nobody records is just a change.
+    CREATE TABLE IF NOT EXISTS experiment (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, hypothesis TEXT,
+      variable TEXT, from_value TEXT, to_value TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT, outcome TEXT, verdict TEXT);
+    -- /insights writes a friction report; tracking its existence over time
+    -- measures whether we are getting better, not merely cheaper.
+    CREATE TABLE IF NOT EXISTS insights_report (
+      path TEXT PRIMARY KEY, generated_at TEXT, bytes INTEGER, seen_at TEXT);
     CREATE INDEX IF NOT EXISTS sample_time ON sample(collected_at);
     CREATE INDEX IF NOT EXISTS usage_day ON session_usage(day);
     """)
@@ -220,6 +236,44 @@ def _json_path(path: Path, key: str) -> str | None:
         return None
 
 
+def read_cron() -> list[tuple[str, str, str, str, int]]:
+    """Inventory Hermes scheduled jobs and whether each spends tokens."""
+    try:
+        out = subprocess.run(["hermes", "cron", "list"], capture_output=True,
+                             text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    import re
+    rows = []
+    for block in re.split(r"\n\s{2}[0-9a-f]{12} \[", out)[1:]:
+        def field(label: str) -> str:
+            m = re.search(rf"{label}:\s+(.+)", block)
+            return m.group(1).strip() if m else ""
+        name, mode = field("Name"), field("Mode")
+        if not name:
+            continue
+        rows.append((name, mode, field("Model") or "default", field("Schedule"),
+                     int("no-agent" not in mode)))
+    return rows
+
+
+def read_insights() -> list[tuple[str, str, int, str]]:
+    """Notice /insights reports as they appear. Cheap: a directory stat."""
+    d = Path.home() / ".claude/usage-data"
+    if not d.is_dir():
+        return []
+    rows = []
+    for f in d.glob("*.html"):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        rows.append((str(f), datetime.fromtimestamp(st.st_mtime, timezone.utc)
+                     .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                     st.st_size, now()))
+    return rows
+
+
 def collect() -> dict[str, Any]:
     db = connect()
     cur = db.execute("INSERT INTO sample (collected_at, host) VALUES (?,?)",
@@ -253,10 +307,19 @@ def collect() -> dict[str, Any]:
           output_tokens=excluded.output_tokens,
           thinking_tokens=excluded.thinking_tokens,
           last_seen=excluded.last_seen, day=excluded.day, cwd=excluded.cwd""", s)
+    cj = read_cron()
+    db.executemany("INSERT INTO cron_job (sample_id, name, mode, model, schedule,"
+                   " costs_tokens) VALUES (?,?,?,?,?,?)", [(sid, *r) for r in cj])
+    ins = read_insights()
+    db.executemany("INSERT INTO insights_report (path, generated_at, bytes, seen_at)"
+                   " VALUES (?,?,?,?) ON CONFLICT(path) DO UPDATE SET"
+                   " bytes=excluded.bytes, generated_at=excluded.generated_at", ins)
     db.commit()
     db.close()
     return {"sample": sid, "quota_rows": len(q), "files": len(f),
-            "config_keys": len(cfg), "drifted": drifted, "sessions": len(s)}
+            "config_keys": len(cfg), "drifted": drifted, "sessions": len(s),
+            "cron_jobs": len(cj), "token_spending_jobs": sum(r[4] for r in cj),
+            "insights_reports": len(ins)}
 
 
 # -- reporting -----------------------------------------------------------
@@ -321,6 +384,22 @@ def report(hours: int = 24) -> tuple[str, bool]:
             lines.append(f"    {r['provider']} {r['window_label']}: "
                          f"{r['remaining_pct']:.0f}% left")
 
+    jobs = db.execute("""SELECT name, model FROM cron_job
+        WHERE sample_id = (SELECT MAX(id) FROM sample) AND costs_tokens = 1""").fetchall()
+    if jobs:
+        lines.append(f"⏰ SCHEDULED AGENT JOBS ({len(jobs)} spend tokens on a timer)")
+        for r in jobs:
+            lines.append(f"    {r['name'][:52]:52} model={r['model']}")
+        lines.append("    (default = cline-pass/deepseek-v4-flash, the clinepass "
+                     "lifeline — see experiment 'scheduled-jobs-off-clinepass')")
+
+    running = db.execute("""SELECT id, name, started_at FROM experiment
+        WHERE ended_at IS NULL ORDER BY started_at""").fetchall()
+    if running:
+        lines.append(f"🧪 EXPERIMENTS RUNNING ({len(running)})")
+        for r in running:
+            lines.append(f"    [{r['id']}] {r['name']}  since {r['started_at'][:10]}")
+
     idle = db.execute("""SELECT provider, MIN(remaining_pct) rem FROM quota
         WHERE sample_id = (SELECT MAX(id) FROM sample) AND remaining_pct >= 90
         GROUP BY provider ORDER BY rem DESC""").fetchall()
@@ -335,6 +414,31 @@ def report(hours: int = 24) -> tuple[str, bool]:
     return "\n".join(lines), actionable
 
 
+def experiment_start(name: str, hypothesis: str, variable: str,
+                     from_value: str, to_value: str) -> int:
+    db = connect()
+    cur = db.execute("""INSERT INTO experiment
+        (name, hypothesis, variable, from_value, to_value, started_at)
+        VALUES (?,?,?,?,?,?)""",
+        (name, hypothesis, variable, from_value, to_value, now()))
+    db.commit(); eid = cur.lastrowid; db.close()
+    return eid
+
+
+def experiment_end(eid: int, outcome: str, verdict: str) -> None:
+    db = connect()
+    db.execute("UPDATE experiment SET ended_at=?, outcome=?, verdict=? WHERE id=?",
+               (now(), outcome, verdict, eid))
+    db.commit(); db.close()
+
+
+def experiments() -> list[sqlite3.Row]:
+    db = connect()
+    rows = db.execute("SELECT * FROM experiment ORDER BY started_at DESC").fetchall()
+    db.close()
+    return rows
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Agent fleet stats")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -342,7 +446,38 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("report")
     r.add_argument("--hours", type=int, default=24)
     sub.add_parser("drift")
+    xs = sub.add_parser("experiment-start")
+    xs.add_argument("--name", required=True)
+    xs.add_argument("--hypothesis", required=True)
+    xs.add_argument("--variable", required=True)
+    xs.add_argument("--from-value", default="")
+    xs.add_argument("--to-value", default="")
+    xe = sub.add_parser("experiment-end")
+    xe.add_argument("--id", type=int, required=True)
+    xe.add_argument("--outcome", required=True)
+    xe.add_argument("--verdict", required=True, choices=("keep", "revert", "inconclusive"))
+    sub.add_parser("experiments")
     args = ap.parse_args(argv)
+
+    if args.command == "experiment-start":
+        eid = experiment_start(args.name, args.hypothesis, args.variable,
+                               args.from_value, args.to_value)
+        print(json.dumps({"experiment": eid, "name": args.name}, indent=2))
+        return 0
+    if args.command == "experiment-end":
+        experiment_end(args.id, args.outcome, args.verdict)
+        print(f"experiment {args.id}: {args.verdict}")
+        return 0
+    if args.command == "experiments":
+        for e in experiments():
+            state = e["verdict"] or ("running" if not e["ended_at"] else "?")
+            print(f"[{e['id']}] {state:12} {e['name']}")
+            print(f"      {e['variable']}: {e['from_value']!r} -> {e['to_value']!r}"
+                  f"  started {e['started_at'][:10]}")
+            print(f"      hypothesis: {e['hypothesis'][:100]}")
+            if e["outcome"]:
+                print(f"      outcome: {e['outcome'][:110]}")
+        return 0
 
     if args.command == "collect":
         print(json.dumps(collect(), indent=2))
