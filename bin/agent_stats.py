@@ -514,8 +514,9 @@ def burn(hours_back: int = 72, warn_hours: float = 48.0) -> tuple[str, bool]:
 # price: a cheap plan nothing else replaces is better value than an idle
 # expensive one.
 PLAN_SEED: list[tuple[str, float | None, str, str]] = [
-    ("claude", None, "Fable/Opus tier; the harness this whole setup runs in",
-     "Max-class. Separate Fable weekly lane. Load-bearing — not a cancellation candidate."),
+    ("claude", 100.0, "Fable/Opus tier; the harness this whole setup runs in",
+     "$100/mo plan. Separate Fable weekly lane. Load-bearing — the harness "
+     "everything else is orchestrated from."),
     ("codex", 20.0, "second-strongest coding models; independent weekly pool",
      "ChatGPT Plus. Reserved for coding judgment, deliberately not spent on background work."),
     ("antigravity", 19.99, "1M-context Gemini + Claude/GPT lanes via one plan",
@@ -524,11 +525,12 @@ PLAN_SEED: list[tuple[str, float | None, str, str]] = [
      "Individual Pro. Official clients only; third-party use violates ToS."),
     ("cursor", 20.0, "IDE composer sessions", "Cursor Pro."),
     ("grok", 30.0, "SuperGrok; non-interactive farming via grok --single", ""),
-    ("zai", None, "cheap bulk via crush TUI", "z.ai lite plan."),
+    ("zai", 18.0, "cheap bulk via crush TUI", "GLM coding plan, Lite tier."),
     ("clinepass", 9.99, "the API pool Hermes and Hindsight actually run on",
      "Open-weight bundle. Load-bearing for Hermes — see the burn alert."),
-    ("devin", None, "autonomous ACU-based agent",
-     "Disabled in Orca's roster; 100% unused every cycle observed."),
+    ("devin", 0.0, "autonomous ACU-based agent",
+     "FREE plan, kept on purpose — to experiment with, and to exercise as an "
+     "aiuse feature. Disabled in Orca's roster; not a cancellation candidate."),
 ]
 
 
@@ -594,7 +596,11 @@ def plan_value(days: int = 30) -> tuple[str, bool]:
     # A free tier is not a cancellation candidate, and neither is a plan we
     # have only watched for an hour: peak-use over 3 samples measures this
     # afternoon, not this month.
-    scored = [s for s in scored if s[1] not in ("opencode-go",)]
+    # Free tiers are not cancellation candidates. devin is a free plan kept
+    # deliberately (to experiment with, and as an aiuse feature), so a $0
+    # price excludes it rather than parking it at the top of the list.
+    scored = [s for s in scored if s[1] not in ("opencode-go",)
+              and not (s[3] is not None and s[3] == 0.0)]
     span = db_span(days)
     lines = [f"💸 PLAN VALUE — cancel-first order"]
     if not scored:
