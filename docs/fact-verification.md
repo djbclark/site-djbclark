@@ -40,16 +40,39 @@ recipes, backticked code — and look for them in the passages the fact was
 mined from. A fact whose own subject matter appears in none of its sources was
 not read out of the evidence.
 
-This also repairs a real defect in the pipeline. `mine_sessions.py:210` stamps
-**every fact in a batch with all six of the batch's passage ids**, so
-provenance is batch-level and no fact can be checked against the passage it
-actually came from. Grounding each claim to its own source text is the
-standard fix for exactly this; the scoring pass recovers fact→passage
-attribution after the fact by finding which passage carries the claim's
-literals.
-
 Threshold: a third of a fact's literals, or two absolute. One literal in
 common is what any two passages about the same tool will share.
+
+#### The provenance defect this was working around — fixed 2026-08-24
+
+`mine_sessions.py` used to stamp **every fact in a batch with all six of the
+batch's passage ids**, so provenance was batch-level and no fact could be
+checked against the passage it actually came from. The literal scoring above
+was recovering that attribution after the fact.
+
+The miner now does it properly. The prompt numbers each excerpt and requires a
+`"source"` per fact, and `attribute()` **checks that citation rather than
+recording it as given** — the fact's literals have to appear in the passage it
+names. A stated citation is itself a claim, and an uncorroborated one is how a
+batch id ends up masquerading as evidence. Five outcomes, all distinguished in
+the output because they were arrived at differently:
+
+| `source_method`             | meaning                                                   |
+| --------------------------- | --------------------------------------------------------- |
+| `model-stated`              | the model's pick, corroborated by the fact's literals     |
+| `literal-corrected`         | the model's pick had no support; a better one won         |
+| `literal-matched`           | no usable number given; found by literals alone           |
+| `model-stated-unverifiable` | the fact has no literals, so nothing could be checked     |
+| `unattributed`              | nothing corroborated — `source` is left null, not guessed |
+
+The batch list survives as `batch`, under its honest name and marked
+audit-only. `verify_facts.py` reads both shapes, since the pre-2026-08-24
+facts are still on disk.
+
+Attribution checked at mine time is strictly better than repaired later: on
+the first run of the new miner, **no fact came back ungrounded**, because a
+fact whose citation cannot be corroborated never gets a `source` in the first
+place.
 
 ### 2. Machine truth — is it still true here?
 
@@ -103,6 +126,23 @@ amount of asking the model how sure it was would have surfaced it.
 The 30 unfalsifiable facts are not wrong. They are claims about judgement and
 rationale rather than about artifacts, and they need a different kind of
 review — which is worth knowing before anyone reports "78 facts verified".
+
+## Second run, on the fixed miner (2026-08-24)
+
+Five facts, mined and verified end to end. Nothing ungrounded; three were
+abstract enough that no check applies. The one flag was a real error:
+
+> The Hermes gateway runs as a user-level launchd service named
+> `ai.hermes.gateway`, with its definition file at
+> `~/Library/LaunchAgents/ai.hermes.gateway.plist`.
+
+That plist does not exist. The gateway is `com.stayturgid.hermes-gateway`; the
+model appears to have collapsed it with the real but different
+`ai.hermes.gateway-restart-watcher`. Note that this fact was correctly
+attributed and correctly grounded — its literals genuinely are in its source
+passage — and still wrong about the machine. Grounding and machine truth are
+independent axes, which is the whole reason the cross-tab is the number to
+read rather than either column.
 
 ## Reusing this for other review passes
 

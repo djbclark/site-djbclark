@@ -5,11 +5,11 @@ the machine they describe.
 `mine_sessions.py distil` asks a model to read session excerpts and emit
 durable facts. Two things about its output cannot be taken at face value:
 
-1. **Provenance is batch-level, not fact-level.** Every fact in a batch is
-   stamped with all six of the batch's passage ids, so no fact can be checked
-   against the passage it actually came from. Grounding every claim to its own
-   source text is the standard fix; without it there is nothing to check a
-   claim against, which is why fabricated claims survive.
+1. **Provenance may be batch-level rather than fact-level.** Facts mined
+   before 2026-08-24 carry all six of their batch's passage ids under
+   `sources`, so no fact can be checked against the passage it actually came
+   from. `mine_sessions` now attributes each fact to a single `source` at mine
+   time, but the older shape is still on disk and still read here.
 2. **The model's self-reported `confidence` carries almost no signal.** In the
    first run 72 of 78 facts said "high". A field that is nearly constant
    cannot rank anything.
@@ -18,9 +18,9 @@ So this does not ask a model how sure it is. It asks two questions that have
 checkable answers:
 
   **Grounding** — do the concrete literals in the fact (paths, flags,
-  commands, env vars, quoted code) actually appear in one of its candidate
-  source passages? This pins each fact to the single passage that supports it
-  and exposes facts whose subject matter appears in none of them.
+  commands, env vars, quoted code) actually appear in its source passage? For
+  older batch-provenance facts this also recovers the attribution, by finding
+  which of the six candidates carries the claim.
 
   **Machine truth** — this corpus is unusual in a way that helps: the facts
   are about *this machine*, not the world. A fact naming `~/.hermes/config.yaml`
@@ -175,6 +175,25 @@ def passage_for(store: EvidenceStore, index: SearchIndex, prefix: str,
     return eid, "\n".join(parts)
 
 
+def candidate_sources(fact: dict[str, Any]) -> list[str]:
+    """Event ids this fact might have come from, best provenance first.
+
+    Two on-disk shapes exist. Facts mined after 2026-08-24 carry a single
+    attributed `source`; before that, `mine_sessions` stamped every fact with
+    all six of its batch's passage ids under `sources`, which is not provenance
+    at all. `batch` is the same batch-level list under its honest name, kept
+    for audit — falling back to it verifies far less than a `source` does, so
+    it is used only when there is nothing better.
+    """
+    if fact.get("source"):
+        return [fact["source"]]
+    if fact.get("sources"):
+        return list(fact["sources"])
+    if fact.get("source_method") == "unattributed":
+        return list(fact.get("batch", []))
+    return list(fact.get("batch", []))
+
+
 def ground(fact: dict[str, Any], store: EvidenceStore, index: SearchIndex,
            cache: dict[str, tuple[str, str] | None]) -> dict[str, Any]:
     """Pin a fact to whichever of its candidate passages actually supports it."""
@@ -185,7 +204,7 @@ def ground(fact: dict[str, Any], store: EvidenceStore, index: SearchIndex,
                 "matched": [], "match_rate": None}
 
     best: tuple[float, str, list[str]] | None = None
-    for prefix in fact.get("sources", []):
+    for prefix in candidate_sources(fact):
         if prefix not in cache:
             cache[prefix] = passage_for(store, index, prefix)
         resolved = cache[prefix]
@@ -341,10 +360,11 @@ def run(facts: list[dict[str, Any]], *, do_entail: bool, model: str,
         v.update(probe(fact, v, recipes))
         v["fact"] = fact.get("fact", "")
         v["claimed_confidence"] = fact.get("confidence")
+        v["source_method"] = fact.get("source_method")
         v["checked_utc"] = utc_today()
         if do_entail and v["grounding"] == "grounded" and v["best_source"]:
             passage = ""
-            for prefix in fact.get("sources", []):
+            for prefix in candidate_sources(fact):
                 got = cache.get(prefix)
                 if got and got[0] == v["best_source"]:
                     passage = got[1]

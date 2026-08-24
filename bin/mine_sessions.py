@@ -11,7 +11,14 @@ Two modes, deliberately separate because they fail differently:
 - **candidates** — cheap, local, no model. Finds passages where somebody was
   *corrected*: "actually", "turns out", "the real cause", "does not work".
   High precision, definitely incomplete. Judgeable in an afternoon.
-- **distil** — sends those passages to a model and asks for durable facts.
+- **distil** — sends those passages to a model and asks for durable facts,
+  each attributed to the one excerpt it came from. That attribution is the
+  model's claim, so `attribute()` checks it against the passage's text rather
+  than recording it as given; an uncheckable citation is worth little more
+  than none. Before 2026-08-24 every fact was stamped with all six of its
+  batch's passage ids, which is not provenance and left the output
+  unverifiable — `bin/verify_facts.py` and `docs/fact-verification.md` cover
+  the check and what the first run of it found.
 
 The prompt below is sharp on purpose. Hindsight's extraction over the same
 material produced a corpus that was **83% episodic** — session narration
@@ -41,10 +48,16 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore  # noqa: E402
-from hindsight_s1_search import SearchIndex  # noqa: E402
+from hindsight_s1 import EvidenceStore
+from hindsight_s1_search import SearchIndex
+from verify_facts import literals
 
 MODEL = "gemini-3.1-pro-high"
+
+# Share of a fact's literals that must appear in a passage for it to count as
+# that fact's source. Matches the grounding threshold in verify_facts.py: one
+# literal in common is what any two passages about the same tool will share.
+LITERAL_SUPPORT = 0.34
 
 # Phrases that reliably precede a correction — someone discovering the world
 # is not as they assumed. Deliberately narrow: precision beats recall here,
@@ -60,7 +73,13 @@ PROMPT = """You are extracting DURABLE OPERATIONAL KNOWLEDGE from excerpts of \
 an engineer's AI-assistant sessions on their own machine.
 
 Return ONLY a JSON array. Each element:
-  {"fact": "...", "why_durable": "...", "confidence": "high"|"medium"}
+  {"fact": "...", "why_durable": "...", "confidence": "high"|"medium", \
+"source": <excerpt number>}
+
+"source" is the number of the single EXCERPT the fact came from. Every fact \
+must come from exactly one excerpt; if you find yourself combining two, they \
+are two facts or neither. Getting this number right matters as much as the \
+fact itself — a fact whose source cannot be checked cannot be trusted later.
 
 What qualifies — a fact that is still true next month and would change what \
 someone does:
@@ -149,11 +168,77 @@ def _readable(raw: bytes) -> str:
     return re.sub(r"\s+", " ", " ".join(parts)).strip()
 
 
+def attribute(fact: dict[str, Any], batch: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pin a fact to the one passage it came from, and check that claim.
+
+    The model states a source excerpt number, which is the only way to get
+    fact-level provenance without one model call per passage. But a stated
+    citation is itself a claim, and an uncorroborated one is how a batch id
+    ends up masquerading as evidence. So the number is checked, not trusted:
+    the fact's concrete literals (paths, flags, recipes, code spans) have to
+    actually appear in the passage it names.
+
+    When the model's pick has no literal support but another passage in the
+    batch does, the best-corroborated passage wins and the disagreement is
+    recorded. When nothing corroborates, `source` is left null rather than
+    guessed — an honest gap beats a plausible wrong answer, because everything
+    downstream treats a populated `source` as checkable.
+
+    A fact with no literals at all cannot be corroborated either way. Its
+    stated source is kept, but labelled `model-stated-unverifiable` rather than
+    `model-stated`, because the two were arrived at differently and a reader
+    who cannot tell them apart is being told a check happened that did not.
+    """
+    lits = literals(fact.get("fact", ""))
+    flat = {v for values in lits.values() for v in values}
+
+    def supports(item: dict[str, Any]) -> float:
+        if not flat:
+            return 0.0
+        low = item["passage"].lower()
+        return sum(1 for v in flat if v.lower() in low) / len(flat)
+
+    stated = fact.get("source")
+    picked = None
+    if isinstance(stated, int) and 1 <= stated <= len(batch):
+        picked = batch[stated - 1]
+
+    if picked is not None and not flat:
+        method = "model-stated-unverifiable"
+    elif picked is not None and supports(picked) >= LITERAL_SUPPORT:
+        method = "model-stated"
+    else:
+        scored = sorted(batch, key=supports, reverse=True)
+        best = scored[0] if scored else None
+        if best is not None and supports(best) >= LITERAL_SUPPORT:
+            method = "literal-corrected" if picked is not None else "literal-matched"
+            picked = best
+        else:
+            method = "unattributed"
+            picked = None
+
+    return {
+        "fact": fact.get("fact", ""),
+        "why_durable": fact.get("why_durable", ""),
+        "confidence": fact.get("confidence"),
+        "source": picked["event_id"] if picked else None,
+        "source_method": method,
+        "source_stated": stated if isinstance(stated, int) else None,
+        # Kept for audit only. This is NOT provenance: it is every passage the
+        # model saw in one call, which is exactly the batch-level "sources"
+        # list that made the first run's facts uncheckable.
+        "batch": [c["event_id"] for c in batch],
+    }
+
+
 def distil(batch: list[dict[str, Any]], *, model: str, timeout: int) -> list[dict[str, Any]]:
-    prompt = PROMPT + "\n\n---\n\n".join(c["passage"] for c in batch)
+    numbered = "\n\n---\n\n".join(
+        f"[EXCERPT {i}]\n{c['passage']}" for i, c in enumerate(batch, 1)
+    )
     try:
-        out = subprocess.run(["agy", "-p", prompt, "--model", model],
-                             capture_output=True, text=True, timeout=timeout)
+        out = subprocess.run(["agy", "-p", PROMPT + numbered, "--model", model],
+                             capture_output=True, text=True, timeout=timeout,
+                             check=False)
     except subprocess.TimeoutExpired:
         return []
     text = out.stdout.strip()
@@ -164,7 +249,8 @@ def distil(batch: list[dict[str, Any]], *, model: str, timeout: int) -> list[dic
         facts = json.loads(text[start:end + 1])
     except ValueError:
         return []
-    return [f for f in facts if isinstance(f, dict) and f.get("fact")]
+    return [attribute(f, batch) for f in facts
+            if isinstance(f, dict) and f.get("fact")]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -206,10 +292,10 @@ def main(argv: list[str] | None = None) -> int:
     facts: list[dict[str, Any]] = []
     for i, batch in enumerate(batches, 1):
         got = distil(batch, model=args.model, timeout=args.timeout)
-        for f in got:
-            f["sources"] = [c["event_id"][:14] for c in batch]
         facts.extend(got)
-        print(f"  batch {i}/{len(batches)}: +{len(got)} facts "
+        unattributed = sum(1 for f in got if f["source_method"] == "unattributed")
+        note = f", {unattributed} unattributed" if unattributed else ""
+        print(f"  batch {i}/{len(batches)}: +{len(got)} facts{note} "
               f"({len(facts)} total)", file=sys.stderr, flush=True)
     payload = json.dumps(facts, indent=1)
     if args.out:
