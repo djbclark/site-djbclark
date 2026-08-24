@@ -73,6 +73,11 @@ Topology background:
 - Follow the relay protocol (`docs/relay/PROTOCOL.md`) for the ongoing
   segmentation/AI-stack work — read the baton before re-planning.
 - `just lint` and `bin/registry_lint.py` gate changes to `registry/`.
+- **Run tests with `just test`** (or `just lint` for the unittest sweep), never
+  a bare `python3 -m pytest` / `-m unittest`. Both recipes run under
+  `uv run --with pytest --with pyyaml`; the system interpreter has no pytest,
+  so a bare run dies on `import pytest` in `tests/test_hindsight_candidates.py`
+  before a single test executes, which looks like a repo failure and is not one.
 - Human-only tasks and operator decisions live under `human/` — do not
   auto-commit changes there without the operator's review; check `git status`
   before committing, since operator-authored files here are sometimes
