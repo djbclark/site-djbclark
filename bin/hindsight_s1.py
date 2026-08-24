@@ -34,6 +34,7 @@ from typing import Any, Iterator
 DEFAULT_DB = Path.home() / ".hindsight" / "candidates.sqlite3"
 DEFAULT_CAS = Path.home() / ".hindsight" / "cas"
 SCHEMA_VERSION = 1
+BUSY_TIMEOUT_MS = 30_000
 
 # event_id inputs are joined with ASCII unit separator: it cannot occur in a
 # path or a hex digest, so no combination of fields can collide by concatenation.
@@ -79,6 +80,12 @@ class EvidenceStore:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
+        # Long-running ingest holds the write lock in batches, and opening a
+        # second connection runs DDL, which needs that lock. Without a busy
+        # timeout the second process fails instantly with "database is locked"
+        # — even for something as harmless as reading stats mid-index. Wait
+        # instead of erroring.
+        self.db.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         self._migrate()
 
     # -- schema -----------------------------------------------------------
