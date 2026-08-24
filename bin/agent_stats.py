@@ -400,6 +400,11 @@ def report(hours: int = 24) -> tuple[str, bool]:
         for r in running:
             lines.append(f"    [{r['id']}] {r['name']}  since {r['started_at'][:10]}")
 
+    btext, balarm = burn()
+    if balarm or "not enough history" not in btext:
+        lines.append(btext)
+        actionable = actionable or balarm
+
     idle = db.execute("""SELECT provider, MIN(remaining_pct) rem FROM quota
         WHERE sample_id = (SELECT MAX(id) FROM sample) AND remaining_pct >= 90
         GROUP BY provider ORDER BY rem DESC""").fetchall()
@@ -439,6 +444,63 @@ def experiments() -> list[sqlite3.Row]:
     return rows
 
 
+# Pools Hermes can actually draw on, in the order its fallback chain tries
+# them. Free tiers exhaust before monthly-paid ones, so the alert has to watch
+# the whole chain rather than the primary alone.
+HERMES_POOLS = ("opencode-zen", "clinepass")
+
+
+def burn(hours_back: int = 72, warn_hours: float = 48.0) -> tuple[str, bool]:
+    """Project when Hermes-usable pools run out, from observed slope.
+
+    Deliberately linear and deliberately cautious: it uses the *worst* window
+    per pool and refuses to extrapolate from a single sample. A projection is
+    only useful if it fires before the wall, so it warns on hours-to-empty,
+    not on a percentage.
+    """
+    db = connect()
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours_back)
+             ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    lines: list[str] = []
+    alarm = False
+    for pool in HERMES_POOLS:
+        rows = db.execute("""SELECT s.collected_at, MIN(q.remaining_pct) rem
+            FROM quota q JOIN sample s ON s.id = q.sample_id
+            WHERE q.provider = ? AND q.remaining_pct IS NOT NULL
+              AND s.collected_at >= ?
+            GROUP BY s.id ORDER BY s.collected_at""", (pool, since)).fetchall()
+        if len(rows) < 3:
+            lines.append(f"    {pool}: not enough history yet "
+                         f"({len(rows)} samples; needs 3)")
+            continue
+        first, last = rows[0], rows[-1]
+        t0 = datetime.fromisoformat(first["collected_at"].replace("Z", "+00:00"))
+        t1 = datetime.fromisoformat(last["collected_at"].replace("Z", "+00:00"))
+        span_h = (t1 - t0).total_seconds() / 3600.0
+        if span_h <= 0:
+            continue
+        drop = (first["rem"] or 0) - (last["rem"] or 0)
+        rate = drop / span_h                      # percentage points per hour
+        if rate <= 0.01:
+            lines.append(f"    {pool}: {last['rem']:.0f}% left, not declining")
+            continue
+        hours_left = (last["rem"] or 0) / rate
+        flag = ""
+        if hours_left <= warn_hours:
+            alarm = True
+            flag = "  ⚠️"
+        lines.append(f"    {pool}: {last['rem']:.0f}% left, burning "
+                     f"{rate:.2f}%/h → empty in ~{hours_left:.0f}h{flag}")
+    db.close()
+    header = "🔥 HERMES-USABLE POOLS"
+    if alarm:
+        header += " — action needed"
+        lines.append("    Options: lower Hermes's token cost (shorter prompts, "
+                     "fewer agent-mode cron jobs, smaller retain_every_n_turns), "
+                     "or add a pool to the fallback chain.")
+    return header + "\n" + "\n".join(lines), alarm
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Agent fleet stats")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -457,7 +519,15 @@ def main(argv: list[str] | None = None) -> int:
     xe.add_argument("--outcome", required=True)
     xe.add_argument("--verdict", required=True, choices=("keep", "revert", "inconclusive"))
     sub.add_parser("experiments")
+    b = sub.add_parser("burn", help="project when Hermes-usable pools run out")
+    b.add_argument("--hours-back", type=int, default=72)
+    b.add_argument("--warn-hours", type=float, default=48.0)
     args = ap.parse_args(argv)
+
+    if args.command == "burn":
+        text, alarm = burn(hours_back=args.hours_back, warn_hours=args.warn_hours)
+        print(text)
+        return 10 if alarm else 0
 
     if args.command == "experiment-start":
         eid = experiment_start(args.name, args.hypothesis, args.variable,
