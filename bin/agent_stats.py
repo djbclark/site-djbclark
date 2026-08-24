@@ -114,6 +114,12 @@ def connect() -> sqlite3.Connection:
     -- measures whether we are getting better, not merely cheaper.
     CREATE TABLE IF NOT EXISTS insights_report (
       path TEXT PRIMARY KEY, generated_at TEXT, bytes INTEGER, seen_at TEXT);
+    -- What each subscription costs and what depends on it, so "which plan do
+    -- I cancel first" is answered from utilisation history rather than from
+    -- whichever one feels least familiar.
+    CREATE TABLE IF NOT EXISTS plan (
+      provider TEXT PRIMARY KEY, monthly_usd REAL, unique_capability TEXT,
+      notes TEXT, updated_at TEXT);
     CREATE INDEX IF NOT EXISTS sample_time ON sample(collected_at);
     CREATE INDEX IF NOT EXISTS usage_day ON session_usage(day);
     """)
@@ -501,6 +507,122 @@ def burn(hours_back: int = 72, warn_hours: float = 48.0) -> tuple[str, bool]:
     return header + "\n" + "\n".join(lines), alarm
 
 
+# Monthly cost and what each plan uniquely provides. Costs marked None are
+# unknown and must be filled in before the ranking means anything — a plan
+# with no price cannot be compared. `unique_capability` is the thing that
+# would actually be lost, which is usually the deciding factor rather than
+# price: a cheap plan nothing else replaces is better value than an idle
+# expensive one.
+PLAN_SEED: list[tuple[str, float | None, str, str]] = [
+    ("claude", None, "Fable/Opus tier; the harness this whole setup runs in",
+     "Max-class. Separate Fable weekly lane. Load-bearing — not a cancellation candidate."),
+    ("codex", 20.0, "second-strongest coding models; independent weekly pool",
+     "ChatGPT Plus. Reserved for coding judgment, deliberately not spent on background work."),
+    ("antigravity", 19.99, "1M-context Gemini + Claude/GPT lanes via one plan",
+     "Google AI Pro. Chat/CLI only — subscription does NOT include API access."),
+    ("copilot", 10.0, "GitHub-native PR review and repo Q&A",
+     "Individual Pro. Official clients only; third-party use violates ToS."),
+    ("cursor", 20.0, "IDE composer sessions", "Cursor Pro."),
+    ("grok", 30.0, "SuperGrok; non-interactive farming via grok --single", ""),
+    ("zai", None, "cheap bulk via crush TUI", "z.ai lite plan."),
+    ("clinepass", 9.99, "the API pool Hermes and Hindsight actually run on",
+     "Open-weight bundle. Load-bearing for Hermes — see the burn alert."),
+    ("devin", None, "autonomous ACU-based agent",
+     "Disabled in Orca's roster; 100% unused every cycle observed."),
+]
+
+
+def seed_plans() -> int:
+    db = connect()
+    db.executemany("""INSERT INTO plan (provider, monthly_usd, unique_capability,
+        notes, updated_at) VALUES (?,?,?,?,?)
+        ON CONFLICT(provider) DO UPDATE SET
+          unique_capability=excluded.unique_capability, notes=excluded.notes,
+          monthly_usd=COALESCE(plan.monthly_usd, excluded.monthly_usd),
+          updated_at=excluded.updated_at""",
+        [(p, c, u, n, now()) for p, c, u, n in PLAN_SEED])
+    db.commit(); db.close()
+    return len(PLAN_SEED)
+
+
+def db_span(days: int) -> float:
+    """How many days of samples we actually have, capped at the window."""
+    db = connect()
+    row = db.execute("SELECT MIN(collected_at) a, MAX(collected_at) b FROM sample"
+                     ).fetchone()
+    db.close()
+    if not row or not row["a"]:
+        return 0.0
+    a = datetime.fromisoformat(row["a"].replace("Z", "+00:00"))
+    b = datetime.fromisoformat(row["b"].replace("Z", "+00:00"))
+    return min(days, (b - a).total_seconds() / 86400.0)
+
+
+def plan_value(days: int = 30) -> tuple[str, bool]:
+    """Rank subscriptions by how safely they could be dropped.
+
+    Utilisation is measured as the deepest draw observed on any window: a
+    plan whose worst window never falls below ~95% is one you are paying for
+    and not using. Cost per point of utilisation makes an expensive idle plan
+    rank above a cheap idle one.
+    """
+    db = connect()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)
+             ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rows = db.execute("""SELECT q.provider, MIN(q.remaining_pct) deepest,
+               AVG(q.remaining_pct) avg_rem, COUNT(DISTINCT q.sample_id) n
+        FROM quota q JOIN sample s ON s.id = q.sample_id
+        WHERE s.collected_at >= ? AND q.remaining_pct IS NOT NULL
+          AND q.billing_kind = 'subscription_window'
+        GROUP BY q.provider""", (since,)).fetchall()
+    plans = {r["provider"]: r for r in db.execute("SELECT * FROM plan")}
+    db.close()
+
+    scored = []
+    for r in rows:
+        p = plans.get(r["provider"])
+        used = 100.0 - (r["deepest"] if r["deepest"] is not None else 100.0)
+        cost = (p["monthly_usd"] if p else None)
+        # Higher = safer to cancel. Idle costs money; cost amplifies it.
+        waste = (100.0 - used) / 100.0
+        score = waste * (cost if cost else 10.0)
+        scored.append((score, r["provider"], used, cost, r["n"],
+                       (p["unique_capability"] if p else ""),
+                       (p["notes"] if p else "")))
+    scored.sort(reverse=True)
+
+    # A free tier is not a cancellation candidate, and neither is a plan we
+    # have only watched for an hour: peak-use over 3 samples measures this
+    # afternoon, not this month.
+    scored = [s for s in scored if s[1] not in ("opencode-go",)]
+    span = db_span(days)
+    lines = [f"💸 PLAN VALUE — cancel-first order"]
+    if not scored:
+        lines.append("    no subscription history yet; needs a few days of samples")
+        return "\n".join(lines), False
+    if span < 7:
+        lines.append(f"    ⚠️  only {span:.1f} days of history — peak-use figures "
+                     "below reflect a snapshot, not a billing cycle. Treat the "
+                     "order as provisional until ~14 days have accumulated.")
+    else:
+        lines.append(f"    based on {span:.0f} days of samples")
+    for i, (score, prov, used, cost, n, uniq, notes) in enumerate(scored, 1):
+        price = f"${cost:.2f}/mo" if cost else "cost UNKNOWN"
+        lines.append(f"  {i}. {prov:14} peak use {used:5.1f}%   {price:14} "
+                     f"({n} samples)")
+        if uniq:
+            lines.append(f"       loses: {uniq}")
+        if notes:
+            lines.append(f"       {notes}")
+    unknown = [s[1] for s in scored if not s[3]]
+    if unknown:
+        lines.append(f"    ⚠️  price unknown, ranking is provisional: "
+                     f"{', '.join(unknown)}  — set with `plan-cost`")
+    lines.append("    Read as: high peak-use = you are using it. Never-drawn "
+                 "plans rank first regardless of price.")
+    return "\n".join(lines), bool(unknown)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Agent fleet stats")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -519,6 +641,11 @@ def main(argv: list[str] | None = None) -> int:
     xe.add_argument("--outcome", required=True)
     xe.add_argument("--verdict", required=True, choices=("keep", "revert", "inconclusive"))
     sub.add_parser("experiments")
+    pv = sub.add_parser("plan-value", help="cancel-first ranking of subscriptions")
+    pv.add_argument("--days", type=int, default=30)
+    pc = sub.add_parser("plan-cost", help="record what a plan costs per month")
+    pc.add_argument("--provider", required=True)
+    pc.add_argument("--usd", type=float, required=True)
     b = sub.add_parser("burn", help="project when Hermes-usable pools run out")
     b.add_argument("--hours-back", type=int, default=72)
     b.add_argument("--warn-hours", type=float, default=48.0)
@@ -538,6 +665,23 @@ def main(argv: list[str] | None = None) -> int:
         experiment_end(args.id, args.outcome, args.verdict)
         print(f"experiment {args.id}: {args.verdict}")
         return 0
+    if args.command == "plan-cost":
+        seed_plans()
+        db = connect()
+        db.execute("""INSERT INTO plan (provider, monthly_usd, updated_at)
+            VALUES (?,?,?) ON CONFLICT(provider) DO UPDATE SET
+              monthly_usd=excluded.monthly_usd, updated_at=excluded.updated_at""",
+            (args.provider, args.usd, now()))
+        db.commit(); db.close()
+        print(f"{args.provider}: ${args.usd:.2f}/mo")
+        return 0
+
+    if args.command == "plan-value":
+        seed_plans()
+        text, incomplete = plan_value(days=args.days)
+        print(text)
+        return 10 if incomplete else 0
+
     if args.command == "experiments":
         for e in experiments():
             state = e["verdict"] or ("running" if not e["ended_at"] else "?")
