@@ -2,8 +2,11 @@
 set -euo pipefail
 
 # site-djbclark — brew-fast-upgrade maintenance script
-# Upgrades Homebrew packages under exclusive site advisory lock (Phase F4).
-# Automatically restarts Google Chrome cleanly if it was running and upgraded.
+# Upgrades Homebrew packages and globally-installed npm packages under
+# exclusive site advisory lock (Phase F4). Retries a bounded number of times
+# until every non-pinned package verifies as up to date, or gives up loudly
+# for manual intervention. Automatically restarts Google Chrome cleanly if it
+# was running and got upgraded.
 
 export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
@@ -23,6 +26,13 @@ trap 'rc=$?; echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc"
 echo "[$STARTED_AT] started; scheduled/manual Jobber invocation"
 
 LOCK_BIN="{{ site_agents_home }}/ops/site-djbclark/bin/brew_flock.py"
+{% raw %}
+MAX_ATTEMPTS="${BREW_FAST_UPGRADE_MAX_ATTEMPTS:-3}"
+RETRY_DELAY_SECS=10
+# Exported: run_upgrade_and_restart_apps may execute inside a fresh `bash -c`
+# spawned by brew_flock.py, which inherits only the environment, not these
+# shell variables.
+export MAX_ATTEMPTS RETRY_DELAY_SECS
 
 run_brew_update() {
   local update_output
@@ -44,9 +54,33 @@ run_brew_update() {
   done <<< "$update_output"
 }
 
-run_upgrade_and_restart_apps() {
+# Non-pinned brew formulae/casks still outdated, one per line (empty when
+# clean). Computes the pinned set once instead of shelling out to `brew list
+# --pinned` per outdated item. `brew outdated` reports tap-qualified names
+# (e.g. "vectordotdev/brew/vector") while `brew list --pinned` reports only
+# the short name ("vector"), so match on both the full name and the part
+# after the last "/".
+brew_remaining_outdated() {
+  local pinned all_outdated
+  pinned="$(brew list --pinned 2>/dev/null)"
+  all_outdated="$(brew outdated --formula 2>/dev/null; brew outdated --cask 2>/dev/null)"
+  [ -z "$all_outdated" ] && return 0
+  # macOS's awk chokes on multiline `-v` values, so pass the pinned set as a
+  # file (process substitution) and use the standard two-file NR==FNR idiom.
+  awk '
+    NR == FNR { pinset[$0] = 1; next }
+    {
+      short = $0
+      sub(/^.*\//, "", short)
+      if (!($0 in pinset) && !(short in pinset)) print
+    }
+  ' <(printf '%s\n' "$pinned") <(printf '%s\n' "$all_outdated")
+}
+
+run_brew_pass() {
   local chrome_outdated=0
   local chrome_running=0
+  local rc=0
 
   # Pre-check: is google-chrome cask outdated?
   if brew outdated --cask google-chrome 2>/dev/null | grep -q "google-chrome"; then
@@ -58,28 +92,11 @@ run_upgrade_and_restart_apps() {
     chrome_running=1
   fi
 
-  # Run upgrade
-  run_brew_update && brew upgrade
-
-  # A successful brew invocation is not enough: fail visibly if any
-  # non-pinned formula or cask remains outdated.
-  local remaining_outdated
-  remaining_outdated="$(
-    {
-      brew outdated --formula 2>/dev/null
-      brew outdated --cask 2>/dev/null
-    } | while IFS= read -r item; do
-      if ! brew list --pinned 2>/dev/null | grep -Fqx "$item"; then
-        echo "$item"
-      fi
-    done
-  )"
-  if [ -n "$remaining_outdated" ]; then
-    echo "[brew-fast-upgrade] ERROR: non-pinned outdated items remain:"
-    echo "$remaining_outdated"
+  if ! run_brew_update; then
+    echo "[brew-fast-upgrade] brew update failed; skipping brew upgrade this pass."
     return 1
   fi
-  echo "[brew-fast-upgrade] Verification passed: no non-pinned outdated items remain."
+  brew upgrade || rc=1
 
   # Post-check: if Chrome was running and upgraded, restart it gracefully
   if [ "$chrome_outdated" -eq 1 ] && [ "$chrome_running" -eq 1 ]; then
@@ -105,14 +122,94 @@ run_upgrade_and_restart_apps() {
     echo "[brew-fast-upgrade] Relaunching Google Chrome..."
     open -a "Google Chrome"
   fi
+
+  return "$rc"
+}
+
+# Outdated globally-installed npm package names, one per line (empty when
+# clean, or when npm/jq isn't available on this host).
+npm_outdated_globals() {
+  command -v npm >/dev/null 2>&1 || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[brew-fast-upgrade] jq not found; skipping npm global upgrade check." >&2
+    return 0
+  fi
+  npm outdated -g --json 2>/dev/null | jq -r 'keys[]?'
+}
+
+run_npm_pass() {
+  local pkgs=()
+  local pkg
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] && pkgs+=("${pkg}@latest")
+  done < <(npm_outdated_globals)
+
+  if [ "${#pkgs[@]}" -eq 0 ]; then
+    echo "[brew-fast-upgrade] npm globals: nothing outdated."
+    return 0
+  fi
+
+  # One batched install call avoids per-package npm startup overhead.
+  echo "[brew-fast-upgrade] npm globals: upgrading ${pkgs[*]}"
+  if ! npm install -g "${pkgs[@]}"; then
+    echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
+    return 1
+  fi
+}
+
+# A successful brew/npm invocation is not enough: confirm nothing non-pinned
+# is still outdated. Prints what remains when verification fails.
+verify_clean() {
+  local brew_remaining npm_remaining
+  brew_remaining="$(brew_remaining_outdated)"
+  npm_remaining="$(npm_outdated_globals)"
+
+  if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ]; then
+    echo "[brew-fast-upgrade] outdated items remain:"
+    [ -n "$brew_remaining" ] && printf 'brew: %s\n' "$brew_remaining"
+    [ -n "$npm_remaining" ] && printf 'npm:  %s\n' "$npm_remaining"
+    return 1
+  fi
+  return 0
+}
+
+run_upgrade_and_restart_apps() {
+  local attempt
+
+  for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+    echo "[brew-fast-upgrade] attempt $attempt/$MAX_ATTEMPTS"
+
+    if ! run_brew_pass; then
+      echo "[brew-fast-upgrade] brew pass failed on attempt $attempt"
+    fi
+    if ! run_npm_pass; then
+      echo "[brew-fast-upgrade] npm pass failed on attempt $attempt"
+    fi
+
+    if verify_clean; then
+      echo "[brew-fast-upgrade] Verification passed: no non-pinned outdated items remain (attempt $attempt)."
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+      echo "[brew-fast-upgrade] retrying in ${RETRY_DELAY_SECS}s..."
+      sleep "$RETRY_DELAY_SECS"
+    fi
+  done
+
+  echo "[brew-fast-upgrade] ERROR: outdated items remain after $MAX_ATTEMPTS attempts; needs manual intervention:"
+  verify_clean || true
+  return 1
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated run_brew_pass npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
   rc=$?
 fi
 exit "$rc"
+{% endraw %}
 
