@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 8a8b93bff245cf03de248602f14a203682d93bc5
-synced: '2026-09-20T15:54:36Z'
+product_commit: afa6d7aa397de92dbf5c76860c8881ddac01300d
+synced: '2026-09-20T16:59:51Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -38,6 +38,8 @@ files:
   sha256: b8dc76610f02d9f26b4f703d5e80c72f2bdb02ac9b5b56eceb95c99dd247f111
 - path: generated/stayturgid/inventory/group_vars/model_pixel_7a.yml
   sha256: 0fc267e8523747dac96280e2285d0afa787a30b874c6c99d8065ac19e8aea6a9
+- path: generated/stayturgid/inventory/group_vars/model_titan_2.yml
+  sha256: c2878ff635f7caee6b70689d2d21208859d1b452345c05e8ea9dbdb9704d5eec
 - path: generated/stayturgid/inventory/group_vars/oneui_7.yml
   sha256: ffcb194522b4bf7b9d676ed6b949e7323a571075b83a93ccb9fe0622a0824c11
 - path: generated/stayturgid/inventory/group_vars/vendor_amazon.yml
