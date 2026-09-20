@@ -7,7 +7,7 @@
 # live inventory (the validator derives live literals from inventory itself).
 #
 # Derived from inventory/hosts.yml + group_vars/stayturgid.yml:
-#   - 192.168.68.0/24  — primary LAN (s24, p7a, control node)
+#   - 192.168.68.0/24  — primary LAN (s24, p7a, t2e, control node)
 #   - 192.168.1.0/24   — secondary LAN (hd8 device_lan_ip)
 #   - 100.64.0.0/10    — Tailscale CGNAT range (all management IPs)
 #     (trailing (?!/) exempts CIDR *range* notation like "100.64.0.0/10",

@@ -47,7 +47,7 @@ openobserve_root_email: djbclark@gmail.com
 # (`lsof -iTCP -sTCP:LISTEN`) — not placeholders. Add/remove targets here as
 # the fleet/control-node service set changes; no product code change needed.
 serverapp_victoriametrics_blackbox_targets:
-  # Termux SSH on the three real fleet devices — previously unmonitored
+  # Termux SSH on the real fleet devices — previously unmonitored
   # (access_monitor.py checks ADB reachability, not the SSH port itself).
   ssh_banner:
     - target: "100.123.218.30:8022"  # s24 (Galaxy S24)
@@ -59,6 +59,9 @@ serverapp_victoriametrics_blackbox_targets:
     - target: "100.124.55.39:8022"   # hd8 (Kindle Fire HD 8)
       labels:
         machine_name: hd8
+    - target: "100.73.253.10:8022"   # t2e (Unihertz Titan 2)
+      labels:
+        machine_name: t2e
   # Caddy front door. HTTPS target uses the real tailnet hostname, not
   # 127.0.0.1 — the cert (real Let's Encrypt via Tailscale's cert
   # integration, confirmed live) is issued for caddy_public_hostname, and

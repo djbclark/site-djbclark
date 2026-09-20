@@ -83,6 +83,15 @@ actions:
       cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy s24
 
+  - id: stayturgid_deploy_t2e
+    title: "Deploy Unihertz Titan 2 (t2e)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      just deploy t2e
+
   - id: stayturgid_deploy_vps_primary
     title: "Deploy vps-primary (vps-primary)"
     icon: "&#128640;"
