@@ -1,0 +1,238 @@
+# Monitors thaw-app/Thaw#1166 — our feature request (full-width Layout
+# editor) combined with a request for read access to the private
+# `thaw-next` repository, which is the only way to build the macOS 27
+# line of Thaw. The signal we care about is any *activity*: a maintainer
+# comment, or the issue closing. Resolution alone is not enough, since the
+# answer may be "wait for the merge" or a question back to us.
+#
+# Dedupe state (last-seen comment / state) lives in a tracking issue in
+# this repository, created on first run, so a reply is reported once.
+#
+# Background: ~/src/Thaw/docs/handoffs/ (handoff standalone-7a4f) and
+# ~/ops/site-private/memory/reference_thaw_3x_private_thaw_next_repo.md.
+#
+# Setup: TELEGRAM_BOT_TOKEN must be set as a repository secret (shared
+# with the other monitor-*.yml workflows).
+
+---
+name: Monitor thaw-next access request
+
+"on":
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: >-
+          Send a test notification to the standing Hermes Telegram topic
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor-thaw-next-access-request
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  UPSTREAM_REPO: thaw-app/Thaw
+  UPSTREAM_ISSUE: "1166"
+  TRACKING_TITLE: "Watch: thaw-app/Thaw#1166 (thaw-next access request)"
+
+jobs:
+  check-issue:
+    name: Check thaw-app/Thaw#1166 for new activity
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.send_test_notification != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Read current upstream state
+        id: upstream
+        run: |
+          data=$(gh issue view "$UPSTREAM_ISSUE" --repo "$UPSTREAM_REPO" \
+            --json state,url,comments)
+
+          {
+            echo "state=$(jq -r '.state' <<<"$data")"
+            echo "url=$(jq -r '.url' <<<"$data")"
+            echo "comment_count=$(jq -r '.comments | length' <<<"$data")"
+            echo "last_id=$(jq -r '.comments | last | .id // ""' <<<"$data")"
+            echo "last_author=$(jq -r \
+              '.comments | last | .author.login // ""' <<<"$data")"
+            echo "last_at=$(jq -r \
+              '.comments | last | .createdAt // ""' <<<"$data")"
+            echo "last_url=$(jq -r '.comments | last | .url // ""' <<<"$data")"
+          } >> "$GITHUB_OUTPUT"
+
+          # Excerpt is multi-line; pass it through a heredoc delimiter.
+          {
+            echo "excerpt<<__EXCERPT__"
+            jq -r '.comments | last | .body // "" | .[0:500]' <<<"$data"
+            echo "__EXCERPT__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Read last-seen state from the tracking issue
+        id: tracking
+        run: |
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all \
+            --search "\"${TRACKING_TITLE}\" in:title" --limit 50 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"${TRACKING_TITLE}\")]
+                  | first | .number // empty")
+
+          if [ -z "$number" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No tracking issue yet; this run will initialize it."
+            exit 0
+          fi
+
+          body=$(gh issue view "$number" --repo "$GITHUB_REPOSITORY" \
+            --json body --jq .body)
+          seen_state=$(grep -oE '^state=.*' <<<"$body" | head -1 | cut -d= -f2-)
+          seen_count=$(grep -oE '^comment_count=.*' <<<"$body" | head -1 \
+            | cut -d= -f2-)
+          seen_id=$(grep -oE '^last_comment_id=.*' <<<"$body" | head -1 \
+            | cut -d= -f2-)
+
+          {
+            echo "exists=true"
+            echo "number=$number"
+            echo "seen_state=$seen_state"
+            echo "seen_count=$seen_count"
+            echo "seen_id=$seen_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether anything changed
+        id: diff
+        env:
+          EXISTS: ${{ steps.tracking.outputs.exists }}
+          SEEN_STATE: ${{ steps.tracking.outputs.seen_state }}
+          SEEN_COUNT: ${{ steps.tracking.outputs.seen_count }}
+          SEEN_ID: ${{ steps.tracking.outputs.seen_id }}
+          STATE: ${{ steps.upstream.outputs.state }}
+          COUNT: ${{ steps.upstream.outputs.comment_count }}
+          LAST_ID: ${{ steps.upstream.outputs.last_id }}
+        run: |
+          changed=false
+          what=""
+          if [ "$EXISTS" = "true" ]; then
+            if [ "$STATE" != "$SEEN_STATE" ]; then
+              changed=true; what="state ${SEEN_STATE} → ${STATE}"
+            fi
+            if [ "$COUNT" != "$SEEN_COUNT" ] \
+              || [ "$LAST_ID" != "$SEEN_ID" ]; then
+              changed=true
+              what="${what:+$what; }"
+              what="${what}new comment(s): ${SEEN_COUNT:-0} → ${COUNT}"
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "what=$what" >> "$GITHUB_OUTPUT"
+          echo "changed=$changed what=${what:-none} (state=$STATE" \
+            "comments=$COUNT)"
+
+      - name: Notify via Hermes Telegram topic
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WHAT: ${{ steps.diff.outputs.what }}
+          ISSUE_URL: ${{ steps.upstream.outputs.url }}
+          LAST_AUTHOR: ${{ steps.upstream.outputs.last_author }}
+          LAST_AT: ${{ steps.upstream.outputs.last_at }}
+          LAST_URL: ${{ steps.upstream.outputs.last_url }}
+          EXCERPT: ${{ steps.upstream.outputs.excerpt }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          printf -v text '%s\n%s\n%s\n\n%s\n\n%s\n%s' \
+            "💬 thaw-app/Thaw#1166 (thaw-next access request): ${WHAT}" \
+            "latest comment by ${LAST_AUTHOR:-n/a} at ${LAST_AT:-n/a}" \
+            "${LAST_URL:-$ISSUE_URL}" \
+            "${EXCERPT:-(no comment body)}" \
+            "$ISSUE_URL" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22158 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the notification."
+
+      - name: Create or update the tracking issue
+        if: >-
+          steps.tracking.outputs.exists != 'true' ||
+          steps.diff.outputs.changed == 'true'
+        env:
+          EXISTS: ${{ steps.tracking.outputs.exists }}
+          NUMBER: ${{ steps.tracking.outputs.number }}
+          STATE: ${{ steps.upstream.outputs.state }}
+          COUNT: ${{ steps.upstream.outputs.comment_count }}
+          LAST_ID: ${{ steps.upstream.outputs.last_id }}
+          LAST_AT: ${{ steps.upstream.outputs.last_at }}
+          ISSUE_URL: ${{ steps.upstream.outputs.url }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          body=$(cat <<EOF
+          Dedupe state for the \`monitor-thaw-next-access-request\` workflow.
+          The lines below are machine-read; edit only to force a re-notify.
+
+          state=${STATE}
+          comment_count=${COUNT}
+          last_comment_id=${LAST_ID}
+          last_comment_at=${LAST_AT}
+
+          - Upstream: ${ISSUE_URL}
+          - Last updated by run: ${run_url}
+          EOF
+          )
+          if [ "$EXISTS" = "true" ]; then
+            gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
+            echo "Updated tracking issue #$NUMBER."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$TRACKING_TITLE" --body "$body"
+            echo "Initialized tracking issue (no notification on first run)."
+          fi
+
+  test-notification:
+    name: Test Telegram delivery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.send_test_notification == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Send test notification to Hermes Telegram topic
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          run_url="${run_url}${GITHUB_RUN_ID}"
+          printf -v text '✅ thaw-next access monitor test\n%s / %s\n%s' \
+            "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22158 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+
+          jq_filter='if .ok == true then true else error(.description) end'
+          jq -e "$jq_filter" "$response" >/dev/null
+          echo "Telegram accepted the test notification."
