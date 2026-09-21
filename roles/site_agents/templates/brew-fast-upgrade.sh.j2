@@ -77,6 +77,25 @@ brew_remaining_outdated() {
   ' <(printf '%s\n' "$pinned") <(printf '%s\n' "$all_outdated")
 }
 
+# Homebrew removed `--no-quarantine`, and some casks ship un-notarized helper
+# binaries that Gatekeeper then blocks/SIGKILLs (kotlin-lsp's bundled
+# intellij-server, used by Claude Code's LSP tool). A fresh version dir comes
+# back quarantined after every upgrade, so strip the attribute here. Scoped to
+# an explicit allowlist (override with BREW_FAST_UPGRADE_UNQUARANTINE_CASKS,
+# space-separated) - never the whole Caskroom. Standalone equivalent:
+# site-private/bin/brew-unquarantine.
+unquarantine_casks() {
+  local cask root
+  root="$(brew --caskroom 2>/dev/null)" || return 0
+  for cask in ${BREW_FAST_UPGRADE_UNQUARANTINE_CASKS:-kotlin-lsp}; do
+    [ -d "$root/$cask" ] || continue
+    if xattr -rl "$root/$cask" 2>/dev/null | grep -q com.apple.quarantine; then
+      xattr -dr com.apple.quarantine "$root/$cask" 2>/dev/null || true
+      echo "[brew-fast-upgrade] cleared Gatekeeper quarantine on cask: $cask"
+    fi
+  done
+}
+
 run_brew_pass() {
   local chrome_outdated=0
   local chrome_running=0
@@ -97,6 +116,7 @@ run_brew_pass() {
     return 1
   fi
   brew upgrade || rc=1
+  unquarantine_casks
 
   # Post-check: if Chrome was running and upgraded, restart it gracefully
   if [ "$chrome_outdated" -eq 1 ] && [ "$chrome_running" -eq 1 ]; then
@@ -204,7 +224,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated run_brew_pass npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
