@@ -69,6 +69,18 @@ jobs:
             number: "6296"
             slug: cfengine-core-6296
             type: discussion
+          - repo: stablyai/orca
+            number: "16226"
+            slug: orca-16226
+          - repo: stablyai/orca
+            number: "21867"
+            slug: orca-21867
+          - repo: stablyai/orca
+            number: "20560"
+            slug: orca-20560
+          - repo: stablyai/orca
+            number: "13733"
+            slug: orca-13733
     steps:
       - uses: actions/checkout@v4
 
