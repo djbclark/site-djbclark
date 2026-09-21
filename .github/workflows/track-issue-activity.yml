@@ -81,6 +81,9 @@ jobs:
           - repo: stablyai/orca
             number: "13733"
             slug: orca-13733
+          - repo: charmbracelet/crush
+            number: "3909"
+            slug: crush-3909
     steps:
       - uses: actions/checkout@v4
 
