@@ -10,11 +10,19 @@ the workspace, or use cow and drive the agent directly.
 Upstream already has this specced, so the sane move is to wait rather than
 fork:
 
-- stablyai/orca#10671 — "Add CLI support to selectively adopt an existing Git
-  worktree" (enhancement, open since 2026-07-26)
+- stablyai/orca#16226 — "Dispatch orchestration workers into an external
+  checkout Orca did not create": the cow-specific request (open since
+  2026-08-24, no PR yet as of 2026-09-20)
+- stablyai/orca#20560 — pluggable external worktree lifecycle provider, a
+  superset of the register half of #16226
 - stablyai/orca#2654 — "Support creating workspaces decoupled from new
   worktrees", which describes an *Open existing* mode that adopts an
   on-disk worktree without creating a second checkout
+
+#10671 (and its PR #13733, `worktree import`) is deliberately NOT watched: it
+only reveals worktrees git already lists under a registered repo, and cannot
+reach a cow pasture, so its closing would be a false positive. Interim
+workaround: `orca repo add --path <pasture>`.
 
 This checks whether either has shipped, and whether a newer Orca release
 exists than the one installed. Exit 10 means something changed and is worth
@@ -33,7 +41,7 @@ import sys
 from typing import Any
 
 REPO = "stablyai/orca"
-ISSUES = (10671, 2654)
+ISSUES = (16226, 20560, 2654)
 
 
 def gh_json(args: list[str]) -> Any:
