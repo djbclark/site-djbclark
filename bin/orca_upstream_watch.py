@@ -15,6 +15,9 @@ fork:
   2026-08-24, no PR yet as of 2026-09-20)
 - stablyai/orca#20560 — pluggable external worktree lifecycle provider, a
   superset of the register half of #16226
+- stablyai/orca#21867 — Claude trust preset, so `worker-start --agent claude`
+  does not fail `agent_readiness` in a new directory (cow-pasture pre-seeds
+  ~/.claude.json meanwhile)
 - stablyai/orca#2654 — "Support creating workspaces decoupled from new
   worktrees", which describes an *Open existing* mode that adopts an
   on-disk worktree without creating a second checkout
@@ -41,7 +44,7 @@ import sys
 from typing import Any
 
 REPO = "stablyai/orca"
-ISSUES = (16226, 20560, 2654)
+ISSUES = (16226, 20560, 2654, 21867)
 
 
 def gh_json(args: list[str]) -> Any:
