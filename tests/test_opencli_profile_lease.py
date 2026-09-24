@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,30 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(lease)
 
 
-class ProfileLeaseTests(unittest.TestCase):
+ALIASES = {
+    "version": 1,
+    "aliases": {"hermes-gemini": "e93u2d9q", "gemini-alt": "e93u2d9q", "opencli-chrome": "hujux4wm"},
+    "defaultContextId": "hujux4wm",
+}
+
+
+class _IsolatedProfilesFile(unittest.TestCase):
+    """Point the alias map at a per-test path so the real ~/.opencli never leaks in."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.profiles_file = Path(tmp.name) / "browser-profiles.json"
+        env = patch.dict(os.environ, {lease.BROWSER_PROFILES_ENV: str(self.profiles_file)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def write_profiles(self, content: object) -> None:
+        text = content if isinstance(content, str) else json.dumps(content)
+        self.profiles_file.write_text(text)
+
+
+class ProfileLeaseTests(_IsolatedProfilesFile):
     def test_same_profile_reports_owner_metadata_when_busy(self) -> None:
         with tempfile.TemporaryDirectory() as state:
             with lease.ProfileLease("brave-bluehost", "topic-bluehost", "bluehost", 1, state_dir=state):
@@ -154,6 +178,87 @@ class ProfileLeaseTests(unittest.TestCase):
                 self.assertEqual(contender.returncode, 16)
                 self.assertIn("lock_busy", contender.stderr)
                 self.assertIn("topic-bluehost", contender.stderr)
+            finally:
+                holder.communicate(timeout=2)
+
+
+class CanonicalProfileTests(_IsolatedProfilesFile):
+    def test_alias_resolves_to_context_id(self) -> None:
+        self.write_profiles(ALIASES)
+        self.assertEqual(lease.canonical_profile("hermes-gemini"), "e93u2d9q")
+        self.assertEqual(lease.canonical_profile("opencli-chrome"), "hujux4wm")
+
+    def test_unknown_name_and_context_id_pass_through(self) -> None:
+        self.write_profiles(ALIASES)
+        self.assertEqual(lease.canonical_profile("e93u2d9q"), "e93u2d9q")
+        self.assertEqual(lease.canonical_profile("brave-bluehost"), "brave-bluehost")
+
+    def test_missing_file_falls_back_to_name(self) -> None:
+        self.assertFalse(self.profiles_file.exists())
+        self.assertEqual(lease.canonical_profile("hermes-gemini"), "hermes-gemini")
+
+    def test_malformed_file_falls_back_to_name(self) -> None:
+        for content in ("{not json", "[]", {"aliases": ["hermes-gemini"]}, {"aliases": {"hermes-gemini": 7}}):
+            with self.subTest(content=content):
+                self.write_profiles(content)
+                self.assertEqual(lease.canonical_profile("hermes-gemini"), "hermes-gemini")
+
+    def test_alias_and_context_id_contend_on_one_lock(self) -> None:
+        self.write_profiles(ALIASES)
+        with tempfile.TemporaryDirectory() as state:
+            with lease.ProfileLease("hermes-gemini", "topic-a", "gemini", 1, state_dir=state):
+                for contender in ("e93u2d9q", "gemini-alt"):
+                    with self.subTest(contender=contender):
+                        with self.assertRaises(lease.LeaseBusy) as ctx:
+                            with lease.ProfileLease(contender, "topic-b", "gemini", 0, state_dir=state):
+                                pass
+                        self.assertEqual(ctx.exception.profile, "e93u2d9q")
+                        self.assertEqual(ctx.exception.owner["owner"], "topic-a")
+                        self.assertEqual(ctx.exception.owner["profile"], "e93u2d9q")
+                        self.assertEqual(ctx.exception.owner["requested_profile"], "hermes-gemini")
+                status = lease.profile_status("gemini-alt", state_dir=state)
+                self.assertTrue(status["busy"])
+                self.assertEqual(status["profile"], "e93u2d9q")
+                self.assertEqual(status["requested_profile"], "gemini-alt")
+            self.assertTrue((Path(state) / "profiles" / "e93u2d9q.lock").exists())
+            self.assertFalse((Path(state) / "profiles" / "hermes-gemini.lock").exists())
+
+    def test_distinct_canonical_profiles_do_not_contend(self) -> None:
+        self.write_profiles(ALIASES)
+        with tempfile.TemporaryDirectory() as state:
+            with lease.ProfileLease("hermes-gemini", "topic-a", "gemini", 0, state_dir=state):
+                with lease.ProfileLease("opencli-chrome", "topic-b", "chrome", 0, state_dir=state):
+                    pass
+
+    def test_cli_run_alias_blocks_context_id_across_processes(self) -> None:
+        self.write_profiles(ALIASES)
+
+        def cmd(profile: str, owner: str, child: str) -> list[str]:
+            return [
+                sys.executable, str(SCRIPT), "run",
+                "--profile", profile, "--owner", owner, "--purpose", "gemini",
+                "--state-dir", state, "--lock-timeout", "0",
+                "--", sys.executable, "-c", child,
+            ]
+
+        with tempfile.TemporaryDirectory() as state:
+            holder = subprocess.Popen(
+                cmd("hermes-gemini", "topic-alias", "import time; time.sleep(0.5)"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                time.sleep(0.1)
+                contender = subprocess.run(
+                    cmd("e93u2d9q", "topic-id", "raise SystemExit(0)"),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(contender.returncode, 16)
+                self.assertIn("lock_busy", contender.stderr)
+                self.assertIn("topic-alias", contender.stderr)
             finally:
                 holder.communicate(timeout=2)
 

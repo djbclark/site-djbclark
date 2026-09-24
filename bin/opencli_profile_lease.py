@@ -7,7 +7,9 @@
 
 The lease is intentionally process-scoped: callers hold an advisory flock while
 using one canonical OpenCLI profile, and the kernel releases it if the caller
-crashes. Metadata is diagnostic only and never includes command arguments,
+crashes. Profile names are resolved through OpenCLI's alias map
+(``~/.opencli/browser-profiles.json``) so every alias of one physical profile,
+and its bare context id, contend on the same lock. Metadata is diagnostic only and never includes command arguments,
 prompts, responses, cookies, or credentials.
 """
 
@@ -28,6 +30,8 @@ DEFAULT_LOCK_TIMEOUT = 10.0
 METADATA_PUBLICATION_GRACE = 0.2
 METADATA_RETRY_INTERVAL = 0.01
 MAX_METADATA_TEXT = 160
+BROWSER_PROFILES_ENV = "OPENCLI_BROWSER_PROFILES_FILE"
+DEFAULT_BROWSER_PROFILES_FILE = "~/.opencli/browser-profiles.json"
 
 
 class LeaseBusy(Exception):
@@ -44,6 +48,32 @@ def _state_dir(explicit: str | None = None) -> Path:
         return Path(explicit).expanduser()
     xdg_state = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
     return Path(xdg_state) / "site-djbclark" / "opencli-profile-leases"
+
+
+def _browser_profiles_file() -> Path:
+    return Path(os.environ.get(BROWSER_PROFILES_ENV) or DEFAULT_BROWSER_PROFILES_FILE).expanduser()
+
+
+def canonical_profile(name: str) -> str:
+    """Resolve an OpenCLI profile alias to its canonical context id.
+
+    Unknown names and bare context ids pass through unchanged. A missing,
+    unreadable, or malformed aliases file fails soft and returns ``name``, so
+    the lease degrades to the old keyed-by-argument behavior rather than
+    failing closed on an OpenCLI config problem.
+    """
+
+    try:
+        data = json.loads(_browser_profiles_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return name
+    aliases = data.get("aliases") if isinstance(data, dict) else None
+    if not isinstance(aliases, dict):
+        return name
+    resolved = aliases.get(name)
+    if isinstance(resolved, str) and resolved.strip():
+        return resolved.strip()
+    return name
 
 
 def _safe_profile(profile: str) -> str:
@@ -97,7 +127,8 @@ class ProfileLease:
         *,
         state_dir: str | None = None,
     ) -> None:
-        self.profile = _safe_metadata_text(profile, "profile")
+        self.requested_profile = _safe_metadata_text(profile, "profile")
+        self.profile = _safe_metadata_text(canonical_profile(self.requested_profile), "profile")
         self.owner = _safe_metadata_text(owner, "owner")
         self.purpose = _safe_metadata_text(purpose, "purpose")
         self.timeout = max(0.0, timeout)
@@ -130,6 +161,7 @@ class ProfileLease:
                 time.sleep(0.05)
         metadata = {
             "profile": self.profile,
+            "requested_profile": self.requested_profile,
             "owner": self.owner,
             "purpose": self.purpose,
             "pid": os.getpid(),
@@ -163,6 +195,8 @@ class ProfileLease:
 
 
 def profile_status(profile: str, *, state_dir: str | None = None) -> dict[str, Any]:
+    requested = _safe_metadata_text(profile, "profile")
+    profile = _safe_metadata_text(canonical_profile(requested), "profile")
     path = _lease_path(profile, state_dir)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     flags = os.O_RDWR | os.O_CREAT
@@ -175,8 +209,9 @@ def profile_status(profile: str, *, state_dir: str | None = None) -> dict[str, A
         except OSError as exc:
             if exc.errno not in (errno.EACCES, errno.EAGAIN):
                 raise
-            return {"profile": profile, "busy": True, "owner": _read_busy_metadata(fd)}
-        return {"profile": profile, "busy": False, "owner": None}
+            owner = _read_busy_metadata(fd)
+            return {"profile": profile, "requested_profile": requested, "busy": True, "owner": owner}
+        return {"profile": profile, "requested_profile": requested, "busy": False, "owner": None}
     finally:
         try:
             fcntl.flock(fd, fcntl.LOCK_UN)

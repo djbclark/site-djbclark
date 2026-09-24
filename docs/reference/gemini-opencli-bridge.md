@@ -104,8 +104,14 @@ mode is hit live, and tighten them if needed.
   active.
 - **No stolen focus**: every call passes `--window background`.
 - **Physical-profile lease**: before touching opencli, the wrapper takes a
-  shared exclusive lease keyed by the explicit OpenCLI Browser Bridge profile
-  under `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/opencli-profile-leases`.
+  shared exclusive lease keyed by the canonical OpenCLI context id, resolved
+  from the `--profile` alias via `~/.opencli/browser-profiles.json` (override
+  with `OPENCLI_BROWSER_PROFILES_FILE`), under
+  `${XDG_STATE_HOME:-~/.local/state}/site-djbclark/opencli-profile-leases`.
+  Two aliases of one physical profile, or an alias and its bare id, contend on
+  one lock; unknown names and a missing/malformed alias file pass the name
+  through unchanged. The alias itself is still what opencli `--profile` and the
+  per-session lock use.
   This is the outer lock and protects against different Hermes topics using the
   same physical Chrome/Brave profile. Contention fails closed with `lock_busy`
   and bounded owner metadata; the kernel releases the flock after a crash.
@@ -199,7 +205,8 @@ python3 -m unittest tests.test_gemini_opencli_bridge -v
 python3 -m unittest tests.test_opencli_profile_lease -v
 ```
 
-Covers: physical-profile lease contention and owner metadata, distinct-profile
+Covers: physical-profile lease contention and owner metadata, alias/context-id
+canonicalization (aliases of one profile contend on one lock), distinct-profile
 concurrency, response-ownership/stale-response rejection, session-lock contention
 and serialization (no interleaving), every typed failure state (login
 required, quota/challenge, daemon unavailable, timeout, UI mismatch/malformed
