@@ -94,6 +94,15 @@ litellm_service_path: >-
 # the credential is called in the vault.
 litellm_clinepass_api_key: "{{ lookup('env', 'CLINE_API_KEY') | default('', true) }}"
 
+# Gemini API free tier, the LAST fallback (2026-09-25; see the fallbacks block
+# in templates/litellm-config.yaml.j2). The API itself is sanctioned for
+# general use (unlike the Gemini *subscription*); the free tier is rate-capped,
+# so it fails loudly rather than billing when exhausted.
+litellm_gemini_api_key: "{{ lookup('env', 'GEMINI_API_KEY') | default('', true) }}"
+litellm_gemini_fallback_models:
+  - { name: gemini-free, model: gemini/gemini-3.7-flash }
+  - { name: gemini-free-lite, model: gemini/gemini-flash-lite-latest }
+
 # Generation ceiling and the timeout that actually enforces it. See the
 # rationale block in templates/litellm-config.yaml.j2 — these three are one
 # decision, not three independent knobs.

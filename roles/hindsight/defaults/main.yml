@@ -21,15 +21,22 @@ hindsight_service_path: "{{ hindsight_home }}/.local/bin:/opt/homebrew/bin:/usr/
 
 # LLM backend. Hindsight talks to the site-local LiteLLM proxy (roles/litellm)
 # rather than a hosted API, so no provider key is embedded here or in the
-# rendered plist. The proxy serves exactly one model, clinepass-deepseek, and
-# holds the only real credential in its own mode-0600 unit.
+# rendered plist. The proxy holds the real credentials in its own mode-0600
+# unit.
+#
+# 2026-09-25: moved off clinepass-deepseek. ClinePass began answering "model
+# not found" for deepseek-v4-flash around 2026-09-21, and every retain and
+# reflect failed for four days (about 260 ops backlogged). minimax-m3 was the
+# 2026-08-22 bake-off pick (matched deepseek-v4-pro at 2-5x the speed). The
+# proxy now falls back to kimi-k3, deepseek, and then the Gemini free tier, and
+# the Hermes cron "LLM Backend Health" alerts on any fallback or retain failure.
 #
 # Provider is "openai" (not "clinepass"/"litellm"): Hindsight's factory routes
 # openai to OpenAICompatibleLLM, which is what an OpenAI-compatible proxy needs.
 # See create_llm_provider() in hindsight_api/engine/llm_wrapper.py.
 hindsight_llm_provider: "openai"
 hindsight_llm_base_url: "http://127.0.0.1:4000/v1"
-hindsight_llm_model: "clinepass-deepseek"
+hindsight_llm_model: "clinepass-minimax-m3"
 
 # Not a secret. Hindsight's requires_api_key() rejects an empty key for the
 # openai provider, and the proxy sets no general_settings.master_key, so it

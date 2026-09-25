@@ -17,7 +17,7 @@ goose_provider_id: litellm-local
 # `smart-router` Auto Router v2 alias was removed on 2026-08-21 when the proxy
 # was narrowed to ClinePass only; pointing at it would render a config naming a
 # model the proxy no longer exposes.
-goose_model: clinepass-deepseek
+goose_model: clinepass-minimax-m3  # 2026-09-25: deepseek-v4-flash gone from ClinePass
 goose_litellm_base_url: http://127.0.0.1:4000/v1
 
 goose_managed_marker: "# site-djbclark managed (roles/goose)"

@@ -23,6 +23,21 @@
 # reaches the same ClinePass subscription through the same key, so there is
 # still nothing to silently substitute.
 #
+# AMENDED 2026-09-25 (operator decision): fallbacks ARE now configured, because
+# a single model with no fallback failed silently in a different way. From
+# ~2026-09-21 ClinePass answered "model not found" for deepseek-v4-flash, and
+# every Hindsight retain and reflect failed for four days with nobody noticing.
+# The 08-21 hazard was fallbacks that were SILENT and that spent PREPAID money.
+# This chain addresses both:
+#   1. ClinePass models first (same subscription, same terms, no extra cost),
+#      then the Gemini API FREE tier (sanctioned API, rate-capped, so it errors
+#      rather than bills when exhausted). No pay-per-token backend is reachable.
+#   2. Every fallback that actually serves a request is alerted. The Hermes
+#      cron "LLM Backend Health" (~/.hermes/scripts/check-llm-backend-health.sh)
+#      greps this proxy's log for LiteLLM's fallback lines and probes each route.
+# Missing keys still cannot cause substitution: a route with an unset key just
+# errors, and the chain only moves on to the next route after an error.
+#
 # ClinePass is also the only monthly subscription whose terms permit this use.
 # Verified 2026-08-21 against docs.cline.bot: "You can use ClinePass models from
 # your own scripts, apps, or automation through the Cline API." Anthropic banned
@@ -91,6 +106,17 @@ model_list:
       api_key: os.environ/CLINEPASS_API_KEY
       max_tokens: {{ litellm_max_tokens }}
 
+  # Last-resort fallbacks: Gemini API free tier (2026-09-25). Probed that day:
+  # gemini-2.5-flash is retired for new users and several newer flash ids 503
+  # under load; 3.7-flash and flash-lite-latest answered. Not for direct use:
+  # the free tier's RPM/RPD caps cannot carry Hindsight's normal load.
+{% for g in litellm_gemini_fallback_models %}
+  - model_name: {{ g.name }}
+    litellm_params:
+      model: {{ g.model }}
+      api_key: os.environ/GEMINI_API_KEY
+{% endfor %}
+
 litellm_settings:
   cache: true
   cache_params:
@@ -111,7 +137,13 @@ router_settings:
   # call.
   num_retries: {{ litellm_num_retries }}
   timeout: {{ litellm_request_timeout }}
-  # No `fallbacks:` key, deliberately — see the header comment.
+  # See the 2026-09-25 amendment in the header. Order matters: stay on the
+  # ClinePass subscription as long as any of its models answers.
+{% set gemini = litellm_gemini_fallback_models | map(attribute='name') | list %}
+  fallbacks:
+    - clinepass-minimax-m3: {{ (['clinepass-kimi-k3', 'clinepass-deepseek'] + gemini) | to_json }}
+    - clinepass-kimi-k3: {{ (['clinepass-minimax-m3', 'clinepass-deepseek'] + gemini) | to_json }}
+    - clinepass-deepseek: {{ (['clinepass-minimax-m3', 'clinepass-kimi-k3'] + gemini) | to_json }}
 
 # No master_key while the proxy is loopback-only. Never widen litellm_bind
 # (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).
