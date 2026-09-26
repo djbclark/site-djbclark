@@ -24,7 +24,8 @@ hindsight_service_path: "{{ hindsight_home }}/.local/bin:/opt/homebrew/bin:/usr/
 # rendered plist. The proxy holds the real credentials in its own mode-0600
 # unit.
 #
-# 2026-09-25: moved off clinepass-deepseek. ClinePass began answering "model
+# 2026-09-25 (SUPERSEDED next day — see the 2026-09-26 block below; kept for
+# the chronology): moved off clinepass-deepseek. ClinePass began answering "model
 # not found" for deepseek-v4-flash around 2026-09-21, and every retain and
 # reflect failed for four days (about 260 ops backlogged). minimax-m3 was the
 # 2026-08-22 bake-off pick (matched deepseek-v4-pro at 2-5x the speed). The
@@ -36,7 +37,22 @@ hindsight_service_path: "{{ hindsight_home }}/.local/bin:/opt/homebrew/bin:/usr/
 # See create_llm_provider() in hindsight_api/engine/llm_wrapper.py.
 hindsight_llm_provider: "openai"
 hindsight_llm_base_url: "http://127.0.0.1:4000/v1"
-hindsight_llm_model: "clinepass-minimax-m3"
+# 2026-09-26: moved off ClinePass entirely. `aiuse` that morning read the
+# ClinePass weekly window at 100% used (resets 09-29T12:56Z) and the MONTHLY at
+# 99% (resets 10-16T07:42Z), so the weekly reset returns ~1% of a month and is
+# immediately gone again. Hindsight's fact extraction across 32 banks is what
+# spent it — a bare `curl` to api.cline.bot returns the same INFERENCE_CAP_ERROR
+# with LiteLLM out of the path, so this was never a proxy bug.
+#
+# grok-sub (SuperGrok via the xAI OAuth bridge) was already proven here as the
+# reflect model and as the fallback that carried retain through the outage. The
+# proxy falls back grok-sub -> Gemini free tier -> ClinePass, so this degrades
+# in speed, not availability. Revert after 2026-10-16 only if `aiuse` shows the
+# ClinePass MONTHLY window actually recovered.
+#
+# Standing rule this restores: site-private memory reference_ai_service_matrix
+# says ClinePass feeds Hindsight+hermes but "never bulk-route there".
+hindsight_llm_model: "grok-sub"
 
 # Not a secret. Hindsight's requires_api_key() rejects an empty key for the
 # openai provider, and the proxy sets no general_settings.master_key, so it
