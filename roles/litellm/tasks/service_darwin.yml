@@ -1,6 +1,38 @@
 ---
 # Darwin: user LaunchAgent com.<site_ns>.litellm (gui/<uid> domain).
 
+# The xAI OAuth bridge first, so LiteLLM's grok-sub route has a listener.
+# It holds no secret (tokens come from Hermes's auth store per request).
+- name: Render xAI OAuth bridge LaunchAgent
+  ansible.builtin.template:
+    src: xai-oauth-bridge.plist.j2
+    dest: "{{ litellm_xai_bridge_plist_path }}"
+    mode: "0644"
+  register: _xai_bridge_plist
+  when: litellm_xai_bridge_enabled | bool
+
+- name: Load or reload the xAI OAuth bridge
+  ansible.builtin.shell: |
+    set -eu
+    uid={{ litellm_uid }}; label={{ litellm_xai_bridge_label }}
+    if launchctl print "gui/$uid/$label" >/dev/null 2>&1; then
+      {% if _xai_bridge_plist.changed | default(false) %}
+      launchctl bootout "gui/$uid/$label"; sleep 1
+      launchctl bootstrap "gui/$uid" "{{ litellm_xai_bridge_plist_path }}"
+      echo changed
+      {% else %}
+      echo unchanged
+      {% endif %}
+    else
+      launchctl bootstrap "gui/$uid" "{{ litellm_xai_bridge_plist_path }}"
+      echo changed
+    fi
+  register: _xai_bridge_load
+  changed_when: "'changed' in _xai_bridge_load.stdout"
+  when:
+    - litellm_xai_bridge_enabled | bool
+    - not ansible_check_mode
+
 - name: Render secret-bearing LiteLLM LaunchAgent
   ansible.builtin.template:
     src: litellm.plist.j2

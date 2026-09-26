@@ -103,6 +103,22 @@ litellm_gemini_fallback_models:
   - { name: gemini-free, model: gemini/gemini-3.7-flash }
   - { name: gemini-free-lite, model: gemini/gemini-flash-lite-latest }
 
+# SuperGrok subscription via xAI OAuth (2026-09-26, operator decision): a
+# fallback after the ClinePass models and before the Gemini free tier. LiteLLM
+# cannot hold a rotating OAuth grant, so a loopback bridge
+# (bin/xai_oauth_bridge.py, run under the Hermes venv) injects a fresh token
+# per request using Hermes's own resolver and lock, sharing the one grant in
+# ~/.hermes/auth.json with Hermes. No API key is rendered anywhere. Darwin
+# only: Hermes, and therefore the grant, lives on the Mac.
+litellm_xai_bridge_enabled: "{{ ansible_facts.get('os_family') == 'Darwin' }}"
+litellm_xai_bridge_label: "com.{{ site_ns }}.xai-oauth-bridge"
+litellm_xai_bridge_port: 14011
+litellm_xai_bridge_python: "{{ litellm_home }}/.hermes/hermes-agent/venv/bin/python"
+litellm_xai_bridge_script: "{{ playbook_dir | dirname }}/bin/xai_oauth_bridge.py"
+litellm_xai_bridge_plist_path: "{{ litellm_home }}/Library/LaunchAgents/{{ litellm_xai_bridge_label }}.plist"
+# Fast non-reasoning model: Hindsight's fallback load is fact extraction.
+litellm_xai_fallback_model: grok-4.20-0309-non-reasoning
+
 # Generation ceiling and the timeout that actually enforces it. See the
 # rationale block in templates/litellm-config.yaml.j2 — these three are one
 # decision, not three independent knobs.

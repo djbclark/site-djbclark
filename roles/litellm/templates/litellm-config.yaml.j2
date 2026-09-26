@@ -38,6 +38,14 @@
 # Missing keys still cannot cause substitution: a route with an unset key just
 # errors, and the chain only moves on to the next route after an error.
 #
+# AMENDED 2026-09-26 (operator decision): `grok-sub` — the SuperGrok
+# subscription via xAI OAuth, the same grant Hermes already runs on — sits
+# after the ClinePass models and before Gemini. It is reached through a
+# loopback bridge (bin/xai_oauth_bridge.py) because the OAuth grant rotates and
+# LiteLLM can only hold a static key. OPEN QUESTION, unverified: xAI's
+# responses carry `cost_in_usd_ticks` even on OAuth calls; whether that draws
+# on the subscription pool or on an API credit balance has not been confirmed.
+#
 # ClinePass is also the only monthly subscription whose terms permit this use.
 # Verified 2026-08-21 against docs.cline.bot: "You can use ClinePass models from
 # your own scripts, apps, or automation through the Cline API." Anthropic banned
@@ -110,6 +118,18 @@ model_list:
   # gemini-2.5-flash is retired for new users and several newer flash ids 503
   # under load; 3.7-flash and flash-lite-latest answered. Not for direct use:
   # the free tier's RPM/RPD caps cannot carry Hindsight's normal load.
+{% if litellm_xai_bridge_enabled | bool %}
+  # SuperGrok subscription through the loopback xAI OAuth bridge (2026-09-26).
+  # The api_key is a placeholder: the bridge replaces the Authorization header
+  # with a fresh OAuth token from Hermes's grant on every request.
+  - model_name: grok-sub
+    litellm_params:
+      model: openai/{{ litellm_xai_fallback_model }}
+      api_base: http://127.0.0.1:{{ litellm_xai_bridge_port }}/v1
+      api_key: bridge-injects-oauth-token
+      max_tokens: {{ litellm_max_tokens }}
+
+{% endif %}
 {% for g in litellm_gemini_fallback_models %}
   - model_name: {{ g.name }}
     litellm_params:
@@ -139,7 +159,7 @@ router_settings:
   timeout: {{ litellm_request_timeout }}
   # See the 2026-09-25 amendment in the header. Order matters: stay on the
   # ClinePass subscription as long as any of its models answers.
-{% set gemini = litellm_gemini_fallback_models | map(attribute='name') | list %}
+{% set gemini = (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + (litellm_gemini_fallback_models | map(attribute='name') | list) %}
   fallbacks:
     - clinepass-minimax-m3: {{ (['clinepass-kimi-k3', 'clinepass-deepseek'] + gemini) | to_json }}
     - clinepass-kimi-k3: {{ (['clinepass-minimax-m3', 'clinepass-deepseek'] + gemini) | to_json }}

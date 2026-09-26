@@ -74,6 +74,8 @@ hosts:
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy,    status: active,
          caddy_path: "/litellm/*",
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1). Runs from the git checkout ~/src/litellm (fork of BerriAI/litellm) installed by hand as a uv tool -- roles/litellm verifies that install but never performs it."}
+      - {port: 14011, bind: "127.0.0.1", owner: site, service: xai-oauth-bridge, status: active,
+         note: "2026-09-26: com.djbclark.xai-oauth-bridge launchd (roles/litellm). bin/xai_oauth_bridge.py under the Hermes venv; injects a fresh SuperGrok OAuth token from Hermes's grant per request so LiteLLM's grok-sub fallback can reach api.x.ai. No auth -- loopback only."}
       - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: planned,
          note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only"}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
