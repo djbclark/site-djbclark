@@ -94,6 +94,7 @@ model_list:
       model: clinepass/deepseek-v4-flash
       api_key: os.environ/CLINEPASS_API_KEY
       max_tokens: {{ litellm_max_tokens }}
+      rpm: {{ litellm_clinepass_rpm }}
 
   # Added 2026-08-22 for Hermes's non-streaming callers (MoA slots, auxiliary
   # tasks), which cannot talk to ClinePass directly — the data envelope kills
@@ -107,12 +108,14 @@ model_list:
       model: clinepass/minimax-m3
       api_key: os.environ/CLINEPASS_API_KEY
       max_tokens: {{ litellm_max_tokens }}
+      rpm: {{ litellm_clinepass_rpm }}
 
   - model_name: clinepass-kimi-k3
     litellm_params:
       model: clinepass/kimi-k3
       api_key: os.environ/CLINEPASS_API_KEY
       max_tokens: {{ litellm_max_tokens }}
+      rpm: {{ litellm_clinepass_rpm }}
 
   # Last-resort fallbacks: Gemini API free tier (2026-09-25). Probed that day:
   # gemini-2.5-flash is retired for new users and several newer flash ids 503
@@ -157,18 +160,38 @@ router_settings:
   # call.
   num_retries: {{ litellm_num_retries }}
   timeout: {{ litellm_request_timeout }}
-  # See the 2026-09-25 amendment in the header. Order matters: stay on the
-  # ClinePass subscription as long as any of its models answers.
-{% set gemini = (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + (litellm_gemini_fallback_models | map(attribute='name') | list) %}
+  # Both are load-bearing; see the block on litellm_allowed_fails in
+  # defaults/main.yml. allowed_fails MUST stay non-default (!= 3) or LiteLLM
+  # reverts to never cooling down these single-deployment groups.
+  allowed_fails: {{ litellm_allowed_fails }}
+  cooldown_time: {{ litellm_cooldown_time }}
+  # REORDERED 2026-09-26 (second change that day). The 2026-09-25 rule was
+  # "stay on the ClinePass subscription as long as any of its models answers".
+  # That rule assumed ClinePass had budget. It does not: `aiuse` that morning
+  # read weekly 100% used AND monthly 99% used (resets 10-16T07:42Z), so all
+  # three ClinePass models are one exhausted bucket, not three chances. Trying
+  # the other two after the first 429s spends nothing but latency and log.
+  #
+  # So: leave the subscription on the first failure, and put ClinePass LAST in
+  # grok-sub's chain rather than first. Hindsight's bulk retain load moved to
+  # grok-sub with it (roles/hindsight/defaults/main.yml) — that load is what
+  # spent the ClinePass month.
+  #
+  # TO REVERT AFTER 2026-10-16: put the sibling ClinePass models back at the
+  # front of each clinepass-* chain and move ClinePass back ahead of Gemini in
+  # grok-sub's, and repoint hindsight_llm_model. Check `aiuse` first — the
+  # monthly reset is the one that matters, not the weekly.
+{% set after_clinepass = (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + (litellm_gemini_fallback_models | map(attribute='name') | list) %}
   fallbacks:
-    - clinepass-minimax-m3: {{ (['clinepass-kimi-k3', 'clinepass-deepseek'] + gemini) | to_json }}
-    - clinepass-kimi-k3: {{ (['clinepass-minimax-m3', 'clinepass-deepseek'] + gemini) | to_json }}
-    - clinepass-deepseek: {{ (['clinepass-minimax-m3', 'clinepass-kimi-k3'] + gemini) | to_json }}
+    - clinepass-minimax-m3: {{ (after_clinepass + ['clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
+    - clinepass-kimi-k3: {{ (after_clinepass + ['clinepass-minimax-m3', 'clinepass-deepseek']) | to_json }}
+    - clinepass-deepseek: {{ (after_clinepass + ['clinepass-minimax-m3', 'clinepass-kimi-k3']) | to_json }}
 {% if litellm_xai_bridge_enabled | bool %}
-    # Hindsight reflect runs on grok-sub first (2026-09-26: minimax-m3 took
-    # 70-120s per reflect and the plugin gives up at ~40s). If SuperGrok errors
-    # or rate-limits, fall back to the ClinePass models, then Gemini free tier.
-    - grok-sub: {{ (['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek'] + (litellm_gemini_fallback_models | map(attribute='name') | list)) | to_json }}
+    # grok-sub is now Hindsight's PRIMARY for both retain and reflect, so its
+    # own chain matters more than it used to. Gemini free tier first (it is at
+    # least alive), ClinePass last so a SuperGrok blip does not spend the 1% of
+    # the ClinePass month that the 09-29 weekly reset will hand back.
+    - grok-sub: {{ ((litellm_gemini_fallback_models | map(attribute='name') | list) + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
 {% endif %}
 
 # No master_key while the proxy is loopback-only. Never widen litellm_bind

@@ -5,15 +5,22 @@
 <dict>
     <key>Label</key>
     <string>{{ litellm_label }}</string>
+    {#- Output goes through bin/litellm_logpipe.py, which filters noise and
+        rotates (launchd never rotates StandardOutPath, and stderr.log reached
+        1.9 GB by 2026-09-26). Positional args keep paths out of the quoting. #}
     <key>ProgramArguments</key>
     <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>"$0" --config "$1" --host "$2" --port "$3" 2&gt;&amp;1 | /usr/bin/python3 "$4" --out "$5" --max-bytes "$6" --backups "$7"</string>
         <string>{{ litellm_bin }}</string>
-        <string>--config</string>
         <string>{{ litellm_config_path }}</string>
-        <string>--host</string>
         <string>{{ litellm_bind }}</string>
-        <string>--port</string>
         <string>{{ litellm_port }}</string>
+        <string>{{ litellm_logpipe_script }}</string>
+        <string>{{ litellm_logs_dir }}/litellm.log</string>
+        <string>{{ litellm_log_max_bytes }}</string>
+        <string>{{ litellm_log_backups }}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -23,16 +30,19 @@
     <string>Background</string>
     <key>Umask</key>
     <integer>63</integer>
+    {#- Only the shell/pipe itself can write here (e.g. python3 missing). #}
     <key>StandardOutPath</key>
-    <string>{{ litellm_logs_dir }}/stdout.log</string>
+    <string>{{ litellm_logs_dir }}/launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>{{ litellm_logs_dir }}/stderr.log</string>
+    <string>{{ litellm_logs_dir }}/launchd.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
         <string>{{ litellm_home }}</string>
         <key>PATH</key>
         <string>{{ litellm_service_path }}</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
         <key>LITELLM_LOG</key>
         <string>INFO</string>
         <key>SERVER_ROOT_PATH</key>

@@ -115,6 +115,16 @@ litellm_xai_bridge_label: "com.{{ site_ns }}.xai-oauth-bridge"
 litellm_xai_bridge_port: 14011
 litellm_xai_bridge_python: "{{ litellm_home }}/.hermes/hermes-agent/venv/bin/python"
 litellm_xai_bridge_script: "{{ playbook_dir | dirname }}/bin/xai_oauth_bridge.py"
+# Log budget (2026-09-26, operator: <= 100 MB for the whole logs dir, rotated
+# files included). Proxy 20 MB x (1 + 3) = 80 MB, bridge 5 MB x (1 + 1) =
+# 10 MB, launchd.log files stay tiny (shell errors only). Filtering and
+# rotation: bin/litellm_logpipe.py. The Hermes cron "LLM Backend Health" warns
+# if the directory ever exceeds 100 MB.
+litellm_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"
+litellm_log_max_bytes: 20000000
+litellm_log_backups: 3
+litellm_xai_bridge_log_max_bytes: 5000000
+litellm_xai_bridge_log_backups: 1
 litellm_xai_bridge_plist_path: "{{ litellm_home }}/Library/LaunchAgents/{{ litellm_xai_bridge_label }}.plist"
 # Fast non-reasoning model: Hindsight's fallback load is fact extraction.
 litellm_xai_fallback_model: grok-4.20-0309-non-reasoning
@@ -125,3 +135,35 @@ litellm_xai_fallback_model: grok-4.20-0309-non-reasoning
 litellm_max_tokens: 16000
 litellm_request_timeout: 600
 litellm_num_retries: 1
+
+# ClinePass self-throttle (2026-09-26). ClinePass has no usage API, so the only
+# way to not spend the subscription is to not send the requests. `aiuse` on
+# 2026-09-26 read weekly 100% used (resets 09-29T12:56Z) and MONTHLY 99% used
+# (resets 10-16T07:42Z) — i.e. the 09-29 weekly reset buys ~1% of a month and
+# is gone again immediately. Hindsight's fact-extraction load is what spent it;
+# see the fallbacks block in templates/litellm-config.yaml.j2 for where that
+# load went instead.
+#
+# This is a runaway ceiling, not a budget: it bounds a retry storm (the failure
+# mode that actually happened), it cannot enforce a weekly allowance. The real
+# protection is that ClinePass is no longer anyone's primary.
+litellm_clinepass_rpm: 10
+
+# Cooldowns. LiteLLM will NOT cool down a model_group that has exactly one
+# deployment on a 429 — see _should_cooldown_deployment() in
+# litellm/router_utils/cooldown_handlers.py: the `exception_status_int == 429`
+# branch is guarded by `and not is_single_deployment_model_group`, and the
+# single-deployment escape hatch needs SINGLE_DEPLOYMENT_TRAFFIC_FAILURE_THRESHOLD
+# (default 1000) requests IN ONE MINUTE before it fires. Every model_group here
+# has one deployment and we never see 1000 rpm, so cooldowns never engaged:
+# during the multi-day ClinePass cap every single request re-probed all three
+# ClinePass models, num_retries+1 times each, before falling through. The logs
+# show `Cooldown Deployments=[]` beside tens of thousands of 429s.
+#
+# Setting allowed_fails to a NON-DEFAULT value (litellm.allowed_fails is 3)
+# routes the decision through should_cooldown_based_on_allowed_fails_policy(),
+# which has no single-deployment special case. Changing this back to 3 silently
+# restores the old never-cooldown behaviour — it is the non-defaultness that
+# switches branches, so do not "tidy" it.
+litellm_allowed_fails: 2
+litellm_cooldown_time: 300
