@@ -1,0 +1,8 @@
+---
+# Shared basic-memory MCP server (streamable HTTP, loopback). Default limit is
+# the live mac host only.
+- name: Configure shared basic-memory MCP server
+  hosts: site_basic_memory_mcp
+  gather_facts: true
+  roles:
+    - role: basic_memory_mcp

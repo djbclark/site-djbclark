@@ -160,6 +160,25 @@ hindsight-status:
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:8888/health || echo "HTTP 8888 not responding"
 
+# Shared basic-memory MCP server over streamable HTTP (roles/basic_memory_mcp):
+# one process per machine instead of one stdio copy per agent session.
+basic_memory_mcp_hosts := env_var_or_default("BASIC_MEMORY_MCP_HOSTS", "mac")
+
+basic-memory-mcp-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/basic_memory_mcp.yml --limit "{{ basic_memory_mcp_hosts }}" {{ args }}
+
+basic-memory-mcp-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/basic_memory_mcp.yml --limit "{{ basic_memory_mcp_hosts }}" {{ args }}
+
+basic-memory-mcp-status:
+    @if launchctl print "gui/$(id -u)/com.djbclark.basic-memory-mcp" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.basic-memory-mcp)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.basic-memory-mcp)"; \
+    fi
+    @code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:18796/mcp); \
+      if [ "$code" = "400" ] || [ "$code" = "200" ]; then echo "HTTP 18796: up ($code)"; else echo "HTTP 18796: not responding ($code)"; fi
+
 # Install/configure Open WebUI.
 # Default limit mac (live).
 open_webui_hosts := env_var_or_default("OPEN_WEBUI_HOSTS", "mac")

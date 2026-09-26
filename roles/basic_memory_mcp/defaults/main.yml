@@ -1,0 +1,43 @@
+---
+# roles/basic_memory_mcp — ONE shared basic-memory MCP server per machine, over
+# streamable HTTP on loopback, instead of one stdio copy per agent session.
+#
+# Why (measured 2026-09-26): 14 concurrent Claude Code sessions each spawned
+# their own `basic-memory mcp` (stdio). RSS said ~14 MB each; phys footprint
+# (top MEM, which counts compressed/swapped pages) said ~198 MB each — 2.6 GB
+# of a 16 GB laptop that was 11 GB into swap, for a server that had zero tool
+# calls in 233 transcripts over 14 days. basic-memory 0.23.x serves
+# `--transport streamable-http` natively, so the fix is the same pattern the
+# HTTP-URL servers (beeper, hindsight-shared, bezalel) already use: clients
+# point at a URL; each extra session costs nothing.
+#
+# Safe to share: basic-memory's state is its project database (default project
+# "main", ~/.basic-memory/config.json), shared by design; the MCP tools take a
+# `project` argument and hold no per-client state.
+#
+# Rollback: put the stdio entry back in ~/.claude.json mcpServers —
+#   "basic-memory": {"type":"stdio","command":"~/.local/bin/basic-memory","args":["mcp"],"env":{}}
+# and `launchctl bootout gui/$UID/com.<site_ns>.basic-memory-mcp`.
+basic_memory_mcp_home: >-
+  {{
+    (ansible_facts.get('env') or {}).get('HOME')
+    | default(lookup('env', 'HOME'), true)
+  }}
+basic_memory_mcp_bind: "127.0.0.1"
+# 18796: next free port in the 1879x block the *-mcp-bridge proxies use
+# (registry/ports.yml). Clients reach {{ basic_memory_mcp_url }}.
+basic_memory_mcp_port: 18796
+basic_memory_mcp_path: "/mcp"
+basic_memory_mcp_bin: "{{ basic_memory_mcp_home }}/.local/bin/basic-memory"
+basic_memory_mcp_logs_dir: "{{ basic_memory_mcp_home }}/Library/Logs/basic-memory-mcp"
+# Same supervisor as roles/hindsight and roles/litellm: forwards SIGTERM,
+# filters repeats, size-caps the log. basic-memory also keeps its own log
+# under ~/.basic-memory/, so this one only needs to hold startup/crash output.
+basic_memory_mcp_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"
+basic_memory_mcp_log_max_bytes: 5000000
+basic_memory_mcp_log_backups: 2
+basic_memory_mcp_plist_dir: "{{ basic_memory_mcp_home }}/Library/LaunchAgents"
+basic_memory_mcp_label: "com.{{ site_ns }}.basic-memory-mcp"
+basic_memory_mcp_plist_path: "{{ basic_memory_mcp_plist_dir }}/{{ basic_memory_mcp_label }}.plist"
+basic_memory_mcp_url: "http://{{ basic_memory_mcp_bind }}:{{ basic_memory_mcp_port }}{{ basic_memory_mcp_path }}"
+basic_memory_mcp_service_path: "{{ basic_memory_mcp_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

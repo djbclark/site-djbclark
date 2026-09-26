@@ -1,0 +1,79 @@
+---
+- name: Assert basic-memory MCP is loopback-only and Darwin is supported
+  ansible.builtin.assert:
+    that:
+      - basic_memory_mcp_bind == '127.0.0.1'
+      - ansible_facts.os_family == 'Darwin'
+    fail_msg: The shared basic-memory MCP server stays loopback-only and currently supports the managed macOS host only.
+
+- name: Locate the basic-memory binary
+  ansible.builtin.stat:
+    path: "{{ basic_memory_mcp_bin }}"
+  register: _basic_memory_bin
+
+- name: Require basic-memory
+  ansible.builtin.fail:
+    msg: "basic-memory not found at {{ basic_memory_mcp_bin }} (uv tool install basic-memory)."
+  when: not _basic_memory_bin.stat.exists
+
+- name: Ensure basic-memory MCP directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  # LaunchAgents is shared with every other role; keep the macOS default 0755
+  # (see the note in roles/hindsight/tasks/main.yml).
+  loop:
+    - {path: "{{ basic_memory_mcp_logs_dir }}", mode: "0700"}
+    - {path: "{{ basic_memory_mcp_plist_dir }}", mode: "0755"}
+
+- name: Render basic-memory MCP LaunchAgent
+  ansible.builtin.template:
+    src: basic-memory-mcp.plist.j2
+    dest: "{{ basic_memory_mcp_plist_path }}"
+    mode: "0600"
+  register: _basic_memory_plist
+
+- name: Probe basic-memory MCP LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ basic_memory_mcp_label }}"]
+  register: _basic_memory_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out changed basic-memory MCP LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ basic_memory_mcp_label }}"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _basic_memory_plist.changed
+    - _basic_memory_loaded.rc == 0
+
+# Same teardown race as roles/hindsight: bootstrap right after bootout can fail
+# with rc=5 until launchd finishes tearing the job down. Retry, don't sleep.
+- name: Bootstrap basic-memory MCP LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ basic_memory_mcp_plist_path }}"]
+  register: _basic_memory_bootstrap
+  changed_when: _basic_memory_bootstrap.rc == 0
+  failed_when: _basic_memory_bootstrap.rc != 0
+  until: _basic_memory_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - _basic_memory_loaded.rc != 0 or _basic_memory_plist.changed
+
+# A bare GET on the streamable-HTTP endpoint is answered with HTTP 400 (no MCP
+# session) — that is the liveness signal. Connection refused is the failure.
+- name: Wait for basic-memory MCP to answer
+  ansible.builtin.uri:
+    url: "{{ basic_memory_mcp_url }}"
+    status_code: [200, 400, 405, 406]
+  register: _basic_memory_health
+  until: _basic_memory_health.status in [200, 400, 405, 406]
+  retries: 20
+  delay: 3
+  when: not ansible_check_mode

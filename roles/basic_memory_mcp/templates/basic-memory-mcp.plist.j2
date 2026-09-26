@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ basic_memory_mcp_label }}</string>
+  {#- bin/litellm_logpipe.py supervises the server (forwards launchd's SIGTERM,
+      filters repeats, size-caps the log). One shared server per machine; every
+      agent session reaches it at {{ basic_memory_mcp_url }}. #}
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>{{ basic_memory_mcp_logpipe_script }}</string>
+    <string>--out</string><string>{{ basic_memory_mcp_logs_dir }}/basic-memory-mcp.log</string>
+    <string>--max-bytes</string><string>{{ basic_memory_mcp_log_max_bytes | string }}</string>
+    <string>--backups</string><string>{{ basic_memory_mcp_log_backups | string }}</string>
+    <string>--</string>
+    <string>{{ basic_memory_mcp_bin }}</string>
+    <string>mcp</string>
+    <string>--transport</string><string>streamable-http</string>
+    <string>--host</string><string>{{ basic_memory_mcp_bind }}</string>
+    <string>--port</string><string>{{ basic_memory_mcp_port | string }}</string>
+    <string>--path</string><string>{{ basic_memory_mcp_path }}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>WorkingDirectory</key><string>{{ basic_memory_mcp_home }}</string>
+  <key>StandardOutPath</key><string>{{ basic_memory_mcp_logs_dir }}/launchd.log</string>
+  <key>StandardErrorPath</key><string>{{ basic_memory_mcp_logs_dir }}/launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{ basic_memory_mcp_home }}</string>
+    <key>PATH</key><string>{{ basic_memory_mcp_service_path }}</string>
+  </dict>
+</dict>
+</plist>
