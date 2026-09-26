@@ -5,22 +5,28 @@
 <dict>
     <key>Label</key>
     <string>{{ litellm_label }}</string>
-    {#- Output goes through bin/litellm_logpipe.py, which filters noise and
-        rotates (launchd never rotates StandardOutPath, and stderr.log reached
-        1.9 GB by 2026-09-26). Positional args keep paths out of the quoting. #}
+    {#- The log filter is the PARENT: it starts litellm, reads its merged output,
+        forwards launchd's SIGTERM (SIGKILL after 20 s) and rotates the log. A
+        `sh -c 'litellm | logpipe'` wrapper orphaned a wedged proxy on :4000
+        when launchd signalled only the shell (2026-09-26). #}
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>"$0" --config "$1" --host "$2" --port "$3" 2&gt;&amp;1 | /usr/bin/python3 "$4" --out "$5" --max-bytes "$6" --backups "$7"</string>
-        <string>{{ litellm_bin }}</string>
-        <string>{{ litellm_config_path }}</string>
-        <string>{{ litellm_bind }}</string>
-        <string>{{ litellm_port }}</string>
+        <string>/usr/bin/python3</string>
         <string>{{ litellm_logpipe_script }}</string>
+        <string>--out</string>
         <string>{{ litellm_logs_dir }}/litellm.log</string>
+        <string>--max-bytes</string>
         <string>{{ litellm_log_max_bytes }}</string>
+        <string>--backups</string>
         <string>{{ litellm_log_backups }}</string>
+        <string>--</string>
+        <string>{{ litellm_bin }}</string>
+        <string>--config</string>
+        <string>{{ litellm_config_path }}</string>
+        <string>--host</string>
+        <string>{{ litellm_bind }}</string>
+        <string>--port</string>
+        <string>{{ litellm_port }}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

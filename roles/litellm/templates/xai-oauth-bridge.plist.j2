@@ -5,19 +5,24 @@
 <dict>
     <key>Label</key>
     <string>{{ litellm_xai_bridge_label }}</string>
-    {#- Same filter/rotation as the proxy (see litellm.plist.j2), smaller cap. #}
+    {#- Same supervising log filter as litellm.plist.j2, smaller cap. #}
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>"$0" "$1" --host 127.0.0.1 --port "$2" 2&gt;&amp;1 | /usr/bin/python3 "$3" --out "$4" --max-bytes "$5" --backups "$6"</string>
+        <string>/usr/bin/python3</string>
+        <string>{{ litellm_logpipe_script }}</string>
+        <string>--out</string>
+        <string>{{ litellm_logs_dir }}/xai-oauth-bridge.log</string>
+        <string>--max-bytes</string>
+        <string>{{ litellm_xai_bridge_log_max_bytes }}</string>
+        <string>--backups</string>
+        <string>{{ litellm_xai_bridge_log_backups }}</string>
+        <string>--</string>
         <string>{{ litellm_xai_bridge_python }}</string>
         <string>{{ litellm_xai_bridge_script }}</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
         <string>{{ litellm_xai_bridge_port }}</string>
-        <string>{{ litellm_logpipe_script }}</string>
-        <string>{{ litellm_logs_dir }}/xai-oauth-bridge.log</string>
-        <string>{{ litellm_xai_bridge_log_max_bytes }}</string>
-        <string>{{ litellm_xai_bridge_log_backups }}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
