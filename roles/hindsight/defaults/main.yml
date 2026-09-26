@@ -49,7 +49,13 @@ hindsight_llm_api_key_placeholder: "sk-litellm-local"
 # explicitly rather than inherited.
 hindsight_reflect_llm_provider: "{{ hindsight_llm_provider }}"
 hindsight_reflect_llm_base_url: "{{ hindsight_llm_base_url }}"
-hindsight_reflect_llm_model: "{{ hindsight_llm_model }}"
+# 2026-09-26 (operator decision): reflect runs on the SuperGrok subscription
+# (`grok-sub`, via roles/litellm's xAI OAuth bridge). On ClinePass minimax-m3 a
+# reflect took 70-120s, and the Claude plugin's session-start reflect is capped
+# at ~40s, so every auto-reflect was cancelled. grok-sub answers in seconds. The
+# proxy falls back grok-sub -> ClinePass models -> Gemini free tier, so a
+# SuperGrok outage or rate limit degrades speed, not availability.
+hindsight_reflect_llm_model: "grok-sub"
 hindsight_reflect_max_context_tokens: 30000
 hindsight_reflect_max_iterations: 4
 

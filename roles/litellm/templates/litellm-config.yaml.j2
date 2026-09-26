@@ -164,6 +164,12 @@ router_settings:
     - clinepass-minimax-m3: {{ (['clinepass-kimi-k3', 'clinepass-deepseek'] + gemini) | to_json }}
     - clinepass-kimi-k3: {{ (['clinepass-minimax-m3', 'clinepass-deepseek'] + gemini) | to_json }}
     - clinepass-deepseek: {{ (['clinepass-minimax-m3', 'clinepass-kimi-k3'] + gemini) | to_json }}
+{% if litellm_xai_bridge_enabled | bool %}
+    # Hindsight reflect runs on grok-sub first (2026-09-26: minimax-m3 took
+    # 70-120s per reflect and the plugin gives up at ~40s). If SuperGrok errors
+    # or rate-limits, fall back to the ClinePass models, then Gemini free tier.
+    - grok-sub: {{ (['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek'] + (litellm_gemini_fallback_models | map(attribute='name') | list)) | to_json }}
+{% endif %}
 
 # No master_key while the proxy is loopback-only. Never widen litellm_bind
 # (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).
