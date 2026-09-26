@@ -134,6 +134,37 @@ hindsight_db_pool_max_size: 16
 hindsight_read_db_pool_min_size: 2
 hindsight_read_db_pool_max_size: 8
 
+# Concurrency (added 2026-09-26, same incident as the pool block above).
+#
+# Vendor guidance, hindsight.vectorize.io/developer/performance, verbatim:
+# "Hindsight's defaults are tuned for cloud LLM providers and multi-core
+# servers. When you run it on a laptop ... those defaults can saturate the
+# backend, time out, or thrash the CPU." That is this host: 8 cores, 16 GB,
+# local CPU embeddings, and ~14 concurrent agent sessions.
+#
+# The per-task limits (RETAIN/REFLECT/CONSOLIDATION_LLM_MAX_CONCURRENT) fall
+# back to the global llm_max_concurrent when unset, so setting the global alone
+# governs all three. Left unset deliberately — one knob, not four.
+#
+# 32 -> 4, not the vendor's 2: their "2" is advice for a LOCAL LLM server with a
+# tiny fixed slot pool. This backend is grok-sub, a cloud API behind the
+# loopback proxy, so the binding constraints here are host CPU and the SuperGrok
+# weekly quota rather than upstream slots. 4 keeps retain and consolidation
+# overlapping without a 32-way stampede. Revisit if retain throughput suffers.
+hindsight_llm_max_concurrent: 4
+
+# 10 -> 6. Total concurrent background tasks per worker. Each task is an LLM
+# call plus local CPU embedding, so this multiplies against the 4 above.
+hindsight_worker_max_slots: 6
+
+# 8 -> 2. There are 32 banks; 8 simultaneous mental-model refreshes is a
+# thundering herd on a machine this size, and refreshes are never urgent.
+hindsight_mental_model_refresh_concurrency: 2
+
+# 32 -> 8. Recall is the latency-sensitive path (session start), but 32
+# concurrent recalls on 8 cores queue behind each other anyway.
+hindsight_recall_max_concurrent: 8
+
 # Recall budgets, in facts per tier.
 hindsight_recall_budget_low: 50
 hindsight_recall_budget_mid: 150
