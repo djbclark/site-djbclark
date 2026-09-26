@@ -104,8 +104,8 @@ hosts:
          note: "site-djbclark#105: @jackwener/opencli's own micro-daemon (its hardcoded default port), auto-started on demand by the `opencli` CLI -- not a launchd service we manage. Backs bin/gemini_opencli_bridge.py (Hermes gemini_status/gemini_read/gemini_ask). See docs/reference/gemini-opencli-bridge.md."}
 
       # ── SuperBrain (independent local application) ────────────────────────
-      - {port: 5000,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
-         note: "SuperBrain FastAPI service; observed listening 2026-07-30"}
+      - {port: 5001,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
+         note: "SuperBrain FastAPI service. Moved 5000 -> 5001 on 2026-09-26: macOS AirPlay Receiver (ControlCenter) owns *:5000 and *:7000, so the launchd job crash-looped 9,082 times over 31 h (EADDRINUSE) while the 8443 funnel delivered YouTube WebSub pushes to AirPlay's 403. PORT env in the plist; tailscale serve 8443/api/youtube/webhook repointed to 5001."}
       - {port: 8443,  bind: "*",         owner: unmanaged, service: superbrain-websub-funnel, status: active,
          note: "Dedicated Tailscale Funnel HTTPS listener for /api/youtube/webhook; must not replace the site HTTPS listener on 443"}
 
