@@ -17,7 +17,16 @@ goose_provider_id: litellm-local
 # `smart-router` Auto Router v2 alias was removed on 2026-08-21 when the proxy
 # was narrowed to ClinePass only; pointing at it would render a config naming a
 # model the proxy no longer exposes.
-goose_model: clinepass-minimax-m3  # 2026-09-25: deepseek-v4-flash gone from ClinePass
+# 2026-09-26: was clinepass-minimax-m3 (set 09-25, before the caps landed).
+# ClinePass is spent, not throttled — `aiuse` reads the weekly window 100% used
+# and the MONTHLY 99% (resets 10-16T07:42Z), so the 09-29 weekly reset returns
+# ~1% of a month and is gone again immediately. Hindsight, Hermes auxiliary and
+# the MoA slots all moved to grok-sub the same day; goose was the last route
+# still pointed at the spent subscription.
+#
+# REVERT AFTER 2026-10-16, and check `aiuse` first — the MONTHLY window is the
+# one that matters, not the weekly.
+goose_model: grok-sub
 goose_litellm_base_url: http://127.0.0.1:4000/v1
 
 goose_managed_marker: "# site-djbclark managed (roles/goose)"
