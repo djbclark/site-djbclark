@@ -92,6 +92,24 @@ hosts:
          note: "Google Antigravity CLI sidecar listener"}
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
          note: "bun ~/.collie/bridge/index.ts; observed listening 2026-08-07 reconcile"}
+      # ── MCP bridges / shared MCP servers (1879x block) ────────────────────────
+      # The six bridge ports were observed listening but never registered; rows
+      # added 2026-09-26 when 18796 was allocated. Pairs: raw mcp-proxy (even)
+      # behind a bearer-auth caddy (odd) that the 8443 funnel fronts.
+      - {port: 18790, bind: "127.0.0.1", owner: unmanaged, service: hermes-mcp-bridge, status: active,
+         note: "mcp-proxy → ~/.local/libexec/hermes-mcp-bridge/hermes_mcp_plus.py (hermes mcp serve + ask_hermes). Also the shared Hermes MCP for local Claude Code sessions since 2026-09-26 (~/.claude.json hermes → http://127.0.0.1:18790/mcp)"}
+      - {port: 18791, bind: "127.0.0.1", owner: unmanaged, service: hermes-mcp-auth, status: active,
+         note: "caddy bearer gate for 18790; funnel path 8443/hermes-mcp"}
+      - {port: 18792, bind: "127.0.0.1", owner: unmanaged, service: saner-mcp-bridge, status: active,
+         note: "mcp-proxy → ~/.opencli/plugins/saner/mcp/saner_mcp.py"}
+      - {port: 18793, bind: "127.0.0.1", owner: unmanaged, service: saner-mcp-auth, status: active,
+         note: "caddy bearer gate for 18792; funnel path 8443/saner-mcp"}
+      - {port: 18794, bind: "127.0.0.1", owner: unmanaged, service: claude-mcp-bridge, status: active,
+         note: "mcp-proxy → ~/.local/libexec/claude-mcp-bridge/claude_mcp.py (ask_claude for Chief of Staff)"}
+      - {port: 18795, bind: "127.0.0.1", owner: unmanaged, service: claude-mcp-auth, status: active,
+         note: "caddy bearer gate for 18794; funnel path 8443/claude-mcp"}
+      - {port: 18796, bind: "127.0.0.1", owner: site, service: basic-memory-mcp, status: active,
+         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint)"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same
