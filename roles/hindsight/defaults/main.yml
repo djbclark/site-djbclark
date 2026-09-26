@@ -101,6 +101,39 @@ hindsight_embeddings_provider: "local"
 hindsight_embeddings_local_model: "BAAI/bge-small-en-v1.5"
 hindsight_reranker_provider: "rrf"
 
+# Postgres connection pool (added 2026-09-26 after a real incident).
+#
+# Hindsight ships DB_POOL_MAX_SIZE=100 and the READ pool falls back to the same
+# number, so one API process can open up to ~200 backends. Embedded pg0 is
+# process-per-connection, so that is ~200 OS processes on what is here an
+# 8-core / 16 GB laptop.
+#
+# What actually happened: re-queueing ~244 backlogged retain ops grew the pool
+# to ~90 backends. asyncpg NEVER SHRINKS A POOL once it has grown, so two hours
+# later 71 of them were still sitting `idle` with 2 waiting and 1 active — 96%
+# dead weight that does not go away without a restart. Contention showed up as
+# ~195 "slow DB pool acquire" warnings/minute in hindsight.log while the API
+# stopped answering, and the box went to load ~70 with 11 GB of swap and
+# WindowServer starved enough to visibly drop keystrokes.
+#
+# Upstream knows: vectorize-io/hindsight#4754 (pool max 100 vs embedded pg
+# max_connections 100 — they collide exactly) and PR #4759. Their small-
+# deployment guidance is min 2 / max 10; docs note each concurrent recall/think
+# can use 2-4 connections, and worker_max_slots defaults to 10.
+#
+# Sized for this machine rather than their default: 16 primary is generous
+# against 10 worker slots (measured peak concurrency was ~3), 8 read, min 2 each
+# so idle cost is ~4 backends instead of ~10. Worst case ~24, not ~200.
+#
+# Raising these is the right move ONLY if "slow DB pool acquire" reappears with
+# backends actually `active`. Idle backends mean the pool is too big, not too
+# small — check with:
+#   ps -Ao command | grep '^postgres: ' | awk '{print $NF}' | sort | uniq -c
+hindsight_db_pool_min_size: 2
+hindsight_db_pool_max_size: 16
+hindsight_read_db_pool_min_size: 2
+hindsight_read_db_pool_max_size: 8
+
 # Recall budgets, in facts per tier.
 hindsight_recall_budget_low: 50
 hindsight_recall_budget_mid: 150
