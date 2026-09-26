@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Filter + size-capped rotation for LiteLLM (and the xAI bridge) logs.
+"""Filter + size-capped rotation for LiteLLM, the xAI bridge and Hindsight logs.
+
+(Named for its first user; roles/hindsight uses it too since 2026-09-26, when
+~/Library/Logs/hindsight had reached ~600 MB, mostly fact-extraction stack
+traces and repeated "slow DB pool acquire" warnings.)
 
 A launchd service can only point stdout/stderr at a file it never rotates, and
 newsyslog needs root. By 2026-09-26 the proxy's stderr.log had reached 1.9 GB;
@@ -41,7 +45,8 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 CLOCK = re.compile(r"^(\d\d:\d\d:\d\d) - ")
 # A new log record: LiteLLM's "HH:MM:SS - Name:LEVEL: ...", uvicorn's
 # "INFO:     ...", Python warnings, or the bridge's "dd/Mon/yyyy hh:mm:ss ...".
-RECORD = re.compile(r"^(\d\d:\d\d:\d\d - |(INFO|WARNING|ERROR|CRITICAL|DEBUG):\s|\S+Warning: |\d\d/\w{3}/\d{4} )")
+RECORD = re.compile(r"^(\d\d:\d\d:\d\d - |(INFO|WARNING|ERROR|CRITICAL|DEBUG):\s|\S+Warning: |\d\d/\w{3}/\d{4} |\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)")
+DATED = re.compile(r"^(\d\d/\w{3}/\d{4} |\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)")   # already carries a date
 EXC = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt|Warning)\b")
 NOISE = [
     re.compile(r"SESSION REUSE"),
@@ -52,6 +57,7 @@ NOISE = [
 ]
 DROP_CONT_AFTER_NOISE = True   # the noise record's own continuation goes too
 CONT_KEEP = 3
+TAIL_KEEP = 2      # the innermost frames are where a stack dump says what it was doing
 MAX_LINE = 2000
 KILL_AFTER = 20
 REPEAT_WINDOW = 60
@@ -138,12 +144,19 @@ def main():
             if n:
                 sink.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}     …[repeated {n}× in {REPEAT_WINDOW}s: {k[:160]}]")
 
+    tail_lines = []
+
     def close_block():
-        nonlocal cont, last_exc
+        nonlocal cont, last_exc, tail_lines
         if cont > CONT_KEEP:
-            tail = f"; last: {last_exc[:300]}" if last_exc else ""
-            sink.write(f"    …[{cont - CONT_KEEP} more line(s) collapsed{tail}]")
-        cont, last_exc = 0, None
+            hidden = cont - CONT_KEEP - len(tail_lines)
+            if hidden > 0:
+                sink.write(f"    …[{hidden} more line(s) collapsed]")
+            for t in tail_lines:
+                sink.write(t)
+            if last_exc and last_exc not in tail_lines:
+                sink.write(f"    …[last exception: {last_exc[:300]}]")
+        cont, last_exc, tail_lines = 0, None, []
 
     stdin = child.stdout if child else sys.stdin.buffer
     buf = b""
@@ -185,7 +198,7 @@ def main():
                 m = CLOCK.match(line)
                 if m:
                     line = f"{stamp} {m.group(1)} - {line[m.end():]}"
-                elif not re.match(r"\d\d/\w{3}/\d{4} ", line):   # bridge lines carry their own date
+                elif not DATED.match(line):   # bridge and Hindsight lines carry their own date
                     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}"
                 sink.write(line)
             else:
@@ -196,6 +209,8 @@ def main():
                     last_exc = line
                 if cont <= CONT_KEEP:
                     sink.write(line)
+                else:
+                    tail_lines = (tail_lines + [line])[-TAIL_KEEP:]
     close_block()
     flush_repeats(force=True)
     if child:

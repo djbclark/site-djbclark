@@ -13,6 +13,14 @@ hindsight_codex_home: "{{ hindsight_home }}/.hindsight/codex"
 hindsight_codex_auth: "{{ hindsight_codex_home }}/auth.json"
 hindsight_data_dir: "{{ hindsight_home }}/.hindsight/data"
 hindsight_logs_dir: "{{ hindsight_home }}/Library/Logs/hindsight"
+# Log budget (2026-09-26, operator: <= 100 MB per logs dir incl. rotated). Had
+# reached ~600 MB unrotated (stdout.log + stderr.log), mostly fact-extraction
+# stack traces and repeated slow-DB-pool warnings. Shared filter/rotator with
+# roles/litellm; 20 MB x (1 + 3) = 80 MB. The Hermes cron "LLM Backend Health"
+# warns if this directory exceeds 100 MB.
+hindsight_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"
+hindsight_log_max_bytes: 20000000
+hindsight_log_backups: 3
 hindsight_plist_dir: "{{ hindsight_home }}/Library/LaunchAgents"
 hindsight_label: "com.{{ site_ns }}.hindsight-api"
 hindsight_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_label }}.plist"

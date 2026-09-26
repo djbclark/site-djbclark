@@ -3,8 +3,17 @@
 <plist version="1.0">
 <dict>
   <key>Label</key><string>{{ hindsight_label }}</string>
+  {#- bin/litellm_logpipe.py supervises the API (forwards launchd's SIGTERM,
+      SIGKILL after 20 s), filters its merged output and rotates the log; see
+      the budget note on hindsight_log_max_bytes in defaults/main.yml. #}
   <key>ProgramArguments</key>
   <array>
+    <string>/usr/bin/python3</string>
+    <string>{{ hindsight_logpipe_script }}</string>
+    <string>--out</string><string>{{ hindsight_logs_dir }}/hindsight.log</string>
+    <string>--max-bytes</string><string>{{ hindsight_log_max_bytes | string }}</string>
+    <string>--backups</string><string>{{ hindsight_log_backups | string }}</string>
+    <string>--</string>
     <string>{{ hindsight_api_bin }}</string>
     <string>--host</string><string>{{ hindsight_bind }}</string>
     <string>--port</string><string>{{ hindsight_port | string }}</string>
@@ -16,8 +25,8 @@
   <key>ThrottleInterval</key><integer>30</integer>
   <key>ProcessType</key><string>Background</string>
   <key>WorkingDirectory</key><string>{{ hindsight_home }}/.hindsight</string>
-  <key>StandardOutPath</key><string>{{ hindsight_logs_dir }}/stdout.log</string>
-  <key>StandardErrorPath</key><string>{{ hindsight_logs_dir }}/stderr.log</string>
+  <key>StandardOutPath</key><string>{{ hindsight_logs_dir }}/launchd.log</string>
+  <key>StandardErrorPath</key><string>{{ hindsight_logs_dir }}/launchd.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>{{ hindsight_home }}</string>
