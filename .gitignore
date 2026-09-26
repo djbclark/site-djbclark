@@ -22,3 +22,6 @@ __pycache__/
 # shared ops-djbclark control plane) — not shared repo content.
 .ralph-tui/
 .secrets/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

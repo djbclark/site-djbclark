@@ -61,15 +61,17 @@
 
 - name: Ensure Hindsight directories exist
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    mode: "0700"
+    mode: "{{ item.mode }}"
+  # LaunchAgents is shared with every other role (litellm sets 0755, the macOS
+  # default); 0700 here made the two roles flip it back and forth each apply.
   loop:
-    - "{{ hindsight_home }}/.hindsight"
-    - "{{ hindsight_data_dir }}"
-    - "{{ hindsight_codex_home }}"
-    - "{{ hindsight_logs_dir }}"
-    - "{{ hindsight_plist_dir }}"
+    - {path: "{{ hindsight_home }}/.hindsight", mode: "0700"}
+    - {path: "{{ hindsight_data_dir }}", mode: "0700"}
+    - {path: "{{ hindsight_codex_home }}", mode: "0700"}
+    - {path: "{{ hindsight_logs_dir }}", mode: "0700"}
+    - {path: "{{ hindsight_plist_dir }}", mode: "0755"}
 
 - name: Ensure Hindsight candidate-ledger directory exists
   ansible.builtin.file:
