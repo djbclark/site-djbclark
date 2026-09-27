@@ -29,6 +29,10 @@ Environment=CLINEPASS_API_KEY={{ litellm_clinepass_api_key | replace('\\', '\\\\
 {% endif %}
 {% if litellm_gemini_api_key | length > 0 %}
 Environment=GEMINI_API_KEY={{ litellm_gemini_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+{% if litellm_db_enabled | bool %}
+Environment=LITELLM_MASTER_KEY={{ litellm_master_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+Environment=DATABASE_URL={{ litellm_database_url | trim }}
+{% endif %}
 {% endif %}
 
 [Install]

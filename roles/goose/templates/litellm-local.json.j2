@@ -10,6 +10,11 @@
       "context_limit": 128000
     }
   ],
-  "requires_auth": false,
+  "requires_auth": true,
+  {# The proxy gained general_settings.master_key on 2026-09-27, so Goose must
+     now authenticate; it previously sent nothing. Goose resolves this name from
+     its keyring (service "goose") or the environment. Value must match
+     roles/litellm litellm_master_key. #}
+  "api_key_env": "{{ goose_litellm_api_key_env }}",
   "supports_streaming": true
 }

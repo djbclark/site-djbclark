@@ -73,3 +73,10 @@ goose_ext_shortwave_available: false
 # No official MCP docs, no npm @saner-ai/mcp-server (404), no PyPI package.
 # Product site: https://www.saner.ai/ — template: comment stub only.
 goose_ext_saner_available: false
+
+# Goose must authenticate to the LiteLLM proxy since 2026-09-27 (roles/litellm
+# gained general_settings.master_key). Goose looks this name up in its keyring
+# (service "goose") and falls back to the environment. The value must equal
+# roles/litellm litellm_master_key; it is not a secret (loopback-only guard).
+goose_litellm_api_key_env: LITELLM_LOCAL_API_KEY
+goose_litellm_api_key: "sk-litellm-local"

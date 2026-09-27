@@ -169,6 +169,97 @@ launchctl bootstrap "gui/${UID_N}" \
 systemctl --user restart com.djbclark.litellm.service
 ```
 
+## Virtual-key auth and the spend database (2026-09-27)
+
+Before this date the proxy had **no `master_key` and no database**. Security
+came entirely from binding to `127.0.0.1`, which is still true — but it meant
+LiteLLM could not account for spend at all: `/key/info` returned
+`500 Database not connected` and `/key/spend/report` `404`. Nothing could read
+how much of the ClinePass subscription this proxy had burned, which is the one
+number that matters now that ClinePass is capped.
+
+### What changed
+
+* `general_settings.master_key` is now set, so **every caller authenticates**.
+* `general_settings.database_url` points at a Postgres **dedicated to LiteLLM**.
+
+The master key is deliberately the placeholder the clients were already
+sending, `sk-litellm-local`. It is **not a secret** — it is checked in as a
+plaintext default here and in `roles/hindsight`, and it only guards a
+loopback-bound port. Treat it as an anti-typo guard. If `litellm_bind` is ever
+widened beyond loopback this MUST become a generated secret pulled from the
+vault, exactly like `litellm_clinepass_api_key`.
+
+### Why a separate Postgres on :5433
+
+Hindsight already runs an **embedded pg0 cluster on :5432**
+(`~/.pg0/instances/hindsight`). LiteLLM refuses to start when its
+`database_url` is unreachable, so sharing that instance would let a Hindsight
+database outage take down every LLM client on the box. Instead this uses the
+Homebrew `postgresql@18` cluster moved to **:5433**, which also stops the two
+from fighting over the port.
+
+Its `pg_hba.conf` is `trust` for `127.0.0.1`/`::1` only, so the connection
+string carries no password and can live in a world-readable default.
+
+```bash
+brew services start postgresql@18      # port 5433, see postgresql.conf
+createdb -h 127.0.0.1 -p 5433 litellm
+```
+
+### Prisma is a manual prerequisite
+
+LiteLLM needs the `prisma` Python client for DB mode, and it is **not** a
+dependency of the editable checkout. It must be injected without reinstalling
+LiteLLM — a PyPI build would silently drop the fork-only providers (see
+"The install is NOT managed by this role"):
+
+```bash
+uv pip install --python ~/.local/share/uv/tools/litellm/bin/python prisma
+~/.local/share/uv/tools/litellm/bin/python -m prisma generate \
+  --schema=$HOME/src/litellm/litellm/proxy/schema.prisma
+DATABASE_URL=postgresql://$USER@127.0.0.1:5433/litellm \
+  ~/.local/share/uv/tools/litellm/bin/python -m prisma db push \
+  --schema=$HOME/src/litellm/litellm/proxy/schema.prisma --skip-generate
+```
+
+Skipping `prisma generate` makes the proxy **fail to start entirely**
+(`Unable to find Prisma binaries`), taking every client down with it.
+
+### Callers that had to change
+
+| Caller | Before | Now |
+| --- | --- | --- |
+| Hermes (`~/.hermes/config.yaml`) | `sk-litellm-local` | unchanged |
+| Hindsight (`roles/hindsight`) | `sk-litellm-local` | unchanged |
+| LLM backend health check | `sk-litellm-local` | unchanged |
+| Open WebUI (`roles/open_webui`) | `sk-dummy` | `sk-litellm-local` |
+| Goose (`roles/goose`) | no auth at all | `requires_auth` + keyring entry |
+| OliveTin diagnostics | bare `curl` | sends the bearer |
+
+Anything else pointed at `:4000` that does not send the key now gets **401**.
+
+### Virtual keys (per-consumer spend)
+
+The master key is not a virtual key, so `/key/info` returns
+`Key not found in database` for it. Consumers that want their own spend and
+budget need a real virtual key **and** a user row — CodexBar rejects key info
+that carries neither a `user_id` nor a `team_id`:
+
+```bash
+curl -s -X POST http://127.0.0.1:4000/user/new \
+  -H "Authorization: Bearer sk-litellm-local" -H 'Content-Type: application/json' \
+  -d '{"user_id":"codexbar","user_alias":"CodexBar","max_budget":50,"budget_duration":"30d","auto_create_key":false}'
+
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer sk-litellm-local" -H 'Content-Type: application/json' \
+  -d '{"key_alias":"codexbar-usage","user_id":"codexbar"}'
+```
+
+Note this LiteLLM build has **no** `/key/spend/report` or `/user/spend/report`
+route; it exposes `/global/spend/report` and `/spend/logs`. Consumers that fall
+back to the per-key report routes will 404.
+
 ## Routing and cache
 
 Since 2026-08-21 the proxy serves ClinePass only and has **no fallback

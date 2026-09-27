@@ -76,10 +76,10 @@ actions:
       launchctl print "gui/$(id -u)/com.djbclark.litellm" 2>&1 | head -30 || true
       echo
       echo "=== http://127.0.0.1:4000/health ==="
-      curl -s -m 5 http://127.0.0.1:4000/health || echo "HTTP 4000 not responding"
+      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/health || echo "HTTP 4000 not responding"
       echo
       echo "=== http://127.0.0.1:4000/v1/models ==="
-      curl -s -m 5 http://127.0.0.1:4000/v1/models | head -30 || echo "Models endpoint failed"
+      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/v1/models | head -30 || echo "Models endpoint failed"
 
   - id: user_litellm_restart
     title: "LiteLLM Proxy — restart service"
@@ -89,7 +89,7 @@ actions:
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       launchctl kickstart -k "gui/$(id -u)/com.djbclark.litellm"
       sleep 2
-      curl -s -m 5 http://127.0.0.1:4000/health || true
+      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/health || true
 
   - id: user_openwebui_status
     title: "Open WebUI — status & health"

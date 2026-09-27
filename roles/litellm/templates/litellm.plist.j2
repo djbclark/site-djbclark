@@ -65,6 +65,15 @@
         <key>GEMINI_API_KEY</key>
         <string>{{ litellm_gemini_api_key | e }}</string>
 {% endif %}
+{% if litellm_db_enabled | bool %}
+{# Virtual-key auth + spend DB. LITELLM_MASTER_KEY is a loopback-only anti-typo
+   guard rather than a real secret (see defaults/main.yml); DATABASE_URL carries
+   no password because the :5433 cluster trusts 127.0.0.1 only. #}
+        <key>LITELLM_MASTER_KEY</key>
+        <string>{{ litellm_master_key | e }}</string>
+        <key>DATABASE_URL</key>
+        <string>{{ litellm_database_url | trim | e }}</string>
+{% endif %}
     </dict>
 </dict>
 </plist>

@@ -167,3 +167,46 @@ litellm_clinepass_rpm: 10
 # switches branches, so do not "tidy" it.
 litellm_allowed_fails: 2
 litellm_cooldown_time: 300
+
+# --- Virtual-key auth + spend DB (2026-09-27, operator decision) -------------
+#
+# Until now the proxy had no master_key and no database, relying entirely on
+# being bound to 127.0.0.1. That is still the security boundary — litellm_bind
+# stays loopback — but it meant LiteLLM could not account for spend at all:
+# /key/info returned 500 "Database not connected" and /key/spend/report 404.
+# Nothing could read how much of ClinePass this proxy had burned, which is the
+# one number that matters now that ClinePass is capped (see litellm_clinepass_rpm).
+#
+# Enabling general_settings.master_key turns on auth for EVERY caller, so the
+# master key is deliberately set to the placeholder the clients already send
+# ("sk-litellm-local", see roles/hindsight hindsight_llm_api_key_placeholder and
+# ~/.hermes/config.yaml). Hermes and Hindsight therefore keep working untouched;
+# only the clients that sent a DIFFERENT placeholder had to change (Open WebUI
+# sent "sk-dummy", Goose sent nothing at all).
+#
+# This value is NOT a secret and must not be treated as one: it is already
+# checked in as a plaintext default here and in roles/hindsight, and it only
+# grants access to a loopback-bound port. It is an anti-typo guard, not a
+# credential. If litellm_bind is ever widened, this MUST become a real
+# generated secret sourced from the vault like litellm_clinepass_api_key.
+litellm_master_key: "sk-litellm-local"
+
+# Dedicated Postgres for LiteLLM's key/spend tables.
+#
+# Deliberately NOT the embedded pg0 cluster that Hindsight runs on :5432
+# (~/.pg0/instances/hindsight). LiteLLM refuses to start when its database_url
+# is unreachable, so sharing Hindsight's private instance would make a Hindsight
+# DB outage take down every LLM client on the box. This is the Homebrew
+# postgresql@18 cluster moved to :5433 so the two never contend for the port.
+#
+# No password: the cluster's pg_hba.conf is `trust` for 127.0.0.1/::1 only, so
+# the connection string carries no secret and can live in a world-readable
+# default. Keep it that way — if this ever needs a password, it belongs in the
+# vault and must be rendered only into the mode-0600 unit/plist.
+litellm_db_enabled: true
+litellm_db_host: "127.0.0.1"
+litellm_db_port: 5433
+litellm_db_name: litellm
+litellm_db_user: "{{ ansible_facts['user_id'] }}"
+litellm_database_url: >-
+  postgresql://{{ litellm_db_user }}@{{ litellm_db_host }}:{{ litellm_db_port }}/{{ litellm_db_name }}

@@ -194,5 +194,23 @@ router_settings:
     - grok-sub: {{ ((litellm_gemini_fallback_models | map(attribute='name') | list) + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
 {% endif %}
 
-# No master_key while the proxy is loopback-only. Never widen litellm_bind
-# (Tailscale or public) without a master key / auth story (E5 + REVIEW-1).
+# The proxy stays loopback-only (litellm_bind). Never widen it (Tailscale or
+# public) without promoting litellm_master_key to a real generated secret from
+# the vault -- the value below is a plaintext anti-typo guard, not a credential
+# (E5 + REVIEW-1). See the rationale block in defaults/main.yml.
+{% if litellm_db_enabled | bool %}
+
+general_settings:
+  # Turning master_key on makes EVERY caller authenticate. It is set to the
+  # placeholder the existing clients already send, so enabling it is a no-op
+  # for Hermes and Hindsight; see defaults/main.yml for the full client list.
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Enables the key/spend tables that back /key/info and /key/spend/report.
+  # Without this LiteLLM cannot account for spend at all.
+  database_url: os.environ/DATABASE_URL
+  # Write spend rows for requests made with the master key too, not just with
+  # virtual keys -- every current client shares the master key, so without this
+  # the spend tables stay empty and the whole exercise is pointless.
+  store_model_in_db: false
+  allow_requests_on_db_unavailable: true
+{% endif %}
