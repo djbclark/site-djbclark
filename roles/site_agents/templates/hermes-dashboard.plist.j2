@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ site_agents_hermes_dashboard_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ site_agents_hermes_bin }}</string>
+        <string>dashboard</string>
+        <string>--host</string>
+        <string>{{ site_agents_hermes_dashboard_bind }}</string>
+        <string>--port</string>
+        <string>{{ site_agents_hermes_dashboard_port }}</string>
+        <string>--no-open</string>
+        <string>--skip-build</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HERMES_HOME</key>
+        <string>{{ site_agents_hermes_home }}</string>
+        <key>PATH</key>
+        <string>{{ site_agents_bin_dir }}:{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>{{ site_agents_hermes_home }}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{{ site_agents_hermes_dashboard_log }}</string>
+    <key>StandardErrorPath</key>
+    <string>{{ site_agents_hermes_dashboard_error_log }}</string>
+</dict>
+</plist>

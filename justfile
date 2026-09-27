@@ -248,6 +248,11 @@ site-agents-status:
     else \
       echo "launchd: not loaded (homebrew.mxcl.jobber)"; \
     fi
+    @if launchctl print "gui/$(id -u)/com.djbclark.hermes-dashboard" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.hermes-dashboard)"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.hermes-dashboard)"; \
+    fi
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)

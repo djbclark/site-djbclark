@@ -77,3 +77,16 @@ site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobb
 site_agents_jobber_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.log"
 site_agents_jobber_error_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.error.log"
 
+# --- hermes-dashboard (Android / Tailscale companion) ----------------------
+# Bind must match registry/ports.yml hermes-dashboard (Tailscale IP, not LAN).
+site_agents_hermes_dashboard_enabled: true
+site_agents_hermes_dashboard_label: "com.{{ site_ns }}.hermes-dashboard"
+site_agents_hermes_dashboard_plist: >-
+  {{ site_agents_launchagents_dir }}/{{ site_agents_hermes_dashboard_label }}.plist
+site_agents_hermes_bin: "{{ site_agents_bin_dir }}/hermes"
+site_agents_hermes_home: "{{ site_agents_home }}/.hermes"
+site_agents_hermes_dashboard_bind: "100.113.53.87"
+site_agents_hermes_dashboard_port: 9119
+site_agents_hermes_dashboard_log: "{{ site_agents_hermes_home }}/logs/dashboard.log"
+site_agents_hermes_dashboard_error_log: "{{ site_agents_hermes_home }}/logs/dashboard.error.log"
+

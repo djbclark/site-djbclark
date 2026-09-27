@@ -13,6 +13,7 @@ install to `~/.local/bin`; plists render to
 | cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
 | aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
 | jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00, `landing-health` hourly) |
+| hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 
 ## Jobber Notifications (`jobber-notify`)
 

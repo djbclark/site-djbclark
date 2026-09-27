@@ -191,3 +191,42 @@
     _agent_plist_path: "{{ site_agents_jobber_plist }}"
     _agent_plist: "{{ _jobber_plist }}"
     _agent_script: "{{ _jobber_config }}"
+
+- name: Assert hermes CLI is present
+  ansible.builtin.stat:
+    path: "{{ site_agents_hermes_bin }}"
+  register: _hermes_bin_stat
+  when: site_agents_hermes_dashboard_enabled | bool
+  tags: [hermes-dashboard]
+
+- name: Fail when hermes CLI is missing
+  ansible.builtin.assert:
+    that:
+      - _hermes_bin_stat.stat.exists
+    fail_msg: >-
+      {{ site_agents_hermes_bin }} not found. The dashboard LaunchAgent
+      execs that binary; install Hermes before applying this agent.
+  when: site_agents_hermes_dashboard_enabled | bool
+  tags: [hermes-dashboard]
+
+- name: Render hermes-dashboard LaunchAgent
+  ansible.builtin.template:
+    src: hermes-dashboard.plist.j2
+    dest: "{{ site_agents_hermes_dashboard_plist }}"
+    mode: "0644"
+  register: _hermes_dashboard_plist
+  when: site_agents_hermes_dashboard_enabled | bool
+  tags: [hermes-dashboard]
+
+- name: Manage hermes-dashboard LaunchAgent
+  ansible.builtin.include_tasks:
+    file: launchagent.yml
+    apply:
+      tags: [hermes-dashboard]
+  vars:
+    _agent_label: "{{ site_agents_hermes_dashboard_label }}"
+    _agent_plist_path: "{{ site_agents_hermes_dashboard_plist }}"
+    _agent_plist: "{{ _hermes_dashboard_plist }}"
+    _agent_script: "{{ site_agents_hermes_dashboard_plist }}"
+  when: site_agents_hermes_dashboard_enabled | bool
+  tags: [hermes-dashboard]
