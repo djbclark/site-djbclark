@@ -76,10 +76,9 @@ hosts:
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1). Runs from the git checkout ~/src/litellm (fork of BerriAI/litellm) installed by hand as a uv tool -- roles/litellm verifies that install but never performs it."}
       - {port: 14011, bind: "127.0.0.1", owner: site, service: xai-oauth-bridge, status: active,
          note: "2026-09-26: com.djbclark.xai-oauth-bridge launchd (roles/litellm). bin/xai_oauth_bridge.py under the Hermes venv; injects a fresh SuperGrok OAuth token from Hermes's grant per request so LiteLLM's grok-sub fallback can reach api.x.ai. No auth -- loopback only."}
-      - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: active,
-         note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only. Flipped planned -> active 2026-09-29 (listening, healthy)."}
-      - {port: 5432,  bind: "127.0.0.1", owner: site, service: hindsight-pg0,    status: active,
-         note: "2026-09-29: Hindsight's embedded pg0 Postgres (~/.pg0/instances/hindsight), started by hindsight-api itself, not by brew. Distinct from the brew postgresql@18 on 5433."}
+      # :8888 hindsight-api and :5432 hindsight-pg0 removed 2026-09-30 — Hindsight
+      # retired (roles/hindsight, hindsight_enabled: false). Both ports are free.
+      # Basic Memory on :18796 replaced it.
       - {port: 5433,  bind: "127.0.0.1", owner: site, service: postgresql-18,   status: active,
          note: "2026-09-29: brew services postgresql@18 (sh.brew.postgresql@18 launchd). Backs LiteLLM's spend/key tables (DATABASE_URL ...:5433/litellm)."}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
@@ -113,7 +112,7 @@ hosts:
       - {port: 18795, bind: "127.0.0.1", owner: unmanaged, service: claude-mcp-auth, status: active,
          note: "caddy bearer gate for 18794; funnel path 8443/claude-mcp"}
       - {port: 18796, bind: "127.0.0.1", owner: site, service: basic-memory-mcp, status: active,
-         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint)"}
+         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private/memory and it is the memory search service (replaced Hindsight)"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same

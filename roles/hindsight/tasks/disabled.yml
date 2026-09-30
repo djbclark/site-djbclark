@@ -1,0 +1,42 @@
+---
+# Stops everything Hindsight runs and keeps it from starting at login. Nothing
+# is deleted: the venv, the pg0 data directory and the 2026-09-30 archive under
+# ~/.hindsight/archive stay on disk.
+- name: Boot out Hindsight LaunchAgents
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ item }}"]
+  loop: "{{ hindsight_retired_labels }}"
+  register: _hindsight_bootout
+  changed_when: _hindsight_bootout.rc == 0
+  # rc 3 / 113: the label is not loaded, which is the state we want.
+  failed_when: _hindsight_bootout.rc not in [0, 3, 113]
+  when: not ansible_check_mode
+
+# A plist left in ~/Library/LaunchAgents is loaded again at the next login.
+- name: Remove Hindsight LaunchAgent plists
+  ansible.builtin.file:
+    path: "{{ hindsight_plist_dir }}/{{ item }}.plist"
+    state: absent
+  loop: "{{ hindsight_retired_labels }}"
+
+# hindsight-api starts the embedded pg0 Postgres itself and leaves it running
+# after the API exits, so it has to be stopped separately.
+- name: Check for a running Hindsight Postgres
+  ansible.builtin.stat:
+    path: "{{ hindsight_pg0_data_dir }}/postmaster.pid"
+  register: _hindsight_pg0_pid
+
+- name: Stop the Hindsight Postgres
+  ansible.builtin.command:
+    argv: ["{{ hindsight_pg0_ctl }}", stop, -D, "{{ hindsight_pg0_data_dir }}", -m, fast]
+  when:
+    - not ansible_check_mode
+    - _hindsight_pg0_pid.stat.exists
+
+- name: Verify nothing answers on the Hindsight port
+  ansible.builtin.wait_for:
+    host: "{{ hindsight_bind }}"
+    port: "{{ hindsight_port }}"
+    state: stopped
+    timeout: 30
+  when: not ansible_check_mode

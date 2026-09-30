@@ -226,3 +226,19 @@ hindsight_dir_syncs:
     dir: "{{ hindsight_home }}/ops/site-private/memory"
     globs: ["reference_*.md", "project_*.md"]
     tags: ["source:site-private-memory"]
+
+# Retired 2026-09-30 (operator decision: token cost, host load, frequent
+# breakage). Basic Memory over ~/ops/site-private/memory replaced it
+# (roles/basic_memory_mcp). With this false the role stops every Hindsight
+# process and removes its LaunchAgent plists; see tasks/disabled.yml. Data and
+# the archive at ~/.hindsight/archive/2026-09-30 are left in place.
+hindsight_enabled: false
+hindsight_pg0_data_dir: "{{ hindsight_home }}/.pg0/instances/hindsight/data"
+hindsight_pg0_ctl: "{{ hindsight_home }}/.pg0/installation/18.1.0/bin/pg_ctl"
+# crush-hindsight-sync is not rendered by this role (Crush's own write-back
+# agent), but it only exists to feed Hindsight, so it retires with it.
+hindsight_retired_labels: >-
+  {{
+    [hindsight_label, hindsight_plugin_patch_label, 'com.' ~ site_ns ~ '.crush-hindsight-sync']
+    + (hindsight_dir_syncs | map(attribute='name') | map('regex_replace', '^', 'com.' ~ site_ns ~ '.hindsight-sync-') | list)
+  }}

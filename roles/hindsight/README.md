@@ -1,5 +1,12 @@
 # Hindsight role
 
+> **Retired 2026-09-30.** `hindsight_enabled` is `false`, so applying this role
+> stops every Hindsight process, removes its LaunchAgent plists and stops the
+> embedded Postgres (`tasks/disabled.yml`). Basic Memory replaced it
+> (`roles/basic_memory_mcp`). Data and the archive under
+> `~/.hindsight/archive/2026-09-30/` stay on disk. Everything below describes
+> the service as it ran, and applies again if the flag is set back to `true`.
+
 Installs and manages the local Hindsight API as the loopback-only macOS
 LaunchAgent `com.<site_ns>.hindsight-api` on `127.0.0.1:8888`.
 
