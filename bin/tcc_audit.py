@@ -20,6 +20,8 @@ Usage:
   tcc_audit.py                 cron mode: print only NEW problems (or a weekly digest); silent when clean
   tcc_audit.py --all           print the full audit now, regardless of state
   tcc_audit.py --json          machine-readable audit
+  tcc_audit.py --list NAME     rows whose client contains NAME, each marked ok/stale/orphan/unknown
+                               (to tell which of several same-named Settings rows is the dead one)
   tcc_audit.py --cleanup-script [--include-stale] [--include-apps]
                                print a root shell script that backs up TCC.db and deletes orphaned
                                path rows (plus, optionally, stale rows and rows for apps that
@@ -409,6 +411,7 @@ def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--all", action="store_true", help="print the full audit now")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--list", metavar="NAME", help="show rows whose client contains NAME")
     ap.add_argument("--cleanup-script", action="store_true")
     ap.add_argument("--include-stale", action="store_true")
     ap.add_argument("--include-apps", action="store_true")
@@ -420,6 +423,12 @@ def main(argv):
     if args.state:
         STATE_PATH = Path(args.state)
     dbs = args.db or [SYSTEM_DB, USER_DB]
+    if args.list:
+        rows, _ = audit(dbs)
+        for r in sorted((r for r in rows if args.list.lower() in r["client"].lower()),
+                        key=lambda r: (short(r["service"]), r["client"])):
+            print(f"{r['status'].upper():8} {short(r['service'])}: {r['client']}")
+        return 0
     rows, problems = gather(dbs)
 
     if args.json:
