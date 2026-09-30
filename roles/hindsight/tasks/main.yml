@@ -219,3 +219,40 @@
   loop: "{{ hindsight_plugin_patches }}"
   when: not ansible_check_mode
   tags: [hindsight_plugin_patches]
+
+- name: Ensure Hindsight directory-sync state directory exists
+  ansible.builtin.file:
+    path: "{{ hindsight_sync_state_dir }}"
+    state: directory
+    mode: "0700"
+  tags: [hindsight_dir_sync]
+
+- name: Render Hindsight directory-sync LaunchAgents
+  ansible.builtin.template:
+    src: hindsight-dir-sync.plist.j2
+    dest: "{{ hindsight_plist_dir }}/com.{{ site_ns }}.hindsight-sync-{{ sync.name }}.plist"
+    mode: "0644"
+  loop: "{{ hindsight_dir_syncs }}"
+  loop_control:
+    loop_var: sync
+    label: "{{ sync.name }}"
+  register: _hindsight_sync_plists
+  tags: [hindsight_dir_sync]
+
+# Boot out (if loaded) and bootstrap every changed agent; the retry covers the same
+# bootout/bootstrap teardown race as the API agent above.
+- name: Reload changed Hindsight directory-sync LaunchAgents
+  ansible.builtin.shell: |
+    launchctl bootout "gui/{{ ansible_facts.user_uid }}/com.{{ site_ns }}.hindsight-sync-{{ item.sync.name }}" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      launchctl bootstrap "gui/{{ ansible_facts.user_uid }}" "{{ item.dest }}" && exit 0
+      sleep 3
+    done
+    exit 1
+  loop: "{{ _hindsight_sync_plists.results }}"
+  loop_control:
+    label: "{{ item.sync.name }}"
+  when:
+    - not ansible_check_mode
+    - item.changed
+  tags: [hindsight_dir_sync]

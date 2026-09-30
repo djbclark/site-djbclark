@@ -19,7 +19,7 @@ from typing import Any
 POLICY_VERSION = "hindsight-retention-v1"
 SECRET_PATTERNS = [
     re.compile(r"(?i)\b(?:api[_-]?key|access[_-]?token|secret|password|private[_-]?key)\s*[:=]\s*\S+"),
-    re.compile(r"\b(?:sk|ghp|github_pat|xox[baprs]-)[A-Za-z0-9_\-]{12,}\b"),
+    re.compile(r"\b(?:sk-|ghp|github_pat|xox[baprs]-)[A-Za-z0-9_\-]{12,}\b"),  # "sk-", not "sk": "skills-..." matched
     re.compile(r"-----BEGIN [A-Z ]+ PRIVATE KEY-----"),
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
 ]

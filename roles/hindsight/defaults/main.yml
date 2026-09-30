@@ -194,3 +194,16 @@ hindsight_plugin_patches:
   - patch-reflect-timeout.sh
 hindsight_plugin_patch_label: "com.{{ site_ns }}.hindsight-plugin-patch"
 hindsight_plugin_patch_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_plugin_patch_label }}.plist"
+
+# Directory -> bank mirrors (bin/hindsight_sync_dir.py). The files stay canonical; the bank
+# makes them findable by recall from any session. Re-run on any change to the directory, at
+# login, and hourly; only changed files are sent. 2026-09-30: site-private's reference_* and
+# project_* memories left the auto-loaded MEMORY.md index, so recall is how they get found.
+hindsight_sync_script: "{{ playbook_dir | dirname }}/bin/hindsight_sync_dir.py"
+hindsight_sync_state_dir: "{{ hindsight_home }}/.hindsight/sync-state"
+hindsight_dir_syncs:
+  - name: site-private-memory
+    bank: hermes-shared
+    dir: "{{ hindsight_home }}/ops/site-private/memory"
+    globs: ["reference_*.md", "project_*.md"]
+    tags: ["source:site-private-memory"]

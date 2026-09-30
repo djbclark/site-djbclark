@@ -67,3 +67,12 @@ login, and hourly. Log: `~/Library/Logs/hindsight/plugin-patch.log`.
    trigger, without which knowledge pages stay blank.
 2. `patch-reflect-timeout.sh`: makes the `hindsight_reflect` MCP tool honor
    `reflectTimeoutMs`; stock 0.3.4 always aborts at 120 s.
+
+## Directory syncs
+
+`hindsight_dir_syncs` mirrors directories of Markdown into a bank with
+`bin/hindsight_sync_dir.py`, one document per file (`document_id` =
+`<name>/<filename>`, replaced on change, deleted when the file goes). One
+LaunchAgent per entry runs it when the directory changes, at login, and hourly.
+Files with secret-shaped content are skipped and listed in
+`~/Library/Logs/hindsight/sync-<name>.log`, never sent.
