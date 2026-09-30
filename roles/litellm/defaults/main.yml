@@ -99,9 +99,14 @@ litellm_clinepass_api_key: "{{ lookup('env', 'CLINE_API_KEY') | default('', true
 # general use (unlike the Gemini *subscription*); the free tier is rate-capped,
 # so it fails loudly rather than billing when exhausted.
 litellm_gemini_api_key: "{{ lookup('env', 'GEMINI_API_KEY') | default('', true) }}"
+# Ids MUST contain "gemini-3": LiteLLM only injects the dummy thought_signature
+# (needed when tool-call history came from another model, e.g. grok-sub) when
+# _is_gemini_3_or_newer() matches the id. The `-latest` alias did not match, so
+# fallbacks from grok-sub failed with HTTP 400 "Function call is missing a
+# thought_signature" (2026-09-29).
 litellm_gemini_fallback_models:
   - { name: gemini-free, model: gemini/gemini-3.7-flash }
-  - { name: gemini-free-lite, model: gemini/gemini-flash-lite-latest }
+  - { name: gemini-free-lite, model: gemini/gemini-3.1-flash-lite }
 
 # SuperGrok subscription via xAI OAuth (2026-09-26, operator decision): a
 # fallback after the ClinePass models and before the Gemini free tier. LiteLLM
