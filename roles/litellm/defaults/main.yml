@@ -218,6 +218,35 @@ litellm_cooldown_time: 300
 # generated secret sourced from the vault like litellm_clinepass_api_key.
 litellm_master_key: "sk-litellm-local"
 
+# --- Per-client virtual keys (2026-09-30) ------------------------------------
+#
+# The spend DB above records every request, but every client sent the same
+# master key, so LiteLLM_SpendLogs could say how much the proxy burned and not
+# WHO burned it. That was the missing number when ClinePass lost a month of
+# quota in two sprints (2026-09-20/21 and 2026-09-25): Hindsight, Hermes and
+# goose all shared one key.
+#
+# Each client now sends its own key. The role creates any that are missing via
+# /key/generate (tasks/client_keys.yml); `aiuse attribute` reads the alias back
+# out of the spend logs. The key values are fixed here rather than generated so
+# a rebuilt database gets the same keys and no client needs re-pointing.
+#
+# Like litellm_master_key these are NOT secrets: loopback-only labels. The
+# master key keeps working, so a client that was missed still gets through; it
+# just lands in the unattributed bucket. Consumers: roles/goose
+# (goose_litellm_api_key), roles/open_webui (open_webui_openai_api_key),
+# ~/.hermes/config.yaml providers.litellm-local.api_key and
+# ~/.hermes/scripts/check-llm-backend-health.sh (both Hermes-owned, hand-edited).
+litellm_client_keys:
+  - alias: hermes
+    key: sk-litellm-hermes
+  - alias: goose
+    key: sk-litellm-goose
+  - alias: open-webui
+    key: sk-litellm-open-webui
+  - alias: llm-health-watchdog
+    key: sk-litellm-watchdog
+
 # Dedicated Postgres for LiteLLM's key/spend tables.
 #
 # Deliberately NOT the embedded pg0 cluster that Hindsight runs on :5432

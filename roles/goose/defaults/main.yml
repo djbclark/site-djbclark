@@ -76,7 +76,9 @@ goose_ext_saner_available: false
 
 # Goose must authenticate to the LiteLLM proxy since 2026-09-27 (roles/litellm
 # gained general_settings.master_key). Goose looks this name up in its keyring
-# (service "goose") and falls back to the environment. The value must equal
-# roles/litellm litellm_master_key; it is not a secret (loopback-only guard).
+# (service "goose") and falls back to the environment. The value is Goose's own
+# virtual key from roles/litellm litellm_client_keys (alias "goose"), so its
+# requests are attributable in the spend logs; it is not a secret
+# (loopback-only guard).
 goose_litellm_api_key_env: LITELLM_LOCAL_API_KEY
-goose_litellm_api_key: "sk-litellm-local"
+goose_litellm_api_key: "sk-litellm-goose"

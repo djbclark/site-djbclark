@@ -158,3 +158,15 @@
   retries: 150
   delay: 2
   when: not ansible_check_mode
+
+# Tagged so the keys can be reconciled without the secrets a full apply needs
+# to render the plist: `just litellm-apply --tags litellm_client_keys`.
+- name: Reconcile per-client LiteLLM virtual keys
+  ansible.builtin.include_tasks:
+    file: client_keys.yml
+    apply:
+      tags: [litellm_client_keys]
+  when:
+    - litellm_db_enabled | bool
+    - not ansible_check_mode
+  tags: [litellm_client_keys]

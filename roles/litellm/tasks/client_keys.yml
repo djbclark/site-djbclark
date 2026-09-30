@@ -1,0 +1,34 @@
+---
+# Per-client virtual keys, so LiteLLM_SpendLogs can say which client spent what.
+# Rationale and the consumer list: litellm_client_keys in defaults/main.yml.
+#
+# Idempotent: a key that already exists is left alone (never regenerated, so
+# its spend history stays attached to it).
+- name: Look up the per-client LiteLLM virtual keys
+  ansible.builtin.uri:
+    url: "http://{{ litellm_bind }}:{{ litellm_port }}/key/info?key={{ item.key }}"
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    status_code: [200, 404]
+  loop: "{{ litellm_client_keys }}"
+  loop_control:
+    label: "{{ item.alias }}"
+  register: _litellm_client_key_info
+
+- name: Create the missing per-client LiteLLM virtual keys
+  ansible.builtin.uri:
+    url: "http://{{ litellm_bind }}:{{ litellm_port }}/key/generate"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    body_format: json
+    body:
+      key: "{{ item.item.key }}"
+      key_alias: "{{ item.item.alias }}"
+      user_id: "{{ item.item.alias }}"
+    status_code: 200
+  loop: "{{ _litellm_client_key_info.results }}"
+  loop_control:
+    label: "{{ item.item.alias }}"
+  when: item.status == 404
+  changed_when: true

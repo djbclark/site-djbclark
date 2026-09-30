@@ -18,8 +18,9 @@ open_webui_health_url: "http://127.0.0.1:{{ open_webui_port }}/health"
 open_webui_serve_port: 8086
 open_webui_base_url: "https://{{ caddy_public_hostname }}:{{ open_webui_serve_port }}"
 open_webui_openai_api_base_url: "http://127.0.0.1:4000/v1"
-# Must match roles/litellm litellm_master_key. The proxy gained
-# general_settings.master_key on 2026-09-27, so every caller now authenticates;
-# the old "sk-dummy" placeholder started returning 401. Not a secret -- see the
-# rationale block in roles/litellm/defaults/main.yml.
-open_webui_openai_api_key: "sk-litellm-local"
+# Open WebUI's own virtual key from roles/litellm litellm_client_keys (alias
+# "open-webui"), so its requests are attributable in the spend logs. The proxy
+# gained general_settings.master_key on 2026-09-27, so every caller
+# authenticates; the old "sk-dummy" placeholder started returning 401. Not a
+# secret -- see the rationale block in roles/litellm/defaults/main.yml.
+open_webui_openai_api_key: "sk-litellm-open-webui"
