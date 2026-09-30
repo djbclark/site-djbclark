@@ -43,6 +43,10 @@
   ansible.builtin.uri:
     url: "{{ hindsight_llm_base_url }}/models"
     return_content: true
+    # LiteLLM answers 401 to an unauthenticated /models once master_key is on; the
+    # placeholder IS that key (see hindsight_llm_api_key_placeholder). 2026-09-29.
+    headers:
+      Authorization: "Bearer {{ hindsight_llm_api_key_placeholder }}"
   register: _hindsight_proxy_models
   changed_when: false
   failed_when: false
@@ -150,6 +154,6 @@
     status_code: 200
   register: _hindsight_health
   until: _hindsight_health.status == 200
-  retries: 30
+  retries: 60
   delay: 5
   when: not ansible_check_mode
