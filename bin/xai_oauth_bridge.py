@@ -24,6 +24,7 @@ import argparse
 import http.client
 import os
 import sys
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -114,7 +115,28 @@ def main() -> None:
     args = ap.parse_args()
     if args.host not in ("127.0.0.1", "::1", "localhost"):
         sys.exit("refusing non-loopback bind: this bridge has no auth")
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+
+    # 2026-09-27: a launchd-triggered restart once left this process alive for
+    # 40+s without binding the socket or logging anything, right after a rapid
+    # bootout/kill/bootstrap cycle on the same port — never reproduced in
+    # isolation, so the exact cause (OS-level port-release race, resource
+    # contention from another service also restarting) is unconfirmed. Retry
+    # the bind with backoff instead of relying on launchd's ThrottleInterval
+    # alone, so a transient collision self-heals in seconds.
+    last_error: OSError | None = None
+    for attempt in range(1, 6):
+        try:
+            server = ThreadingHTTPServer((args.host, args.port), Handler)
+            break
+        except OSError as e:
+            last_error = e
+            sys.stderr.write(f"bind attempt {attempt}/5 failed: {e}; retrying in {attempt}s\n")
+            sys.stderr.flush()
+            time.sleep(attempt)
+    else:
+        sys.exit(f"giving up after 5 bind attempts: {last_error}")
+
+    server.serve_forever()
 
 
 if __name__ == "__main__":
