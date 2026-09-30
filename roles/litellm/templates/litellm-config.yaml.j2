@@ -143,6 +143,9 @@ model_list:
       api_base: {{ litellm_opencode_go_api_base }}
       api_key: os.environ/OPENCODE_GO_API_KEY
       max_tokens: {{ litellm_max_tokens }}
+{% for k, v in (g.params | default({})).items() %}
+      {{ k }}: {{ v | to_json }}
+{% endfor %}
       extra_headers:
         x-opencode-session: litellm-proxy
 {% endfor %}

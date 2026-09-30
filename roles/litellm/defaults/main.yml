@@ -121,8 +121,14 @@ litellm_opencode_go_models:
   - { name: go-kimi, model: kimi-k3 }
   - { name: go-deepseek-pro, model: deepseek-v4-pro }
   - { name: go-deepseek-flash, model: deepseek-v4-flash }
-  # Hindsight reflect (2026-09-30): 10-13s on a ~30k-token reflect turn vs kimi-k3's 24-40s, low reasoning tokens.
-  - { name: go-glm-flash, model: glm-5.3-flash }
+  # Hindsight reflect (2026-09-30). `params` are merged into litellm_params. With default
+  # reasoning, glm-5.3-flash spent 2.8-4k hidden reasoning tokens on long answers and
+  # reflect's final synthesis took ~75s (120s direct, 33 tok/s). With reasoning_effort
+  # none: 5s on a reflect-shaped tool call, answers still correct. Its API rejects
+  # `thinking: {type: disabled}` with HTTP 400; reasoning_effort is the knob that works.
+  # It must go in extra_body: a top-level reasoning_effort "none" is silently dropped by
+  # LiteLLM (drop_params: true) and the model reasons at full length anyway.
+  - { name: go-glm-flash, model: glm-5.3-flash, params: { extra_body: { reasoning_effort: "none" } } }
 
 # SuperGrok subscription via xAI OAuth (2026-09-26, operator decision): a
 # fallback after the ClinePass models and before the Gemini free tier. LiteLLM
