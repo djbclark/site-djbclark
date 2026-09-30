@@ -204,6 +204,13 @@ hindsight_plugin_dir: "{{ hindsight_home }}/.hindsight/coding-agents"
 hindsight_plugin_patches:
   - patch-page-trigger.sh
   - patch-reflect-timeout.sh
+  - patch-page-schedule.sh
+# The same agent enforces a staggered cron refresh on every knowledge page in every bank
+# (bin/hindsight_page_schedule.py), replacing refresh-after-consolidation: ~90 page refreshes
+# in 8.5 h on 2026-09-30, each a 1-5 min reflect. A cron refresh runs only when the page is
+# stale, so an active bank refreshes each page at most once per interval.
+hindsight_page_schedule_script: "{{ playbook_dir | dirname }}/bin/hindsight_page_schedule.py"
+hindsight_page_refresh_every_hours: 6
 hindsight_plugin_patch_label: "com.{{ site_ns }}.hindsight-plugin-patch"
 hindsight_plugin_patch_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_plugin_patch_label }}.plist"
 

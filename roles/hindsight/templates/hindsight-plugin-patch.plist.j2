@@ -10,7 +10,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>rc=0; for p in {% for p in hindsight_plugin_patches %}"{{ hindsight_plugin_dir }}/{{ p }}" {% endfor %}; do echo "$(date '+%F %T') $p"; "$p" || rc=1; done; exit $rc</string>
+        <string>rc=0; for p in {% for p in hindsight_plugin_patches %}"{{ hindsight_plugin_dir }}/{{ p }}" {% endfor %}; do echo "$(date '+%F %T') $p"; "$p" || rc=1; done; /usr/bin/python3 "{{ hindsight_page_schedule_script }}" --api "http://{{ hindsight_bind }}:{{ hindsight_port }}" --every-hours {{ hindsight_page_refresh_every_hours }} || rc=1; exit $rc</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

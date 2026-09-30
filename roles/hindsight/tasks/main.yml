@@ -256,3 +256,11 @@
     - not ansible_check_mode
     - item.changed
   tags: [hindsight_dir_sync]
+
+- name: Put Hindsight knowledge pages on the staggered refresh schedule now
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "{{ hindsight_page_schedule_script }}", --api, "http://{{ hindsight_bind }}:{{ hindsight_port }}", --every-hours, "{{ hindsight_page_refresh_every_hours | string }}"]
+  register: _hindsight_page_schedule
+  changed_when: "'patched=0 ' not in _hindsight_page_schedule.stdout"
+  when: not ansible_check_mode
+  tags: [hindsight_plugin_patches]

@@ -67,6 +67,10 @@ login, and hourly. Log: `~/Library/Logs/hindsight/plugin-patch.log`.
    trigger, without which knowledge pages stay blank.
 2. `patch-reflect-timeout.sh`: makes the `hindsight_reflect` MCP tool honor
    `reflectTimeoutMs`; stock 0.3.4 always aborts at 120 s.
+3. `patch-page-schedule.sh`: new knowledge and initiative pages refresh on a
+   6-hourly cron instead of after every consolidation. The same agent runs
+   `bin/hindsight_page_schedule.py`, which moves every existing knowledge page to a
+   per-bank staggered schedule (`hindsight_page_refresh_every_hours`).
 
 ## Directory syncs
 
