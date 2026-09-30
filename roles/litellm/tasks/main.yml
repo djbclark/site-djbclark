@@ -148,6 +148,10 @@
   ansible.builtin.uri:
     url: "{{ litellm_health_url }}"
     status_code: 200
+    # With general_settings.master_key on (litellm_db_enabled) /v1/models answers 401 to an
+    # unauthenticated probe even though the proxy is up; that made a healthy apply
+    # "fail" after 60 retries (2026-09-29). Send the same anti-typo master key clients use.
+    headers: "{{ {'Authorization': 'Bearer ' ~ litellm_master_key} if (litellm_db_enabled | bool) else {} }}"
   register: _litellm_health
   until: _litellm_health.status == 200
   retries: 60

@@ -133,6 +133,21 @@ model_list:
       max_tokens: {{ litellm_max_tokens }}
 
 {% endif %}
+{% if litellm_opencode_go_api_key | length > 0 %}
+  # OpenCode Go pool (2026-09-29): the durable, least-used paid pool. The static
+  # x-opencode-session header is required by the endpoint (upstream affinity only).
+{% for g in litellm_opencode_go_models %}
+  - model_name: {{ g.name }}
+    litellm_params:
+      model: openai/{{ g.model }}
+      api_base: {{ litellm_opencode_go_api_base }}
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      max_tokens: {{ litellm_max_tokens }}
+      extra_headers:
+        x-opencode-session: litellm-proxy
+{% endfor %}
+
+{% endif %}
 {% for g in litellm_gemini_fallback_models %}
   - model_name: {{ g.name }}
     litellm_params:
@@ -181,18 +196,21 @@ router_settings:
   # front of each clinepass-* chain and move ClinePass back ahead of Gemini in
   # grok-sub's, and repoint hindsight_llm_model. Check `aiuse` first — the
   # monthly reset is the one that matters, not the weekly.
-{% set after_clinepass = (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + (litellm_gemini_fallback_models | map(attribute='name') | list) %}
+{% set go_names = (litellm_opencode_go_models | map(attribute='name') | list) if (litellm_opencode_go_api_key | length > 0) else [] %}
+{% set gemini_names = litellm_gemini_fallback_models | map(attribute='name') | list %}
+{% set after_clinepass = go_names + (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + gemini_names %}
+  # 2026-09-29: the Go models lead every chain (durable, ~2% of its month used);
+  # SuperGrok and Gemini free tier follow, ClinePass stays last.
   fallbacks:
     - clinepass-minimax-m3: {{ (after_clinepass + ['clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
     - clinepass-kimi-k3: {{ (after_clinepass + ['clinepass-minimax-m3', 'clinepass-deepseek']) | to_json }}
     - clinepass-deepseek: {{ (after_clinepass + ['clinepass-minimax-m3', 'clinepass-kimi-k3']) | to_json }}
 {% if litellm_xai_bridge_enabled | bool %}
-    # grok-sub is now Hindsight's PRIMARY for both retain and reflect, so its
-    # own chain matters more than it used to. Gemini free tier first (it is at
-    # least alive), ClinePass last so a SuperGrok blip does not spend the 1% of
-    # the ClinePass month that the 09-29 weekly reset will hand back.
-    - grok-sub: {{ ((litellm_gemini_fallback_models | map(attribute='name') | list) + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
+    - grok-sub: {{ (go_names + gemini_names + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
 {% endif %}
+{% for n in go_names %}
+    - {{ n }}: {{ ((go_names | reject('equalto', n) | list) + (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + gemini_names + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
+{% endfor %}
 
 # The proxy stays loopback-only (litellm_bind). Never widen it (Tailscale or
 # public) without promoting litellm_master_key to a real generated secret from

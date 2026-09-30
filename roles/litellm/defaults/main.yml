@@ -108,6 +108,20 @@ litellm_gemini_fallback_models:
   - { name: gemini-free, model: gemini/gemini-3.7-flash }
   - { name: gemini-free-lite, model: gemini/gemini-3.1-flash-lite }
 
+# OpenCode Go pool (2026-09-29, operator decision: "better value options that last
+# longer"). SuperGrok's weekly cap and its extra credits were exhausted and ClinePass
+# is at 99% of its month, while Go sat at ~2% of its month. The Go endpoint needs an
+# `x-opencode-session` header (static value is fine; it only pins upstream affinity)
+# and accepts the account-wide OpenCode key, which is the already-managed
+# OPENCODE_ZEN_API_KEY -- NOT a new credential. Render it through
+# `just litellm-apply-secrets`; the daemon reads it as OPENCODE_GO_API_KEY.
+litellm_opencode_go_api_key: "{{ lookup('env', 'OPENCODE_ZEN_API_KEY') | default('', true) }}"
+litellm_opencode_go_api_base: "https://opencode.ai/zen/go/v1"
+litellm_opencode_go_models:
+  - { name: go-kimi, model: kimi-k3 }
+  - { name: go-deepseek-pro, model: deepseek-v4-pro }
+  - { name: go-deepseek-flash, model: deepseek-v4-flash }
+
 # SuperGrok subscription via xAI OAuth (2026-09-26, operator decision): a
 # fallback after the ClinePass models and before the Gemini free tier. LiteLLM
 # cannot hold a rotating OAuth grant, so a loopback bridge

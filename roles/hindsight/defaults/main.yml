@@ -60,7 +60,11 @@ hindsight_llm_base_url: "http://127.0.0.1:4000/v1"
 #
 # Standing rule this restores: site-private memory reference_ai_service_matrix
 # says ClinePass feeds Hindsight+hermes but "never bulk-route there".
-hindsight_llm_model: "grok-sub"
+# 2026-09-29 (operator: move to better-value pools): SuperGrok's weekly cap and extra credits are
+# gone (resets 2026-10-01T06:41Z) and Hindsight was silently riding the Gemini free tier. The
+# OpenCode Go pool (roles/litellm go-* routes, ~2% of its month used) takes retain/consolidation.
+# Chain in the proxy: go-deepseek-flash -> go-kimi -> go-deepseek-pro -> grok-sub -> Gemini -> ClinePass.
+hindsight_llm_model: "go-deepseek-flash"
 
 # Not a secret. Hindsight's requires_api_key() rejects an empty key for the
 # openai provider, and the proxy sets no general_settings.master_key, so it
@@ -79,7 +83,8 @@ hindsight_reflect_llm_base_url: "{{ hindsight_llm_base_url }}"
 # at ~40s, so every auto-reflect was cancelled. grok-sub answers in seconds. The
 # proxy falls back grok-sub -> ClinePass models -> Gemini free tier, so a
 # SuperGrok outage or rate limit degrades speed, not availability.
-hindsight_reflect_llm_model: "grok-sub"
+# go-kimi answers a tool-using turn in ~7-9s, inside the Claude plugin's ~40s session-start reflect cap.
+hindsight_reflect_llm_model: "go-kimi"
 hindsight_reflect_max_context_tokens: 30000
 hindsight_reflect_max_iterations: 4
 
