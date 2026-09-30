@@ -197,6 +197,16 @@ class TccAuditTest(unittest.TestCase):
         with mock.patch.object(tcc, "bundle_paths", side_effect=RuntimeError("lsregister failed")):
             self.assertEqual(tcc.classify(app)[0], "unknown")
 
+    def test_unsigned_script_is_unknown_but_unsigned_binary_is_stale(self):
+        d = Path(tempfile.mkdtemp())
+        script, binary = d / "tool", d / "bin"
+        script.write_text("#!/usr/bin/env bash\necho hi\n")
+        binary.write_bytes(b"\xcf\xfa\xed\xfe not really signed")
+        fake = mock.Mock(returncode=1, stderr=b"code object is not signed at all")
+        with mock.patch.object(tcc, "run", return_value=fake):
+            self.assertIsNone(tcc.satisfies(str(script), "req"))
+            self.assertIs(tcc.satisfies(str(binary), "req"), False)
+
     def test_permission_denied_is_not_a_missing_path(self):
         with mock.patch.object(tcc.os, "lstat", side_effect=PermissionError("denied")):
             with self.assertRaises(PermissionError):

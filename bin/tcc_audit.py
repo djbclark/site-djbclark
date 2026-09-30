@@ -173,8 +173,16 @@ def satisfies(path, req):
     p = run(["codesign", "--verify", "--ignore-resources", f"-R={req}", path])
     if p.returncode == 0:
         return True
-    if p.returncode == 3 or b"failed to satisfy" in p.stderr or b"not signed at all" in p.stderr:
+    if p.returncode == 3 or b"failed to satisfy" in p.stderr:
         return False
+    if b"not signed at all" in p.stderr:
+        # A stripped Mach-O has no identity, so tccd rejects it. A #! script never has one:
+        # TCC binds such a row to the interpreter, which we cannot judge from the script path.
+        try:
+            with open(path, "rb") as f:
+                return None if f.read(2) == b"#!" else False
+        except OSError:
+            return None
     return None
 
 
