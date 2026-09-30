@@ -154,6 +154,7 @@
     headers: "{{ {'Authorization': 'Bearer ' ~ litellm_master_key} if (litellm_db_enabled | bool) else {} }}"
   register: _litellm_health
   until: _litellm_health.status == 200
-  retries: 60
+  # A cold start (DB connect + route warm-up) took ~3 min on 2026-09-30; 150 x 2s = 5 min.
+  retries: 150
   delay: 2
   when: not ansible_check_mode
