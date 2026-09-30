@@ -207,6 +207,29 @@ class TccAuditTest(unittest.TestCase):
             self.assertIsNone(tcc.satisfies(str(script), "req"))
             self.assertIs(tcc.satisfies(str(binary), "req"), False)
 
+    def test_acknowledged_problems_drop_out_of_cron_output(self):
+        db = self.make_db([(FDA, "/old/path", 1, 2, b"x"), (FDA, "/other/gone", 1, 2, b"x")])
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(tcc, "csreq_text", lambda b: "req"), \
+             mock.patch.object(tcc, "path_exists", lambda p: False), \
+             mock.patch.object(tcc, "missing_expected", lambda rows: []), \
+             mock.patch.object(tcc, "IGNORE_PATH", d / "ignore.json"), \
+             mock.patch.object(tcc, "STATE_PATH", d / "state.json"):
+            import io, contextlib
+            def run_main(*a):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    tcc.main(["--db", db, *a])
+                return buf.getvalue()
+            self.assertIn("2 new problem", run_main())
+            self.assertIn("acknowledged 1", run_main("--ack", "/old/path", "--note", "kept"))
+            out = run_main("--all")
+            self.assertIn("/other/gone", out)
+            self.assertNotIn("/old/path", out)
+            self.assertIn("1 acknowledged", out)
+            self.assertIn("un-acknowledged 1", run_main("--unack", "/old/path"))
+            self.assertIn("/old/path", run_main("--all"))
+
     def test_permission_denied_is_not_a_missing_path(self):
         with mock.patch.object(tcc.os, "lstat", side_effect=PermissionError("denied")):
             with self.assertRaises(PermissionError):

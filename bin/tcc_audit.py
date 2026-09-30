@@ -20,6 +20,10 @@ Usage:
   tcc_audit.py                 cron mode: print only NEW problems (or a weekly digest); silent when clean
   tcc_audit.py --all           print the full audit now, regardless of state
   tcc_audit.py --json          machine-readable audit
+  tcc_audit.py --ack PATTERN [--note TEXT]
+                               acknowledge current problems whose key contains PATTERN: cron mode
+                               stops alerting/reminding about them (still listed by --all)
+  tcc_audit.py --unack PATTERN  undo an acknowledgement
   tcc_audit.py --list NAME     rows whose client contains NAME, each marked ok/stale/orphan/unknown
                                (to tell which of several same-named Settings rows is the dead one)
   tcc_audit.py --cleanup-script [--include-stale] [--include-apps]
@@ -50,6 +54,7 @@ SYSTEM_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 USER_DB = str(HOME / "Library/Application Support/com.apple.TCC/TCC.db")
 STATE_PATH = HOME / ".local/state/tcc-audit/state.json"
 EXPECTED_PATH = HOME / ".config/tcc-audit/expected.json"
+IGNORE_PATH = HOME / ".config/tcc-audit/ignore.json"
 DIGEST_EVERY = 7 * 86400
 
 # auth_value: 0 denied, 1 unknown, 2 allowed, 3 limited
@@ -330,6 +335,19 @@ def render(problems, rows):
     return "\n".join(out)
 
 
+def load_ignored():
+    try:
+        return {e["key"]: e.get("note", "") for e in json.loads(IGNORE_PATH.read_text())}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def save_ignored(ignored):
+    IGNORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    IGNORE_PATH.write_text(json.dumps(
+        [{"key": k, "note": n} for k, n in sorted(ignored.items())], indent=1))
+
+
 def load_state():
     try:
         return json.loads(STATE_PATH.read_text())
@@ -412,6 +430,9 @@ def main(argv):
     ap.add_argument("--all", action="store_true", help="print the full audit now")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--list", metavar="NAME", help="show rows whose client contains NAME")
+    ap.add_argument("--ack", metavar="PATTERN")
+    ap.add_argument("--unack", metavar="PATTERN")
+    ap.add_argument("--note", default="")
     ap.add_argument("--cleanup-script", action="store_true")
     ap.add_argument("--include-stale", action="store_true")
     ap.add_argument("--include-apps", action="store_true")
@@ -431,6 +452,26 @@ def main(argv):
         return 0
     rows, problems = gather(dbs)
 
+    if args.ack or args.unack:
+        ignored = load_ignored()
+        if args.ack:
+            hit = [k for k in problems if args.ack in k]
+            for k in hit:
+                ignored[k] = args.note
+        else:
+            hit = [k for k in ignored if args.unack in k]
+            for k in hit:
+                del ignored[k]
+        save_ignored(ignored)
+        print(f"{'acknowledged' if args.ack else 'un-acknowledged'} {len(hit)} problem(s)")
+        for k in sorted(hit):
+            print("  " + k)
+        return 0
+
+    ignored = load_ignored()
+    acked = {k: v for k, v in problems.items() if k in ignored}
+    problems = {k: v for k, v in problems.items() if k not in ignored}
+
     if args.json:
         json.dump(dict(problems=problems, rows=len(rows)), sys.stdout, indent=1, default=str)
         print()
@@ -441,9 +482,16 @@ def main(argv):
     if args.all:
         text = render(problems, rows)
         print(text if text else f"clean: {len(rows)} grants checked, none stale or orphaned")
+        if acked:
+            print(f"({len(acked)} acknowledged, hidden: see {IGNORE_PATH})")
         return 0
 
-    # cron mode: alert on problems not seen before; re-print everything weekly while any remain
+    # cron mode: alert on problems not seen before; re-print everything weekly while any remain.
+    # "App not found" rows are informational (--all only): LaunchServices flaps (Drive for desktop
+    # appeared in the list mid-session) and a prefpane like Hazel never registers, so alerting
+    # on them would be noise.
+    problems = {k: v for k, v in problems.items()
+                if not (v["kind"] == "orphan" and v.get("client_type") == 0)}
     state = load_state()
     now = time.time()
     known = state["known"]
