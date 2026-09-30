@@ -87,11 +87,12 @@ class TccAuditTest(unittest.TestCase):
         self.assertIn("'/it''s/gone'", tcc.cleanup_script(problems, False, False))
 
     def test_unreadable_db_is_reported_not_silent(self):
-        _, problems = tcc.gather(["/nonexistent-dir/TCC.db"])  # missing db is skipped, not an error
-        self.assertEqual(problems, {})
-        with mock.patch.object(tcc, "read_rows", side_effect=sqlite3.OperationalError("authorization denied")), \
-             mock.patch.object(tcc.os.path, "exists", lambda p: True):
-            _, problems = tcc.gather(["/x/TCC.db"])
+        with mock.patch.object(tcc, "missing_expected", lambda rows: []):  # ignore the real expected.json
+            _, problems = tcc.gather(["/nonexistent-dir/TCC.db"])  # missing db is skipped, not an error
+            self.assertEqual(problems, {})
+            with mock.patch.object(tcc, "read_rows", side_effect=sqlite3.OperationalError("authorization denied")), \
+                 mock.patch.object(tcc.os.path, "exists", lambda p: True):
+                _, problems = tcc.gather(["/x/TCC.db"])
         self.assertEqual([p["kind"] for p in problems.values()], ["health"])
 
 
