@@ -151,15 +151,20 @@ hindsight_read_db_pool_max_size: 8
 # loopback proxy, so the binding constraints here are host CPU and the SuperGrok
 # weekly quota rather than upstream slots. 4 keeps retain and consolidation
 # overlapping without a 32-way stampede. Revisit if retain throughput suffers.
-hindsight_llm_max_concurrent: 4
+# 4 -> 2 on 2026-09-29 (operator: reduce load). SuperGrok's weekly cap was
+# hit (resets 10-01T06:41Z), so grok-sub calls fall through to the Gemini free
+# tier, which Hermes also needs; halve what Hindsight can take from it.
+hindsight_llm_max_concurrent: 2
 
 # 10 -> 6. Total concurrent background tasks per worker. Each task is an LLM
 # call plus local CPU embedding, so this multiplies against the 4 above.
-hindsight_worker_max_slots: 6
+# 6 -> 3 on 2026-09-29, same reason as llm_max_concurrent above.
+hindsight_worker_max_slots: 3
 
 # 8 -> 2. There are 32 banks; 8 simultaneous mental-model refreshes is a
 # thundering herd on a machine this size, and refreshes are never urgent.
-hindsight_mental_model_refresh_concurrency: 2
+# 2 -> 1 on 2026-09-29, same reason.
+hindsight_mental_model_refresh_concurrency: 1
 
 # 32 -> 8. Recall is the latency-sensitive path (session start), but 32
 # concurrent recalls on 8 cores queue behind each other anyway.

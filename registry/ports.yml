@@ -76,8 +76,12 @@ hosts:
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1). Runs from the git checkout ~/src/litellm (fork of BerriAI/litellm) installed by hand as a uv tool -- roles/litellm verifies that install but never performs it."}
       - {port: 14011, bind: "127.0.0.1", owner: site, service: xai-oauth-bridge, status: active,
          note: "2026-09-26: com.djbclark.xai-oauth-bridge launchd (roles/litellm). bin/xai_oauth_bridge.py under the Hermes venv; injects a fresh SuperGrok OAuth token from Hermes's grant per request so LiteLLM's grok-sub fallback can reach api.x.ai. No auth -- loopback only."}
-      - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: planned,
-         note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only"}
+      - {port: 8888,  bind: "127.0.0.1", owner: site, service: hindsight-api,    status: active,
+         note: "#92: com.djbclark.hindsight-api launchd; Hindsight 0.9.0 with dedicated CODEX_HOME; loopback-only. Flipped planned -> active 2026-09-29 (listening, healthy)."}
+      - {port: 5432,  bind: "127.0.0.1", owner: site, service: hindsight-pg0,    status: active,
+         note: "2026-09-29: Hindsight's embedded pg0 Postgres (~/.pg0/instances/hindsight), started by hindsight-api itself, not by brew. Distinct from the brew postgresql@18 on 5433."}
+      - {port: 5433,  bind: "127.0.0.1", owner: site, service: postgresql-18,   status: active,
+         note: "2026-09-29: brew services postgresql@18 (sh.brew.postgresql@18 launchd). Backs LiteLLM's spend/key tables (DATABASE_URL ...:5433/litellm)."}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
          tailscale_serve_port: 8086,
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
@@ -196,6 +200,14 @@ hosts:
       - {port: 3031,  bind: "*",         owner: unmanaged, service: TODO-identify, status: active}
       - {port: 15220, bind: "*",         owner: unmanaged, service: octoclip,     status: active,
          note: "F2: Octoclip app (not homebrew.mxcl)"}
+      - {port: 15221, bind: "*",         owner: unmanaged, service: octoclip-2,   status: active,
+         note: "2026-09-29: second Octoclip listener next to 15220"}
+      - {port: 5000,  bind: "*",         owner: unmanaged, service: macos-airplay-receiver-5000, status: active,
+         note: "2026-09-29: ControlCenter (AirPlay Receiver). Why SuperBrain moved to 5001; do not claim."}
+      - {port: 7000,  bind: "*",         owner: unmanaged, service: macos-airplay-receiver-7000, status: active,
+         note: "2026-09-29: ControlCenter (AirPlay Receiver); do not claim."}
+      - {port: 6768,  bind: "*",         owner: unmanaged, service: orca-app,     status: active,
+         note: "2026-09-29: Orca.app (~/.local/churn-producing-apps/Orca.app) fixed listener"}
       # postgresql@14: formula gone; orphaned agent removed 2026-07-20 (operator Accept, RESIDUAL-EF).
       # postgresql@18 installed, service none. mariadb installed, service none, 3306 free.
       # Register 5432/3306 only when a service is adopted and started.
@@ -212,6 +224,14 @@ hosts:
         note: "Maestro MCP server (java, ~/.maestro/lib) -- one process per active MCP client connection; observed 10000/10001/10002"
       - pattern: "happy/dist/index.mjs"
         note: "happy CLI daemon (node) -- observed 55089/55093/55094"
+      - pattern: "query-engine-darwin"
+        note: "Prisma query engine (prisma-python) -- one per LiteLLM/Hindsight process, random -p port per start; observed 50291/56091 (2026-09-29)"
+      - pattern: "Orca.app/Contents/MacOS/Orca"
+        note: "Orca.app secondary loopback listener on a per-launch high port (observed 49464); its fixed 6768 has its own row"
+      - pattern: "1Password.app"
+        note: "1Password local helper port (observed 127.0.0.1:39127); app-owned, not ours to allocate"
+      - pattern: "rapportd"
+        note: "macOS rapportd (Continuity) -- random high port per boot; observed 65309"
 
   # E5: Intel Mac mini — same loopback LiteLLM port claim; host offline/unprovisioned
   # on the tailnet as of 2026-07-20. status planned until first successful apply.
