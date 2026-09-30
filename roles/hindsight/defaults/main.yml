@@ -83,8 +83,12 @@ hindsight_reflect_llm_base_url: "{{ hindsight_llm_base_url }}"
 # at ~40s, so every auto-reflect was cancelled. grok-sub answers in seconds. The
 # proxy falls back grok-sub -> ClinePass models -> Gemini free tier, so a
 # SuperGrok outage or rate limit degrades speed, not availability.
-# go-kimi answers a tool-using turn in ~7-9s, inside the Claude plugin's ~40s session-start reflect cap.
-hindsight_reflect_llm_model: "go-kimi"
+# 2026-09-30: go-kimi took 40-50s per reflect LLM call in production, so a 3-iteration reflect ran
+# ~150s and the Claude plugin's 120s reflectTimeoutMs aborted it. Benchmarked the Go pool on a
+# reflect-shaped turn (tool call + ~30k-token synthesis): glm-5.3-flash 10.7-12.5s, 3/3 correct,
+# 0-435 reasoning tokens; kimi-k3 24-40s, 2/3; minimax-m3 fast but leaks <think> text into
+# answers; deepseek-v4-flash, qwen3.8-flash and mimo-v2.6-flash returned empty answers.
+hindsight_reflect_llm_model: "go-glm-flash"
 hindsight_reflect_max_context_tokens: 30000
 hindsight_reflect_max_iterations: 4
 

@@ -121,6 +121,8 @@ litellm_opencode_go_models:
   - { name: go-kimi, model: kimi-k3 }
   - { name: go-deepseek-pro, model: deepseek-v4-pro }
   - { name: go-deepseek-flash, model: deepseek-v4-flash }
+  # Hindsight reflect (2026-09-30): 10-13s on a ~30k-token reflect turn vs kimi-k3's 24-40s, low reasoning tokens.
+  - { name: go-glm-flash, model: glm-5.3-flash }
 
 # SuperGrok subscription via xAI OAuth (2026-09-26, operator decision): a
 # fallback after the ClinePass models and before the Gemini free tier. LiteLLM
