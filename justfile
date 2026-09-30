@@ -142,6 +142,12 @@ litellm-status:
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
 
+# Reload a LaunchAgent after editing its plist (bootout + wait + bootstrap
+# with retry; `kickstart` alone does NOT re-read the plist). Optional health URL.
+#   just svc-reload com.djbclark.hindsight-api http://127.0.0.1:8888/health
+svc-reload label health="":
+    bin/launchd_reload.sh "{{ label }}" "{{ health }}"
+
 # Install/configure local Hindsight memory service for #92. Opt-in and
 # deliberately separate from LiteLLM; no Hermes provider mutation occurs here.
 hindsight_hosts := env_var_or_default("HINDSIGHT_HOSTS", "mac")
