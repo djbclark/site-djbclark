@@ -32,13 +32,18 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import shlex
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
-HOME = Path.home()
+# Under `sudo` Path.home() is root's home; the user's own state, expected.json and TCC.db are
+# what we mean.
+_SUDO_USER = os.environ.get("SUDO_USER")
+HOME = Path(os.path.expanduser(f"~{_SUDO_USER}")) if os.geteuid() == 0 and _SUDO_USER else Path.home()
 SYSTEM_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 USER_DB = str(HOME / "Library/Application Support/com.apple.TCC/TCC.db")
 STATE_PATH = HOME / ".local/state/tcc-audit/state.json"
@@ -54,19 +59,29 @@ def short(service):
 
 
 def run(cmd, stdin=None, timeout=30):
-    return subprocess.run(cmd, input=stdin, capture_output=True, timeout=timeout)
+    """subprocess.run that never raises: a hang or missing tool comes back as rc 124/127."""
+    try:
+        return subprocess.run(cmd, input=stdin, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, b"", b"timeout")
+    except OSError as e:
+        return subprocess.CompletedProcess(cmd, 127, b"", str(e).encode())
 
 
 def read_rows(db):
     """Rows from one TCC.db. Raises sqlite3.Error / OSError if unreadable."""
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    # Absolute + as_uri(): the generated cleanup script must act on exactly the file audited,
+    # whatever its cwd, and '?'/'#' in a path must not be read as URI syntax.
+    db = str(Path(db).resolve(strict=True))
+    con = sqlite3.connect(Path(db).as_uri() + "?mode=ro", uri=True)
     try:
         cur = con.execute(
-            "SELECT service, client, client_type, auth_value, csreq, last_modified FROM access"
+            "SELECT service, client, client_type, auth_value, csreq, last_modified, "
+            "indirect_object_identifier FROM access"
         )
         return [
-            dict(service=s, client=c, client_type=t, auth=a, csreq=q, modified=m, db=db)
-            for s, c, t, a, q, m in cur
+            dict(service=s, client=c, client_type=t, auth=a, csreq=q, modified=m, ioi=i, db=db)
+            for s, c, t, a, q, m, i in cur
         ]
     finally:
         con.close()
@@ -95,33 +110,60 @@ _bundle_map = None
 def _dump_bundle_map():
     """bundle id -> [paths] from the LaunchServices registry (~15s; Spotlight misses
     apps it has not indexed, e.g. Xcode.app, and nested helper apps)."""
-    out = run([LSREGISTER, "-dump"], timeout=120).stdout.decode(errors="replace")
+    p = run([LSREGISTER, "-dump"], timeout=120)
     mapping, path = {}, None
-    for line in out.splitlines():
+    for line in p.stdout.decode(errors="replace").splitlines():
         if line.startswith("path:"):
             path = line[5:].strip().rsplit(" (0x", 1)[0]
         elif line.startswith("identifier:") and path:
             mapping.setdefault(line[11:].strip(), set()).add(path)
         elif line.startswith("----"):
             path = None
+    if p.returncode != 0 or not mapping:
+        # An empty map would make every installed app look uninstalled.
+        raise RuntimeError(f"lsregister -dump failed (rc={p.returncode})")
     return {k: sorted(v) for k, v in mapping.items()}
 
 
-def bundle_paths(bundle_id):
-    """Installed locations of an app bundle id."""
-    global _bundle_map
-    if _bundle_map is None:
+def _load_bundle_map(force=False):
+    if not force:
         try:
-            fresh = time.time() - BUNDLE_MAP_PATH.stat().st_mtime < BUNDLE_MAP_TTL
-            _bundle_map = json.loads(BUNDLE_MAP_PATH.read_text()) if fresh else None
+            if time.time() - BUNDLE_MAP_PATH.stat().st_mtime < BUNDLE_MAP_TTL:
+                cached = json.loads(BUNDLE_MAP_PATH.read_text())
+                if cached:
+                    return cached
         except (OSError, ValueError):
-            _bundle_map = None
+            pass
+    mapping = _dump_bundle_map()
+    BUNDLE_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BUNDLE_MAP_PATH.write_text(json.dumps(mapping))
+    return mapping
+
+
+_bundle_lock = threading.Lock()
+_bundle_refreshed = False
+
+
+def bundle_paths(bundle_id):
+    """Registered locations of an app bundle id. Raises RuntimeError if LaunchServices cannot
+    be read. An id missing from a cached map triggers one fresh dump before we believe it."""
+    global _bundle_map, _bundle_refreshed
+    with _bundle_lock:
         if _bundle_map is None:
-            _bundle_map = _dump_bundle_map()
-            if _bundle_map:  # never cache an empty dump (lsregister failure)
-                BUNDLE_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-                BUNDLE_MAP_PATH.write_text(json.dumps(_bundle_map))
-    return [p for p in _bundle_map.get(bundle_id, []) if os.path.lexists(p)]
+            _bundle_map = _load_bundle_map()
+        if bundle_id not in _bundle_map and not _bundle_refreshed:
+            _bundle_refreshed = True
+            _bundle_map = _load_bundle_map(force=True)
+        return list(_bundle_map.get(bundle_id, []))
+
+
+def path_exists(path):
+    """lexists() that does not mistake 'permission denied' for 'gone'."""
+    try:
+        os.lstat(path)
+        return True
+    except (FileNotFoundError, NotADirectoryError):
+        return False
 
 
 def satisfies(path, req):
@@ -131,27 +173,33 @@ def satisfies(path, req):
     p = run(["codesign", "--verify", "--ignore-resources", f"-R={req}", path])
     if p.returncode == 0:
         return True
-    if p.returncode == 3 or b"failed to satisfy" in p.stderr:
+    if p.returncode == 3 or b"failed to satisfy" in p.stderr or b"not signed at all" in p.stderr:
         return False
     return None
 
 
 def classify(row):
-    """-> (status, detail). status in ok | stale | orphan | unknown."""
-    if row["client_type"] == 1:
-        candidates = [row["client"]]
-    else:
-        candidates = bundle_paths(row["client"])
-    existing = [c for c in candidates if os.path.lexists(c)]
+    """-> (status, detail). status in ok | stale | orphan | unknown.
+    Anything we cannot prove is 'unknown', never stale/orphan: those feed a deleting script."""
+    try:
+        if row["client_type"] == 1:
+            candidates = [row["client"]]
+        else:
+            candidates = bundle_paths(row["client"])
+        existing = [c for c in candidates if path_exists(c)]
+    except (RuntimeError, OSError) as e:
+        return "unknown", str(e)
     if not existing:
-        return "orphan", "not installed" if row["client_type"] == 0 else "path gone"
+        return "orphan", "not registered with LaunchServices" if row["client_type"] == 0 else "path gone"
+    if not row["csreq"]:
+        return "ok", "no csreq"
     req = csreq_text(row["csreq"])
     if not req:
-        return "ok", "no csreq"
+        return "unknown", "csreq could not be decoded"
     verdicts = [satisfies(c, req) for c in existing]
     if any(v is True for v in verdicts):
         return "ok", req
-    if any(v is False for v in verdicts):
+    if all(v is False for v in verdicts):  # every copy conclusively fails the requirement
         return "stale", req
     return "unknown", req
 
@@ -198,8 +246,14 @@ def missing_expected(rows):
     return out
 
 
-def problem_key(kind, service, client):
-    return f"{kind}|{short(service)}|{client}"
+def problem_key(kind, row):
+    """Stable across runs (Hermes dedupes on it); extra parts only for non-default rows."""
+    key = f"{kind}|{short(row['service'])}|{row['client']}"
+    if row["ioi"] != "UNUSED":
+        key += f"|ioi={row['ioi']}"
+    if row["db"] != str(Path(SYSTEM_DB).resolve()):
+        key += f"|db={row['db']}"
+    return key
 
 
 def gather(dbs):
@@ -209,10 +263,11 @@ def gather(dbs):
         problems[f"health|{db}"] = dict(kind="health", service="", client=db, detail=err)
     for r in rows:
         if r["status"] in ("stale", "orphan"):
-            problems[problem_key(r["status"], r["service"], r["client"])] = dict(
+            problems[problem_key(r["status"], r)] = dict(
                 kind=r["status"], service=short(r["service"]), client=r["client"],
                 detail=r["detail"], db=r["db"], client_type=r["client_type"],
-                full_service=r["service"],
+                full_service=r["service"], ioi=r["ioi"], auth=r["auth"],
+                csreq=r["csreq"], modified=r["modified"],
             )
     for svc, path in missing_expected(rows):
         problems[f"missing|{svc}|{path}"] = dict(kind="missing", service=svc, client=path, detail="no grant row")
@@ -278,6 +333,12 @@ def save_state(state):
 
 
 def cleanup_script(problems, include_stale, include_apps):
+    """A root bash script that deletes the audited rows. Hardened after two independent reviews:
+    every value is shell-quoted (client strings are attacker-influenced: a path can contain
+    $(...), backticks, quotes, newlines); the DELETE names the full primary key plus the row's
+    audited auth_value/csreq/last_modified, so a grant re-created since the audit survives; all
+    deletes for a database run in ONE transaction (-bail => all or nothing); the backup uses
+    SQLite's backup API (a plain cp of a live db can miss the WAL) into a unique file."""
     def wanted(p):
         if p["kind"] == "orphan":
             return p["client_type"] == 1 or include_apps
@@ -287,38 +348,52 @@ def cleanup_script(problems, include_stale, include_apps):
     if not targets:
         return "# nothing to clean up\n"
 
-    def q(s):
+    def q(s):  # SQL string literal
         return "'" + s.replace("'", "''") + "'"
 
+    def blob(b):
+        return "NULL" if b is None else "X'" + bytes(b).hex() + "'"
+
+    live = {str(Path(SYSTEM_DB).resolve()), str(Path(USER_DB).resolve())}
     lines = [
         "#!/bin/bash",
         "# Generated by tcc_audit.py --cleanup-script. REVIEW BEFORE RUNNING. Run with: sudo bash <file>",
-        "# Deletes only the rows listed below from the TCC databases, after backing each one up.",
+        "# Deletes only the rows listed below (matched on the full primary key AND the audited",
+        "# auth/csreq/last_modified, so a grant changed since the audit is left alone), in one",
+        "# transaction per database, after an integrity-checked backup.",
         "# Needs Full Disk Access for the terminal running it. If a write is refused, remove the",
-        "# rows in System Settings > Privacy & Security instead (nothing here is needed to use plocate).",
+        "# rows in System Settings > Privacy & Security instead.",
         "set -euo pipefail",
         '[ "$(id -u)" -eq 0 ] || { echo "run with sudo" >&2; exit 1; }',
-        "TS=$(date +%Y%m%d-%H%M%S)",
     ]
     for db in sorted({p["db"] for p in targets}):
+        rows = sorted((t for t in targets if t["db"] == db), key=lambda x: (x["service"], x["client"]))
         lines += [
-            f'DB={q(db)}',
-            'cp -p "$DB" "$DB.bak-$TS"',
-            'echo "backup: $DB.bak-$TS"',
+            f"DB={shlex.quote(db)}",
+            'BACKUP=$(mktemp "$DB.bak-XXXXXXXX")',
+            'sqlite3 "$DB" ".backup \\"$BACKUP\\""',
+            '[ "$(sqlite3 "$BACKUP" "PRAGMA integrity_check")" = ok ] || '
+            '{ echo "backup failed integrity check; nothing deleted" >&2; exit 1; }',
+            'echo "backup: $BACKUP"',
         ]
-        for p in sorted((t for t in targets if t["db"] == db), key=lambda x: (x["service"], x["client"])):
-            lines.append(
-                f"# {p['kind']}: {p['service']} {p['client']}"
+        stmts = ["BEGIN IMMEDIATE;"]
+        for p in rows:
+            # json.dumps keeps hostile text on ONE line (no newline can start a new command)
+            lines.append("# " + json.dumps([p["kind"], p["service"], p["client"]]))
+            stmts.append(
+                f'DELETE FROM access WHERE service={q(p["full_service"])} AND client={q(p["client"])} '
+                f'AND client_type={int(p["client_type"])} AND indirect_object_identifier={q(p["ioi"])} '
+                f'AND auth_value={int(p["auth"])} AND last_modified={int(p["modified"])} '
+                f'AND csreq IS {blob(p["csreq"])};'
             )
-            lines.append(
-                f'sqlite3 "$DB" "DELETE FROM access WHERE service={q(p["full_service"])} '
-                f'AND client={q(p["client"])} AND client_type={p["client_type"]};"'
-            )
-    lines += [
-        "# make tccd re-read the databases",
-        "killall tccd 2>/dev/null || true",
-        'echo "done -- re-check with: tcc_audit.py --all"',
-    ]
+        stmts += ["SELECT total_changes();", "COMMIT;"]
+        lines += [
+            'CHANGED=$(sqlite3 -bail "$DB" ' + shlex.quote("\n".join(stmts)) + ")",
+            f'echo "deleted $CHANGED of {len(rows)} rows from $DB (rows changed since the audit are skipped)"',
+        ]
+        if db in live:  # tccd caches; it is relaunched by launchd. Not for copies of a db.
+            lines.append("killall tccd 2>/dev/null || true")
+    lines.append('echo "done -- re-check with: tcc_audit.py --all"')
     return "\n".join(lines) + "\n"
 
 
