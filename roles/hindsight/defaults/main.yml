@@ -163,12 +163,21 @@ hindsight_read_db_pool_max_size: 8
 # 4 -> 2 on 2026-09-29 (operator: reduce load). SuperGrok's weekly cap was
 # hit (resets 10-01T06:41Z), so grok-sub calls fall through to the Gemini free
 # tier, which Hermes also needs; halve what Hindsight can take from it.
-hindsight_llm_max_concurrent: 2
+# 2 -> 4 on 2026-09-30 (operator: fix Hindsight first). The 09-29 reason is gone: Hindsight
+# runs on the OpenCode Go pool (~2% of its month used), not the Gemini free tier. At 2,
+# interactive reflects queued behind background LLM calls and hit the server's 300 s cap.
+hindsight_llm_max_concurrent: 4
 
 # 10 -> 6. Total concurrent background tasks per worker. Each task is an LLM
 # call plus local CPU embedding, so this multiplies against the 4 above.
 # 6 -> 3 on 2026-09-29, same reason as llm_max_concurrent above.
-hindsight_worker_max_slots: 3
+# 3 -> 5 on 2026-09-30, same reason. With 3 slots and consolidation's default floor of 2,
+# ONE shared slot served everything else; page refreshes (1-5 min reflects) held it while
+# 68 jobs queued, retains included. Floors below guarantee consolidation and retain one
+# slot each (a floor, not a cap), leaving 3 shared; refreshes stay capped at 1.
+hindsight_worker_max_slots: 5
+hindsight_worker_consolidation_reserved_slots: 1
+hindsight_worker_retain_reserved_slots: 1
 
 # 8 -> 2. There are 32 banks; 8 simultaneous mental-model refreshes is a
 # thundering herd on a machine this size, and refreshes are never urgent.
