@@ -45,6 +45,11 @@
     <dict>
         <key>HOME</key>
         <string>{{ litellm_home }}</string>
+        <!-- Pydantic v2 scans every installed distribution for plugins on first
+             schema build; in these uv envs that took 25+ min on litellm's first
+             request (2026-09-27, py-spy). Neither service uses a Pydantic plugin. -->
+        <key>PYDANTIC_DISABLE_PLUGINS</key>
+        <string>1</string>
         <key>PATH</key>
         <string>{{ litellm_service_path }}</string>
         <key>PYTHONUNBUFFERED</key>

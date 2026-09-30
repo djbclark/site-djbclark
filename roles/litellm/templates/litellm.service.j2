@@ -18,6 +18,8 @@ UMask=0077
 StandardOutput=append:{{ litellm_logs_dir }}/stdout.log
 StandardError=append:{{ litellm_logs_dir }}/stderr.log
 Environment=HOME={{ litellm_home }}
+# Skip Pydantic's plugin scan (25+ min cold start, 2026-09-27); see litellm.plist.j2.
+Environment=PYDANTIC_DISABLE_PLUGINS=1
 Environment=PATH={{ litellm_service_path }}
 Environment=LITELLM_LOG=INFO
 Environment=SERVER_ROOT_PATH={{ litellm_server_root_path }}

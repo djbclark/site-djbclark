@@ -30,6 +30,8 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>{{ hindsight_home }}</string>
+    <!-- See roles/litellm/templates/litellm.plist.j2: Pydantic plugin scan cold start. -->
+    <key>PYDANTIC_DISABLE_PLUGINS</key><string>1</string>
     <key>CODEX_HOME</key><string>{{ hindsight_codex_home }}</string>
     <key>HINDSIGHT_API_HOST</key><string>{{ hindsight_bind }}</string>
     <key>HINDSIGHT_API_PORT</key><string>{{ hindsight_port | string }}</string>
