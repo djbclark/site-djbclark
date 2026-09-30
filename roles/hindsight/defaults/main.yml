@@ -182,6 +182,9 @@ hindsight_worker_retain_reserved_slots: 1
 # 8 -> 2. There are 32 banks; 8 simultaneous mental-model refreshes is a
 # thundering herd on a machine this size, and refreshes are never urgent.
 # 2 -> 1 on 2026-09-29, same reason.
+# NO EFFECT in hindsight-api 0.9.0 (checked 2026-09-30): the setting is parsed but never read,
+# and the worker has no per-type cap, only floors. 3 refreshes were seen running at once.
+# The retain floor (hindsight_worker_retain_reserved_slots) is what keeps saves moving.
 hindsight_mental_model_refresh_concurrency: 1
 
 # 32 -> 8. Recall is the latency-sensitive path (session start), but 32
