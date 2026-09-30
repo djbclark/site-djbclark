@@ -30,7 +30,6 @@ expected.json: [{"path": "~/.local/bin/plocate-updatedb", "services": ["SystemPo
 """
 import argparse
 import concurrent.futures as cf
-import hashlib
 import json
 import os
 import sqlite3
