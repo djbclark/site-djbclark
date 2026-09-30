@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ hindsight_plugin_patch_label }}</string>
+    {#- One shell runs every patch; a failing patch does not stop the rest. #}
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>rc=0; for p in {% for p in hindsight_plugin_patches %}"{{ hindsight_plugin_dir }}/{{ p }}" {% endfor %}; do echo "$(date '+%F %T') $p"; "$p" || rc=1; done; exit $rc</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ hindsight_service_path }}</string>
+        <key>HINDSIGHT_PLUGIN_DIR</key>
+        <string>{{ hindsight_plugin_dir }}</string>
+    </dict>
+    {#- A plugin update replaces files in dist/, which changes the directory. The patches
+        write files in place, which does not, so they do not retrigger themselves. #}
+    <key>WatchPaths</key>
+    <array>
+        <string>{{ hindsight_plugin_dir }}/dist</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>StandardOutPath</key>
+    <string>{{ hindsight_logs_dir }}/plugin-patch.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ hindsight_logs_dir }}/plugin-patch.log</string>
+</dict>
+</plist>

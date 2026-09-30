@@ -184,3 +184,13 @@ hindsight_recall_budget_low: 50
 hindsight_recall_budget_mid: 150
 hindsight_recall_budget_high: 400
 hindsight_recall_include_chunks: false
+
+# Local patches to the Claude Code plugin (@vectorize-io/hindsight-coding-agents, 0.3.4 as of
+# 2026-09-30). `npx ... install|update` rewrites dist/ and drops them, so a LaunchAgent re-runs
+# every patch when dist/ changes, at login, and hourly as a backstop. Each patch is idempotent.
+hindsight_plugin_dir: "{{ hindsight_home }}/.hindsight/coding-agents"
+hindsight_plugin_patches:
+  - patch-page-trigger.sh
+  - patch-reflect-timeout.sh
+hindsight_plugin_patch_label: "com.{{ site_ns }}.hindsight-plugin-patch"
+hindsight_plugin_patch_plist_path: "{{ hindsight_plist_dir }}/{{ hindsight_plugin_patch_label }}.plist"

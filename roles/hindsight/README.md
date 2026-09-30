@@ -54,3 +54,16 @@ launchctl bootout gui/$(id -u)/com.djbclark.hindsight-api
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.djbclark.hindsight-api.plist
 curl -fsS http://127.0.0.1:8888/health
 ```
+
+## Plugin patches
+
+The role also installs local patches for the Claude Code plugin
+(`@vectorize-io/hindsight-coding-agents`) into `~/.hindsight/coding-agents/` and
+loads the `com.<site>.hindsight-plugin-patch` LaunchAgent. It re-runs every patch
+when the plugin's `dist/` changes (an `npx … install|update` rewrites it), at
+login, and hourly. Log: `~/Library/Logs/hindsight/plugin-patch.log`.
+
+1. `patch-page-trigger.sh`: sets `exclude_mental_models: true` on the page
+   trigger, without which knowledge pages stay blank.
+2. `patch-reflect-timeout.sh`: makes the `hindsight_reflect` MCP tool honor
+   `reflectTimeoutMs`; stock 0.3.4 always aborts at 120 s.
