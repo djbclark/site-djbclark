@@ -27,3 +27,4 @@ material belongs in `site-private`.
 |---|---|
 | [`autonomy/`](autonomy/) | The 2026-08-16 plan for unattended continuous AI coding (beads + ralph-orchestrator + verification judge + quota gate; zeroshot trial). Start at its `README.md`, final decisions in `04-final-plan.md`. |
 | [`cfengine-community-review-coverage/`](cfengine-community-review-coverage/) | 2026-08-18 idea: whitespace-only C minification to fit more of `cfengine/core` under ultrareview's line cap, spread across contributors. **Idea stage, not started** — open premises unverified. |
+| [`apply-dev-toolchain/`](apply-dev-toolchain/) | 2026-10-01 drop-in prompt (v5) that has a Claude Code orchestrator apply the stayturgid/aiuse/Graft toolchain, subagents, skills/plugins, tests, CI and CodeRabbit to another repo (currently `Kuriboh493/perp-option-pricer`). Preamble explains how to run it or cut it to a budget. |
