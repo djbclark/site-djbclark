@@ -39,7 +39,6 @@ brew "herdr"  # [site] F2 site claim — workstation AI workspace manager (UDS)
 brew "jobber"  # [site] Jobber daemon for scheduled background jobs
 brew "just"  # [site] site justfile runner
 brew "secretspec"  # [site] SecretSpec CLI; LiteLLM key injection (E4)
-cask "block-goose"  # [site] roles/goose E2 Desktop app
 
 # === stack: stayturgid ===
 # Formulae/casks stayturgid roles install on the control node (prereqs, serverapps, ET).
@@ -62,4 +61,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 1 taps, 32 formulae, 4 casks across 4 stack(s)
+# summary: 1 taps, 32 formulae, 3 casks across 4 stack(s)

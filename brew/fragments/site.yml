@@ -19,6 +19,7 @@ formulae:
   - name: just
     note: site justfile runner
 
-casks:
-  - name: block-goose
-    note: roles/goose E2 Desktop app
+# casks: none. block-goose removed 2026-10-02 (operator): Goose Desktop was
+# archived to /Volumes/mac256usb/Applications and the cask uninstalled. The
+# role now enforces that via goose_desktop_enabled=false; re-add this claim
+# only alongside flipping that flag back to true.

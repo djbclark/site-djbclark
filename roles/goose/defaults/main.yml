@@ -12,6 +12,16 @@ goose_cask_name: block-goose
 goose_formula_name: block-goose-cli
 goose_app_path: /Applications/Goose.app
 
+# 2026-10-02: Goose Desktop is retired from this machine. The operator archived
+# Goose.app to /Volumes/mac256usb/Applications and the `block-goose` cask was
+# uninstalled, but the role reinstalled it on every apply because the cask task
+# only checked "is it absent?". Flipping this to false makes apply ENFORCE the
+# removal instead (same pattern as hindsight_enabled), so a stray
+# `brew install --cask block-goose` gets undone on the next run. The CLI
+# (`block-goose-cli`) and every config/keyring task below are unaffected --
+# this flag governs the Desktop cask only. Set it back to true to reinstall.
+goose_desktop_enabled: false
+
 goose_provider_id: litellm-local
 # Tracks the only model_list entry roles/litellm now serves. The former
 # `smart-router` Auto Router v2 alias was removed on 2026-08-21 when the proxy

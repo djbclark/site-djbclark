@@ -1,9 +1,16 @@
 # Goose role
 
-This role installs Goose Desktop (`block-goose` cask) and Goose CLI
-(`block-goose-cli` formula) when absent, then configures a declarative custom
-OpenAI-compatible provider pointing at the site-owned loopback LiteLLM proxy
-and templates researched MCP extension entries (Phase E3).
+This role installs Goose CLI (`block-goose-cli` formula) when absent, then
+configures a declarative custom OpenAI-compatible provider pointing at the
+site-owned loopback LiteLLM proxy and templates researched MCP extension
+entries (Phase E3).
+
+Goose Desktop (`block-goose` cask) is governed by `goose_desktop_enabled`,
+which is **false as of 2026-10-02**: the operator archived `Goose.app` to
+`/Volumes/mac256usb/Applications`, so apply now *enforces* the cask's removal
+instead of reinstalling it on every run. Flip the flag back to true (and
+re-add the `block-goose` claim in `brew/fragments/site.yml`) to restore the
+Desktop. The CLI, config, keyring and MCP tasks are unaffected by the flag.
 
 Goose **1.43.x** (verified 2026-07-20) uses:
 

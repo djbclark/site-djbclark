@@ -34,8 +34,22 @@
     name: "{{ goose_cask_name }}"
     state: present
   when:
+    - goose_desktop_enabled | bool
     - not ansible_check_mode
     - _goose_cask_list.rc != 0
+
+# Enforce the retirement rather than merely skipping the install: the app was
+# archived off this machine, so a cask that reappears would drop a new
+# Goose.app into /Applications behind the operator's back. Removing the cask
+# never touches the archived copy on /Volumes/mac256usb.
+- name: Remove Goose Desktop cask when the Desktop is disabled
+  community.general.homebrew_cask:
+    name: "{{ goose_cask_name }}"
+    state: absent
+  when:
+    - not (goose_desktop_enabled | bool)
+    - not ansible_check_mode
+    - _goose_cask_list.rc == 0
 
 - name: Check whether Goose CLI formula is installed
   ansible.builtin.command:
@@ -211,7 +225,8 @@
   ansible.builtin.debug:
     msg:
       goose_version: "{{ (_goose_version.stdout | default('unknown')) | trim }}"
-      goose_app_path: "{{ goose_app_path }}"
+      goose_desktop_enabled: "{{ goose_desktop_enabled }}"
+      goose_app_path: "{{ goose_app_path if goose_desktop_enabled | bool else 'n/a (Desktop retired)' }}"
       goose_config_path: "{{ goose_config_path }}"
       goose_custom_provider_path: "{{ goose_custom_provider_path }}"
       goose_provider_id: "{{ goose_provider_id }}"
