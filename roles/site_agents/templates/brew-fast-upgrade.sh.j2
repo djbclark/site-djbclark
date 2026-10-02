@@ -6,7 +6,8 @@ set -euo pipefail
 # exclusive site advisory lock (Phase F4). Retries a bounded number of times
 # until every non-pinned package verifies as up to date, or gives up loudly
 # for manual intervention. Automatically restarts Google Chrome cleanly if it
-# was running and got upgraded.
+# was running and got upgraded. Purges the default Homebrew downloads cache
+# at the end of every run.
 
 export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
@@ -230,6 +231,18 @@ else
   run_upgrade_and_restart_apps
   rc=$?
 fi
+
+# Scheduled runs (Jobber/launchd) don't source the shell profile that points
+# HOMEBREW_CACHE at the external drive, so `brew` falls back to the default
+# ~/Library/Caches/Homebrew and accumulates downloads there indefinitely.
+# Purge them unconditionally, independent of upgrade success/failure.
+downloads_cache="$HOME/Library/Caches/Homebrew/downloads"
+if [ -d "$downloads_cache" ]; then
+  before_size="$(du -sh "$downloads_cache" 2>/dev/null | cut -f1)"
+  find "$downloads_cache" -mindepth 1 -delete
+  echo "[brew-fast-upgrade] purged $downloads_cache (was $before_size)"
+fi
+
 exit "$rc"
 {% endraw %}
 
