@@ -94,7 +94,8 @@ hosts:
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
          note: "Google Antigravity CLI sidecar listener"}
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
-         note: "bun ~/.collie/bridge/index.ts; observed listening 2026-08-07 reconcile"}
+         tailscale_serve_port: 8788,
+         note: "Collie bridge (Herdr plugin herdr.collie, launchd gui/501/herdr.collie, ~/.collie/current/bin/collie _exec-bridge). Exposed via its own managed `tailscale serve --https=8788` (COLLIE_SERVE_PORT=8788 in ~/.config/herdr/plugins/config/herdr.collie/.env), NOT Caddy and NOT 443: Collie defaults to publishing on tailnet :443, which collides with caddy-https above -- caused the 2026-09-24..26 caddy crash-loop and recurred 2026-10-02 after `collie update` republished 443 (phones reached Collie at :443, the Mac reached Caddy). Collie's PWA and pairing are per-origin, so the phone URL is https://mac.greyhound-sidemirror.ts.net:8788/. Keep COLLIE_SERVE_PORT set; `collie start`/`update` re-publishes whatever the .env says."}
       # ── MCP bridges / shared MCP servers (1879x block) ────────────────────────
       # The six bridge ports were observed listening but never registered; rows
       # added 2026-09-26 when 18796 was allocated. Pairs: raw mcp-proxy (even)
