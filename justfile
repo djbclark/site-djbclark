@@ -10,7 +10,7 @@ stayturgid_root := env_var_or_default("STAYTURGID_ROOT", ops_root + "/stayturgid
 # validate-identity) never falls back to site-* discovery, which is ambiguous
 # when more than one site-* dir exists under ~/ops.
 site_dir := justfile_directory()
-# Site-owned roles (litellm, goose, …) first; product roles from stayturgid.
+# Site-owned roles (litellm, …) first; product roles from stayturgid.
 export ANSIBLE_ROLES_PATH := site_dir + "/roles:" + stayturgid_root + "/ansible/roles"
 export ANSIBLE_COLLECTIONS_PATH := stayturgid_root + "/.ansible/collections:" + stayturgid_root
 
@@ -205,20 +205,6 @@ open-webui-status:
       echo "service: not loaded on this host"; \
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
-
-# Install/configure Goose Desktop + CLI against loopback LiteLLM (Phase E2).
-# Holds the site brew flock (F4) because the role may brew install cask/formula.
-goose-apply *args:
-    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py -- env ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/goose.yml {{ args }}
-
-goose-check:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/goose.yml
-
-goose-status:
-    @test -d /Applications/Goose.app && echo "app: /Applications/Goose.app" || echo "app: missing"
-    @goose --version
-    @goose info -v 2>/dev/null | rg -i 'config yaml|goose_provider|goose_model|active_provider|litellm-local|smart-router|filesystem|fieldy|extensions:' || true
-    @stat -f '%Sp %N' ~/.config/goose ~/.config/goose/config.yaml ~/.config/goose/custom_providers/litellm-local.json 2>/dev/null || true
 
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
