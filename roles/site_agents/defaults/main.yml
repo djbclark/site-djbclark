@@ -72,6 +72,10 @@ site_agents_jobber_notify_script: "{{ site_agents_bin_dir }}/jobber-notify"
 site_agents_jobber_state_dir: "{{ site_agents_state_dir }}/jobber"
 site_agents_jobber_var_dir: "{{ site_agents_homebrew_prefix }}/var/jobber/{{ site_agents_uid }}"
 site_agents_brew_fast_upgrade_script: "{{ site_agents_bin_dir }}/brew-fast-upgrade"
+# External volume holding the redirected Homebrew/npm/yarn caches (the same
+# $USB_DRIVE that ~/.bashrc points HOMEBREW_CACHE at). brew-fast-upgrade uses
+# it only when it is genuinely mounted. Set to "" on a host without one.
+site_agents_brew_cache_volume: /Volumes/mac256usb
 site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
 site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobber.plist"
 site_agents_jobber_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.log"

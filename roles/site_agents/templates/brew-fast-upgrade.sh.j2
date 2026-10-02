@@ -6,10 +6,23 @@ set -euo pipefail
 # exclusive site advisory lock (Phase F4). Retries a bounded number of times
 # until every non-pinned package verifies as up to date, or gives up loudly
 # for manual intervention. Automatically restarts Google Chrome cleanly if it
-# was running and got upgraded. Purges the default Homebrew downloads cache
-# at the end of every run.
+# was running and got upgraded. Redirects HOMEBREW_CACHE to the external
+# volume when mounted, and purges the default downloads cache either way.
 
 export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# Scheduled runs don't source ~/.bashrc, so they miss the HOMEBREW_CACHE
+# redirect to the external drive and fill ~/Library/Caches/Homebrew instead.
+# Set it here too — but only when the volume is really mounted. ~/.bashrc
+# tests `[ -d "$USB_DRIVE" ]`, which a stale mount-point directory left on the
+# boot disk also satisfies; that would silently put the cache back on the disk
+# we are trying to keep free. A mount-table check cannot be fooled that way.
+BREW_CACHE_VOLUME="{{ site_agents_brew_cache_volume }}"
+if [ -n "$BREW_CACHE_VOLUME" ] && mount | grep -q " on ${BREW_CACHE_VOLUME} "; then
+  export HOMEBREW_CACHE="$BREW_CACHE_VOLUME/Caches/Homebrew"
+else
+  BREW_CACHE_VOLUME=""
+fi
 
 LOG_DIR="{{ site_agents_state_dir }}/brew-fast-upgrade"
 LOG_FILE="$LOG_DIR/run.log"
@@ -232,10 +245,15 @@ else
   rc=$?
 fi
 
-# Scheduled runs (Jobber/launchd) don't source the shell profile that points
-# HOMEBREW_CACHE at the external drive, so `brew` falls back to the default
-# ~/Library/Caches/Homebrew and accumulates downloads there indefinitely.
-# Purge them unconditionally, independent of upgrade success/failure.
+# Safety net for the default cache location. With HOMEBREW_CACHE set above
+# this should stay empty, but anything else that shells out to brew without
+# the redirect (or a run where the volume was unmounted) still lands here, so
+# purge it unconditionally, independent of upgrade success/failure.
+if [ -n "$BREW_CACHE_VOLUME" ]; then
+  echo "[brew-fast-upgrade] HOMEBREW_CACHE=$HOMEBREW_CACHE"
+else
+  echo "[brew-fast-upgrade] external cache volume not mounted; used the default Homebrew cache"
+fi
 downloads_cache="$HOME/Library/Caches/Homebrew/downloads"
 if [ -d "$downloads_cache" ]; then
   before_size="$(du -sh "$downloads_cache" 2>/dev/null | cut -f1)"
