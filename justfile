@@ -42,6 +42,13 @@ site-sync *args:
 site-serverapps *args:
     STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" site-serverapps dir="{{ site_dir }}" {{ args }}
 
+# Upgrade a pinned serverapp formula and converge the service onto it.
+# The serverapp_* roles never upgrade by design, so this is the explicit
+# operator action: unpin -> brew upgrade -> re-pin -> restart -> verify.
+# Extra args: just serverapps-upgrade vector formula=vectordotdev/brew/vector
+serverapps-upgrade app formula="":
+    STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" serverapps-upgrade "{{ app }}" dir="{{ site_dir }}" formula="{{ formula }}"
+
 # Landing page (Phase D4: com.djbclark.landing). Exports site-namespace labels.
 landing-status:
     LANDING_LABEL=com.djbclark.landing LANDING_DISCOVER_LABEL=com.djbclark.landing-discover \
