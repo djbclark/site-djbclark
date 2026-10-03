@@ -234,7 +234,12 @@ the ones that change how you call them:
    `tests/python/test_fleet_health.py` calls made as `fh.extract_devlog_lines(…)`
    through a module alias. Tests are exactly what breaks when you change a
    function, so back a blast-radius answer with a grep for the bare name before
-   relying on it. token-savior additionally emitted malformed `null` entries in
+   relying on it. Known upstream for graft as
+   [trailhq/Graft#465](https://github.com/trailhq/Graft/issues/465), where our
+   reproduction is [added as a comment](https://github.com/trailhq/Graft/issues/465#issuecomment-5969863631)
+   — it is **not** Windows-specific as that title suggests, and the module-alias
+   shape (`import m as x; x.f()`) is a third case alongside the symbol-alias and
+   classmethod ones already there. token-savior additionally emitted malformed `null` entries in
    its `dependents`/`dependencies` lists here.
 8. **`graft_check_freshness` reporting `STALE` does not mean stale answers.**
    Queries auto-refresh the graph before answering (`refreshed stayturgid (1 file
@@ -294,7 +299,10 @@ Separately and still unexplained: `get_function_source` on one symbol
 cleared, and in a later probe the plain call succeeded while the `force_full:
 true` call hung. A 15-minute time-boxed investigation reproduced the slowness
 above but not the hang, so treat a multi-minute stall as possible and bound your
-timeouts. This is one more reason the navigation rule puts graft first: graft
+timeouts. Both filed upstream as
+[Mibayy/token-savior#122](https://github.com/Mibayy/token-savior/issues/122) —
+the per-call cache rewrite with the measurements, and the hang folded in as a
+related observation with the honest caveat that it has no reliable repro. This is one more reason the navigation rule puts graft first: graft
 refreshed the same repo and answered in 0.52 s under the same conditions.
 
 The two tools also do not index the same corpus: for stayturgid, token-savior indexed
