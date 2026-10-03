@@ -20,7 +20,6 @@ just brew-project          # write generated/Merged-Brewfile from fragments
 just brew-diff             # project then compare to ~/system-state/Brewfile
 just brew-diff --strict    # exit 1 if any claimed package is missing on live
 just brew-lock -- <cmd…>   # run a command holding the site brew lock
-just goose-apply           # brew-touching; already wraps brew install under lock
 ```
 
 ## Diff semantics

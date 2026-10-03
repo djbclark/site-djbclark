@@ -207,8 +207,8 @@ litellm_cooldown_time: 300
 # Enabling general_settings.master_key turns on auth for EVERY caller, so the
 # master key is deliberately set to the placeholder the clients already send
 # ("sk-litellm-local", see ~/.hermes/config.yaml). Hermes therefore keeps working untouched;
-# only the clients that sent a DIFFERENT placeholder had to change (Open WebUI
-# sent "sk-dummy", Goose sent nothing at all).
+# only the client that sent a DIFFERENT placeholder had to change (Open WebUI
+# sent "sk-dummy").
 #
 # This value is NOT a secret and must not be treated as one: it is already
 # checked in as a plaintext default here, and it only
@@ -232,15 +232,13 @@ litellm_master_key: "sk-litellm-local"
 #
 # Like litellm_master_key these are NOT secrets: loopback-only labels. The
 # master key keeps working, so a client that was missed still gets through; it
-# just lands in the unattributed bucket. Consumers: roles/goose
-# (goose_litellm_api_key), roles/open_webui (open_webui_openai_api_key),
+# just lands in the unattributed bucket. Consumers: roles/open_webui
+# (open_webui_openai_api_key),
 # ~/.hermes/config.yaml providers.litellm-local.api_key and
 # ~/.hermes/scripts/check-llm-backend-health.sh (both Hermes-owned, hand-edited).
 litellm_client_keys:
   - alias: hermes
     key: sk-litellm-hermes
-  - alias: goose
-    key: sk-litellm-goose
   - alias: open-webui
     key: sk-litellm-open-webui
   - alias: llm-health-watchdog

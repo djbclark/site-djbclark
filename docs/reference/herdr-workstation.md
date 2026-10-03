@@ -87,19 +87,12 @@ the command for long-lived sessions, or
 | `alt+o`             | `opencode`                                                  |
 | `alt+e`             | `hermes`                                                    |
 | `alt+y`             | `copilot`                                                   |
-| `alt+s`             | `herdr-goose` (Goose, sidebar/border reporting — see below) |
 | `alt+i`             | `herdr-aider` (Aider, sidebar/border reporting — see below) |
 
-`config.toml` is machine-local (not in this repo); add these two blocks by
+`config.toml` is machine-local (not in this repo); add this block by
 hand next to the existing launchers, then `hreload`:
 
 ```toml
-[[keys.command]]
-key = "prefix+alt+s"
-type = "pane"
-command = "herdr-goose"
-description = "start Goose with Herdr agent-state reporting"
-
 [[keys.command]]
 key = "prefix+alt+i"
 type = "pane"
@@ -184,14 +177,14 @@ herdr server update-agent-manifests
 
 Integrations installed on this machine (hooks/plugins): pi, claude, codex,
 copilot, cursor, opencode, hermes. Grok and agy use screen manifests (no
-lifecycle integration). Check with `herdr integration status`. **Goose and
-Aider are neither** — see the next section.
+lifecycle integration). Check with `herdr integration status`. **Aider is
+not integrated** — see the next section.
 
-## Goose and Aider (site-side prototype, site-djbclark#12)
+## Aider (site-side prototype, site-djbclark#12)
 
-Herdr 0.7.5 has no built-in agent "kind" for `goose` or `aider`
-(`herdr agent start --kind` does not list either), and no remote manifest
-exists for them. A local `~/.config/herdr/agent-detection/<agent>.toml`
+Herdr 0.7.5 has no built-in agent "kind" for `aider`
+(`herdr agent start --kind` does not list it), and no remote manifest
+exists for it. A local `~/.config/herdr/agent-detection/<agent>.toml`
 override can only re-tune screen-detection _rules_ for an agent Herdr already
 recognizes by process name — it cannot invent a new agent id. Upstream
 contribution is the correct long-term fix (file/track on
@@ -200,26 +193,26 @@ site-side prototype per the issue's own suggested path.
 
 ### Mechanism
 
-`bin/herdr_agent_wrapper.py` (+ thin shims `bin/herdr-goose`, `bin/herdr-aider`)
+`bin/herdr_agent_wrapper.py` (+ thin shim `bin/herdr-aider`)
 wraps the real binary and self-reports pane lifecycle over the documented
 `herdr pane report-agent` / `release-agent` socket API — the same API the
 official `claude`/`codex`/`cursor`/… hook scripts use
 (`~/.claude/hooks/herdr-agent-state.sh` etc.), just invoked from a standalone
-wrapper instead of a per-tool hook. The real `goose`/`aider` binaries on
-`PATH` are untouched; only the `herdr-goose`/`herdr-aider` launcher names go
+wrapper instead of a per-tool hook. The real `aider` binary on `PATH` is
+untouched; only the `herdr-aider` launcher name goes
 through the wrapper.
 
 State classification (`working` / `idle` / `blocked`) is a generic
 content-quiescence poll (every 2s by default, `HERDR_AGENT_POLL_INTERVAL`):
 pane output changing → `working`; unchanged for two consecutive polls →
 `idle`; a confirm/permission-prompt pattern (best-effort regexes tuned
-against real prompts observed live from both tools, see
+against real prompts observed live from Aider, see
 `bin/herdr_agent_wrapper.py`) → `blocked`. This is coarser than Herdr's own
 per-agent manifest rules (`~/.local/state/herdr/agent-detection/remote/*.toml`)
 but needs no agent-specific screen regions to hit the issue's "at least
 working vs idle" bar.
 
-Aider additionally has a real upstream hook Goose lacks —
+Aider has a real upstream hook:
 `--notifications-command` fires when Aider is ready for input — so
 `herdr-aider` layers that on top (`--notify-idle` mode of the same wrapper
 script) for a more precise idle transition, unless the invocation already
@@ -255,8 +248,7 @@ same landmine class site-djbclark#100 fixed for generated fragments).
   macOS Dock, confirmed via `herdr pane process-info`. Any future
   process-name-based detection (upstream or local override) cannot key off
   the process name for Aider; it would need to match `cmdline` containing
-  `aider`, or Aider would need its own hook. Goose's process name (`goose`)
-  is clean by contrast.
+  `aider`, or Aider would need its own hook.
 
 ### Not done (honest scope call, not silently dropped)
 
@@ -265,12 +257,11 @@ same landmine class site-djbclark#100 fixed for generated fragments).
 integration/kind system on server restart — it has no hook into a
 report-agent-only pane, so nothing here can wire it without the same
 upstream "kind" support layer #12 identifies as the real gap for detection
-in general. Goose's `session --resume --session-id` and Aider's
-`--restore-chat-history` both exist and could back a resume flow once that
+in general. Aider's `--restore-chat-history` exists and could back a resume
+flow once that
 upstream layer exists; wiring them now would be a facade with no actual
 restart-survives-it behavior. The issue's own text already calls Aider
-restore "likely out of scope v1"; the same call now extends to Goose for the
-same underlying reason.
+restore "likely out of scope v1" for the same underlying reason.
 
 ## Shell aliases and PATH helpers
 

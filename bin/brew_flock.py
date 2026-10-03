@@ -15,7 +15,7 @@ lock file (same semantics). Default lock path resolution:
 
 Usage:
   bin/brew_flock.py -- brew install just
-  bin/brew_flock.py --timeout 30 -- just goose-apply
+  bin/brew_flock.py --timeout 30 -- brew upgrade herdr
   bin/brew_flock.py --nonblock -- true   # exit 75 if lock held
 
 Exit codes:
@@ -182,4 +182,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

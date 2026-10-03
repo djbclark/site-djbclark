@@ -1,8 +1,7 @@
 #!/bin/sh
 # Launches `aider` with Herdr sidebar/pane-border state reporting. Also wires
-# aider's own `--notifications-command` hook (a real upstream signal, unlike
-# goose which has none) for a more precise idle transition, layered on top of
-# the same content-polling monitor the wrapper always runs.
+# aider's own `--notifications-command` hook for a more precise idle transition, layered
+# on top of the same content-polling monitor the wrapper always runs.
 # See docs/reference/herdr-workstation.md and bin/herdr_agent_wrapper.py.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"

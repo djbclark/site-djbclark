@@ -19,7 +19,7 @@ and
 | `docs/relay/NEXT-PROMPT.md`                                      | **Start here to continue the work** — the baton: which AI to use and the exact prompt to paste ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md)) |
 | `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` | Architecture + decision log (2026-07-18)                                                                                                                            |
 | `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`     | Phased execution plan: steps, difficulty, AI routing, risk register                                                                                                 |
-| `docs/plans/site-djbclark-step0-plan-v1.md`                      | Goose + LiteLLM AI-stack plan (see amendment header)                                                                                                                |
+| `docs/plans/site-djbclark-step0-plan-v1.md`                      | Initial AI-stack plan (see amendment header)                                                                                                                        |
 | `registry/ports.yml`, `registry/paths.yml`                       | Port and path/namespace allocation authorities — check before adding either; lint with `bin/registry_lint.py`                                                       |
 | `bin/check_hostnames.py`                                         | Site-specific Mac/Linux/Android hostname audit (`just hostnames-audit`)                                                                                             |
 
@@ -63,7 +63,6 @@ sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
 See `roles/litellm/README.md` for multi-host, routing, verification, rollback.
-Goose against this proxy: `roles/goose/README.md`.
 
 ## Merged-Brewfile + brew flock (Phase F4)
 
@@ -77,7 +76,7 @@ just brew-diff                 # project + compare to ~/system-state/Brewfile
 just brew-lock -- brew info just   # exclusive lock around brew-touching cmds
 ```
 
-Concurrent brew mutations (e.g. `just goose-apply`) take
+Concurrent brew mutations take
 `~/.local/state/site-djbclark/brew.lock` (or `$XDG_RUNTIME_DIR` / `$TMPDIR`) via `bin/brew_flock.py` (`fcntl.flock`; macOS
 has no util-linux `flock(1)` by default). Details and rollback:
 [`brew/README.md`](brew/README.md).

@@ -5,8 +5,7 @@
 > apply/verify commands below without reading secret values.
 >
 > **Index:** [human/README.md](README.md) · LiteLLM:
-> [roles/litellm/README.md](../roles/litellm/README.md) · Goose:
-> [roles/goose/README.md](../roles/goose/README.md)
+> [roles/litellm/README.md](../roles/litellm/README.md)
 
 Last updated: **2026-08-16** (sudo-secretspec)
 
@@ -167,56 +166,7 @@ curl -sS http://127.0.0.1:4000/v1/chat/completions \
   | jq -r '.choices[0].message.content // .error.message'
 ```
 
-Goose against loopback LiteLLM:
-
-```bash
-goose info -v | rg -i 'litellm-local|smart-router'
-goose run --no-session -t "Reply with exactly the word PONG and nothing else."
-```
-
-If Goose hangs after LiteLLM is healthy, check which tier `smart-router` chose
-and whether that tier’s key is in the LaunchAgent. Partial keys (Anthropic only)
-mean SIMPLE Goose prompts may still fail or hang on OpenAI missing-credential
-retries — prefer a COMPLEX-style prompt, or set `OPENAI_API_KEY` and re-apply.
-
----
-
-## 4. Fieldy MCP — enable + browser OAuth (optional until you are ready)
-
-Fieldy is a **real** remote MCP at `https://api.fieldy.ai/mcp` (streamable HTTP).
-Default remains **disabled** so Goose sessions do not block on OAuth.
-
-When you are ready:
-
-1. Set in inventory/group_vars (or pass as extra-var) and re-apply Goose:
-
-   ```bash
-   # example extra-var one-shot
-   just goose-apply -- -e goose_ext_fieldy_enabled=true
-   ```
-
-2. Start Goose Desktop or CLI so it loads extensions.
-3. On first Fieldy tool use, complete **browser OAuth** with your Fieldy account
-   email (vendor flow; tokens stay in Goose’s local state — not in git).
-4. Confirm the extension shows enabled in `goose info -v` / config
-   (`~/.config/goose/config.yaml`, mode 0600).
-
-Do **not** flip the role default to `true` until OAuth succeeds on this host.
-
----
-
-## 5. Explicitly out of scope (E3 research; do not invent packages)
-
-| Product | Goose-facing MCP? | Action |
-| --- | --- | --- |
-| **Shortwave** | **No** — Shortwave is an MCP *client* only | Leave comment stub; no package install |
-| **Saner.ai** | **No** MCP found (npm 404) | Leave comment stub; revisit if vendor ships |
-| **filesystem** | Yes — already templated and enabled | First use may `npx -y` download the package |
-| **Fieldy** | Yes — remote MCP; OAuth above | Enable only when ready |
-
----
-
-## 6. Multi-host LiteLLM keys (E5)
+## 4. Multi-host LiteLLM keys (E5)
 
 Inventory group `site_litellm`: `m1-air` (online), `mac-mini-intel` and
 `vps-primary` (planned / offline until you set `ansible_host` and clear
@@ -253,7 +203,7 @@ curl -fsS http://127.0.0.1:4000/v1/models | jq -r '[.data[].id]|join(",")'
 # Presence only — never paste unit env output into chat
 ```
 
-## 7. Record outcomes
+## 5. Record outcomes
 
 Copy `RESPONSES.md.example` → `RESPONSES.md` (gitignored) and note, without
 pasting secrets:
@@ -262,9 +212,6 @@ pasting secrets:
 - [ ] `ANTHROPIC_API_KEY` set / resolved
 - [ ] `sudo-secretspec run --reason "…" -- just litellm-apply` succeeded
 - [ ] SIMPLE + REASONING completions 200 with different router tiers in log
-- [ ] `goose run` returned a model response
-- [ ] Fieldy OAuth done (or deferred)
-- [ ] Shortwave/Saner acknowledged as no Goose MCP
 - [ ] (E5) mini/VPS: inventory online + keys applied when hosts exist
 
 Tell the agent: _Read human/RESPONSES.md and continue._

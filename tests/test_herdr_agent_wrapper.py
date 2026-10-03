@@ -23,13 +23,8 @@ class LooksBlockedTests(unittest.TestCase):
         text = "Open documentation url for more info? (Y)es/(N)o/(D)on't ask again [Yes]: "
         self.assertTrue(wrapper._looks_blocked(text))
 
-    def test_matches_goose_clack_toggle(self) -> None:
-        # Real prompt observed live from goose 1.44.0, 2026-07-29.
-        text = "Share anonymous usage data to help improve goose?\n● Yes  / ○ No"
-        self.assertTrue(wrapper._looks_blocked(text))
-
     def test_ignores_ordinary_streaming_output(self) -> None:
-        text = "goose is ready\n> Enter to send · Ctrl+J newline"
+        text = "agent is ready\n> Enter to send · Ctrl+J newline"
         self.assertFalse(wrapper._looks_blocked(text))
 
     def test_ignores_ordinary_aider_prompt(self) -> None:

@@ -20,10 +20,10 @@ Agent work menu: [docs/options.md](https://github.com/djbclark/stayturgid/blob/m
 | File                   | Who edits                        | In git     |
 | ---------------------- | -------------------------------- | ---------- |
 | `HANDOFF-HUMAN.md`     | Agent (task list, session notes) | yes        |
-| `API-KEYS-E4.md`       | Agent (SecretSpec / LiteLLM / Fieldy first-run) | yes |
+| `API-KEYS-E4.md`       | Agent (SecretSpec / LiteLLM first-run)          | yes |
 | `F2-BREW-SERVICES-DECISIONS.md` | Operator keep/kill sign-off (F2 audit) | yes |
 | `RESPONSES.md.example` | Template                         | yes        |
 | `RESPONSES.md`         | **You** (outcomes, approvals)    | gitignored |
 
 **Phase E4 keys:** complete [`API-KEYS-E4.md`](API-KEYS-E4.md) before expecting
-Goose/LiteLLM completions or Fieldy OAuth.
+LiteLLM completions.

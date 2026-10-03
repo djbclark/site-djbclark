@@ -31,10 +31,9 @@ cask "codexbar"  # [ai-quota-tools] CodexBar.app + codexbar CLI — primary mult
 cask "openusage"  # [ai-quota-tools] OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits. After install: open app once; Settings → Command Line → Install for `openusage` CLI. Used by aiuse collectors.openusage (enabled by default).
 
 # === stack: site ===
-# Packages the site repo owns: Goose (E2), SecretSpec (E4), F2 workstation claim (herdr), and site orchestration tooling.
+# Packages the site repo owns: SecretSpec (E4), F2 workstation claim (herdr), and site orchestration tooling.
 # fragment: brew/fragments/site.yml
 
-brew "block-goose-cli"  # [site] roles/goose E2 CLI
 brew "herdr"  # [site] F2 site claim — workstation AI workspace manager (UDS)
 brew "jobber"  # [site] Jobber daemon for scheduled background jobs
 brew "just"  # [site] site justfile runner
@@ -61,4 +60,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 1 taps, 32 formulae, 3 casks across 4 stack(s)
+# summary: 1 taps, 31 formulae, 3 casks across 4 stack(s)

@@ -4,12 +4,10 @@
 # do not re-add without explicit sign-off.
 stack: site
 description: >-
-  Packages the site repo owns: Goose (E2), SecretSpec (E4), F2 workstation
+  Packages the site repo owns: SecretSpec (E4), F2 workstation
   claim (herdr), and site orchestration tooling.
 
 formulae:
-  - name: block-goose-cli
-    note: roles/goose E2 CLI
   - name: secretspec
     note: SecretSpec CLI; LiteLLM key injection (E4)
   - name: herdr
@@ -18,8 +16,3 @@ formulae:
     note: Jobber daemon for scheduled background jobs
   - name: just
     note: site justfile runner
-
-# casks: none. block-goose removed 2026-10-02 (operator): Goose Desktop was
-# archived to /Volumes/mac256usb/Applications and the cask uninstalled. The
-# role now enforces that via goose_desktop_enabled=false; re-add this claim
-# only alongside flipping that flag back to true.

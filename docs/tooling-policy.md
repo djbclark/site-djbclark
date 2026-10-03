@@ -324,7 +324,6 @@ Hand-edited, because they have no add subcommand or it is broken:
 `cursor-agent` (`~/.cursor/mcp.json`, then `cursor-agent mcp enable token-savior`),
 `zcode` (`~/.zcode/cli/setting.json`, under `mcp.servers`),
 `crush` (`~/.config/crush/crushrc`, an `mcp add …` DSL line),
-`goose` (`~/.config/goose/config.yaml`, under `extensions`, `cmd:` not `command:`),
 `qwen` (`~/.qwen/settings.json`, `mcpServers` — the key did not exist before),
 `copilot` (`~/.copilot/mcp-config.json`, `"type": "local"` — its own
 `mcp add` *and* `mcp list` both fail with "The shared writer lock or its directory

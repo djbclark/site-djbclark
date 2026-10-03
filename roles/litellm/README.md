@@ -233,7 +233,6 @@ Skipping `prisma generate` makes the proxy **fail to start entirely**
 | Hermes (`~/.hermes/config.yaml`) | `sk-litellm-local` | unchanged |
 | LLM backend health check | `sk-litellm-local` | unchanged |
 | Open WebUI (`roles/open_webui`) | `sk-dummy` | `sk-litellm-local` |
-| Goose (`roles/goose`) | no auth at all | `requires_auth` + keyring entry |
 | OliveTin diagnostics | bare `curl` | sends the bearer |
 
 Anything else pointed at `:4000` that does not send the key now gets **401**.

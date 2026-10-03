@@ -17,11 +17,8 @@ Last updated: **2026-07-20** (E4 SecretSpec / LiteLLM keys checklist)
 | --- | --- |
 | sudo-secretspec operational | Root-owned vault at `/var/db/sudo-secretspec/`; no config file or manifest path to maintain |
 | LiteLLM LaunchAgent keys | `ANTHROPIC_API_KEY` injected via `sudo-secretspec run -- just litellm-apply`; `OPENAI_API_KEY` still **human** if not set |
-| Completions / Goose | Proven with Anthropic (+ router fallbacks); full SIMPLE OpenAI path needs your OpenAI key |
-| Fieldy | Still `enabled: false`; enable + browser OAuth when ready — see `API-KEYS-E4.md` |
-| Shortwave / Saner | No Goose MCP — out of scope |
 
-**You do (if not done):** follow [`API-KEYS-E4.md`](API-KEYS-E4.md) — set `OPENAI_API_KEY`, re-apply LiteLLM, optional Fieldy OAuth. Do not paste secrets into `RESPONSES.md`.
+**You do (if not done):** follow [`API-KEYS-E4.md`](API-KEYS-E4.md) — set `OPENAI_API_KEY` and re-apply LiteLLM. Do not paste secrets into `RESPONSES.md`.
 
 ## Session notes (2026-07-10 evening) — agent completed
 

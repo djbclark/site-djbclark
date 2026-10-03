@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Site-side Herdr agent-state prototype for coding-agent TUIs Herdr cannot
-identify by process name yet (goose, aider — see site-djbclark#12).
+"""Site-side Herdr agent-state wrapper for coding-agent TUIs Herdr cannot
+identify by process name.
 
-Herdr has no built-in "kind" for goose/aider (`herdr agent start --kind`
-does not list them) and local `~/.config/herdr/agent-detection/*.toml`
-overrides only re-tune screen-detection rules for agents Herdr already
-recognizes by process name — they cannot invent a new agent id. Until an
-upstream Herdr release adds native support, this script self-reports pane
-lifecycle state over the documented `herdr pane report-agent` /
-`release-agent` API instead (see docs/reference/herdr-workstation.md).
+Local `~/.config/herdr/agent-detection/*.toml` overrides only re-tune
+screen-detection rules for agents Herdr already recognizes by process name;
+they cannot invent a new agent id. Until an upstream Herdr release adds native
+support, this script self-reports pane lifecycle state over the documented
+`herdr pane report-agent` / `release-agent` API instead (see
+docs/reference/herdr-workstation.md).
 
 Usage:
     herdr_agent_wrapper.py <agent-label> -- <real-command> [args...]
@@ -33,14 +32,13 @@ STABLE_POLLS_BEFORE_IDLE = 2
 READ_LINES = 40
 
 # Best-effort confirm/permission-prompt detection, tuned against the actual
-# prompts observed live from both tools (2026-07-29 empirical pass — see the
-# handoff doc), not guessed from docs. Deliberately generic: catches common
-# yes/no and clack-style (goose) confirmation UIs. False negatives (missing a
+# prompts observed live from the supported launcher (2026-07-29 empirical pass
+# — see the handoff doc), not guessed from docs. Deliberately generic: catches
+# common yes/no confirmation UIs. False negatives (missing a
 # novel prompt phrasing) are expected and safe — the pane just stays
 # "working" a beat longer than ideal, it never gets stuck falsely blocked.
 BLOCKED_PATTERNS = (
     r"\(y\)es\s*/\s*\(n\)o",  # aider: "(Y)es/(N)o", "(Y)es/(N)o/(D)on't ask again"
-    r"[●○]\s*(yes|no)\b",  # goose clack-style toggle prompts
     r"\by/n\b",
     r"\ballow\b.{0,40}\?",
 )
@@ -144,7 +142,7 @@ def classify_next_state(
     Content-quiescence heuristic: unchanged screen content for
     STABLE_POLLS_BEFORE_IDLE consecutive polls means idle; any change means
     working; a confirm/permission-prompt pattern always wins as blocked.
-    Generic on purpose — no goose/aider-specific screen regions, unlike
+    Generic on purpose — no agent-specific screen regions, unlike
     Herdr's own manifest rules for agents it natively detects.
     """
     if _looks_blocked(snapshot):
@@ -214,8 +212,8 @@ def run_wrapped(agent: str, real_cmd: list[str]) -> int:
 
     child = subprocess.Popen(real_cmd)
     try:
-        # Some agents (aider: "^C again to exit") swallow the first SIGINT
-        # for their own confirm-to-quit UX and keep running. Ctrl+C reaches
+        # Some agents swallow the first SIGINT for their own confirm-to-quit
+        # UX and keep running. Ctrl+C reaches
         # both this wrapper and the child (same foreground process group),
         # so re-wait after each KeyboardInterrupt instead of exiting early —
         # otherwise release-agent fires while the wrapped agent is still
