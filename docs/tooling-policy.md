@@ -314,7 +314,7 @@ Verification per client, where one exists: `codex mcp get`, `cursor-agent mcp li
 `opencode debug config` — **not** `opencode mcp list`, which prints "No MCP servers
 configured" even when servers are loaded.
 
-**End-to-end proven in three non-Claude hosts.**
+**End-to-end proven in four non-Claude hosts.**
 
 - `crush run "use find_symbol with name=main"` in stayturgid returned a correct
   `@F:…@S:main@L:135-174` line.
@@ -326,9 +326,23 @@ configured" even when servers are loaded.
   launched the wrapper, completed the MCP handshake and enumerated all 15 tools by
   name and description before writing anything.
 
-Only `copilot` remains unverified at the tool-call level, and not for want of
-trying — its own `mcp list` fails on a pre-existing lock bug, so nothing about it
-can be confirmed from the CLI.
+- `copilot -p '…' --allow-all-tools` returned the same `adb_shell` span, after
+  its `mcp list` was unblocked (below). `copilot mcp list` confirms
+  `token-savior (local)` alongside `basic-memory`.
+
+So all twelve CLIs are registered and four of the non-Claude ones are proven at
+the tool-call level, with Hermes proven at the handshake level.
+
+**The copilot lock bug, and its fix.** Every `copilot mcp` subcommand was failing
+with "The shared writer lock or its directory changed", which is why copilot was
+hand-edited and unverifiable. Cause (upstream
+[github/copilot-cli#4998](https://github.com/github/copilot-cli/issues/4998)):
+`~/.copilot/.mcp-writer.binding` persists filesystem device IDs, and ours had
+gone stale — the file said `16777232` while `stat -f '%d' ~/.copilot` reported
+`16777230`. Editing just those two `device` values, inodes untouched, fixed it
+immediately. It also appears to have been what broke copilot's headless `-p`
+mode, which worked on the first try afterwards — so the long-standing "prefer
+codex for headless" note in `home-agents.md` has been withdrawn.
 
 **`crushrc`, not `crush.json`, is crush's live config here** — settled by ablation:
 with the `mcp` block removed from `crush.json`, crush still advertised
