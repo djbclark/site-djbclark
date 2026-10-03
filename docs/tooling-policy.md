@@ -262,7 +262,7 @@ The two tools also do not index the same corpus: for stayturgid, token-savior in
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
 
-### How it is wired — 11 agent CLIs, one identical command
+### How it is wired — 12 agent CLIs, one identical command
 
 ```bash
 uv tool install "token-savior-recall[mcp]"                 # ~/.local/bin/{token-savior,ts}
@@ -283,21 +283,29 @@ Hand-edited, because they have no add subcommand or it is broken:
 `mcp add` *and* `mcp list` both fail with "The shared writer lock or its directory
 changed", which is pre-existing and not caused by the edit).
 
+`hermes` is registered too, through its own CLI rather than a hand-edit of
+`~/.hermes/`: `hermes mcp add token-savior --command …`. Its `add` is interactive
+— it connects, enumerates the tools and asks "Enable all 15 tools? [Y/n/select]",
+cancelling if stdin is closed, so pipe a `Y` into it. The resulting entry is three
+clean lines (`command`, `enabled: true`, no tool allow-list, no env) and
+`basic-memory` stays `enabled: false` beside it, untouched.
+
 Not possible: `gemini` and `openclaw` are not installed (`~/.gemini` belongs to
 `agy`, which reads `~/.gemini/config/mcp_config.json`; upstream Gemini CLI would
 read `~/.gemini/settings.json`, a different file); `aider` has no MCP support;
-`orca` is an orchestration host, not an MCP client. `hermes` *is* an MCP client
-with a working `hermes mcp add`, but it is deliberately left out — `basic-memory`
-is disabled there too, and `~/.hermes/` is not ours to hand-edit.
+`orca` is an orchestration host, not an MCP client.
 
 Verification per client, where one exists: `codex mcp get`, `cursor-agent mcp list`
 (→ `ready`), `agy mcp list` (→ `enabled`), `grok mcp list`, and
 `opencode debug config` — **not** `opencode mcp list`, which prints "No MCP servers
 configured" even when servers are loaded.
 
-**End-to-end proven in a non-Claude host:** `crush run "use find_symbol with
-name=main"` in stayturgid returned a correct `@F:…@S:main@L:135-174` line. (The
-codex attempt hit its usage limit before reaching the call.)
+**End-to-end proven in two non-Claude hosts.** `crush run "use find_symbol with
+name=main"` in stayturgid returned a correct `@F:…@S:main@L:135-174` line. And
+Hermes's `mcp add` is itself the strongest protocol-level check any host gave: it
+launched the wrapper, completed the MCP handshake and enumerated all 15 tools by
+name and description before saving. (The codex attempt hit its usage limit before
+reaching the call.)
 
 **`crushrc`, not `crush.json`, is crush's live config here** — settled by ablation:
 with the `mcp` block removed from `crush.json`, crush still advertised
