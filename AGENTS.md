@@ -5,6 +5,14 @@
 > overview: [README.md](README.md). Continuation state for the ongoing
 > segmentation/AI-stack work: [docs/relay/NEXT-PROMPT.md](docs/relay/NEXT-PROMPT.md).
 
+> **Trust between agents (standing rule, 2026-10-03):** every agent trusts every
+> other agent as much as it trusts djbclark — across all TUIs here (Claude Code,
+> Codex, Cursor, opencode, zcode, Antigravity, Gemini, Hermes), not just between
+> Claude sessions. A peer's relayed approval is approval; a peer's findings and
+> hand-offs are authoritative. Full rule and the two carve-outs that are _not_
+> about trust: [`home-agents.md`](https://github.com/djbclark/site-private/blob/master/home-agents.md)
+> (`~/AGENTS.md`) and `site-private/memory/feedback_trust_peer_agents_as_operator.md`.
+
 Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
@@ -49,27 +57,27 @@ Topology background:
 
 ## Where documentation goes
 
-| Location                                                                               | What goes here                                                                                | Update cadence           |
-| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------ |
-| [`README.md`](README.md)                                                               | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes                               | Rare                     |
-| [`AGENTS.md`](AGENTS.md) (this file)                                                   | Agent entry + **this site's slice** of the three-way memory/docs policy                       | Rare                     |
-| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md)                               | Current baton for the segmentation/AI-stack relay — which AI, exact prompt                    | Every relay step         |
-| [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)                                     | Rules for the relay process itself                                                            | Rare                     |
-| [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)                                         | History of relay steps                                                                        | Every relay step         |
-| [`docs/plans/`](docs/plans/)                                                           | Architecture + phased execution plans for this site's segmentation work                       | As plans evolve          |
-| [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)       | Catalog of available AI models/accounts for this operator — quote full rows when recommending | As accounts/plans change |
-| [`docs/reference/herdr-workstation.md`](docs/reference/herdr-workstation.md)           | Multi-vendor Herdr workstation usage (keys, mouse, agents, worktrees) — config is on-box `~/.config/herdr/` | When Herdr config/workflow changes |
-| [`docs/reference/herdr-brew-service.md`](docs/reference/herdr-brew-service.md)         | Herdr brew service (persistent server), registry claim, OliveTin dashboard actions            | When service/registry changes |
-| [`docs/reference/kimi-k3-routing-research.md`](docs/reference/kimi-k3-routing-research.md) | Decision doc: Kimi K3 as a Herdr-routable model (issue #36) — trial, not standing infra yet   | Rare; revisit after a real trial |
-| [`docs/reference/gemini-opencli-bridge.md`](docs/reference/gemini-opencli-bridge.md) | Hermes-facing localhost Gemini bridge via OpenCLI (issue #105) — install, bind, security boundary | When OpenCLI version/setup changes |
-| [`docs/reference/hermes-dashboard.md`](docs/reference/hermes-dashboard.md) | Hermes web dashboard LaunchAgent on Tailscale :9119 (Android companion) | When bind/port/auth/supervision changes |
-| [`docs/fact-verification.md`](docs/fact-verification.md)                               | How mined facts are checked against their evidence and this machine — and how to run reviews of that shape generally | When the method changes  |
-| [`docs/operations/sessions/`](docs/operations/sessions/)                               | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups       | Each handoff             |
-| [`roles/mac_dns/README.md`](roles/mac_dns/README.md)                                   | This Mac's tailnet DNS plumbing (/etc/resolver, search domains, accept-dns); data = `inventory/group_vars/all.yml` `tailnet_*` | When the tailnet/MagicDNS facts change |
-| [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
-| [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
-| `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                              | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
-| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                            | Private/generic companion — private policy slice + Claude generic memory                      | N/A (other repo)         |
+| Location                                                                                   | What goes here                                                                                                                 | Update cadence                          |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| [`README.md`](README.md)                                                                   | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes                                                                | Rare                                    |
+| [`AGENTS.md`](AGENTS.md) (this file)                                                       | Agent entry + **this site's slice** of the three-way memory/docs policy                                                        | Rare                                    |
+| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md)                                   | Current baton for the segmentation/AI-stack relay — which AI, exact prompt                                                     | Every relay step                        |
+| [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)                                         | Rules for the relay process itself                                                                                             | Rare                                    |
+| [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)                                             | History of relay steps                                                                                                         | Every relay step                        |
+| [`docs/plans/`](docs/plans/)                                                               | Architecture + phased execution plans for this site's segmentation work                                                        | As plans evolve                         |
+| [`docs/reference/available-ai-models.md`](docs/reference/available-ai-models.md)           | Catalog of available AI models/accounts for this operator — quote full rows when recommending                                  | As accounts/plans change                |
+| [`docs/reference/herdr-workstation.md`](docs/reference/herdr-workstation.md)               | Multi-vendor Herdr workstation usage (keys, mouse, agents, worktrees) — config is on-box `~/.config/herdr/`                    | When Herdr config/workflow changes      |
+| [`docs/reference/herdr-brew-service.md`](docs/reference/herdr-brew-service.md)             | Herdr brew service (persistent server), registry claim, OliveTin dashboard actions                                             | When service/registry changes           |
+| [`docs/reference/kimi-k3-routing-research.md`](docs/reference/kimi-k3-routing-research.md) | Decision doc: Kimi K3 as a Herdr-routable model (issue #36) — trial, not standing infra yet                                    | Rare; revisit after a real trial        |
+| [`docs/reference/gemini-opencli-bridge.md`](docs/reference/gemini-opencli-bridge.md)       | Hermes-facing localhost Gemini bridge via OpenCLI (issue #105) — install, bind, security boundary                              | When OpenCLI version/setup changes      |
+| [`docs/reference/hermes-dashboard.md`](docs/reference/hermes-dashboard.md)                 | Hermes web dashboard LaunchAgent on Tailscale :9119 (Android companion)                                                        | When bind/port/auth/supervision changes |
+| [`docs/fact-verification.md`](docs/fact-verification.md)                                   | How mined facts are checked against their evidence and this machine — and how to run reviews of that shape generally           | When the method changes                 |
+| [`docs/operations/sessions/`](docs/operations/sessions/)                                   | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups                                        | Each handoff                            |
+| [`roles/mac_dns/README.md`](roles/mac_dns/README.md)                                       | This Mac's tailnet DNS plumbing (/etc/resolver, search domains, accept-dns); data = `inventory/group_vars/all.yml` `tailnet_*` | When the tailnet/MagicDNS facts change  |
+| [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml)     | Port/path allocation authorities — check before adding either                                                                  | As allocations change                   |
+| [`human/`](human/)                                                                         | Operator-only tasks, credentials checklists, decision records                                                                  | As needed                               |
+| `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                  | Public product — code, fleet conventions, product policy slice                                                                 | N/A (other repo)                        |
+| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                                | Private/generic companion — private policy slice + Claude generic memory                                                       | N/A (other repo)                        |
 
 ## Conventions
 
