@@ -222,12 +222,22 @@ the ones that change how you call them:
    function, so back a blast-radius answer with a grep for the bare name before
    relying on it. token-savior additionally emitted malformed `null` entries in
    its `dependents`/`dependencies` lists here.
-8. **First token-savior use on a fresh machine hits the network.** The cold path
+8. **`graft_check_freshness` reporting `STALE` does not mean stale answers.**
+   Queries auto-refresh the graph before answering (`refreshed stayturgid (1 file
+   changed)`), and a planted marker function was found at the correct lines by
+   both tools — graft in 0.52 s, token-savior in 1.84 s via its incremental
+   cache. `STALE` is a signal about the *committed* graph lagging the working
+   tree, i.e. commit hygiene, not an answer-correctness warning.
+9. **graft prepends 204–427 characters of "tokens saved" banner to most
+   responses**, including an instruction to relay the figure to the user. On the
+   who-calls-it query the banner was 425 chars against a 215-char answer —
+   roughly twice the result. Worth knowing when counting what a call costs.
+10. **First token-savior use on a fresh machine hits the network.** The cold path
    downloaded an embedding model from the HuggingFace Hub (~8 s of a 15.8 s cold
    call) and warned about unauthenticated Hub requests. Already warmed here; it
    matters for offline work.
 
-They also do not index the same corpus: for stayturgid, token-savior indexed
+Numbering above continues from the token-savior defects. They also do not index the same corpus: for stayturgid, token-savior indexed
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
 
