@@ -1,0 +1,10 @@
+---
+# This Mac's tailnet DNS plumbing (roles/mac_dns): /etc/resolver file, search
+# domains, accept-dns. Data lives in inventory/group_vars/all.yml. Runs daily
+# from Jobber (mac-dns-apply, 03:30) and by hand via `just mac-dns-apply`.
+- name: Configure tailnet DNS on this Mac
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  roles:
+    - role: mac_dns

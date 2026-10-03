@@ -12,7 +12,7 @@ install to `~/.local/bin`; plists render to
 | hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad | macOS notification when `/` free GB < threshold (default 25) |
 | cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
 | aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
-| jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00, `landing-health` hourly) |
+| jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00, `mac-dns-apply` nightly at 03:30, `landing-health` hourly) |
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 
 ## Jobber Notifications (`jobber-notify`)

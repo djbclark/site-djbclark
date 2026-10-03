@@ -1,0 +1,38 @@
+---
+# roles/mac_dns — this Mac's DNS plumbing for the tailnet, rendered from the
+# canonical host facts in inventory/group_vars/all.yml (tailnet_* vars).
+#
+# Why this exists: Tailscale's macOS forwarder has two open upstream bugs
+# (tailscale/tailscale#20417 persistent SERVFAIL per boot, #21154 stall after
+# a link change). The workaround keeps MagicDNS for *.<tailnet> via an
+# /etc/resolver file while the OS uses its DHCP resolvers for everything else
+# (`tailscale set --accept-dns=false`). Tailscale then no longer supplies the
+# tailnet search domains, so they are pinned on the Wi-Fi service instead.
+
+# Root-owned applier + its sudoers rule, installed once by `just mac-dns-setup`
+# (Touch ID). The role refuses to run until both match the repo copy, so an
+# unattended run can never silently drift.
+mac_dns_apply_bin: /usr/local/libexec/mac-dns-apply
+mac_dns_sudoers_file: /etc/sudoers.d/mac-dns
+mac_dns_operator: "{{ ansible_facts['user_id'] | default(lookup('env', 'USER'), true) }}"
+
+# Data (override in group_vars/all.yml — that file is the authority).
+mac_dns_resolver_domain: "{{ tailnet_magicdns_suffix }}"
+mac_dns_resolver_nameservers: "{{ tailnet_magicdns_nameservers }}"
+mac_dns_search_domains: "{{ tailnet_search_domains }}"
+mac_dns_search_domain_services: ["Wi-Fi"]
+mac_dns_tailscale_accept_dns: false
+
+# Homebrew tailscale CLI (same arch rule as site_agents_homebrew_prefix).
+mac_dns_tailscale_bin: >-
+  {{
+    ('/opt/homebrew' if ansible_facts.get('architecture', 'arm64') in ['arm64', 'aarch64'] else '/usr/local')
+    ~ '/bin/tailscale'
+  }}
+
+# Post-apply probes through the real system resolver. The tailnet probe uses
+# this host's own MagicDNS name (always present); the public probe catches the
+# nightly forwarder stall this role exists to avoid.
+mac_dns_verify: true
+mac_dns_verify_tailnet_host: "{{ caddy_short_hostname | default('mac') }}"
+mac_dns_verify_public_name: example.com

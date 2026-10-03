@@ -40,3 +40,15 @@ jobs:
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
+
+  # Daily re-apply of this Mac's tailnet DNS plumbing (roles/mac_dns): keeps
+  # /etc/resolver/<tailnet>, Wi-Fi search domains and accept-dns in sync with
+  # group_vars/all.yml. 03:30 = after brew-fast-upgrade and after the nightly
+  # ~03:01 Wi-Fi blip the role exists to survive. Privileged step is sudo -n
+  # to the root-owned applier installed by `just mac-dns-setup`.
+  mac-dns-apply:
+    cmd: export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_bin_dir }}:$PATH" && cd {{ site_agents_home }}/ops/site-djbclark && just mac-dns-apply
+    time: 0 30 3 * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]

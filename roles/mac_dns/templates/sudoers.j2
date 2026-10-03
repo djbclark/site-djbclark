@@ -1,0 +1,4 @@
+# Managed by site-djbclark roles/mac_dns (installed by `just mac-dns-setup`).
+# Lets the daily unattended `just mac-dns-apply` refresh /etc/resolver and the
+# tailnet search domains through ONE root-owned, input-validating script.
+{{ mac_dns_operator }} ALL=(root) NOPASSWD: {{ mac_dns_apply_bin }}

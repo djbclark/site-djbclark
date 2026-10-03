@@ -213,6 +213,28 @@ open-webui-status:
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
 
+# Tailnet DNS plumbing for this Mac (roles/mac_dns): /etc/resolver/<tailnet>,
+# Wi-Fi search domains, `tailscale set --accept-dns`. Data: group_vars/all.yml
+# tailnet_* vars. Jobber re-applies daily at 03:30. `mac-dns-setup` is the one
+# privileged step (Touch ID): installs the root-owned applier + sudoers rule.
+mac-dns-setup:
+    roles/mac_dns/files/mac-dns-setup.sh
+
+mac-dns-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/mac_dns.yml {{ args }}
+
+mac-dns-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/mac_dns.yml {{ args }}
+
+mac-dns-status:
+    @echo "applier:  $(ls -l /usr/local/libexec/mac-dns-apply 2>/dev/null || echo 'not installed — run just mac-dns-setup')"
+    @echo "sudoers:  $(sudo -n -l /usr/local/libexec/mac-dns-apply >/dev/null 2>&1 && echo 'NOPASSWD ok' || echo 'missing — run just mac-dns-setup')"
+    @for f in /etc/resolver/*; do [ -e "$f" ] && echo "resolver: $f -> $(tr '\n' ' ' < "$f")"; done; true
+    @echo "Wi-Fi search domains: $(networksetup -getsearchdomains Wi-Fi | tr '\n' ' ')"
+    @echo "tailscale: $(tailscale dns status 2>/dev/null | grep -m1 '^Tailscale DNS:' || echo unknown)"
+    @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | grep ip_address || echo 'NO ANSWER')"
+    @echo "probe example.com: $(dscacheutil -q host -a name example.com | grep -m1 ip_address || echo 'NO ANSWER')"
+
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
 site-agents-apply *args:

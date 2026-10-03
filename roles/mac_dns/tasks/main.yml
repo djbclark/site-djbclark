@@ -1,0 +1,82 @@
+---
+# Every privileged action goes through mac_dns_apply_bin (root-owned, sudoers
+# NOPASSWD, validates its own inputs). Nothing here uses `become`.
+
+- name: Assert tailnet DNS facts are set in inventory
+  ansible.builtin.assert:
+    that:
+      - mac_dns_resolver_domain | length > 0
+      - mac_dns_resolver_nameservers | length > 0
+      - mac_dns_search_domain_services | length > 0
+    fail_msg: "tailnet_magicdns_suffix / tailnet_magicdns_nameservers must be set in inventory/group_vars/all.yml"
+
+- name: Stat the installed applier and its sudoers rule
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ mac_dns_apply_bin }}"
+    - "{{ mac_dns_sudoers_file }}"
+    - "{{ role_path }}/files/mac-dns-apply"
+  register: _mac_dns_installed
+
+- name: Refuse to run until `just mac-dns-setup` has installed the root-owned applier
+  ansible.builtin.assert:
+    that:
+      - _mac_dns_installed.results[0].stat.exists
+      - _mac_dns_installed.results[0].stat.pw_name == 'root'
+      - _mac_dns_installed.results[0].stat.checksum == _mac_dns_installed.results[2].stat.checksum
+      - _mac_dns_installed.results[1].stat.exists
+    fail_msg: >-
+      {{ mac_dns_apply_bin }} is missing, not root-owned, or differs from
+      roles/mac_dns/files/mac-dns-apply (or {{ mac_dns_sudoers_file }} is
+      missing). Run `just mac-dns-setup` once (Touch ID) and re-run.
+
+- name: Render /etc/resolver/{{ mac_dns_resolver_domain }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['sudo', '-n', mac_dns_apply_bin]
+         + (['--check'] if ansible_check_mode else [])
+         + ['resolver', mac_dns_resolver_domain]
+         + mac_dns_resolver_nameservers }}
+  register: _mac_dns_resolver
+  changed_when: _mac_dns_resolver.stdout in ['changed', 'would-change']
+  check_mode: false
+
+- name: Pin tailnet search domains on {{ mac_dns_search_domain_services | join(', ') }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['sudo', '-n', mac_dns_apply_bin]
+         + (['--check'] if ansible_check_mode else [])
+         + ['searchdomains', item]
+         + (mac_dns_search_domains if mac_dns_search_domains | length > 0 else ['Empty']) }}
+  loop: "{{ mac_dns_search_domain_services }}"
+  register: _mac_dns_search
+  changed_when: _mac_dns_search.stdout in ['changed', 'would-change']
+  check_mode: false
+
+- name: Read Tailscale prefs
+  ansible.builtin.command:
+    argv: ["{{ mac_dns_tailscale_bin }}", "debug", "prefs"]
+  register: _mac_dns_ts_prefs
+  changed_when: false
+  check_mode: false
+
+- name: Set Tailscale accept-dns={{ mac_dns_tailscale_accept_dns | lower }}
+  ansible.builtin.command:
+    argv: ["{{ mac_dns_tailscale_bin }}", "set", "--accept-dns={{ mac_dns_tailscale_accept_dns | lower }}"]
+  when: (_mac_dns_ts_prefs.stdout | from_json).CorpDNS | bool != mac_dns_tailscale_accept_dns | bool
+  register: _mac_dns_ts_set
+  changed_when: true
+
+- name: Verify names resolve through the system resolver
+  ansible.builtin.command:
+    argv: ["/usr/bin/dscacheutil", "-q", "host", "-a", "name", "{{ item }}"]
+  loop:
+    - "{{ mac_dns_verify_tailnet_host }}.{{ mac_dns_resolver_domain }}"
+    - "{{ mac_dns_verify_public_name }}"
+  register: _mac_dns_probe
+  changed_when: false
+  failed_when: "'ip_address' not in _mac_dns_probe.stdout"
+  check_mode: false
+  when: mac_dns_verify | bool and not ansible_check_mode

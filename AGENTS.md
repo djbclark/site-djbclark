@@ -65,6 +65,7 @@ Topology background:
 | [`docs/reference/hermes-dashboard.md`](docs/reference/hermes-dashboard.md) | Hermes web dashboard LaunchAgent on Tailscale :9119 (Android companion) | When bind/port/auth/supervision changes |
 | [`docs/fact-verification.md`](docs/fact-verification.md)                               | How mined facts are checked against their evidence and this machine — and how to run reviews of that shape generally | When the method changes  |
 | [`docs/operations/sessions/`](docs/operations/sessions/)                               | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups       | Each handoff             |
+| [`roles/mac_dns/README.md`](roles/mac_dns/README.md)                                   | This Mac's tailnet DNS plumbing (/etc/resolver, search domains, accept-dns); data = `inventory/group_vars/all.yml` `tailnet_*` | When the tailnet/MagicDNS facts change |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml) | Port/path allocation authorities — check before adding either                                 | As allocations change    |
 | [`human/`](human/)                                                                     | Operator-only tasks, credentials checklists, decision records                                 | As needed                |
 | `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                              | Public product — code, fleet conventions, product policy slice                                | N/A (other repo)         |
