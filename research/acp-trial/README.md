@@ -100,3 +100,31 @@ These are the next questions, in order:
    have no ACP mode.
 3. Keep Orca/Herdr for supervision and visible panes. ACP would sit under
    them, not replace them.
+
+## Follow-up: `acp-run` (same day)
+
+The recommendation above was built: `site-private/bin/acp-run` is a uv
+inline-script client on the official SDK. It wraps 10 agents and has
+permission policies, `--model` (via ACP session config options), `--mode`, a
+timeout that sends `session/cancel` (exit 124), and a JSONL log per run. The
+same bug-fix task, run through it:
+
+| Agent | Result |
+|---|---|
+| claude (adapter, npm -g), copilot, cursor (`cursor-agent acp`, needs `authenticate` with `cursor_login`), devin, cline, opencode | ✅ fixed, test passes |
+| hermes | ❌ transport fine and `end_turn`, but the reply was a provider error from its ACP default model. **Exit 0 is not success.** |
+| qwen | ❌ 401, expired token (needs re-login) |
+| goose | ❌ no provider configured |
+| codex (`codex-acp` adapter) | not run (usage limit) |
+
+Also verified:
+
+1. **`--perm scoped:calc.py`**: Copilot sent 6 permission requests, all inside
+   scope, so all were allowed, and the fix landed.
+2. **`--perm deny`**: Copilot's edit was refused and the test still failed, as
+   intended.
+3. **`--timeout 4`** on a long task: `session/cancel` was sent, the agent
+   stopped with `cancelled`, exit 124.
+4. **`--model` matters.** The claude adapter defaults to the user's settings
+   model (Fable here): $1.33 for this task, versus $0.22 with `--model sonnet`.
+
