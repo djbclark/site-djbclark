@@ -237,6 +237,26 @@ the ones that change how you call them:
    call) and warned about unauthenticated Hub requests. Already warmed here; it
    matters for offline work.
 
+#### Workaround for each, in one place
+
+| # | Defect | Workaround |
+|---|---|---|
+| 1 | `get_function_source` omits the body, non-deterministically | **Always pass `force_full: true`.** Verified byte-exact on first call. Better still, read functions with `graft_find_code --full`. |
+| 2 | `find_symbol` collapses ambiguity | Use `get_entry_points` (lists them all) or `search_codebase`; in a graft repo, `graft_find_all`. Treat a single hit for a common name (`main`, `run`, `handler`) as unverified. |
+| 3 | `find_dead_code` ~43% false positives | Before deleting anything, re-check the symbol with `graft_trace_calls --direction in` *and* a plain `rg -n '\bname\b'`. Anything that is a method override, a framework entry point or an `@property` is a false positive by construction. |
+| 4 | `detect_breaking_changes` is Python-only | Fine as-is; just diff non-Python files yourself (`git diff --stat`) so YAML/Kotlin/Swift changes are not silently assumed safe. |
+| 5 | `graft_file_api` fails unless cwd is the repo root | Run `graft file-api` from inside the repo, or use `graft ask` there. From a `~/ops`-rooted session, prefer `graft_find_code` scoped with `in:`. |
+| 6 | graft misranks workspace-wide queries | Always pass `in: "<repo>/"` from a multi-repo session. The repo-scoped CLI (`graft ask` with cwd in the repo) also ranks correctly and was cheaper (769 chars / 0.31 s). |
+| 7 | Neither tool resolves alias-qualified callers | After any blast-radius answer, run `rg -n '\bsymbol\b' -g '!graft/'` and reconcile. Expect test callers to be the ones missing. |
+| 8 | `graft_check_freshness` says `STALE` | Ignore it for answer correctness — queries auto-refresh. Read it as "the committed graph is behind the working tree", i.e. commit the graph. |
+| 9 | graft's per-call banner | **Keep it** — djbclark wants to see periodically what graft has saved, so relay the running total at the end of a reply that made graft calls. |
+| 10 | Cold token-savior use needs the network | Already warmed on this machine. For offline work, run one query per repo while online, or set `HF_TOKEN` to avoid the unauthenticated-Hub rate limit. |
+
+Corroboration for defect 2 arrived by accident: asked for `main` in stayturgid,
+token-savior answered `native_agent_config.py:135-174` from crush and
+`android_intent.py:98-147` from Claude Code — two different single answers to the
+same question about the same repo, neither flagged as one of many.
+
 The two tools also do not index the same corpus: for stayturgid, token-savior indexed
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
@@ -272,8 +292,17 @@ is disabled there too, and `~/.hermes/` is not ours to hand-edit.
 Verification per client, where one exists: `codex mcp get`, `cursor-agent mcp list`
 (→ `ready`), `agy mcp list` (→ `enabled`), `grok mcp list`, and
 `opencode debug config` — **not** `opencode mcp list`, which prints "No MCP servers
-configured" even when servers are loaded. An end-to-end tool call from a non-Claude
-host is still unproven: the codex attempt hit its usage limit before the call.
+configured" even when servers are loaded.
+
+**End-to-end proven in a non-Claude host:** `crush run "use find_symbol with
+name=main"` in stayturgid returned a correct `@F:…@S:main@L:135-174` line. (The
+codex attempt hit its usage limit before reaching the call.)
+
+**`crushrc`, not `crush.json`, is crush's live config here** — settled by ablation:
+with the `mcp` block removed from `crush.json`, crush still advertised
+`find_dead_code`, `find_semantic_duplicates`, `find_symbol`. So the `mcp add …`
+DSL lines in `~/.config/crush/crushrc` are what crush reads, `crush.json` is left
+holding only `permissions`, and there is one source of truth rather than two.
 
 `token-savior-mcp` is a launcher in
 [`site-private/bin/`](https://github.com/djbclark/site-private/blob/master/bin/token-savior-mcp),
@@ -328,9 +357,13 @@ host rather than needing per-client `env`/`env_vars` bookkeeping:
 
 **Memory stays with Basic Memory.** `TS_MEMORY_DISABLE=1` drops
 `memory_*`/`reasoning_*`/`corpus_*` from the manifest *and* from what `ts_search`
-can route to, so nothing reaches for token-savior's own SQLite store
-(`~/.local/share/token-savior/memory.db`) — a second durable store no other agent
-on this machine can read is state divergence, not redundancy. It is also what
+can route to, so nothing reaches for token-savior's own SQLite store — a second
+durable store no other agent on this machine can read is state divergence, not
+redundancy. The store itself (`~/.local/share/token-savior/memory.db`, 424 KB) has
+been deleted, and two server starts since confirmed it is **not** recreated — so
+the flag stops the engine, not merely its tool manifest. What stays in
+`~/.local/share/token-savior/` is the telemetry and the 1.1 MB tool-embedding
+cache, both of which are in use. It is also what
 upstream's benchmarked configuration uses: `optimized` is an alias for the
 tiny_plus manifest only, and the documented Pareto config is that manifest *plus*
 `TS_THIN_SCHEMAS=1 + TS_CAPTURE_DISABLED=1 + TS_MEMORY_DISABLE=1`.
