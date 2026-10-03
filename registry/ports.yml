@@ -85,6 +85,8 @@ hosts:
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
          note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
+      - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
+         note: "2026-10-03: `aiuse serve` (github.com/djbclark/aiuse, ~/src/aiuse) — on-demand loopback HTTP for agents, auto-started by the operator/agents, not a launchd service we manage (same class as opencli :19825). Its CLI default was 8787 until 2026-10-03, which silently collided with collie-bridge above: collie answers every path with HTML 200, so an agent hitting http://127.0.0.1:8787/v1/snapshot got plausible HTML from collie while aiuse serve wasn't running. aiuse commit 11d67f4 moved the default to 28787 AND made serve fail loudly when the port is held by a non-aiuse responder; clients identity-check via GET /v1/health -> {\"service\": \"aiuse\"}. Do not reassign 8787 or 28787 without checking both repos."}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
       - {port: 9115,  bind: "127.0.0.1", owner: site, service: blackbox-exporter, status: active,
          note: "Prometheus Blackbox Exporter endpoint"}
