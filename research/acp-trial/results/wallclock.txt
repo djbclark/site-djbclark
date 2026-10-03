@@ -1,0 +1,6 @@
+acp-claude real 43.34
+acp-copilot real 43.12
+acp-opencode real 33.71
+hl-claude real 19.82
+hl-copilot real 45.93
+hl-opencode real 36.87

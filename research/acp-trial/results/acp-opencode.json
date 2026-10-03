@@ -1,0 +1,39 @@
+{
+ "label": "acp-opencode",
+ "cmd": [
+  "opencode",
+  "acp"
+ ],
+ "agent": {
+  "name": "OpenCode",
+  "version": "2.0.22"
+ },
+ "stop_reason": "end_turn",
+ "prompt_usage": {
+  "total_tokens": 248501,
+  "input_tokens": 37932,
+  "output_tokens": 393,
+  "cached_read_tokens": 210176
+ },
+ "seconds": 31.3,
+ "final_text": "DONE",
+ "permissions": [],
+ "update_kinds": {
+  "available_commands_update": 2,
+  "config_option_update": 1,
+  "agent_thought_chunk": 7,
+  "tool_call": 6,
+  "tool_call_update": 13,
+  "agent_message_chunk": 1,
+  "usage_update": 1
+ },
+ "usage_update": {
+  "used": 37759,
+  "size": 1048576,
+  "cost": {
+   "amount": 0.0,
+   "currency": "USD"
+  },
+  "sessionUpdate": "usage_update"
+ }
+}

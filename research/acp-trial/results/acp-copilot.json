@@ -1,0 +1,60 @@
+{
+ "label": "acp-copilot",
+ "cmd": [
+  "copilot",
+  "--acp"
+ ],
+ "agent": {
+  "name": "Copilot",
+  "title": "Copilot",
+  "version": "1.0.91"
+ },
+ "stop_reason": "end_turn",
+ "prompt_usage": {
+  "total_tokens": 231104,
+  "input_tokens": 230449,
+  "output_tokens": 655,
+  "thought_tokens": 289,
+  "cached_read_tokens": 200759,
+  "cached_write_tokens": 29666
+ },
+ "seconds": 40.4,
+ "final_text": "DONE",
+ "permissions": [
+  {
+   "title": "Locate calc symbols in graft",
+   "picked": "allow_once"
+  },
+  {
+   "title": "Build graft index and locate calc code",
+   "picked": "allow_once"
+  },
+  {
+   "title": "Inspect calc module API",
+   "picked": "allow_once"
+  },
+  {
+   "title": "Update file",
+   "picked": "allow_once"
+  },
+  {
+   "title": "Run calculator tests",
+   "picked": "allow_once"
+  }
+ ],
+ "update_kinds": {
+  "available_commands_update": 2,
+  "session_info_update": 1,
+  "config_option_update": 1,
+  "usage_update": 8,
+  "tool_call": 8,
+  "tool_call_update": 18,
+  "agent_thought_chunk": 380,
+  "agent_message_chunk": 1
+ },
+ "usage_update": {
+  "used": 34084,
+  "size": 272000,
+  "sessionUpdate": "usage_update"
+ }
+}

@@ -1,0 +1,6 @@
+acp-claude test=OK testfile=unchanged
+acp-copilot test=OK testfile=unchanged
+acp-opencode test=OK testfile=unchanged
+hl-claude test=OK testfile=unchanged
+hl-copilot test=OK testfile=unchanged
+hl-opencode test=OK testfile=unchanged
