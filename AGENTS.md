@@ -164,6 +164,23 @@ Always commit and push when done. Leave no uncommitted changes you didn't
 create. If `git pull` fails with a merge conflict, STOP and report it. Verify
 changes are yours before editing — if a file has unrelated modifications from
 another agent or the operator, leave it alone and report it.
+
+## Shareable tools published from this repo (2026-10-03)
+
+[`tools/book-to-kb/`](tools/book-to-kb/) is a **self-contained, MIT-licensed**
+package published for other people to install: the `book-kb` CLI, the
+`book-to-kb` agent skill, an installer and the measured docs.
+
+Two rules when touching it:
+
+1. **It must stay portable.** No reference to this machine's paths, repo names or
+   private tooling. Its output names `book-kb ...`, never `just book-...`, and its
+   defaults come from `KB_ROOT` / `BOOK_KB_VENV` / `BOOK_KB_BM_PROJECT`.
+2. **`bin/book-kb` and `bin/clip` are byte-identical to the `site-private`
+   copies.** Fix one, copy to the other, and verify with `cmp` — per the standing
+   "sync external-facing skill on update" rule. The two `SKILL.md` files differ on
+   purpose: the public one has no references to this machine's repos.
+
 ## CFEngine reference book — query it, don't guess (2026-10-03)
 
 `Learning CFEngine` (Diego Zamboni, 2nd ed.; covers CFEngine 3.12) is in the

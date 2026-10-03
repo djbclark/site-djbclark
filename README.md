@@ -120,3 +120,12 @@ macOS provides a built-in Postfix MTA managed by launchd. It is configured to ru
 - **Service Status**: Active on-demand, managed by the system LaunchDaemon (not user-configurable without a custom override).
 - **Verification**: `echo "Test" | mail -s "Test" $USER` and check `/var/mail/$USER`.
 - **Note**: Local delivery works out-of-the-box without additional configuration; no `sudo` modifications or passwordless exceptions are required.
+
+## Shareable tools
+
+- **[`tools/book-to-kb`](tools/book-to-kb/)** (MIT) — add a long technical book to
+  a local, token-efficient knowledge base so a coding agent can query it without
+  loading it into context: docling extraction, chapter split, a ~2.5k-token index
+  over a 115k-token book. Ships the `book-kb` CLI, a `book-to-kb` agent skill and
+  an installer. Self-contained; see its own
+  [README](tools/book-to-kb/README.md).
