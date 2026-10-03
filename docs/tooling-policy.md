@@ -250,7 +250,8 @@ the ones that change how you call them:
 | 7 | Neither tool resolves alias-qualified callers | After any blast-radius answer, run `rg -n '\bsymbol\b' -g '!graft/'` and reconcile. Expect test callers to be the ones missing. |
 | 8 | `graft_check_freshness` says `STALE` | Ignore it for answer correctness — queries auto-refresh. Read it as "the committed graph is behind the working tree", i.e. commit the graph. |
 | 9 | graft's per-call banner | **Keep it** — djbclark wants to see periodically what graft has saved, so relay the running total at the end of a reply that made graft calls. |
-| 10 | Cold token-savior use needs the network | Already warmed on this machine. For offline work, run one query per repo while online, or set `HF_TOKEN` to avoid the unauthenticated-Hub rate limit. |
+| 10a | `search_codebase(semantic: true)` hangs and rebuilds the disabled memory store | **Never pass it.** Since `[memory-vector]` was removed it fails in 2.3 s with a clear message, so this is now self-enforcing. Use the default regex mode, or graft. |
+| 10 | Cold token-savior use needed the network | **No longer applies** — the embedding model went with `[memory-vector]`. Indexing is pure tree-sitter now, so a cold repo is offline-safe. |
 
 Corroboration for defect 2 arrived by accident: asked for `main` in stayturgid,
 token-savior answered `native_agent_config.py:135-174` from crush and
@@ -264,7 +265,7 @@ files. That alone explains much of the divergence in their result sets.
 ### How it is wired — 11 agent CLIs, one identical command
 
 ```bash
-uv tool install "token-savior-recall[mcp,memory-vector]"   # ~/.local/bin/{token-savior,ts}
+uv tool install "token-savior-recall[mcp]"                 # ~/.local/bin/{token-savior,ts}
 claude        mcp add token-savior --scope user -- /Users/djbclark/.local/bin/token-savior-mcp
 codex         mcp add token-savior              -- /Users/djbclark/.local/bin/token-savior-mcp
 opencode      mcp add --global token-savior     -- /Users/djbclark/.local/bin/token-savior-mcp
@@ -359,19 +360,49 @@ host rather than needing per-client `env`/`env_vars` bookkeeping:
 `memory_*`/`reasoning_*`/`corpus_*` from the manifest *and* from what `ts_search`
 can route to, so nothing reaches for token-savior's own SQLite store — a second
 durable store no other agent on this machine can read is state divergence, not
-redundancy. The store itself (`~/.local/share/token-savior/memory.db`, 424 KB) has
-been deleted, and two server starts since confirmed it is **not** recreated — so
-the flag stops the engine, not merely its tool manifest. What stays in
-`~/.local/share/token-savior/` is the telemetry and the 1.1 MB tool-embedding
-cache, both of which are in use. It is also what
+redundancy. **Precisely what the flag does and does not do** — an earlier version of this
+paragraph overstated it. It makes the engine *unreachable*: no `memory_*` tools in
+the manifest and none reachable through `ts_search`. It does **not** stop the
+SQLite file being created: every tool call initialises
+`~/.local/share/token-savior/memory.db` at ~360 KB of empty schema (verified by
+deleting it and calling `find_symbol`, `ts_search` and `search_codebase`
+separately — all three recreate it). It stays at that size and accumulates no
+memories, so deleting it is pointless rather than harmful. The one thing that ever
+grew it was the semantic-search path, which is now dead; see below. It is also what
 upstream's benchmarked configuration uses: `optimized` is an alias for the
 tiny_plus manifest only, and the documented Pareto config is that manifest *plus*
 `TS_THIN_SCHEMAS=1 + TS_CAPTURE_DISABLED=1 + TS_MEMORY_DISABLE=1`.
 
-**The `[memory-vector]` extra is installed**, and it earns its 132 MB (tool venv
-40 MB → 172 MB; the Nomic model was already in the shared `~/.cache/huggingface`).
-It is what makes `ts_search` — the router to the ~51 tools the profile hides —
-actually work: the same query went from `method: "substring"`, top hits
-`find_dead_code`/`find_symbol` at score 0.25, to `method: "embedding"`, top hit
-`detect_breaking_changes` at 0.692. The 1.1 MB tool-embedding cache persists
-across server respawns, so only the first call pays the model load.
+**The `[memory-vector]` extra was installed, investigated, and removed again
+(2026-10-03).** It enables exactly three code paths, and under the decisions above
+none of them earns its keep:
+
+1. `ts_search`'s embedding-based routing. Real — the same query went from
+   `method: "substring"` with `find_dead_code` top at score 0.25 to
+   `method: "embedding"` with `detect_breaking_changes` top at 0.692. But
+   `ts_search` exists to reach the ~51 tools the profile hides, and those are the
+   navigation tools graft now owns. All five audit tools we keep are in the
+   advertised 15.
+2. `search_codebase(semantic: true)`. **Never pass this.** On site-private it ran
+   past a 300-second timeout without returning, and while running it resurrected
+   the disabled `memory.db` and grew it to 7.2 MB, because the semantic path calls
+   `reindex_project_symbols()` to embed every symbol into that store. Its own
+   docstring also says never to act on a semantic hit without verifying through
+   `find_symbol(exact_name)` first — so even working it adds a step rather than
+   replacing one.
+3. `find_semantic_duplicates(method: "embedding")`. Opt-in; the default AST-
+   normalised hashing needs no vectors, and the embedding mode depends on the same
+   symbol-vector index inside the disabled store.
+
+So two of the three consumers *are* the memory engine wearing a different hat, and
+the third routes to tools graft answers better. Cost was ~85 MB of dependencies in
+the tool venv (onnxruntime 75 MB, tokenizers 9.5 MB) plus a **132 MB model in
+`$TMPDIR/fastembed_cache`** — a directory macOS periodically purges, so the ~8 s
+unauthenticated HuggingFace download recurs rather than being one-time. Startup
+cost was negligible either way (~0.1 s: 0.53 s vs 0.44 s to `tools/list`).
+
+Removing it reclaimed ~285 MB (venv 186 MB → 33 MB, model cache 132 MB, state dir
+1.1 MB → 444 KB) and both degradations are clean and fast: `ts_search` reports
+`method: "substring"` and still works, and `semantic: true` now fails in 2.3 s with
+`semantic index unavailable: sqlite-vec not loadable` instead of hanging. To put it
+back is one command: `uv tool install --force "token-savior-recall[mcp,memory-vector]"`.
