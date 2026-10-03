@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""book-kb — local, token-efficient knowledge base for long technical books.
+
+Pipeline: source document -> docling -> one clean Markdown file -> split into
+chapters -> INDEX.md heading map -> served to agents three ways:
+
+  1. INDEX.md / `toc`   cheap outline (heading -> file:line, token estimate)
+  2. `grep`             exact-match proof over the chapters
+  3. basic-memory MCP   semantic search over the same chapters (project `books`)
+
+Nothing here loads a whole book into an agent's context. The index is a few
+hundred tokens; a chapter is a few thousand; the full book is never read.
+
+Layout (KB_ROOT, default ~/kb):
+    sources/<file>              original EPUB/PDF/DOCX...   (not indexed)
+    raw/<slug>.md               full docling output          (not indexed)
+    md/<slug>/INDEX.md          heading map
+    md/<slug>/chapters/*.md     split chapters               (indexed)
+    md/<slug>/meta.json         provenance: sha256, docling version, counts
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+KB_ROOT = Path(os.environ.get("KB_ROOT", Path.home() / "kb")).expanduser()
+VENV = Path(
+    os.environ.get("BOOK_KB_VENV", Path.home() / ".local/share/book-kb/venv")
+).expanduser()
+BM_PROJECT = os.environ.get("BOOK_KB_BM_PROJECT", "books")
+
+# A chapter above this many characters is split again on the next heading level:
+# ~15k chars is ~4k tokens, which an agent can read without regret.
+MAX_CHAPTER_CHARS = 15_000
+# Fewer sections than this means the heading level is too coarse to be a map.
+MIN_SECTIONS = 4
+
+SUPPORTED = {
+    ".pdf", ".epub", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md",
+    ".markdown", ".adoc", ".asciidoc", ".txt", ".csv", ".rtf", ".odt",
+    ".tex", ".xml",
+}
+
+
+def die(msg: str, code: int = 1) -> "NoReturn":  # type: ignore[valid-type]
+    print(f"book-kb: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def venv_bin(name: str) -> Path:
+    p = VENV / "bin" / name
+    if not p.exists():
+        die(
+            f"{name} not found at {p}\n"
+            f"  run the installer, or see `book-kb doctor`"
+        )
+    return p
+
+
+def slugify(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return re.sub(r"-{2,}", "-", s) or "book"
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def tokens(text: str) -> int:
+    """Rough token count. 4 chars/token is close enough to budget a read."""
+    return len(text) // 4
+
+
+# --------------------------------------------------------------------------- #
+# source normalisation
+# --------------------------------------------------------------------------- #
+
+PRE_RE = re.compile(rb"<pre\b[^>]*>(.*?)</pre>", re.S | re.I)
+TAG_RE = re.compile(rb"<[^>]+>")
+XHTML_SUFFIXES = (".html", ".xhtml", ".htm")
+
+
+def normalize_epub(src: Path, dest: Path) -> int:
+    """Flatten syntax-highlighted `<pre>` blocks to plain text before docling.
+
+    Technical EPUBs commonly wrap every highlighted *token* in its own `<code>`
+    element inside one `<pre>`. docling maps each of those to inline code, so a
+    policy listing comes out as a single line of dozens of backtick fragments
+    with spaces injected inside string literals — `" s1 "` instead of `"s1"`.
+    Collapsing each `<pre>` to one plain-text `<code>` first turned 12 recovered
+    code blocks into 210 on Learning CFEngine, with correct indentation.
+    """
+    import html as html_mod
+
+    def fix(m: "re.Match[bytes]") -> bytes:
+        inner = TAG_RE.sub(b"", m.group(1))
+        text = html_mod.unescape(inner.decode("utf-8", "replace"))
+        return b"<pre><code>" + html_mod.escape(text, quote=False).encode("utf-8") + b"</code></pre>"
+
+    import zipfile
+
+    fixed = 0
+    with zipfile.ZipFile(src) as zin, \
+            zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.lower().endswith(XHTML_SUFFIXES):
+                data, n = PRE_RE.subn(fix, data)
+                fixed += n
+            zout.writestr(item, data)
+    return fixed
+
+
+LINK_RE = re.compile(r"\[([^\]]*)\]\((https?://[^)\s]+)\)")
+
+
+def collapse_repeat_links(body: str) -> tuple[str, int]:
+    """Keep each distinct URL's first occurrence; later ones become plain text.
+
+    Reference books cross-link the same keyword to the same doc-search URL on
+    every mention. On Learning CFEngine that was 635 links over 248 distinct
+    URLs — 8% of the whole book spent re-stating URLs an agent already has.
+    """
+    seen: set[str] = set()
+    saved = 0
+
+    def sub(m: "re.Match[str]") -> str:
+        url = m.group(2)
+        if url in seen:
+            nonlocal saved
+            saved += len(m.group(0)) - len(m.group(1))
+            return m.group(1)
+        seen.add(url)
+        return m.group(0)
+
+    return LINK_RE.sub(sub, body), saved
+
+
+# --------------------------------------------------------------------------- #
+# extract
+# --------------------------------------------------------------------------- #
+
+def run_docling(src: Path, out_dir: Path, pages: str | None, ocr: bool,
+                enrich_code: bool = False) -> Path:
+    """Convert src to Markdown with docling. Returns the produced .md path."""
+    docling = venv_bin("docling")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(docling),
+        "convert",
+        "--to", "md",
+        "--output", str(out_dir),
+        # Tables as Markdown grids, not flattened prose. The whole point of
+        # docling over pdftotext for a technical book.
+        "--table-mode", "accurate",
+        "--image-export-mode", "placeholder",
+        "--quiet",
+    ]
+    if pages:
+        cmd += ["--page-range", pages]
+    if enrich_code:
+        # Classifies fenced blocks and recovers their language. PDF-only value:
+        # an EPUB already carries <code> markup, and this downloads a model.
+        cmd.append("--enrich-code")
+    # OCR is for scanned pages only and costs minutes. ocrmac uses the macOS
+    # Vision framework, so it needs no extra model download on an M-series Mac.
+    cmd += ["--ocr-engine", "ocrmac"] if ocr else ["--no-ocr"]
+    cmd.append(str(src))
+
+    print(f"  docling: {' '.join(cmd[1:])}", file=sys.stderr)
+    t0 = time.monotonic()
+    proc = subprocess.run(cmd, text=True, capture_output=True)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stdout[-4000:])
+        sys.stderr.write(proc.stderr[-4000:])
+        die(f"docling failed (exit {proc.returncode})")
+    produced = sorted(out_dir.glob("*.md"), key=lambda p: p.stat().st_mtime)
+    if not produced:
+        die(f"docling wrote no Markdown into {out_dir}")
+    print(f"  docling: {time.monotonic() - t0:.1f}s", file=sys.stderr)
+    return produced[-1]
+
+
+FENCE_RE = re.compile(r"^(?:```|~~~)")
+HEADING_RE = re.compile(r"^(#{1,6}) +(\S.*?)\s*$")
+# Headings this short are almost always a book's own navigation, not content.
+GENERIC_TITLES = {"table of contents", "contents", "index", "colophon"}
+# A section below this is noise as its own file; it is folded into the previous.
+MIN_CHAPTER_CHARS = 500
+
+
+def scan_headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """(line_index, level, title) for every ATX heading OUTSIDE a code fence.
+
+    Fence tracking is the whole reason this is line-based rather than one regex
+    over the body: a technical book is full of shell and .gitignore samples whose
+    `# comment` lines look exactly like Markdown headings. Without this, Pro Git
+    produced a chapter called "ignore all .a files".
+    """
+    out: list[tuple[int, int, str]] = []
+    in_fence = False
+    for i, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = HEADING_RE.match(line)
+        if m:
+            out.append((i, len(m.group(1)), m.group(2)))
+    return out
+
+
+def pick_split_level(headings: list[tuple[int, int, str]]) -> int:
+    """Shallowest heading level that yields a usable number of sections."""
+    for level in (1, 2, 3):
+        if sum(1 for _, lv, _ in headings if lv == level) >= MIN_SECTIONS:
+            return level
+    return 2
+
+
+def split_sections(lines: list[str], headings: list[tuple[int, int, str]],
+                   level: int, lo: int, hi: int) -> list[tuple[str, str]]:
+    """Split lines[lo:hi] on headings of exactly `level`."""
+    marks = [(i, t) for i, lv, t in headings if lv == level and lo <= i < hi]
+    if not marks:
+        return [("Document", "\n".join(lines[lo:hi]))]
+    out: list[tuple[str, str]] = []
+    if (pre := "\n".join(lines[lo : marks[0][0]]).strip()):
+        out.append(("Front matter", pre))
+    for n, (start, title) in enumerate(marks):
+        end = marks[n + 1][0] if n + 1 < len(marks) else hi
+        out.append((title, "\n".join(lines[start:end]).rstrip()))
+    return out
+
+
+def subdivide(title: str, text: str, level: int) -> list[tuple[str, str]]:
+    """Recursively split an oversized section on progressively deeper headings.
+
+    One extra level is not enough in practice: "The CFEngine Policy Language"
+    came out at 18k tokens because its own H3s were few and huge. Stop at H4 —
+    below that, headings stop being section boundaries.
+    """
+    if len(text) <= MAX_CHAPTER_CHARS or level > 4:
+        return [(title, text)]
+    lines = text.splitlines()
+    subs = split_sections(lines, scan_headings(lines), level, 0, len(lines))
+    if len(subs) < 2:
+        return [(title, text)]
+    out: list[tuple[str, str]] = []
+    for sub_title, sub_text in subs:
+        label = title if sub_title in ("Front matter", "Document") else f"{title} — {sub_title}"
+        out.extend(subdivide(label, sub_text, level + 1))
+    return out
+
+
+def split_chapters(body: str) -> list[tuple[str, str]]:
+    """Split into chapters: top heading level, subdividing anything oversized,
+    then folding away fragments too small to deserve their own file."""
+    lines = body.splitlines()
+    headings = scan_headings(lines)
+    level = pick_split_level(headings)
+
+    rough: list[tuple[str, str]] = []
+    for title, text in split_sections(lines, headings, level, 0, len(lines)):
+        rough.extend(subdivide(title, text, level + 1))
+
+    merged: list[tuple[str, str]] = []
+    for title, text in rough:
+        if merged and len(text) < MIN_CHAPTER_CHARS:
+            prev_title, prev_text = merged[-1]
+            merged[-1] = (prev_title, prev_text + "\n\n" + text)
+        else:
+            merged.append((title, text))
+    return merged
+
+
+def write_outline(slug: str, book_dir: Path,
+                  chapters: list[tuple[str, str, Path]]) -> Path:
+    """The deep map, kept OUT of INDEX.md on purpose: every sub-heading in the
+    book is thousands of tokens, and an agent should pay for it only when the
+    chapter table was not specific enough."""
+    lines = [f"# {slug} — full heading outline", "",
+             "Every sub-heading with a `file:line` anchor, for a narrow "
+             "`sed -n 'A,Bp'` read instead of a whole chapter.", ""]
+    for title, text, path in chapters:
+        rel = path.relative_to(book_dir)
+        subs = [
+            (i + 1, lv, t)
+            for i, lv, t in scan_headings(text.splitlines())
+            if lv >= 2
+        ]
+        if not subs:
+            continue
+        lines += [f"## {title}", "", f"`{rel}`", ""]
+        for lineno, lv, t in subs:
+            lines.append(f"{'  ' * max(0, lv - 2)}- {t} — `{rel}:{lineno}`")
+        lines.append("")
+    out = book_dir / "OUTLINE.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def write_index(slug: str, book_dir: Path, chapters: list[tuple[str, str, Path]],
+                meta: dict) -> Path:
+    """The map an agent reads first: every heading, its file, line and cost."""
+    lines = [
+        f"# {meta['title']} — chapter index",
+        "",
+        f"Source: `{meta['source']}` · {meta['pages'] or '?'} pages · "
+        f"{meta['words']:,} words · ~{meta['tokens']:,} tokens total.",
+        f"Extracted {meta['extracted_at']} with docling {meta['docling_version']}.",
+        "",
+        "**Read a chapter, never the book.** Column 3 is the cost of reading "
+        "that file. For a narrower read, `OUTLINE.md` anchors every sub-heading "
+        "to a `file:line`.",
+        "",
+        "| # | Chapter | ~tokens | File |",
+        "| -: | --- | -: | --- |",
+    ]
+    for n, (title, text, path) in enumerate(chapters, 1):
+        rel = path.relative_to(book_dir)
+        safe = title.replace("|", "\\|")
+        lines.append(f"| {n} | {safe} | {tokens(text):,} | `{rel}` |")
+
+    index = book_dir / "INDEX.md"
+    index.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return index
+
+
+def cmd_extract(args: argparse.Namespace) -> int:
+    src = Path(args.source).expanduser().resolve()
+    if not src.is_file():
+        die(f"not a file: {src}")
+    if src.suffix.lower() not in SUPPORTED:
+        die(f"unsupported extension {src.suffix!r} (docling handles: "
+            f"{', '.join(sorted(SUPPORTED))})")
+
+    slug = args.slug or slugify(src.stem)
+    book_dir = KB_ROOT / "md" / slug
+    raw_path = KB_ROOT / "raw" / f"{slug}.md"
+    digest = sha256(src)
+
+    meta_path = book_dir / "meta.json"
+    if meta_path.exists() and not args.force:
+        old = json.loads(meta_path.read_text())
+        if old.get("sha256") == digest:
+            print(f"up to date: {slug} (same sha256; --force to rebuild)")
+            return 0
+        print(f"source changed, re-extracting {slug}", file=sys.stderr)
+
+    # Keep the original inside the KB so the book is reproducible from one dir.
+    kept = KB_ROOT / "sources" / src.name
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    if src != kept:
+        shutil.copy2(src, kept)
+
+    print(f"==> extracting {src.name} -> {slug}", file=sys.stderr)
+    staging = KB_ROOT / "raw" / f".staging-{slug}-{os.getpid()}"
+    staging.mkdir(parents=True, exist_ok=True)
+    try:
+        to_convert = src
+        if src.suffix.lower() == ".epub" and not args.raw_epub:
+            to_convert = staging / f"normalized-{src.name}"
+            fixed = normalize_epub(src, to_convert)
+            print(f"  normalized {fixed} <pre> blocks", file=sys.stderr)
+        produced = run_docling(to_convert, staging, args.pages, args.ocr,
+                               args.enrich_code)
+        body = produced.read_text(encoding="utf-8", errors="replace")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    before = len(body)
+    if not args.keep_links:
+        body, saved = collapse_repeat_links(body)
+        if saved:
+            print(f"  collapsed repeated link URLs: -{saved:,} chars "
+                  f"(-{saved * 100 // max(before, 1)}%)", file=sys.stderr)
+
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text(body, encoding="utf-8")
+
+    chapters_dir = book_dir / "chapters"
+    if chapters_dir.exists():
+        shutil.rmtree(chapters_dir)
+    chapters_dir.mkdir(parents=True, exist_ok=True)
+
+    split = split_chapters(body)
+    written: list[tuple[str, str, Path]] = []
+    for n, (title, text) in enumerate(split, 1):
+        name = f"{n:02d}-{slugify(title)[:60] or 'section'}.md"
+        path = chapters_dir / name
+        # Frontmatter so basic-memory and a human both know what this is without
+        # reading the body. `permalinks` are disabled globally; this is metadata
+        # only, and basic-memory is configured not to rewrite these files.
+        header = (
+            "---\n"
+            f"title: {json.dumps(title, ensure_ascii=False)}\n"
+            f"book: {json.dumps(meta_title(body, slug, src), ensure_ascii=False)}\n"
+            f"slug: {slug}\n"
+            f"chapter: {n}\n"
+            "type: book-chapter\n"
+            "---\n\n"
+        )
+        path.write_text(header + text.rstrip() + "\n", encoding="utf-8")
+        written.append((title, text, path))
+
+    meta = {
+        "slug": slug,
+        "title": meta_title(body, slug, src),
+        "source": kept.name,
+        "source_path": str(kept),
+        "sha256": digest,
+        "bytes": src.stat().st_size,
+        "pages": args.pages or page_count(src),
+        "words": len(body.split()),
+        "tokens": tokens(body),
+        "chapters": len(written),
+        "docling_version": docling_version(),
+        "extracted_at": time.strftime("%Y-%m-%d %H:%M:%S%z"),
+        "raw": str(raw_path),
+    }
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    index = write_index(slug, book_dir, written, meta)
+    outline = write_outline(slug, book_dir, written)
+
+    print(
+        f"==> {slug}: {len(written)} chapters, ~{meta['tokens']:,} tokens total\n"
+        f"    index   {index}  (~{tokens(index.read_text()):,} tokens)\n"
+        f"    outline {outline}  (~{tokens(outline.read_text()):,} tokens)\n"
+        f"    raw     {raw_path}  (never read this whole)\n"
+        f"    next    book-kb index",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def embedded_title(src: Path) -> str | None:
+    """The document's own declared title, which beats anything guessed from the
+    extracted Markdown: the first `# ` heading in a book is typically its Table
+    of Contents or License page, not its title."""
+    suffix = src.suffix.lower()
+    if suffix == ".epub":
+        try:
+            import xml.etree.ElementTree as ET
+            import zipfile
+
+            with zipfile.ZipFile(src) as z:
+                container = ET.fromstring(z.read("META-INF/container.xml"))
+                rootfile = container.find(
+                    ".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile"
+                )
+                if rootfile is None:
+                    return None
+                opf = ET.fromstring(z.read(rootfile.attrib["full-path"]))
+                node = opf.find(".//{http://purl.org/dc/elements/1.1/}title")
+                if node is not None and (node.text or "").strip():
+                    return node.text.strip()
+        except (OSError, KeyError, ET.ParseError, zipfile.BadZipFile):
+            return None
+        return None
+    if suffix == ".pdf":
+        try:
+            out = subprocess.run(
+                ["pdfinfo", str(src)], text=True, capture_output=True, check=True
+            ).stdout
+            m = re.search(r"^Title:\s+(.+)$", out, re.MULTILINE)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+    return None
+
+
+def meta_title(body: str, fallback: str, src: Path | None = None) -> str:
+    if src is not None and (declared := embedded_title(src)):
+        return declared
+    for _, level, title in scan_headings(body.splitlines()):
+        if level == 1 and title.strip().lower() not in GENERIC_TITLES:
+            return title.strip()
+    return fallback.replace("-", " ").title()
+
+
+def page_count(src: Path) -> int | None:
+    if src.suffix.lower() != ".pdf":
+        return None
+    try:
+        out = subprocess.run(
+            ["pdfinfo", str(src)], text=True, capture_output=True, check=True
+        ).stdout
+        m = re.search(r"^Pages:\s+(\d+)", out, re.MULTILINE)
+        return int(m.group(1)) if m else None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def docling_version() -> str:
+    try:
+        out = subprocess.run(
+            [str(VENV / "bin" / "docling"), "convert", "--version"],
+            text=True, capture_output=True, check=True,
+        ).stdout.strip()
+        first = out.splitlines()[0] if out else ""
+        return first.split(":", 1)[-1].strip() or "unknown"
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+# --------------------------------------------------------------------------- #
+# index (basic-memory) / query / toc / list / doctor
+# --------------------------------------------------------------------------- #
+
+def bm_registered(project: str) -> bool:
+    """Read registration from basic-memory's config, not from `bm project list`.
+
+    That command renders a Rich table which truncates the name column to the
+    terminal width ("books" -> "boo…"), so a substring test on its output
+    silently reports a registered project as missing.
+    """
+    cfg = Path.home() / ".basic-memory" / "config.json"
+    try:
+        return project in json.loads(cfg.read_text()).get("projects", {})
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def bm(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    exe = shutil.which("bm") or shutil.which("basic-memory")
+    if not exe:
+        die("basic-memory CLI (`bm`) not on PATH")
+    return subprocess.run([exe, *args], text=True, capture_output=True, check=check)
+
+
+def indexed_count(project: str) -> int | None:
+    """Entities basic-memory has indexed for `project`, read straight from its
+    SQLite file — a cheap read-only check that `bm reindex` actually did work."""
+    import sqlite3
+
+    db = Path.home() / ".basic-memory" / "memory.db"
+    if not db.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+        with con:
+            row = con.execute(
+                "SELECT COUNT(e.id) FROM project p "
+                "LEFT JOIN entity e ON e.project_id = p.id WHERE p.name = ?",
+                (project,),
+            ).fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    """Register the KB as a basic-memory project so agents get semantic search.
+
+    Optional. The index + grep path needs no server at all; this only adds
+    concept-level recall for "where does the book discuss X" when you do not
+    know the author's wording.
+    """
+    root = KB_ROOT / "md"
+    root.mkdir(parents=True, exist_ok=True)
+    if not bm_registered(BM_PROJECT):
+        print(f"==> registering basic-memory project {BM_PROJECT!r} -> {root}",
+              file=sys.stderr)
+        bm("project", "add", BM_PROJECT, str(root))
+    else:
+        print(f"==> project {BM_PROJECT!r} already registered", file=sys.stderr)
+
+    # A freshly registered project stays at zero notes until something touches
+    # it — adding it does not index it, so waiting passively waits forever.
+    # `bm reindex` is the trigger. Budget generously: with semantic search on
+    # (fastembed / bge-small-en-v1.5) the FIRST reindex on this machine loads the
+    # ONNX model before embedding anything, which took over a minute once and
+    # ~3s every time since.
+    print(f"==> reindexing {BM_PROJECT} (first run loads the embedding model)",
+          file=sys.stderr)
+    proc = bm("reindex", "--project", BM_PROJECT, "--search", check=False)
+    if proc.returncode != 0:
+        sys.stderr.write((proc.stdout + proc.stderr)[-1500:])
+        print(f"!!! bm reindex exited {proc.returncode}", file=sys.stderr)
+
+    deadline = time.monotonic() + args.timeout
+    count = indexed_count(BM_PROJECT) or 0
+    while count == 0 and time.monotonic() < deadline:
+        time.sleep(3)
+        count = indexed_count(BM_PROJECT) or 0
+
+    if count == 0:
+        print(
+            f"!!! basic-memory has indexed 0 notes for {BM_PROJECT!r} after "
+            f"{args.timeout}s.\n"
+            f"    The index/grep path still works; only semantic search is "
+            f"affected.\n"
+            f"    Retry: bm reindex --project {BM_PROJECT} --search",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"==> basic-memory has {count} notes indexed in {BM_PROJECT!r}.\n"
+        f"    semantic : search_notes(project=\"{BM_PROJECT}\", query=...)\n"
+        f"    exact    : book-kb query '<regex>' <slug>\n"
+        f"    outline  : book-kb toc <slug>",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    """Exact-match search. Semantic search ranks by similarity and returns its
+    closest N notes whether or not any of them match, so this is how you prove
+    a term really is (or is not) in the book."""
+    rg = shutil.which("rg")
+    target = KB_ROOT / "md"
+    if args.slug:
+        target = target / args.slug
+    if not target.exists():
+        die(f"no such book directory: {target}")
+    # INDEX.md and OUTLINE.md list every chapter title, so they match almost any
+    # query and crowd out the actual prose. They are maps; use `toc` for them.
+    if rg:
+        cmd = [rg, "--heading", "--line-number", "--color", "never",
+               "--glob", "!INDEX.md", "--glob", "!OUTLINE.md",
+               "--max-columns", "240", "--max-columns-preview", "-C", str(args.context)]
+        if args.ignore_case:
+            cmd.append("-i")
+        cmd += [args.pattern, str(target)]
+    else:
+        cmd = ["grep", "-rn", "--exclude=INDEX.md", "--exclude=OUTLINE.md",
+               "-C", str(args.context)]
+        if args.ignore_case:
+            cmd.append("-i")
+        cmd += ["-e", args.pattern, str(target)]
+    return subprocess.run(cmd).returncode
+
+
+def cmd_toc(args: argparse.Namespace) -> int:
+    name = "OUTLINE.md" if args.deep else "INDEX.md"
+    index = KB_ROOT / "md" / args.slug / name
+    if not index.exists():
+        die(f"no index for {args.slug!r} — run: book-kb extract <file>")
+    sys.stdout.write(index.read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    books = sorted((KB_ROOT / "md").glob("*/meta.json"))
+    if not books:
+        print(f"no books in {KB_ROOT / 'md'} — add one: book-kb extract <file>")
+        return 0
+    print(f"{'slug':<28} {'chapters':>8} {'~tokens':>9}  title")
+    for meta_path in books:
+        m = json.loads(meta_path.read_text())
+        print(f"{m['slug']:<28} {m['chapters']:>8} {m['tokens']:>9,}  {m['title']}")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    ok = True
+    print("book-kb doctor\n")
+    print(f"  KB_ROOT   {KB_ROOT}  {'✓' if KB_ROOT.exists() else '✗ missing'}")
+    print(f"  venv      {VENV}  {'✓' if VENV.exists() else '✗ missing'}")
+    for tool in ("docling", "python"):
+        p = VENV / "bin" / tool
+        print(f"  {tool:<9} {'✓ ' + str(p) if p.exists() else '✗ missing — run the installer'}")
+        ok &= p.exists()
+    if (VENV / "bin" / "docling").exists():
+        print(f"  version   {docling_version()}")
+    for tool in ("rg", "bm", "pdfinfo"):
+        w = shutil.which(tool)
+        print(f"  {tool:<9} {'✓ ' + w if w else '✗ missing'}")
+    if bm_registered(BM_PROJECT):
+        n = indexed_count(BM_PROJECT)
+        print(f"  bm project '{BM_PROJECT}'  ✓ registered, "
+              f"{n if n is not None else '?'} notes indexed")
+    else:
+        print(f"  bm project '{BM_PROJECT}'  ✗ not registered — run: book-kb index")
+    print(f"\n  book-to-skill PYTHON_BIN should be {VENV / 'bin' / 'python'}")
+    return 0 if ok else 1
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="book-kb", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("extract", help="document -> Markdown chapters + index")
+    p.add_argument("source")
+    p.add_argument("--slug")
+    p.add_argument("--pages", help="PDF page range, e.g. 1-80 (test runs)")
+    p.add_argument("--ocr", action="store_true",
+                   help="OCR scanned pages via macOS Vision (slow)")
+    p.add_argument("--enrich-code", action="store_true",
+                   help="recover code-block languages in PDFs (downloads a model)")
+    p.add_argument("--keep-links", action="store_true",
+                   help="keep every repeated inline link URL (costs ~8%% more tokens)")
+    p.add_argument("--raw-epub", action="store_true",
+                   help="skip <pre> normalisation (diagnosing an extraction)")
+    p.add_argument("--force", action="store_true", help="rebuild even if unchanged")
+    p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("index", help="register the KB with basic-memory (optional)")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="seconds to wait for indexing to produce notes")
+    p.set_defaults(func=cmd_index)
+
+    p = sub.add_parser("query", help="exact-match search over chapters")
+    p.add_argument("pattern")
+    # Positional, because that is the form documented in every repo's AGENTS.md:
+    #   book-kb query '<regex>' learning-cfengine
+    p.add_argument("slug", nargs="?", default=None,
+                   help="limit to one book (default: search every book)")
+    p.add_argument("--slug", dest="slug", help=argparse.SUPPRESS)
+    p.add_argument("-C", "--context", type=int, default=2)
+    p.add_argument("-i", "--ignore-case", action="store_true")
+    p.set_defaults(func=cmd_query)
+
+    p = sub.add_parser("toc", help="print a book's chapter index")
+    p.add_argument("slug")
+    p.add_argument("--deep", action="store_true",
+                   help="print OUTLINE.md (every sub-heading) instead")
+    p.set_defaults(func=cmd_toc)
+
+    sub.add_parser("list", help="list books in the KB").set_defaults(func=cmd_list)
+    sub.add_parser("doctor", help="check the toolchain").set_defaults(func=cmd_doctor)
+
+    args = ap.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

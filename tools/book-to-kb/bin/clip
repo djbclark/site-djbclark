@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# clip — put text on the macOS pasteboard without mangling it.
+#
+# Bare `pbcopy` is unsafe from an agent shell: those start with LANG unset and
+# LC_CTYPE=C, so pbcopy reads stdin as MacRoman and writes that to the
+# pasteboard. An em dash (U+2014, UTF-8 E2 80 94) then pastes into a GUI app as
+# "‚Äî". This forces LC_CTYPE=UTF-8 and then verifies the pasteboard the way a
+# GUI app reads it — `pbcopy | pbpaste` cannot verify anything, because in the
+# same C locale pbpaste applies the inverse mangling and looks correct.
+#
+#   clip < file          clip file          cmd | clip
+#   clip --unwrap file   one line per paragraph, so the recipient's app wraps
+#   clip -q              no report on stderr
+set -uo pipefail
+
+unwrap=0 quiet=0 file=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --unwrap|-u) unwrap=1 ;;
+    --quiet|-q)  quiet=1 ;;
+    -h|--help)   sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*)          echo "clip: unknown option $1" >&2; exit 2 ;;
+    *)           file="$1" ;;
+  esac
+  shift
+done
+
+text=$(if [ -n "$file" ]; then cat -- "$file"; else cat; fi) || exit 1
+
+if [ "$unwrap" = 1 ]; then
+  # Collapse each blank-line-separated block to one line. Hard-wrapped text
+  # reflows raggedly in mail clients and web forms, which do their own wrapping.
+  text=$(printf '%s' "$text" | LC_CTYPE=UTF-8 python3 -c '
+import re, sys
+blocks = re.split(r"\n\s*\n", sys.stdin.read())
+out = [re.sub(r"\s*\n\s*", " ", b).strip() for b in blocks]
+print("\n\n".join(b for b in out if b))')
+fi
+
+printf '%s' "$text" | LC_CTYPE=UTF-8 pbcopy || { echo "clip: pbcopy failed" >&2; exit 1; }
+[ "$quiet" = 1 ] && exit 0
+
+# Verify through AppKit, not pbpaste.
+LC_CTYPE=UTF-8 python3 - <<'PY' >&2
+import subprocess, sys
+s = subprocess.run(["osascript", "-e", "the clipboard as «class utf8»"],
+                   capture_output=True, text=True).stdout.rstrip("\n")
+if not s:
+    print("clip: could not read the pasteboard back to verify"); sys.exit(0)
+odd = sorted({c for c in s if ord(c) > 127})
+# These only appear together when UTF-8 has been decoded as MacRoman/Latin-1.
+moji = [c for c in odd if c in "‚Äî‚Äù‚Äú√¢â€™"]
+paras = [p for p in s.split("\n") if p.strip()]
+longest = max((len(l) for l in s.split("\n")), default=0)
+print(f"clip: {len(s.split())} words, {len(paras)} paragraph(s), "
+      f"longest line {longest} chars")
+if moji:
+    print(f"clip: WARNING mojibake on the pasteboard: {moji}")
+    sys.exit(1)
+print(f"clip: non-ASCII verified clean: {odd if odd else 'none'}")
+PY
