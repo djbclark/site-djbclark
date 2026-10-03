@@ -150,8 +150,11 @@ because it is reference material and this file loads every session.
 > open it means your checkout or file access is broken, and the operator
 > wants to know.
 
-Short version: prefer `rg` over `grep`, `fd` over `find`, `ast-grep` for
-structural code search, and `gh` over raw API calls.
+Short version: **`graft` before `cat`/`rg` for anything about code** (run
+`graft build` first if a repo has no `graft/` — free, seconds); then `rg` over
+`grep`, `fd` over `find`, `ast-grep` for structural code search, and `gh` over
+raw API calls. The same file covers the `token-savior` MCP server — what it is
+for and the traps it carries.
 
 ## Multi-Agent Protocol
 
