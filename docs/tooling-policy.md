@@ -272,6 +272,31 @@ token-savior answered `native_agent_config.py:135-174` from crush and
 `android_intent.py:98-147` from Claude Code — two different single answers to the
 same question about the same repo, neither flagged as one of many.
 
+#### Per-call cost in a dirty repo — measured 2026-10-03
+
+The benchmark's "~0.01 s warm" figure assumes a persistent server **and** a
+working tree matching the cached git ref. Neither holds in normal use, and the
+difference is large:
+
+| Condition | `find_symbol` on stayturgid |
+|---|---|
+| tree matches cache, warm process | ~0.9 s |
+| 5 files differ from the cached ref | **8.9 s** |
+| three concurrent calls, same repo | **14.3 s each** |
+
+The cause is in the server's own stderr: every start reports `Cache hit with 5
+changed files, applying incremental update` and then `Cache saved` — i.e. it
+re-parses the changed files and **rewrites the whole 14 MB cache on every call**.
+Concurrency degrades it a further ~60% but does not deadlock.
+
+Separately and still unexplained: `get_function_source` on one symbol
+(`extract_devlog_lines`) **timed out three times at 120 s** after the cache was
+cleared, and in a later probe the plain call succeeded while the `force_full:
+true` call hung. A 15-minute time-boxed investigation reproduced the slowness
+above but not the hang, so treat a multi-minute stall as possible and bound your
+timeouts. This is one more reason the navigation rule puts graft first: graft
+refreshed the same repo and answered in 0.52 s under the same conditions.
+
 The two tools also do not index the same corpus: for stayturgid, token-savior indexed
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
