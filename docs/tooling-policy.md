@@ -314,12 +314,21 @@ Verification per client, where one exists: `codex mcp get`, `cursor-agent mcp li
 `opencode debug config` — **not** `opencode mcp list`, which prints "No MCP servers
 configured" even when servers are loaded.
 
-**End-to-end proven in two non-Claude hosts.** `crush run "use find_symbol with
-name=main"` in stayturgid returned a correct `@F:…@S:main@L:135-174` line. And
-Hermes's `mcp add` is itself the strongest protocol-level check any host gave: it
-launched the wrapper, completed the MCP handshake and enumerated all 15 tools by
-name and description before saving. (The codex attempt hit its usage limit before
-reaching the call.)
+**End-to-end proven in three non-Claude hosts.**
+
+- `crush run "use find_symbol with name=main"` in stayturgid returned a correct
+  `@F:…@S:main@L:135-174` line.
+- `codex exec` (2026-10-03 10:41, after its quota reset) logged
+  `mcp: token-savior/find_symbol (completed)` and returned
+  `@F:…/adb_shell.py @S:adb_shell @L:40-41` — byte-identical to the span graft
+  reported independently for the same symbol, so the two indexes agree.
+- Hermes's `mcp add` is the strongest protocol-level check of the three: it
+  launched the wrapper, completed the MCP handshake and enumerated all 15 tools by
+  name and description before writing anything.
+
+Only `copilot` remains unverified at the tool-call level, and not for want of
+trying — its own `mcp list` fails on a pre-existing lock bug, so nothing about it
+can be confirmed from the CLI.
 
 **`crushrc`, not `crush.json`, is crush's live config here** — settled by ablation:
 with the `mcp` block removed from `crush.json`, crush still advertised
