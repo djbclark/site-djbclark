@@ -237,7 +237,7 @@ the ones that change how you call them:
    call) and warned about unauthenticated Hub requests. Already warmed here; it
    matters for offline work.
 
-Numbering above continues from the token-savior defects. They also do not index the same corpus: for stayturgid, token-savior indexed
+The two tools also do not index the same corpus: for stayturgid, token-savior indexed
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
 
