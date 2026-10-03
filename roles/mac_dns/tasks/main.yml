@@ -17,6 +17,7 @@
     - "{{ mac_dns_apply_bin }}"
     - "{{ mac_dns_sudoers_file }}"
     - "{{ role_path }}/files/mac-dns-apply"
+    - "{{ mac_dns_allow_file }}"
   register: _mac_dns_installed
 
 - name: Refuse to run until `just mac-dns-setup` has installed the root-owned applier
@@ -26,10 +27,30 @@
       - _mac_dns_installed.results[0].stat.pw_name == 'root'
       - _mac_dns_installed.results[0].stat.checksum == _mac_dns_installed.results[2].stat.checksum
       - _mac_dns_installed.results[1].stat.exists
+      - _mac_dns_installed.results[3].stat.exists
     fail_msg: >-
       {{ mac_dns_apply_bin }} is missing, not root-owned, or differs from
-      roles/mac_dns/files/mac-dns-apply (or {{ mac_dns_sudoers_file }} is
-      missing). Run `just mac-dns-setup` once (Touch ID) and re-run.
+      roles/mac_dns/files/mac-dns-apply (or {{ mac_dns_sudoers_file }} /
+      {{ mac_dns_allow_file }} is missing). Run `just mac-dns-setup` once
+      (Touch ID) and re-run.
+
+- name: Read the root-owned allow-list
+  ansible.builtin.slurp:
+    src: "{{ mac_dns_allow_file }}"
+  register: _mac_dns_allow
+
+- name: Refuse to run if the allow-list does not match group_vars (data changed; re-run setup)
+  ansible.builtin.assert:
+    that: (_mac_dns_allow.content | b64decode).splitlines() | sort == _mac_dns_allow_expected | sort
+    fail_msg: >-
+      {{ mac_dns_allow_file }} does not match the tailnet_* facts in
+      inventory/group_vars/all.yml. Run `just mac-dns-setup` (Touch ID) to
+      re-render it, then re-run.
+  vars:
+    _mac_dns_allow_expected: >-
+      {{ ['resolver ' ~ mac_dns_resolver_domain]
+         + (mac_dns_resolver_nameservers | map('regex_replace', '^', 'nameserver ') | list)
+         + (mac_dns_search_domains | map('regex_replace', '^', 'search ') | list) }}
 
 - name: Render /etc/resolver/{{ mac_dns_resolver_domain }}
   ansible.builtin.command:
@@ -64,8 +85,7 @@
     argv: >-
       {{ ['sudo', '-n', mac_dns_apply_bin]
          + (['--check'] if ansible_check_mode else [])
-         + ['dnsservers', item]
-         + (mac_dns_dns_servers if mac_dns_dns_servers | length > 0 else ['Empty']) }}
+         + ['dnsservers', item, 'Empty'] }}
   loop: "{{ _mac_dns_services }}"
   register: _mac_dns_servers
   changed_when: _mac_dns_servers.stdout in ['changed', 'would-change']

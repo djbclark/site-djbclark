@@ -4,15 +4,22 @@
 # Installed root-owned at /usr/local/libexec/mac-dns-apply by `just mac-dns-setup`
 # and allowed NOPASSWD for the operator via /etc/sudoers.d/mac-dns, so the daily
 # unattended Ansible run can keep /etc/resolver and the search domains in sync
-# with inventory/group_vars/all.yml. Everything it accepts is validated here;
-# it never takes a path, never reads the environment, and only writes under
-# /etc/resolver or through networksetup.
+# with inventory/group_vars/all.yml. Everything it accepts is validated here
+# AND must appear in the root-owned allow-list /etc/mac-dns.allow (rendered
+# from the same group_vars by mac-dns-setup), so the NOPASSWD rule can only
+# ever reproduce the declared tailnet configuration, never point a resolver
+# or a network service somewhere else. It never takes a path, never reads the
+# environment, and only writes under /etc/resolver or through networksetup.
 #
 # Usage:
-#   mac-dns-apply [--check] resolver <domain> <nameserver>...
-#   mac-dns-apply [--check] resolver-remove <domain>
-#   mac-dns-apply [--check] searchdomains <network-service> (<domain>...|Empty)
-#   mac-dns-apply [--check] dnsservers   <network-service> (<nameserver>...|Empty)
+#   mac-dns-apply [--check] [--allow-file F] resolver <domain> <nameserver>...
+#   mac-dns-apply [--check] [--allow-file F] resolver-remove <domain>
+#   mac-dns-apply [--check] [--allow-file F] searchdomains <network-service> (<domain>...|Empty)
+#   mac-dns-apply [--check] dnsservers <network-service> Empty
+#
+# --allow-file is honoured only when NOT running as root (unit tests); root
+# always reads /etc/mac-dns.allow. Allow-list lines: "resolver <domain>",
+# "nameserver <ip>", "search <domain>".
 #
 # Prints exactly one of "changed" / "unchanged" on stdout (with --check:
 # "would-change" / "unchanged"). Exit 2 = invalid input, 1 = runtime failure.
@@ -20,14 +27,31 @@ set -eu
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 RESOLVER_DIR=/etc/resolver
+ALLOW_FILE=/etc/mac-dns.allow
 
 die() { printf 'mac-dns-apply: %s\n' "$1" >&2; exit "${2:-1}"; }
 usage() { die "usage: see header comment" 2; }
 
 CHECK=0
-if [ "${1:-}" = "--check" ]; then CHECK=1; shift; fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check) CHECK=1; shift ;;
+    --allow-file)
+      [ $# -ge 2 ] || usage
+      [ "$(id -u)" -ne 0 ] || die "--allow-file is not accepted when running as root" 2
+      ALLOW_FILE=$2; shift 2 ;;
+    *) break ;;
+  esac
+done
 [ $# -ge 1 ] || usage
 cmd=$1; shift
+
+allowed() {
+  # $1 = kind (resolver|nameserver|search), $2 = value; exact line match only.
+  [ -f "$ALLOW_FILE" ] || die "allow-list $ALLOW_FILE missing; run: just mac-dns-setup" 2
+  grep -Fxq -- "$1 $2" "$ALLOW_FILE" \
+    || die "$1 '$2' is not in $ALLOW_FILE (edit inventory/group_vars/all.yml, then: just mac-dns-setup)" 2
+}
 
 valid_domain() {
   # lowercase DNS name, 2+ labels, no leading/trailing dot or hyphen, <=253 chars
@@ -60,9 +84,11 @@ case "$cmd" in
     [ $# -ge 2 ] || usage
     domain=$1; shift
     valid_domain "$domain" || die "invalid domain: $domain" 2
+    allowed resolver "$domain"
     content=""
     for ns in "$@"; do
       valid_nameserver "$ns" || die "invalid nameserver: $ns" 2
+      allowed nameserver "$ns"
       content="${content}nameserver ${ns}
 "
     done
@@ -83,6 +109,7 @@ case "$cmd" in
     [ $# -eq 1 ] || usage
     domain=$1
     valid_domain "$domain" || die "invalid domain: $domain" 2
+    allowed resolver "$domain"
     target="$RESOLVER_DIR/$domain"
     [ -e "$target" ] || { report 0; exit 0; }
     [ "$CHECK" -eq 1 ] && { report 1; exit 0; }
@@ -100,6 +127,7 @@ case "$cmd" in
       want=""
       for d in "$@"; do
         valid_domain "$d" || die "invalid search domain: $d" 2
+        allowed search "$d"
         want="${want}${d}
 "
       done
@@ -121,30 +149,19 @@ case "$cmd" in
     # Empty = no manual DNS servers, so the service uses what DHCP (or the
     # Tailscale extension, for its own service) provides. A manual list here
     # was how a dead 10.128.0.1 took down all name resolution on 2026-10-02.
-    [ $# -ge 2 ] || usage
-    service=$1; shift
+    # Only "Empty" is accepted: a passwordless path that could point a
+    # service at an arbitrary resolver is exactly the vector to avoid. If a
+    # fixed resolver is ever genuinely wanted, extend this script and
+    # re-run mac-dns-setup (Touch ID).
+    [ $# -eq 2 ] || usage
+    service=$1
+    [ "$2" = "Empty" ] || die "dnsservers accepts only Empty (DHCP); manual DNS servers are not allowed here" 2
     valid_service "$service" || die "unknown network service: $service" 2
-    if [ $# -eq 1 ] && [ "$1" = "Empty" ]; then
-      want=""
-    else
-      want=""
-      for ns in "$@"; do
-        valid_nameserver "$ns" || die "invalid nameserver: $ns" 2
-        want="${want}${ns}
-"
-      done
-    fi
     have=$(networksetup -getdnsservers "$service" | grep -v "^There aren't any" || true)
-    [ -n "$have" ] && have="${have}
-"
-    if [ "$have" = "$want" ]; then report 0; exit 0; fi
+    if [ -z "$have" ]; then report 0; exit 0; fi
     [ "$CHECK" -eq 1 ] && { report 1; exit 0; }
     [ "$(id -u)" -eq 0 ] || die "must run as root (via sudo) to change DNS servers"
-    if [ -z "$want" ]; then
-      networksetup -setdnsservers "$service" Empty >/dev/null
-    else
-      networksetup -setdnsservers "$service" "$@" >/dev/null
-    fi
+    networksetup -setdnsservers "$service" Empty >/dev/null
     report 1
     ;;
   *) usage ;;

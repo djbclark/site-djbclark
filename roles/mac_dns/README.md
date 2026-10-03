@@ -8,7 +8,7 @@ Keeps three things in sync with the canonical host facts in
 | What | Where | From |
 | ---- | ----- | ---- |
 | MagicDNS resolver file | `/etc/resolver/<tailnet_magicdns_suffix>` (`nameserver 100.100.100.100`, …) | `tailnet_magicdns_*` |
-| Manual DNS servers | `networksetup -setdnsservers <service> Empty` on every service except Tailscale's (`mac_dns_services`/`mac_dns_exclude_services`) | `mac_dns_dns_servers` (default `[]` = DHCP) |
+| Manual DNS servers | cleared (`networksetup -setdnsservers <service> Empty`) on every service except Tailscale's (`mac_dns_services`/`mac_dns_exclude_services`) | fixed: DHCP only |
 | Search domains | `networksetup -setsearchdomains <service> …` on the same services | `tailnet_search_domains` |
 | Tailscale OS DNS takeover | `tailscale set --accept-dns=false` | `mac_dns_tailscale_accept_dns` |
 
@@ -46,16 +46,24 @@ prompting. The role also refuses to run if the installed copy differs from the
 repo copy, so a change to the script is never half-applied (re-run
 `just mac-dns-setup` after editing it).
 
-Residual risk, stated plainly: anything running as the operator can set an
-`/etc/resolver/<any-domain>` entry to any IP without a password. That is a
-narrow DNS-hijack vector for an attacker who already has local code execution
-as the operator, and it is the price of a daily unattended refresh of a
-root-owned file.
+The applier is further fenced by a root-owned allow-list,
+`/etc/mac-dns.allow`, rendered by `mac-dns-setup` from the same `tailnet_*`
+facts ([`files/render-allow-list.py`](files/render-allow-list.py)). Every
+resolver domain, nameserver and search domain must appear in it verbatim, and
+`dnsservers` accepts only `Empty`. So the NOPASSWD rule can reproduce exactly
+the declared tailnet configuration and nothing else: no other resolver file,
+no other nameserver, no other search domain, no manual DNS servers. Changing
+the facts in `group_vars` therefore requires one `just mac-dns-setup` (Touch
+ID) to re-render the allow-list; the role refuses to run until it matches.
+
+Residual risk after that: an attacker with local code execution as the
+operator can re-apply the already-declared config, or remove the tailnet
+resolver file. Neither redirects traffic.
 
 ## Commands
 
 ```bash
-just mac-dns-setup    # once, Touch ID: install root-owned applier + sudoers rule
+just mac-dns-setup    # Touch ID: install root-owned applier, sudoers rule, allow-list (re-run after editing those or the tailnet_* facts)
 just mac-dns-check    # ansible --check: shows would-change without touching anything
 just mac-dns-apply    # converge (what Jobber runs daily at 03:30)
 just mac-dns-status   # files, search domains, accept-dns, live probes
@@ -82,7 +90,6 @@ unreachable from this LAN, and the copy on the Tailscale service won for every
 lookup. The Tailscale service itself is excluded because the extension owns
 that service's DNS state; a manual entry on it is the failure mode.
 
-`mac-dns-apply resolver-remove`, `dnsservers <service> <ip>...` and
-`mac_dns_dns_servers` exist for the day a fixed resolver is genuinely wanted;
-until then `[]` (DHCP) is the only setting that follows the Mac between
-networks.
+DHCP-provided DNS is the only setting that follows the Mac between networks,
+so the applier accepts nothing else. If a fixed resolver is ever genuinely
+wanted, extend `files/mac-dns-apply` and re-run `just mac-dns-setup`.

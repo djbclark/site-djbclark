@@ -14,6 +14,9 @@
 # unattended run can never silently drift.
 mac_dns_apply_bin: /usr/local/libexec/mac-dns-apply
 mac_dns_sudoers_file: /etc/sudoers.d/mac-dns
+# Root-owned allow-list rendered from the tailnet_* facts by mac-dns-setup; the
+# applier refuses any domain or nameserver not listed in it.
+mac_dns_allow_file: /etc/mac-dns.allow
 mac_dns_operator: "{{ ansible_facts['user_id'] | default(lookup('env', 'USER'), true) }}"
 
 # Data (override in group_vars/all.yml — that file is the authority).
@@ -28,9 +31,8 @@ mac_dns_search_domains: "{{ tailnet_search_domains }}"
 # is exactly what overrode MagicDNS with a dead 10.128.0.1 on 2026-10-02.
 mac_dns_services: all
 mac_dns_exclude_services: ["Tailscale"]
-# Manual DNS servers per service. [] = "Empty" = use what DHCP hands out, which
-# is the only setting that survives moving between networks.
-mac_dns_dns_servers: []
+# Manual DNS servers are always cleared ("Empty" = DHCP): the applier accepts
+# nothing else, by design.
 mac_dns_tailscale_accept_dns: false
 
 # Homebrew tailscale CLI (same arch rule as site_agents_homebrew_prefix).
