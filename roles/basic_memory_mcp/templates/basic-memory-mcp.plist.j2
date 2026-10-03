@@ -6,9 +6,18 @@
   {#- bin/litellm_logpipe.py supervises the server (forwards launchd's SIGTERM,
       filters repeats, size-caps the log). One shared server per machine; every
       agent session reaches it at {{ basic_memory_mcp_url }}. #}
+  {#- NOT /usr/bin/python3 below: that is the Xcode CommandLineTools shim
+      (/Applications/Xcode.app/Contents/Developer/usr/bin/python3), which dies with
+      "unable to locate xcodebuild" whenever Xcode updates or its selected developer
+      dir goes stale. It would take the log filter down with it, and so this whole
+      service, which never starts without its filter. `env python3` resolves against
+      the PATH declared below, which puts the user and homebrew bins ahead of
+      /usr/bin, making the shim a last-resort fallback instead of a hard dependency.
+      logpipe is stdlib-only; verified on 3.9.6 and 3.14.8 (2026-10-03). #}
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
     <string>{{ basic_memory_mcp_logpipe_script }}</string>
     <string>--out</string><string>{{ basic_memory_mcp_logs_dir }}/basic-memory-mcp.log</string>
     <string>--max-bytes</string><string>{{ basic_memory_mcp_log_max_bytes | string }}</string>

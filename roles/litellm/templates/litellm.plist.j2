@@ -9,9 +9,18 @@
         forwards launchd's SIGTERM (SIGKILL after 20 s) and rotates the log. A
         `sh -c 'litellm | logpipe'` wrapper orphaned a wedged proxy on :4000
         when launchd signalled only the shell (2026-09-26). #}
+    {#- NOT /usr/bin/python3 below: that is the Xcode CommandLineTools shim
+        (/Applications/Xcode.app/Contents/Developer/usr/bin/python3), which dies with
+        "unable to locate xcodebuild" whenever Xcode updates or its selected developer
+        dir goes stale. It would take the log filter down with it, and so this whole
+        service, which never starts without its filter. `env python3` resolves against
+        the PATH declared below, which puts the user and homebrew bins ahead of
+        /usr/bin, making the shim a last-resort fallback instead of a hard dependency.
+        logpipe is stdlib-only; verified on 3.9.6 and 3.14.8 (2026-10-03). #}
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
         <string>{{ litellm_logpipe_script }}</string>
         <string>--out</string>
         <string>{{ litellm_logs_dir }}/litellm.log</string>
