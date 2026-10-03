@@ -4,7 +4,7 @@
 Claude Code writes one JSONL record per event under
 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, and garbage-collects
 those files over time. That GC is not hypothetical: it already cost us the
-repo attribution for 15 Hindsight documents dated 2026-08-15..19, which is
+repo attribution for 15 extracted memory documents dated 2026-08-15..19, which is
 recorded as this store's first `ingest_gap`. Copying the bytes into S1 before
 they vanish is the whole point of this adapter.
 
@@ -20,9 +20,9 @@ Two properties matter more than throughput:
   stored in `event.scope`, so attribution survives the transcript itself.
 
 Usage:
-    hindsight_s1_claude.py scan            # all projects, resuming each file
-    hindsight_s1_claude.py scan --dry-run  # report what would be ingested
-    hindsight_s1_claude.py scan --path <file.jsonl>
+    s1_claude.py scan            # all projects, resuming each file
+    s1_claude.py scan --dry-run  # report what would be ingested
+    s1_claude.py scan --path <file.jsonl>
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore, SourceMutated, now_iso  # noqa: E402
+from s1_evidence import EvidenceStore, SourceMutated, now_iso  # noqa: E402
 
 PRODUCER = "claude-code"
 ADAPTER_VERSION = "claude-tail-1"

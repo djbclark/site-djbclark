@@ -8,7 +8,7 @@
 # of a 16 GB laptop that was 11 GB into swap, for a server that had zero tool
 # calls in 233 transcripts over 14 days. basic-memory 0.23.x serves
 # `--transport streamable-http` natively, so the fix is the same pattern the
-# HTTP-URL servers (beeper, hindsight-shared, bezalel) already use: clients
+# HTTP-URL servers (beeper, bezalel) already use: clients
 # point at a URL; each extra session costs nothing.
 #
 # Safe to share: basic-memory's state is its project database (default project
@@ -30,7 +30,7 @@ basic_memory_mcp_port: 18796
 basic_memory_mcp_path: "/mcp"
 basic_memory_mcp_bin: "{{ basic_memory_mcp_home }}/.local/bin/basic-memory"
 basic_memory_mcp_logs_dir: "{{ basic_memory_mcp_home }}/Library/Logs/basic-memory-mcp"
-# Same supervisor as roles/hindsight and roles/litellm: forwards SIGTERM,
+# Same supervisor as roles/litellm: forwards SIGTERM,
 # filters repeats, size-caps the log. basic-memory also keeps its own log
 # under ~/.basic-memory/, so this one only needs to hold startup/crash output.
 basic_memory_mcp_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"

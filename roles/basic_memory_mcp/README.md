@@ -13,7 +13,7 @@ session. Measured 2026-09-26: 13 stdio copies ≈ 2.6 GB phys footprint on a
 ## What it serves (since 2026-09-30)
 
 The `main` project is `~/ops/site-private/memory`; this server is the memory
-search service that replaced Hindsight. The project path and three safety
+search service for agent memory. The project path and three safety
 settings live in `~/.basic-memory/config.json`, which this role does not
 render: `ensure_frontmatter_on_sync: false`, `disable_permalinks: true` and
 `auto_update: false`. With either of the first two at its default, indexing

@@ -61,11 +61,6 @@ WATCHED_FILES: list[tuple[str, int]] = [
 # automatically — silent auto-correction is the failure mode this guards.
 EXPECTED: dict[str, str] = {
     "claude.env.ENABLE_PROMPT_CACHING_1H": "1",
-    "hermes.hindsight.auto_recall": "True",
-    "hermes.hindsight.auto_retain": "True",
-    "hermes.hindsight.bank_id": "hermes-shared",
-    "hindsight.coding_agent.dynamicBankId": "True",
-    "hindsight.coding_agent.bankIdTemplate": "coding-agent::{gitProject}",
 }
 
 
@@ -228,10 +223,6 @@ def read_config() -> list[tuple[str, str | None]]:
     jget(Path.home()/".claude/settings.json", "env.ENABLE_PROMPT_CACHING_1H",
          "env.MAX_THINKING_TOKENS", prefix="claude.env")
     vals["claude.effortLevel"] = _json_path(Path.home()/".claude/settings.json", "effortLevel")
-    jget(Path.home()/".hermes/hindsight/config.json",
-         "auto_recall", "auto_retain", "bank_id", prefix="hermes.hindsight")
-    jget(Path.home()/".hindsight/coding-agent.json",
-         "dynamicBankId", "bankIdTemplate", prefix="hindsight.coding_agent")
     return [(k, None if v is None else str(v)) for k, v in vals.items()]
 
 
@@ -526,7 +517,7 @@ PLAN_SEED: list[tuple[str, float | None, str, str]] = [
     ("cursor", 20.0, "IDE composer sessions", "Cursor Pro."),
     ("grok", 30.0, "SuperGrok; non-interactive farming via grok --single", ""),
     ("zai", 18.0, "cheap bulk via crush TUI", "GLM coding plan, Lite tier."),
-    ("clinepass", 9.99, "the API pool Hermes and Hindsight actually run on",
+    ("clinepass", 9.99, "the API pool Hermes actually runs on",
      "Open-weight bundle. Load-bearing for Hermes — see the burn alert."),
     ("devin", 0.0, "autonomous ACU-based agent",
      "FREE plan, kept on purpose — to experiment with, and to exercise as an "

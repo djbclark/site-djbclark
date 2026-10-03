@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Filter + size-capped rotation for LiteLLM, the xAI bridge and Hindsight logs.
+"""Filter + size-capped rotation for LiteLLM, the xAI bridge and other launchd logs.
 
-(Named for its first user; roles/hindsight uses it too since 2026-09-26, when
-~/Library/Logs/hindsight had reached ~600 MB, mostly fact-extraction stack
-traces and repeated "slow DB pool acquire" warnings.)
+(Named for its first user; roles/basic_memory_mcp uses it too. It was added
+after one service's log reached ~600 MB of repeated stack traces.)
 
 A launchd service can only point stdout/stderr at a file it never rotates, and
 newsyslog needs root. By 2026-09-26 the proxy's stderr.log had reached 1.9 GB;
@@ -198,7 +197,7 @@ def main():
                 m = CLOCK.match(line)
                 if m:
                     line = f"{stamp} {m.group(1)} - {line[m.end():]}"
-                elif not DATED.match(line):   # bridge and Hindsight lines carry their own date
+                elif not DATED.match(line):   # bridge lines carry their own date
                     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}"
                 sink.write(line)
             else:

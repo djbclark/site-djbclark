@@ -151,27 +151,9 @@ litellm-status:
 
 # Reload a LaunchAgent after editing its plist (bootout + wait + bootstrap
 # with retry; `kickstart` alone does NOT re-read the plist). Optional health URL.
-#   just svc-reload com.djbclark.hindsight-api http://127.0.0.1:8888/health
+#   just svc-reload com.djbclark.basic-memory-mcp http://127.0.0.1:18796/mcp
 svc-reload label health="":
     bin/launchd_reload.sh "{{ label }}" "{{ health }}"
-
-# Install/configure local Hindsight memory service for #92. Opt-in and
-# deliberately separate from LiteLLM; no Hermes provider mutation occurs here.
-hindsight_hosts := env_var_or_default("HINDSIGHT_HOSTS", "mac")
-
-hindsight-apply *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/hindsight.yml --limit "{{ hindsight_hosts }}" {{ args }}
-
-hindsight-check *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/hindsight.yml --limit "{{ hindsight_hosts }}" {{ args }}
-
-hindsight-status:
-    @if launchctl print "gui/$(id -u)/com.djbclark.hindsight-api" >/dev/null 2>&1; then \
-      echo "launchd: loaded (com.djbclark.hindsight-api)"; \
-    else \
-      echo "launchd: not loaded (com.djbclark.hindsight-api)"; \
-    fi
-    @curl -fsS --max-time 5 http://127.0.0.1:8888/health || echo "HTTP 8888 not responding"
 
 # Shared basic-memory MCP server over streamable HTTP (roles/basic_memory_mcp):
 # one process per machine instead of one stdio copy per agent session.
@@ -488,20 +470,6 @@ maintenance:
     @echo "Verify: df -h /System/Volumes/Data && tmutil listlocalsnapshots /"
     @echo "Also confirm Arq's exclusions are still present in the UI — they"
     @echo "are set by hand and are not asserted by anything in this repo."
-
-# Hindsight retention pilot. These commands only manage the local candidate
-# ledger; promotion emits a payload and never writes to Hindsight implicitly.
-hindsight-candidate-propose:
-    python3 bin/hindsight_memory_candidates.py propose
-
-hindsight-candidate-list status="pending":
-    python3 bin/hindsight_memory_candidates.py list --status "{{ status }}"
-
-hindsight-candidate-review id decision content="":
-    if test -n "{{ content }}"; then python3 bin/hindsight_memory_candidates.py review "{{ id }}" "{{ decision }}" --content "{{ content }}"; else python3 bin/hindsight_memory_candidates.py review "{{ id }}" "{{ decision }}"; fi
-
-hindsight-candidate-payload id:
-    python3 bin/hindsight_memory_candidates.py payload "{{ id }}"
 
 # Herdr reporter helpers (added by lifecycle reporter release)
 ralph-herdr-supervisor:

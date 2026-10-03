@@ -16,7 +16,7 @@ goose_app_path: /Applications/Goose.app
 # Goose.app to /Volumes/mac256usb/Applications and the `block-goose` cask was
 # uninstalled, but the role reinstalled it on every apply because the cask task
 # only checked "is it absent?". Flipping this to false makes apply ENFORCE the
-# removal instead (same pattern as hindsight_enabled), so a stray
+# removal instead (an `_enabled: false` flag the apply enforces), so a stray
 # `brew install --cask block-goose` gets undone on the next run. The CLI
 # (`block-goose-cli`) and every config/keyring task below are unaffected --
 # this flag governs the Desktop cask only. Set it back to true to reinstall.
@@ -30,8 +30,8 @@ goose_provider_id: litellm-local
 # 2026-09-26: was clinepass-minimax-m3 (set 09-25, before the caps landed).
 # ClinePass is spent, not throttled — `aiuse` reads the weekly window 100% used
 # and the MONTHLY 99% (resets 10-16T07:42Z), so the 09-29 weekly reset returns
-# ~1% of a month and is gone again immediately. Hindsight, Hermes auxiliary and
-# the MoA slots all moved to grok-sub the same day; goose was the last route
+# ~1% of a month and is gone again immediately. Hermes auxiliary and the MoA
+# slots moved to grok-sub the same day; goose was the last route
 # still pointed at the spent subscription.
 #
 # REVERT AFTER 2026-10-16, and check `aiuse` first — the MONTHLY window is the

@@ -20,7 +20,7 @@ Two modes, deliberately separate because they fail differently:
   unverifiable — `bin/verify_facts.py` and `docs/fact-verification.md` cover
   the check and what the first run of it found.
 
-The prompt below is sharp on purpose. Hindsight's extraction over the same
+The prompt below is sharp on purpose. The earlier LLM extraction over the same
 material produced a corpus that was **83% episodic** — session narration
 ("the agent retired the wrapper…") rather than knowledge you could act on
 later. That is the failure mode to design against, so the prompt demands
@@ -48,8 +48,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore
-from hindsight_s1_search import SearchIndex
+from s1_evidence import EvidenceStore
+from s1_search import SearchIndex
 from verify_facts import literals
 
 MODEL = "gemini-3.1-pro-high"

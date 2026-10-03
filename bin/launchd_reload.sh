@@ -9,7 +9,7 @@
 #      Only bootout + bootstrap re-reads it.
 #   2. launchd does not finish tearing a job down before `bootout` returns, so
 #      an immediate `bootstrap` can fail with "5: Input/output error". The same
-#      command succeeds a moment later (see roles/hindsight/tasks/main.yml).
+#      command succeeds a moment later (see roles/basic_memory_mcp/tasks/main.yml).
 # This script waits for teardown to finish and retries bootstrap, mirroring the
 # Ansible roles' `until rc == 0` loop.
 set -euo pipefail

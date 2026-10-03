@@ -36,7 +36,7 @@ from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore, now_iso  # noqa: E402
+from s1_evidence import EvidenceStore, now_iso  # noqa: E402
 
 PROJECTION_CHARS = 8192
 INDEX_VERSION = 1

@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
-import hindsight_s1 as s1  # noqa: E402
-import hindsight_s1_claude as adapter  # noqa: E402
+import s1_evidence as s1  # noqa: E402
+import s1_claude as adapter  # noqa: E402
 
 
 def record(**kw) -> str:

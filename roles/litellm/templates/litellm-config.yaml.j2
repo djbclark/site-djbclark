@@ -26,7 +26,7 @@
 # AMENDED 2026-09-25 (operator decision): fallbacks ARE now configured, because
 # a single model with no fallback failed silently in a different way. From
 # ~2026-09-21 ClinePass answered "model not found" for deepseek-v4-flash, and
-# every Hindsight retain and reflect failed for four days with nobody noticing.
+# every memory-extraction call failed for four days with nobody noticing.
 # The 08-21 hazard was fallbacks that were SILENT and that spent PREPAID money.
 # This chain addresses both:
 #   1. ClinePass models first (same subscription, same terms, no extra cost),
@@ -120,7 +120,7 @@ model_list:
   # Last-resort fallbacks: Gemini API free tier (2026-09-25). Probed that day:
   # gemini-2.5-flash is retired for new users and several newer flash ids 503
   # under load; 3.7-flash and flash-lite-latest answered. Not for direct use:
-  # the free tier's RPM/RPD caps cannot carry Hindsight's normal load.
+  # the free tier's RPM/RPD caps cannot carry a bulk extraction load.
 {% if litellm_xai_bridge_enabled | bool %}
   # SuperGrok subscription through the loopback xAI OAuth bridge (2026-09-26).
   # The api_key is a placeholder: the bridge replaces the Authorization header
@@ -191,13 +191,12 @@ router_settings:
   # the other two after the first 429s spends nothing but latency and log.
   #
   # So: leave the subscription on the first failure, and put ClinePass LAST in
-  # grok-sub's chain rather than first. Hindsight's bulk retain load moved to
-  # grok-sub with it (roles/hindsight/defaults/main.yml) — that load is what
-  # spent the ClinePass month.
+  # grok-sub's chain rather than first. The bulk extraction load that spent
+  # the ClinePass month moved to grok-sub with it (that service is retired).
   #
   # TO REVERT AFTER 2026-10-16: put the sibling ClinePass models back at the
   # front of each clinepass-* chain and move ClinePass back ahead of Gemini in
-  # grok-sub's, and repoint hindsight_llm_model. Check `aiuse` first — the
+  # grok-sub's. Check `aiuse` first — the
   # monthly reset is the one that matters, not the weekly.
 {% set go_names = (litellm_opencode_go_models | map(attribute='name') | list) if (litellm_opencode_go_api_key | length > 0) else [] %}
 {% set gemini_names = litellm_gemini_fallback_models | map(attribute='name') | list %}
@@ -224,7 +223,7 @@ router_settings:
 general_settings:
   # Turning master_key on makes EVERY caller authenticate. It is set to the
   # placeholder the existing clients already send, so enabling it is a no-op
-  # for Hermes and Hindsight; see defaults/main.yml for the full client list.
+  # for Hermes; see defaults/main.yml for the full client list.
   master_key: os.environ/LITELLM_MASTER_KEY
   # Enables the key/spend tables that back /key/info and /key/spend/report.
   # Without this LiteLLM cannot account for spend at all.

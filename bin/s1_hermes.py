@@ -18,9 +18,9 @@ re-ingestion idempotent while still preserving everything that carries
 meaning.
 
 Usage:
-    hindsight_s1_hermes.py sink              # ingest new rows, resuming
-    hindsight_s1_hermes.py sink --dry-run
-    hindsight_s1_hermes.py sink --limit 5000
+    s1_hermes.py sink              # ingest new rows, resuming
+    s1_hermes.py sink --dry-run
+    s1_hermes.py sink --limit 5000
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore, SourceMutated, now_iso  # noqa: E402
+from s1_evidence import EvidenceStore, SourceMutated, now_iso  # noqa: E402
 
 PRODUCER = "hermes"
 ADAPTER_VERSION = "hermes-sink-1"

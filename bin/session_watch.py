@@ -51,7 +51,7 @@ MIN_CONTEXT_TOKENS = 50_000  # below this the re-read is not worth interrupting 
 
 # Commands whose presence means work is in flight; interrupting to suggest a
 # handoff would be worse than the cache miss.
-BUSY_PATTERNS = ("hindsight_s1", "mine_sessions", "agent_stats", "graft build",
+BUSY_PATTERNS = ("s1_evidence", "s1_claude", "s1_hermes", "mine_sessions", "agent_stats", "graft build",
                  "cow migrate", "yt-dlp")
 
 

@@ -106,7 +106,7 @@ def message(r: dict[str, Any], lvl: int) -> str:
                 f"  Every turn re-sends all of it. Send /compress to shrink it now.")
     if lvl == 2:
         return (f"⚠⚠ Context is heavy, ~{k} tokens: {head}\n"
-                f"  /compress now — or /new if the topic has changed (Hindsight keeps "
+                f"  /compress now — or /new if the topic has changed (Basic Memory keeps "
                 f"long-term memory across sessions, so nothing important is lost).")
     return (f"💤 Idle {r['idle_h']:.0f}h at ~{k} tokens: {head}\n"
             f"  Resuming pays to re-read all of it. Prefer /new (memory carries over), "

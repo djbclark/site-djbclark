@@ -76,9 +76,8 @@ hosts:
          note: "E1/E5: com.djbclark.litellm launchd; loopback default until auth/Tailscale design (REVIEW-1). Runs from the git checkout ~/src/litellm (fork of BerriAI/litellm) installed by hand as a uv tool -- roles/litellm verifies that install but never performs it."}
       - {port: 14011, bind: "127.0.0.1", owner: site, service: xai-oauth-bridge, status: active,
          note: "2026-09-26: com.djbclark.xai-oauth-bridge launchd (roles/litellm). bin/xai_oauth_bridge.py under the Hermes venv; injects a fresh SuperGrok OAuth token from Hermes's grant per request so LiteLLM's grok-sub fallback can reach api.x.ai. No auth -- loopback only."}
-      # :8888 hindsight-api and :5432 hindsight-pg0 removed 2026-09-30 — Hindsight
-      # retired (roles/hindsight, hindsight_enabled: false). Both ports are free.
-      # Basic Memory on :18796 replaced it.
+      # :8888 and :5432 freed 2026-09-30 (retired memory service); Basic Memory
+      # on :18796 replaced it.
       - {port: 5433,  bind: "127.0.0.1", owner: site, service: postgresql-18,   status: active,
          note: "2026-09-29: brew services postgresql@18 (sh.brew.postgresql@18 launchd). Backs LiteLLM's spend/key tables (DATABASE_URL ...:5433/litellm)."}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
@@ -113,7 +112,7 @@ hosts:
       - {port: 18795, bind: "127.0.0.1", owner: unmanaged, service: claude-mcp-auth, status: active,
          note: "caddy bearer gate for 18794; funnel path 8443/claude-mcp"}
       - {port: 18796, bind: "127.0.0.1", owner: site, service: basic-memory-mcp, status: active,
-         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private/memory and it is the memory search service (replaced Hindsight)"}
+         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private/memory and it is the memory search service (replaced the retired memory service)"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same
@@ -225,7 +224,7 @@ hosts:
       - pattern: "happy/dist/index.mjs"
         note: "happy CLI daemon (node) -- observed 55089/55093/55094"
       - pattern: "query-engine-darwin"
-        note: "Prisma query engine (prisma-python) -- one per LiteLLM/Hindsight process, random -p port per start; observed 50291/56091 (2026-09-29)"
+        note: "Prisma query engine (prisma-python) -- one per LiteLLM process, random -p port per start; observed 50291/56091 (2026-09-29)"
       - pattern: "Orca.app/Contents/MacOS/Orca"
         note: "Orca.app secondary loopback listener on a per-launch high port (observed 49464); its fixed 6768 has its own row"
       - pattern: "1Password.app"

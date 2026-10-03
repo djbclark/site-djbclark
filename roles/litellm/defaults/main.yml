@@ -121,7 +121,7 @@ litellm_opencode_go_models:
   - { name: go-kimi, model: kimi-k3 }
   - { name: go-deepseek-pro, model: deepseek-v4-pro }
   - { name: go-deepseek-flash, model: deepseek-v4-flash }
-  # Hindsight reflect (2026-09-30). `params` are merged into litellm_params. With default
+  # Tuned 2026-09-30 for long-answer synthesis loads. `params` are merged into litellm_params. With default
   # reasoning, glm-5.3-flash spent 2.8-4k hidden reasoning tokens on long answers and
   # reflect's final synthesis took ~75s (120s direct, 33 tok/s). With reasoning_effort
   # none: 5s on a reflect-shaped tool call, answers still correct. Its API rejects
@@ -153,7 +153,7 @@ litellm_log_backups: 3
 litellm_xai_bridge_log_max_bytes: 5000000
 litellm_xai_bridge_log_backups: 1
 litellm_xai_bridge_plist_path: "{{ litellm_home }}/Library/LaunchAgents/{{ litellm_xai_bridge_label }}.plist"
-# Fast non-reasoning model: Hindsight's fallback load is fact extraction.
+# Fast non-reasoning model: the fallback load here is bulk fact extraction.
 litellm_xai_fallback_model: grok-4.20-0309-non-reasoning
 
 # Generation ceiling and the timeout that actually enforces it. See the
@@ -167,7 +167,7 @@ litellm_num_retries: 1
 # way to not spend the subscription is to not send the requests. `aiuse` on
 # 2026-09-26 read weekly 100% used (resets 09-29T12:56Z) and MONTHLY 99% used
 # (resets 10-16T07:42Z) — i.e. the 09-29 weekly reset buys ~1% of a month and
-# is gone again immediately. Hindsight's fact-extraction load is what spent it;
+# is gone again immediately. A since-retired bulk fact-extraction service spent it;
 # see the fallbacks block in templates/litellm-config.yaml.j2 for where that
 # load went instead.
 #
@@ -206,13 +206,12 @@ litellm_cooldown_time: 300
 #
 # Enabling general_settings.master_key turns on auth for EVERY caller, so the
 # master key is deliberately set to the placeholder the clients already send
-# ("sk-litellm-local", see roles/hindsight hindsight_llm_api_key_placeholder and
-# ~/.hermes/config.yaml). Hermes and Hindsight therefore keep working untouched;
+# ("sk-litellm-local", see ~/.hermes/config.yaml). Hermes therefore keeps working untouched;
 # only the clients that sent a DIFFERENT placeholder had to change (Open WebUI
 # sent "sk-dummy", Goose sent nothing at all).
 #
 # This value is NOT a secret and must not be treated as one: it is already
-# checked in as a plaintext default here and in roles/hindsight, and it only
+# checked in as a plaintext default here, and it only
 # grants access to a loopback-bound port. It is an anti-typo guard, not a
 # credential. If litellm_bind is ever widened, this MUST become a real
 # generated secret sourced from the vault like litellm_clinepass_api_key.
@@ -223,8 +222,8 @@ litellm_master_key: "sk-litellm-local"
 # The spend DB above records every request, but every client sent the same
 # master key, so LiteLLM_SpendLogs could say how much the proxy burned and not
 # WHO burned it. That was the missing number when ClinePass lost a month of
-# quota in two sprints (2026-09-20/21 and 2026-09-25): Hindsight, Hermes and
-# goose all shared one key.
+# quota in two sprints (2026-09-20/21 and 2026-09-25): every client shared
+# one key.
 #
 # Each client now sends its own key. The role creates any that are missing via
 # /key/generate (tasks/client_keys.yml); `aiuse attribute` reads the alias back
@@ -249,10 +248,9 @@ litellm_client_keys:
 
 # Dedicated Postgres for LiteLLM's key/spend tables.
 #
-# Deliberately NOT the embedded pg0 cluster that Hindsight runs on :5432
-# (~/.pg0/instances/hindsight). LiteLLM refuses to start when its database_url
-# is unreachable, so sharing Hindsight's private instance would make a Hindsight
-# DB outage take down every LLM client on the box. This is the Homebrew
+# Deliberately its own cluster. LiteLLM refuses to start when its database_url
+# is unreachable, so sharing an instance with another service would let that
+# service's DB outage take down every LLM client on the box. This is the Homebrew
 # postgresql@18 cluster moved to :5433 so the two never contend for the port.
 #
 # No password: the cluster's pg_hba.conf is `trust` for 127.0.0.1/::1 only, so

@@ -22,7 +22,7 @@
     state: directory
     mode: "{{ item.mode }}"
   # LaunchAgents is shared with every other role; keep the macOS default 0755
-  # (see the note in roles/hindsight/tasks/main.yml).
+  # (every role that renders into it relies on that).
   loop:
     - {path: "{{ basic_memory_mcp_logs_dir }}", mode: "0700"}
     - {path: "{{ basic_memory_mcp_plist_dir }}", mode: "0755"}
@@ -51,7 +51,7 @@
     - _basic_memory_plist.changed
     - _basic_memory_loaded.rc == 0
 
-# Same teardown race as roles/hindsight: bootstrap right after bootout can fail
+# launchd teardown race: bootstrap right after bootout can fail
 # with rc=5 until launchd finishes tearing the job down. Retry, don't sleep.
 - name: Bootstrap basic-memory MCP LaunchAgent
   ansible.builtin.command:

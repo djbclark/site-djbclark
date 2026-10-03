@@ -185,17 +185,17 @@ number that matters now that ClinePass is capped.
 
 The master key is deliberately the placeholder the clients were already
 sending, `sk-litellm-local`. It is **not a secret** — it is checked in as a
-plaintext default here and in `roles/hindsight`, and it only guards a
+plaintext default here, and it only guards a
 loopback-bound port. Treat it as an anti-typo guard. If `litellm_bind` is ever
 widened beyond loopback this MUST become a generated secret pulled from the
 vault, exactly like `litellm_clinepass_api_key`.
 
 ### Why a separate Postgres on :5433
 
-Hindsight already runs an **embedded pg0 cluster on :5432**
-(`~/.pg0/instances/hindsight`). LiteLLM refuses to start when its
-`database_url` is unreachable, so sharing that instance would let a Hindsight
-database outage take down every LLM client on the box. Instead this uses the
+LiteLLM refuses to start when its `database_url` is unreachable, so it must
+never share a database instance with anything whose outage should not take
+down every LLM client on the box (historically an embedded pg0 cluster held
+:5432, since removed). Instead this uses the
 Homebrew `postgresql@18` cluster moved to **:5433**, which also stops the two
 from fighting over the port.
 
@@ -231,7 +231,6 @@ Skipping `prisma generate` makes the proxy **fail to start entirely**
 | Caller | Before | Now |
 | --- | --- | --- |
 | Hermes (`~/.hermes/config.yaml`) | `sk-litellm-local` | unchanged |
-| Hindsight (`roles/hindsight`) | `sk-litellm-local` | unchanged |
 | LLM backend health check | `sk-litellm-local` | unchanged |
 | Open WebUI (`roles/open_webui`) | `sk-dummy` | `sk-litellm-local` |
 | Goose (`roles/goose`) | no auth at all | `requires_auth` + keyring entry |

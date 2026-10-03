@@ -3,8 +3,8 @@
 
 S1 is the only irreplaceable machine-readable store: it keeps producer bytes
 exactly as they arrived, before any normalization, and uses SQLite for identity
-and transactional state. Everything else in the architecture (Hindsight banks,
-projections, indexes) is rebuildable from here, so this module's contract is
+and transactional state. Everything else in the architecture (projections,
+indexes, exported notes) is rebuildable from here, so this module's contract is
 narrow and strict:
 
 - raw bytes land in a content-addressed store first, and the row that describes
@@ -15,8 +15,9 @@ narrow and strict:
   about our coverage, and claiming losslessness we don't have is worse than
   admitting the hole.
 
-Phase A's candidate ledger lives in the same database file
-(`hindsight_memory_candidates.py`); this module only adds tables.
+The database file also carries the tables of the retired Phase A candidate
+ledger; this module only adds its own (CREATE TABLE IF NOT EXISTS) and is
+self-sufficient on an empty file.
 
 Spec: site-djbclark/docs/plans/memory-architecture-v2.md §4.1.
 """
@@ -31,8 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-DEFAULT_DB = Path.home() / ".hindsight" / "candidates.sqlite3"
-DEFAULT_CAS = Path.home() / ".hindsight" / "cas"
+DEFAULT_DB = Path.home() / ".local" / "share" / "s1-evidence" / "candidates.sqlite3"
+DEFAULT_CAS = Path.home() / ".local" / "share" / "s1-evidence" / "cas"
 SCHEMA_VERSION = 1
 BUSY_TIMEOUT_MS = 30_000
 

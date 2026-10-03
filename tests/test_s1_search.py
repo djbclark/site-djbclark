@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
-import hindsight_s1 as s1  # noqa: E402
-import hindsight_s1_search as search  # noqa: E402
+import s1_evidence as s1  # noqa: E402
+import s1_search as search  # noqa: E402
 
 
 class SearchTestCase(unittest.TestCase):

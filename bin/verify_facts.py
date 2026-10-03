@@ -60,8 +60,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hindsight_s1 import EvidenceStore
-from hindsight_s1_search import SearchIndex, project
+from s1_evidence import EvidenceStore
+from s1_search import SearchIndex, project
 
 ENTAIL_MODEL = "gemini-3.1-pro-high"
 
