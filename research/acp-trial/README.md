@@ -115,7 +115,7 @@ same bug-fix task, run through it:
 | hermes | ❌ transport fine and `end_turn`, but the reply was a provider error from its ACP default model. **Exit 0 is not success.** |
 | qwen | ❌ 401, expired token (needs re-login) |
 | goose | ❌ no provider configured |
-| codex (`codex-acp` adapter) | not run (usage limit) |
+| codex (`codex-acp` adapter, npm -g) | ✅ fixed, test passes (run later the same day, once its usage limit reset: 45 s, 8 tool calls, 36k tokens, no permission requests) |
 
 Also verified:
 
