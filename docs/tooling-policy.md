@@ -343,9 +343,29 @@ read `~/.gemini/settings.json`, a different file); `aider` has no MCP support;
 `orca` is an orchestration host, not an MCP client.
 
 Verification per client, where one exists: `codex mcp get`, `cursor-agent mcp list`
-(→ `ready`), `agy mcp list` (→ `enabled`), `grok mcp list`, and
-`opencode debug config` — **not** `opencode mcp list`, which prints "No MCP servers
-configured" even when servers are loaded.
+(→ `ready`), `agy mcp list` (→ `enabled`), `grok mcp list`.
+
+**Correction, 2026-10-03 — opencode's registration is inert, and I had the
+diagnostic backwards.** An earlier version of this section said to trust
+`opencode debug config` over `opencode mcp list`, because `mcp list` reported "No
+MCP servers configured" while `debug config` showed the servers. Testing at the
+*agent* level reversed it: an `opencode run` session can call **no** MCP tools at
+all — it reports that only the `tools.opencode.*` namespace is available — and that
+is true of `basic-memory` too, which was configured long before token-savior and is
+independently healthy for every other client on this machine. So `mcp list` was
+accurately reporting the runtime's zero registered servers, and `debug config`
+merely echoes the parsed file. Transport makes no difference (HTTP and stdio both
+fail) and neither does config shape (flat `mcp.<name>` and nested
+`mcp.servers.<name>` both fail), so it is not the `--global` write-location issue
+([#49904](https://github.com/anomalyco/opencode/issues/49904)).
+
+It matches [anomalyco/opencode#50710](https://github.com/anomalyco/opencode/issues/50710),
+filed as Windows-specific; our macOS reproduction is
+[added there](https://github.com/anomalyco/opencode/issues/50710#issuecomment-5970758142)
+and contradicts that scoping. Until it is fixed, **treat opencode as having no MCP
+access** — the token-savior entry is correct and will start working when the bug
+is, but do not route MCP-dependent work there, and do not assume opencode can
+reach the shared Basic Memory pool.
 
 **End-to-end proven in four non-Claude hosts.**
 
