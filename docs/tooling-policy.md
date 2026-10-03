@@ -176,18 +176,32 @@ ground — and given defect 1 below, graft is the safer way to read a function.
 Both tools returned at least one confidently wrong answer under test. These are
 the ones that change how you call them:
 
-1. **`get_function_source` returns no function body by default. Always pass
-   `force_full: true`.** Asked for `lan_ipv4`, it returned 82 characters — the
-   signature and docstring summary, none of the eight body lines that gate on
-   CGNAT, loopback and link-local. On a second symbol the same call returned a
-   551-char stub with type annotations stripped and the body simply absent, then
-   the correct 980 chars when repeated with identical arguments. The escalation
-   level is persisted in `.token-savior-cache.json` and survives across
-   processes, so the answer depends on invisible accumulated history: 980, then
-   385, then 551, then 980 for one symbol in one session. `force_full: true`
-   returned correct complete source on the first call, verified byte-for-byte.
-   An agent that edited on the strength of the default reply would destroy logic
-   it never saw.
+1. **`get_function_source` can return a body-less stub on a repeat call. Pass
+   `force_full: true` when you need the source.** Reproduced from a clean state
+   on `lan_ipv4` (stayturgid), no `level`, separate processes per call: call 1
+   gave 507 chars of correct, complete body; call 2 with identical arguments gave
+   171 chars — `[L2] lan_ipv4(value) / returns: None / doc: …`, no body. Three
+   earlier identical calls went 143 → 507 → 507.
+
+   **Corrected 2026-10-03 — the original write-up here overstated this.** Two
+   claims did not survive my own reproduction. The abbreviation *is* labelled
+   `[L2]`, so it is not indistinguishable from a body-less function; and an
+   abbreviated *first* call did not reproduce — nine fresh symbols all returned
+   complete bodies first time. A benchmark run reported an 82-char unlabelled
+   summary for `lan_ipv4` and a 980/385/551/980 sequence, and a Thompson-sampling
+   bandit (`memory_db.thompson_sample_level`, `lattice.py:71`) is a plausible
+   mechanism for that, but I could not reproduce either, so treat both as
+   unconfirmed. See
+   [`memory/benchmarks/2026-10-03-graft-vs-token-savior.md`](https://github.com/djbclark/site-private/blob/master/memory/benchmarks/2026-10-03-graft-vs-token-savior.md)
+   for the original measurements.
+
+   What *is* demonstrated and still matters: the escalation state lives in
+   `.token-savior-cache.json` and therefore persists **across processes**, so the
+   "you already have this body" premise can be false for a new session, another
+   agent sharing the repo, or the same agent after a compaction. Filed upstream
+   as [Mibayy/token-savior#121](https://github.com/Mibayy/token-savior/issues/121),
+   with that correction posted as a follow-up.
+
 2. **`find_symbol` silently collapses ambiguity.** `~/src/herdr` has seven
    `fn main` definitions; `find_symbol {"name":"main"}` returned exactly one —
    and not `src/main.rs`, the real entry point — with nothing in the response
@@ -241,7 +255,7 @@ the ones that change how you call them:
 
 | # | Defect | Workaround |
 |---|---|---|
-| 1 | `get_function_source` omits the body, non-deterministically | **Always pass `force_full: true`.** Verified byte-exact on first call. Better still, read functions with `graft_find_code --full`. |
+| 1 | `get_function_source` can serve a body-less `[L2]` stub on a repeat call | **Pass `force_full: true`** whenever you actually need source. The stub's "you already have it" premise is false across processes, and graft is the safer way to read a function anyway. |
 | 2 | `find_symbol` collapses ambiguity | Use `get_entry_points` (lists them all) or `search_codebase`; in a graft repo, `graft_find_all`. Treat a single hit for a common name (`main`, `run`, `handler`) as unverified. |
 | 3 | `find_dead_code` ~43% false positives | Before deleting anything, re-check the symbol with `graft_trace_calls --direction in` *and* a plain `rg -n '\bname\b'`. Anything that is a method override, a framework entry point or an `@property` is a false positive by construction. |
 | 4 | `detect_breaking_changes` is Python-only | Fine as-is; just diff non-Python files yourself (`git diff --stat`) so YAML/Kotlin/Swift changes are not silently assumed safe. |
