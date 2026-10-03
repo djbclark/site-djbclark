@@ -8,7 +8,8 @@ Keeps three things in sync with the canonical host facts in
 | What | Where | From |
 | ---- | ----- | ---- |
 | MagicDNS resolver file | `/etc/resolver/<tailnet_magicdns_suffix>` (`nameserver 100.100.100.100`, …) | `tailnet_magicdns_*` |
-| Search domains | `networksetup -setsearchdomains Wi-Fi …` (services: `mac_dns_search_domain_services`) | `tailnet_search_domains` |
+| Manual DNS servers | `networksetup -setdnsservers <service> Empty` on every service except Tailscale's (`mac_dns_services`/`mac_dns_exclude_services`) | `mac_dns_dns_servers` (default `[]` = DHCP) |
+| Search domains | `networksetup -setsearchdomains <service> …` on the same services | `tailnet_search_domains` |
 | Tailscale OS DNS takeover | `tailscale set --accept-dns=false` | `mac_dns_tailscale_accept_dns` |
 
 Then it probes the real system resolver for `mac.<tailnet>` and `example.com`
@@ -42,7 +43,8 @@ service must appear in `networksetup -listallnetworkservices`), ignores the
 environment, and only writes under `/etc/resolver` or via `networksetup`.
 Ansible calls it with `sudo -n`, so an unattended run fails closed instead of
 prompting. The role also refuses to run if the installed copy differs from the
-repo copy, so a change to the script is never half-applied.
+repo copy, so a change to the script is never half-applied (re-run
+`just mac-dns-setup` after editing it).
 
 Residual risk, stated plainly: anything running as the operator can set an
 `/etc/resolver/<any-domain>` entry to any IP without a password. That is a
@@ -70,10 +72,17 @@ Set `mac_dns_tailscale_accept_dns: true`, `tailnet_search_domains: []`, run
 resolver-remove <tailnet>` (or `sudo rm /etc/resolver/<tailnet>`). Remove
 `/etc/sudoers.d/mac-dns` and the applier if the role is retired.
 
-## Related, not managed here
+## Every service, not just Wi-Fi
 
-Four other network services (USB 10/100/1000 LAN, iPhone, Thunderbolt Bridge,
-nRF52) still carry a manual DNS override of `10.128.0.1` found on 2026-10-02.
-It only bites when one of them is active. Add them to
-`mac_dns_search_domain_services` if they are used, and clear the override
-with `networksetup -setdnsservers <service> Empty`.
+The role enumerates `networksetup -listallnetworkservices` on each run, so a
+newly plugged-in adapter (a new USB NIC, an iPhone tether) gets the same
+settings the next time it converges. Manual DNS servers are cleared on all of
+them: the 2026-10-02 outage was a hand-set `10.128.0.1` on five services,
+unreachable from this LAN, and the copy on the Tailscale service won for every
+lookup. The Tailscale service itself is excluded because the extension owns
+that service's DNS state; a manual entry on it is the failure mode.
+
+`mac-dns-apply resolver-remove`, `dnsservers <service> <ip>...` and
+`mac_dns_dns_servers` exist for the day a fixed resolver is genuinely wanted;
+until then `[]` (DHCP) is the only setting that follows the Mac between
+networks.

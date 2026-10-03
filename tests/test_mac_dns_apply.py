@@ -49,6 +49,17 @@ class MacDnsApplyTests(unittest.TestCase):
         self.assertEqual(p.returncode, 2, p.stderr)
         self.assertIn("unknown network service", p.stderr)
 
+    def test_dnsservers_validation(self) -> None:
+        p = run("--check", "dnsservers", "Not A Service", "Empty")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("unknown network service", p.stderr)
+        p = run("--check", "dnsservers", "Wi-Fi", "not-an-ip")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("invalid nameserver", p.stderr)
+        p = run("--check", "dnsservers", "Wi-Fi", "Empty")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(p.stdout.strip(), {"unchanged", "would-change"})
+
     def test_resolver_remove_of_absent_file_is_unchanged(self) -> None:
         p = run("--check", "resolver-remove", "definitely-absent.example.net")
         self.assertEqual(p.returncode, 0, p.stderr)
@@ -65,6 +76,7 @@ class MacDnsApplyTests(unittest.TestCase):
         self.assertEqual(run().returncode, 2)
         self.assertEqual(run("bogus").returncode, 2)
         self.assertEqual(run("resolver", "example.ts.net").returncode, 2)
+        self.assertEqual(run("dnsservers", "Wi-Fi").returncode, 2)
 
 
 if __name__ == "__main__":

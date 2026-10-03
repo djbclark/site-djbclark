@@ -12,6 +12,7 @@
 #   mac-dns-apply [--check] resolver <domain> <nameserver>...
 #   mac-dns-apply [--check] resolver-remove <domain>
 #   mac-dns-apply [--check] searchdomains <network-service> (<domain>...|Empty)
+#   mac-dns-apply [--check] dnsservers   <network-service> (<nameserver>...|Empty)
 #
 # Prints exactly one of "changed" / "unchanged" on stdout (with --check:
 # "would-change" / "unchanged"). Exit 2 = invalid input, 1 = runtime failure.
@@ -38,6 +39,11 @@ valid_nameserver() {
   printf '%s' "$1" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && return 0
   printf '%s' "$1" | grep -Eq '^[0-9a-fA-F:]+(\.[0-9]{1,3}){0,3}$' && printf '%s' "$1" | grep -q ':' && return 0
   return 1
+}
+
+valid_service() {
+  # The service must be one networksetup knows; its list is the allow-list.
+  networksetup -listallnetworkservices | tail -n +2 | sed 's/^\*//' | grep -Fxq -- "$1"
 }
 
 report() {
@@ -87,9 +93,7 @@ case "$cmd" in
   searchdomains)
     [ $# -ge 2 ] || usage
     service=$1; shift
-    # The service must be one networksetup knows; the list is the allow-list.
-    networksetup -listallnetworkservices | tail -n +2 | sed 's/^\*//' | grep -Fxq -- "$service" \
-      || die "unknown network service: $service" 2
+    valid_service "$service" || die "unknown network service: $service" 2
     if [ $# -eq 1 ] && [ "$1" = "Empty" ]; then
       want=""
     else
@@ -110,6 +114,36 @@ case "$cmd" in
       networksetup -setsearchdomains "$service" Empty >/dev/null
     else
       networksetup -setsearchdomains "$service" "$@" >/dev/null
+    fi
+    report 1
+    ;;
+  dnsservers)
+    # Empty = no manual DNS servers, so the service uses what DHCP (or the
+    # Tailscale extension, for its own service) provides. A manual list here
+    # was how a dead 10.128.0.1 took down all name resolution on 2026-10-02.
+    [ $# -ge 2 ] || usage
+    service=$1; shift
+    valid_service "$service" || die "unknown network service: $service" 2
+    if [ $# -eq 1 ] && [ "$1" = "Empty" ]; then
+      want=""
+    else
+      want=""
+      for ns in "$@"; do
+        valid_nameserver "$ns" || die "invalid nameserver: $ns" 2
+        want="${want}${ns}
+"
+      done
+    fi
+    have=$(networksetup -getdnsservers "$service" | grep -v "^There aren't any" || true)
+    [ -n "$have" ] && have="${have}
+"
+    if [ "$have" = "$want" ]; then report 0; exit 0; fi
+    [ "$CHECK" -eq 1 ] && { report 1; exit 0; }
+    [ "$(id -u)" -eq 0 ] || die "must run as root (via sudo) to change DNS servers"
+    if [ -z "$want" ]; then
+      networksetup -setdnsservers "$service" Empty >/dev/null
+    else
+      networksetup -setdnsservers "$service" "$@" >/dev/null
     fi
     report 1
     ;;

@@ -20,7 +20,17 @@ mac_dns_operator: "{{ ansible_facts['user_id'] | default(lookup('env', 'USER'), 
 mac_dns_resolver_domain: "{{ tailnet_magicdns_suffix }}"
 mac_dns_resolver_nameservers: "{{ tailnet_magicdns_nameservers }}"
 mac_dns_search_domains: "{{ tailnet_search_domains }}"
-mac_dns_search_domain_services: ["Wi-Fi"]
+
+# Which network services get the search domains and the DNS-server setting.
+# "all" = every service `networksetup -listallnetworkservices` reports, minus
+# mac_dns_exclude_services. Tailscale's own service is excluded: the extension
+# manages that service's DNS state itself, and a manual (Setup:) entry on it
+# is exactly what overrode MagicDNS with a dead 10.128.0.1 on 2026-10-02.
+mac_dns_services: all
+mac_dns_exclude_services: ["Tailscale"]
+# Manual DNS servers per service. [] = "Empty" = use what DHCP hands out, which
+# is the only setting that survives moving between networks.
+mac_dns_dns_servers: []
 mac_dns_tailscale_accept_dns: false
 
 # Homebrew tailscale CLI (same arch rule as site_agents_homebrew_prefix).

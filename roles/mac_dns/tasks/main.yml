@@ -7,7 +7,6 @@
     that:
       - mac_dns_resolver_domain | length > 0
       - mac_dns_resolver_nameservers | length > 0
-      - mac_dns_search_domain_services | length > 0
     fail_msg: "tailnet_magicdns_suffix / tailnet_magicdns_nameservers must be set in inventory/group_vars/all.yml"
 
 - name: Stat the installed applier and its sudoers rule
@@ -43,14 +42,43 @@
   changed_when: _mac_dns_resolver.stdout in ['changed', 'would-change']
   check_mode: false
 
-- name: Pin tailnet search domains on {{ mac_dns_search_domain_services | join(', ') }}
+- name: List this Mac's network services
+  ansible.builtin.shell: networksetup -listallnetworkservices | tail -n +2 | sed 's/^\*//'
+  register: _mac_dns_services_raw
+  changed_when: false
+  check_mode: false
+
+- name: Resolve which services to manage
+  ansible.builtin.set_fact:
+    _mac_dns_services: >-
+      {{ (_mac_dns_services_raw.stdout_lines if mac_dns_services == 'all' else mac_dns_services)
+         | difference(mac_dns_exclude_services) }}
+
+- name: Assert the service list is non-empty
+  ansible.builtin.assert:
+    that: _mac_dns_services | length > 0
+    fail_msg: "no network services left to manage after excluding {{ mac_dns_exclude_services }}"
+
+- name: Clear manual DNS servers (use DHCP) on {{ _mac_dns_services | join(', ') }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['sudo', '-n', mac_dns_apply_bin]
+         + (['--check'] if ansible_check_mode else [])
+         + ['dnsservers', item]
+         + (mac_dns_dns_servers if mac_dns_dns_servers | length > 0 else ['Empty']) }}
+  loop: "{{ _mac_dns_services }}"
+  register: _mac_dns_servers
+  changed_when: _mac_dns_servers.stdout in ['changed', 'would-change']
+  check_mode: false
+
+- name: Pin tailnet search domains on {{ _mac_dns_services | join(', ') }}
   ansible.builtin.command:
     argv: >-
       {{ ['sudo', '-n', mac_dns_apply_bin]
          + (['--check'] if ansible_check_mode else [])
          + ['searchdomains', item]
          + (mac_dns_search_domains if mac_dns_search_domains | length > 0 else ['Empty']) }}
-  loop: "{{ mac_dns_search_domain_services }}"
+  loop: "{{ _mac_dns_services }}"
   register: _mac_dns_search
   changed_when: _mac_dns_search.stdout in ['changed', 'would-change']
   check_mode: false

@@ -6,7 +6,8 @@ set -euo pipefail
 # exclusive site advisory lock (Phase F4). Retries a bounded number of times
 # until every non-pinned package verifies as up to date, or gives up loudly
 # for manual intervention. Automatically restarts Google Chrome cleanly if it
-# was running and got upgraded. Redirects HOMEBREW_CACHE to the external
+# was running and got upgraded, and restarts any `brew services` daemon left
+# running a deleted (upgraded-away) binary. Redirects HOMEBREW_CACHE to the external
 # volume when mounted, and purges the default downloads cache either way.
 
 export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -160,6 +161,56 @@ run_brew_pass() {
   return "$rc"
 }
 
+# `brew upgrade` repoints /opt/homebrew/opt/<formula> at the new Cellar dir but
+# never restarts a running `brew services` daemon, which keeps the deleted old
+# binary open (moshi-hook ran a deleted 0.4.9 for a day on 2026-10-02 and the
+# phone app hung against it). Detect that state directly instead of guessing
+# from formula names: a started service whose executable (lsof txt) no longer
+# exists on disk is stale, and gets `brew services restart`. Root-owned
+# services are reported, not touched (no sudo here). Opt-outs:
+#   BREW_FAST_UPGRADE_SKIP_RESTART="name1 name2"   never restart these
+#   BREW_FAST_UPGRADE_RESTART_DRY_RUN=1            report only
+restart_stale_brew_services() {
+  local rc=0 svc user pid exe skip name
+  command -v jq >/dev/null 2>&1 || { echo "[brew-fast-upgrade] jq not found; skipping stale-service check." >&2; return 0; }
+  while IFS=$'\t' read -r svc user; do
+    [ -n "$svc" ] || continue
+    skip=0
+    for name in ${BREW_FAST_UPGRADE_SKIP_RESTART:-}; do [ "$name" = "$svc" ] && skip=1; done
+    pid="$(brew services info "$svc" --json 2>/dev/null | jq -r '.[0].pid // empty')"
+    [ -n "$pid" ] || continue
+    # First Cellar/Caskroom-resident text segment = the service executable as
+    # actually running (opt/ symlinks already resolved by the loader).
+    exe="$(lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | grep -m1 -E '/(Cellar|Caskroom)/' || true)"
+    [ -n "$exe" ] || continue
+    [ -e "$exe" ] && continue
+    if [ "$skip" -eq 1 ]; then
+      echo "[brew-fast-upgrade] stale service $svc (pid $pid runs deleted $exe) — skipped by BREW_FAST_UPGRADE_SKIP_RESTART"
+      continue
+    fi
+    if [ "$user" != "$(id -un)" ]; then
+      echo "[brew-fast-upgrade] stale service $svc runs as $user (pid $pid, deleted $exe); restart it manually: sudo brew services restart $svc"
+      rc=1; continue
+    fi
+    if [ "${BREW_FAST_UPGRADE_RESTART_DRY_RUN:-0}" = "1" ]; then
+      echo "[brew-fast-upgrade] DRY RUN: would restart stale service $svc (pid $pid runs deleted $exe)"
+      continue
+    fi
+    echo "[brew-fast-upgrade] restarting stale service $svc (pid $pid runs deleted $exe)"
+    if brew services restart "$svc" >/dev/null 2>&1; then
+      sleep 2
+      if [ "$(brew services info "$svc" --json 2>/dev/null | jq -r '.[0].running')" = "true" ]; then
+        echo "[brew-fast-upgrade] restarted $svc OK"
+      else
+        echo "[brew-fast-upgrade] ERROR: $svc not running after restart"; rc=1
+      fi
+    else
+      echo "[brew-fast-upgrade] ERROR: brew services restart $svc failed"; rc=1
+    fi
+  done < <(brew services list --json 2>/dev/null | jq -r '.[] | select(.status == "started" or .status == "scheduled") | [.name, (.user // "")] | @tsv')
+  return "$rc"
+}
+
 # Outdated globally-installed npm package names, one per line (empty when
 # clean, or when npm/jq isn't available on this host).
 npm_outdated_globals() {
@@ -209,7 +260,7 @@ verify_clean() {
 }
 
 run_upgrade_and_restart_apps() {
-  local attempt
+  local attempt stale_rc=0
 
   for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     echo "[brew-fast-upgrade] attempt $attempt/$MAX_ATTEMPTS"
@@ -217,13 +268,17 @@ run_upgrade_and_restart_apps() {
     if ! run_brew_pass; then
       echo "[brew-fast-upgrade] brew pass failed on attempt $attempt"
     fi
+    if ! restart_stale_brew_services; then
+      echo "[brew-fast-upgrade] stale brew service(s) could not be restarted on attempt $attempt"
+      stale_rc=1
+    fi
     if ! run_npm_pass; then
       echo "[brew-fast-upgrade] npm pass failed on attempt $attempt"
     fi
 
     if verify_clean; then
       echo "[brew-fast-upgrade] Verification passed: no non-pinned outdated items remain (attempt $attempt)."
-      return 0
+      return "$stale_rc"
     fi
 
     if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
@@ -238,7 +293,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass restart_stale_brew_services npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
