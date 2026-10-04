@@ -33,6 +33,7 @@ NOTIFY_TARGET = "telegram:838808636:22158"  # Inbox topic (per hermes-messaging 
 
 MAX_RESTART_ATTEMPTS = 3   # consecutive failed-then-restarted cycles before giving up
 ESCALATION_COOLDOWN_S = 3600 * 6  # don't re-escalate more than once per 6h while still down
+STARTUP_GRACE_S = 300  # Basic Memory can take several minutes to load its embedding model
 
 
 def log(msg):
@@ -115,6 +116,13 @@ def main():
         save_state(state)
         return
 
+    last_restart_at = state.get("last_restart_at")
+    if state.get("status") == "down" and isinstance(last_restart_at, (int, float)):
+        elapsed = now - last_restart_at
+        if 0 <= elapsed < STARTUP_GRACE_S:
+            log(f"startup grace active ({STARTUP_GRACE_S - elapsed:.0f}s remaining); not restarting")
+            return
+
     # unhealthy
     state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
     log(f"unhealthy (consecutive_failures={state['consecutive_failures']})")
@@ -146,6 +154,7 @@ def main():
     restart_service()
     state["status"] = "down"
     state["attempts_since_healthy"] = attempts + 1
+    state["last_restart_at"] = time.time()
     save_state(state)
 
 
