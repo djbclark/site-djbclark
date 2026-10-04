@@ -20,6 +20,11 @@ Fully decommission Bluehost by migrating all websites, databases, DNS, and relat
 - The VPS is not required by any currently audited deployed site; VPS bootstrap is deferred as separate infrastructure work.
 - The current deployed sites are authoritative. Retained historical material is documented in `~/maynarddaycare-backup/README.md`.
 
+**2026-10-04 infrastructure follow-up (not executed):** the operator plans to
+replace Ubuntu with NixOS while retaining the VPS IP. The deferred SSH/bootstrap
+checklist is [vps-primary-nixos-transition.md](vps-primary-nixos-transition.md);
+the August OS/access observations above remain historical, not a fresh probe.
+
 **Historical migration result**
 - Migration completed through operational workarounds. Repairing the script was not required for the cutover.
 - A repaired, read-only provider health-check remains worthwhile for future domain/VPS automation, but it is not a migration blocker.
