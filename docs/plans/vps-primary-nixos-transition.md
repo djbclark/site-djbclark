@@ -7,6 +7,11 @@ NixOS 26.05 runs as `vps-primary`, with BIOS GRUB on `/dev/sda`, ext4 root
 on `/dev/sda1`, and swap on `/dev/sda2`. NetworkManager obtains the retained
 IPv4 address by DHCP on `enp1s0`, with gateway `172.31.1.1`.
 
+The exact installed configuration is tracked in
+[`nixos/vps-primary/`](../../nixos/vps-primary/). Keep both files synchronized
+with `/etc/nixos/` when making authorized changes. This directory is not wired
+to an automatic deployment; tracking it does not authorize a rebuild.
+
 Root SSH works with the existing Mac `~/.ssh/vps_primary_key`; effective
 settings require public-key authentication and disable password and
 keyboard-interactive authentication. The installed ED25519 host fingerprint
