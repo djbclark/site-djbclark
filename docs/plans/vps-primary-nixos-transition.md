@@ -1,6 +1,31 @@
-# vps-primary: deferred Ubuntu to NixOS transition
+# vps-primary: Ubuntu to NixOS transition
 
-Recorded 2026-10-04. **Preparation only; do not execute until the operator
+## Current state — 2026-10-04
+
+Installation and SSD boot are complete and verified after operator authorization.
+NixOS 26.05 runs as `vps-primary`, with BIOS GRUB on `/dev/sda`, ext4 root
+on `/dev/sda1`, and swap on `/dev/sda2`. NetworkManager obtains the retained
+IPv4 address by DHCP on `enp1s0`, with gateway `172.31.1.1`.
+
+Root SSH works with the existing Mac `~/.ssh/vps_primary_key`; effective
+settings require public-key authentication and disable password and
+keyboard-interactive authentication. The installed ED25519 host fingerprint
+`SHA256:frTI5lQmM1o5kBYX83dGj0tD+3pozafMJYiyl0AMMs8` was independently confirmed
+through the Hetzner console before updating only this server's known-hosts entry.
+
+Root's console password is locked. Console-password recovery is deferred by the
+operator; provider rescue/ISO is the fallback, not a verified password login.
+Inventory remains `provisioning`: Python, Ansible/NixOS role compatibility,
+non-root accounts, IPv6, Tailscale and service rollout are outside the completed
+installation. Do not reinstall this host or apply the whole stack.
+
+The installer temporarily lost access to its virtual CD-ROM and reported
+`Medium not present` and SquashFS read errors. Reattachment alone did not restore
+executable reads; a fresh ISO boot did. Detachment cause remains unknown.
+
+## Historical preparation checklist
+
+Recorded before installation on 2026-10-04. **Historical preparation only; do not execute until the operator
 authorizes the next step.** The operator plans to replace Ubuntu with NixOS
 while retaining public IPv4 `178.105.34.223`.
 
