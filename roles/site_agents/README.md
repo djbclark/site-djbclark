@@ -11,7 +11,7 @@ install to `~/.local/bin`; plists render to
 | system-state-backup | `com.{{ site_ns }}.system-state-backup` | Daily 12:00 + RunAtLoad | `{{ homebrew_prefix }}/var/system-state` + mirror `~/system-state` |
 | hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad | macOS notification when `/` free GB < threshold (default 25) |
 | cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
-| aiuse | `com.{{ site_ns }}.aiuse` | Every 3600s (1h) + RunAtLoad | `aiuse -q --json`; snapshots under `~/.cache/aiuse/snapshots` when `persist_snapshots` is on |
+| aiuse | `com.{{ site_ns }}.aiuse` | Every 180s + RunAtLoad | `aiuse sample`: collects hourly when idle, every 15 min when quota moved, every 3 min in a burst; snapshots under `~/.cache/aiuse/snapshots`, token ledger under `~/.cache/aiuse/ledger` |
 | jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00 — also restarts any `brew services` daemon left running a deleted binary after the upgrade, `mac-dns-apply` nightly at 03:30, `landing-health` hourly) |
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 

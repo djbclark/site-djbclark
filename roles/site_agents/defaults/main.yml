@@ -51,7 +51,11 @@ site_agents_cswap_cooldown: 300
 site_agents_cswap_model: "all"
 
 # --- aiuse (quota snapshot collector) ----------------------------------------
-# Periodic `aiuse -q --json` to accumulate ~/.cache/aiuse/snapshots.
+# `aiuse sample` (aiuse >= 3.2.0) fired every 3 minutes. Most firings return at
+# once: aiuse itself collects hourly when idle, every 15 min when a quota window
+# moved, and every 3 min during a burst (the burning providers only), so
+# `aiuse attribute` can line the meters up against the token ledgers. Cadence
+# is tuned in ~/.config/aiuse/config.toml [sampling], not here.
 # New installations get a TOML config enabling history. Existing user config is
 # never edited: aiuse owns migration of a legacy YAML-only configuration.
 site_agents_aiuse_label: "com.{{ site_ns }}.aiuse"
@@ -60,7 +64,7 @@ site_agents_aiuse_plist: >-
 site_agents_aiuse_bin: "{{ site_agents_bin_dir }}/aiuse"
 site_agents_aiuse_log: "{{ site_agents_state_dir }}/aiuse.log"
 site_agents_aiuse_error_log: "{{ site_agents_state_dir }}/aiuse.error.log"
-site_agents_aiuse_interval_seconds: 3600
+site_agents_aiuse_interval_seconds: 180
 site_agents_aiuse_config_dir: "{{ site_agents_home }}/.config/aiuse"
 site_agents_aiuse_config_toml: "{{ site_agents_aiuse_config_dir }}/config.toml"
 site_agents_aiuse_legacy_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"
