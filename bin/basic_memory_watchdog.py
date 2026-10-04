@@ -21,8 +21,8 @@ import json
 import subprocess
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 STATE_FILE = "/Users/djbclark/.hermes/cache/basic_memory_watchdog_state.json"
 LOG_FILE = "/Users/djbclark/Library/Logs/basic-memory-mcp/watchdog.log"
@@ -42,8 +42,8 @@ def log(msg):
     try:
         with open(LOG_FILE, "a") as f:
             f.write(line)
-    except Exception:
-        pass
+    except OSError as exc:
+        print(f"watchdog log write failed: {exc}", file=sys.stderr)
     print(line, end="")
 
 
@@ -52,8 +52,8 @@ def load_state() -> dict:
         with open(STATE_FILE) as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
+    except FileNotFoundError:
+        return {"status": "healthy", "consecutive_failures": 0, "last_escalation": 0, "attempts_since_healthy": 0}
     return {"status": "healthy", "consecutive_failures": 0, "last_escalation": 0, "attempts_since_healthy": 0}
 
 
@@ -81,7 +81,7 @@ def health_check():
         # Some MCP servers return 4xx for a handshake without a session but
         # still prove the ASGI stack is alive and responsive.
         return e.code < 500
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError) as e:
         log(f"health_check failed: {e!r}")
         return False
 
@@ -91,7 +91,7 @@ def notify(text):
         subprocess.run([HERMES_BIN, "send", "--to", NOTIFY_TARGET, text],
                         timeout=30, check=False,
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         log(f"notify failed: {e!r}")
 
 

@@ -66,7 +66,7 @@ hostnames-audit:
     bin/check_hostnames.py
 
 test:
-    PYTHONPATH=. uv run --with pytest --with pyyaml pytest -q
+    PYTHONPATH=. uv run --with pytest --with pyyaml pytest -q tests
 
 # Runs the unittest suite under the same interpreter the `test` recipe uses.
 # `unittest discover` imports every tests/test_*.py, including the pytest-based
