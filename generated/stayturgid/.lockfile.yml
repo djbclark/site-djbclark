@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 67e5c2b90c55f1de7a4e9426e5cc9cf80b68e279
-synced: '2026-09-30T09:58:26Z'
+product_commit: cddbbabbcb7ec725df7d49381438c7866bfb7578
+synced: '2026-10-04T02:10:27Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -11,9 +11,9 @@ files:
 - path: generated/stayturgid/fragments/caddy/stayturgid.caddy
   sha256: 6d83ed579bd577c03b78811fdc40bbd819d882c2014cc58c2ec7c3072f70f1be
 - path: generated/stayturgid/fragments/vector/stayturgid_sources.yaml
-  sha256: 7774ffac6078f5fd046521fa3593c055b6608a2af465fa9843cc3fefc8ff514c
+  sha256: 1ba7d86983f731b0027feb28f8dcb67dc2f2138120a8803d9e6b55db9e0420e4
 - path: generated/stayturgid/fragments/vector/stayturgid_sinks.yaml
-  sha256: c53041c7a11a209a34df6dde049e2d85b13b0a157bf2df07bfc0eb11eea51461
+  sha256: 6091bd388a56de54f113562b42e14631e0924852bf9444b070c87df28ce43184
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
   sha256: 74c0b37a064362652850192c4f0e840e324d13feddc73839ca112c90157d5a39
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
@@ -27,13 +27,13 @@ files:
 - path: generated/stayturgid/inventory/placeholder_inventory.yml
   sha256: 170070f18a97b4f9134c9ed664184a8f31870b471ed357e316d43d90cecf606e
 - path: generated/stayturgid/inventory/group_vars/all.yml
-  sha256: 4a2f0fac0ac0d84e758f03c87d6b071d9cb825a5c93a8107a2cc0f4d3174b7d1
+  sha256: aafa260a3b853b5c8da1ffd55a5e84f087f6c23afa4ccc9690575c39fec98d00
 - path: generated/stayturgid/inventory/group_vars/android_11.yml
-  sha256: 69623b791896df2e41acd9cf6d0b7606e9225cd05c8404e04d9f40bd62a2adf1
+  sha256: 191239d2a39ff2815a89327fb5221e6c6e0613636568aa0fc7ca71e44e13e49a
 - path: generated/stayturgid/inventory/group_vars/android_16.yml
   sha256: ae2159aa7ddf03c90239956cf9c6d59455ceb89a48440dc0fc14efc2ced62837
 - path: generated/stayturgid/inventory/group_vars/model_galaxy_s24.yml
-  sha256: b717688471f6635cee049e5063c2264fa164594d4719927a3e63177476936ea6
+  sha256: 68b9187f0080ef48fcfffd6c2c489a4afb0b8ac20eced5175e77016fff93f84f
 - path: generated/stayturgid/inventory/group_vars/model_kindle_hd8.yml
   sha256: b8dc76610f02d9f26b4f703d5e80c72f2bdb02ac9b5b56eceb95c99dd247f111
 - path: generated/stayturgid/inventory/group_vars/model_pixel_7a.yml

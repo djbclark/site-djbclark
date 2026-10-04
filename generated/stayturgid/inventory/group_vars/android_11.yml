@@ -3,5 +3,5 @@
 # put SITE-specific overrides in the site's own inventory/group_vars/ (they win).
 ---
 # Android 11 / Fire OS layer (API 30). Wireless debugging exists but UI
-# differs from Android 16; Shizuku TCP mode (thedjchi fork) still pins 5555.
+# differs from Android 16; Shizuku TCP mode (ShizukuTendCF / frdminc fork) still pins 5555.
 
