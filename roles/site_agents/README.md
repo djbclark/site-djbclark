@@ -24,7 +24,7 @@ Job failures in Jobber trigger `~/.local/bin/jobber-notify`, which implements th
 3. **Option C: Log Sinks & Filesystem Capture** — Jobber `filesystem` sink + structured JSON records in `~/.local/state/jobber/notifications.log` (14-day retention).
 
 **What 'red' means for landing-health:**
-If the `landing-health` job fails (goes 'red'), it means that at least one service declared as "registered" in the site's `registry/ports.yml` (or flagged with `dashboard: true` in `registry/paths.yml`) is currently unreachable. Check the job output or run `python3 control/landing/discover.py` manually to see which service is down.
+`landing-health` is Jobber → `~/.local/bin/landing-health` → `stayturgid/control/landing/discover.py --health-check`. It fails only when a **must-be-up** Mac listener (or a `dashboard: true` launchd job) is not accepting TCP. Offline phones (`group: devices`/`android`), unmanaged apps, and `must_be_up: false` registry rows are **expected-offline** and must not page. Jobber's notify snippet is stderr-only: the wrapper merges stdout+stderr and strips the `site directory` announce so the page shows `Summary:` / `Expected-offline:`. Diagnose with `landing-health` or `python3 control/landing/discover.py --health-check` from `~/ops/stayturgid` (do not treat a hang on SSH to p7a/hd8 as an outage). Set `must_be_up: false` on ephemeral or deliberately disabled site-owned ports instead of leaving them as default-up.
 
 
 

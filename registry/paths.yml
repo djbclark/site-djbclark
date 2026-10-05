@@ -58,7 +58,8 @@ prefixes:
     - {label: homebrew.mxcl.postgresql@14,  claimed_by: unmanaged,  note: "F2: agent removed 2026-07-20 (operator Accept, RESIDUAL-EF); data dir /opt/homebrew/var/postgresql@14 preserved (~50MB) pending separate delete confirmation"}
     - {label: homebrew.mxcl.postgresql@18,  claimed_by: unmanaged,  note: "F2 defer: formula installed, brew services none; no port claim until a consumer exists"}
     - {label: homebrew.mxcl.mariadb,        claimed_by: unmanaged,  note: "F2: formula installed, service none, 3306 free; leave stopped; uninstall only after operator confirms data"}
-    - {label: homebrew.mxcl.herdr,          claimed_by: site,       dashboard: true, note: "F2 keep + brew services: herdr server (KeepAlive/RunAtLoad); UDS ~/.config/herdr/herdr.sock; OliveTin user_herdr_*; no TCP port (see ports.yml UDS note)"}
+    - {label: homebrew.mxcl.herdr,          claimed_by: site,       note: "retired brew LaunchAgent (plist.bak); live server is LaunchAgent dev.herdr.server"}
+    - {label: dev.herdr.server,             claimed_by: site,       dashboard: true, note: "Herdr multiplexer (KeepAlive); UDS ~/.config/herdr/herdr.sock; not a brew service"}
     # homebrew.mxcl.omlx — removed 2026-07-29 (operator): formula/tap/weights uninstalled;
     # claim dropped so brew-diff / agents do not treat it as a missing install.
 

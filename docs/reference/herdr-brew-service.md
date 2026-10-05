@@ -1,8 +1,11 @@
 # Herdr brew service (site Mac)
 
-Keep the Herdr **server** running as a Homebrew LaunchAgent so panes and
-agents survive closing Ghostty. Attach with `herdr` / `h` only; do not rely on
-a one-off foreground process for the herd.
+Keep the Herdr **server** running so panes and agents survive closing Ghostty.
+Attach with `herdr` / `h` only; do not rely on a one-off foreground process.
+
+**Live LaunchAgent is `dev.herdr.server`**, not `homebrew.mxcl.herdr` (retired brew
+plist). landing-health pages the `dashboard: true` label in `registry/paths.yml`;
+keep that label matching `launchctl print gui/$(id -u)/…`.
 
 ## Live process
 

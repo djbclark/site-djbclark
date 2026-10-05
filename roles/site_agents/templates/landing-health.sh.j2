@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
+# Jobber landing-health: stayturgid discover.py --health-check.
+# Jobber's notifyOnError snippet is stderr-only. Site-discovery announce
+# prints to stderr; discover.py also copies Summary/Expected-offline to
+# stderr. Drop the announce so a page is the summary, not three
+# "site directory" lines. Full per-service list stays on stdout (discarded
+# here — run discover.py --health-check for the list).
 set -euo pipefail
-
-# site-djbclark — landing-health verification script
-# Runs network service discovery and fails if any registered service is down.
-
-export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-export STAYTURGID_SITE_DIR="{{ site_agents_home }}/ops/site-djbclark"
-export ANSIBLE_CONFIG="{{ site_agents_home }}/ops/site-djbclark/ansible.cfg"
-
-exec python3 "{{ site_agents_home }}/ops/stayturgid/control/landing/discover.py" --health-check
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+discover="${STAYTURGID_ROOT:-$HOME/ops/stayturgid}/control/landing/discover.py"
+set +e
+err=$(python3 "$discover" --health-check 2>&1 >/dev/null)
+rc=$?
+set -e
+printf '%s\n' "$err" | grep -v 'site directory' >&2 || true
+exit "$rc"

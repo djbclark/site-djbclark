@@ -13,6 +13,9 @@
 #   load_caddy_proxied_ports() for the consumer side. New optional fields
 #   like this one never need a schema/contract_version bump; only renaming,
 #   retyping, or removing an EXISTING field does.
+# must_be_up: optional -- false exempts an active entry from the landing-health
+#   pager (ephemeral port, or service deliberately disabled). Default true for
+#   active site/stayturgid-owned entries; unmanaged entries are never paged on.
 # tailscale_serve_port: optional -- for a loopback backend exposed via
 #   `tailscale serve --https=<port>` directly (bypassing Caddy entirely),
 #   the external HTTPS port it's reachable on. Same skip-list purpose as
@@ -81,6 +84,7 @@ hosts:
       - {port: 5433,  bind: "127.0.0.1", owner: site, service: postgresql-18,   status: active,
          note: "2026-09-29: brew services postgresql@18 (sh.brew.postgresql@18 launchd). Backs LiteLLM's spend/key tables (DATABASE_URL ...:5433/litellm)."}
       - {port: 8085,  bind: "127.0.0.1", owner: site, service: open-webui,       status: active,
+         must_be_up: false,  # launchd job com.djbclark.open-webui deliberately disabled
          tailscale_serve_port: 8086,
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
@@ -91,8 +95,10 @@ hosts:
       - {port: 9115,  bind: "127.0.0.1", owner: site, service: blackbox-exporter, status: active,
          note: "Prometheus Blackbox Exporter endpoint"}
       - {port: 53837, bind: "127.0.0.1", owner: site, service: antigravity-agy-ipc, status: active,
+         must_be_up: false,  # ephemeral: agy picks new ports per session
          note: "Google Antigravity CLI daemon IPC"}
       - {port: 53838, bind: "127.0.0.1", owner: site, service: antigravity-agy-sidecar, status: active,
+         must_be_up: false,  # ephemeral: agy picks new ports per session
          note: "Google Antigravity CLI sidecar listener"}
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
          tailscale_serve_port: 8788,
