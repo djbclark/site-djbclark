@@ -34,7 +34,10 @@
   <key>KeepAlive</key>
   <dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>ProcessType</key><string>Background</string>
+  <!-- Standard, not Background: launchd defers and throttles Background jobs at login, so after the
+       2026-10-05 reboot the server was not listening for ~5 min and every agent session resumed
+       in that window came up without basic-memory (clients do not retry). -->
+  <key>ProcessType</key><string>Standard</string>
   <key>WorkingDirectory</key><string>{{ basic_memory_mcp_home }}</string>
   <key>StandardOutPath</key><string>{{ basic_memory_mcp_logs_dir }}/launchd.log</string>
   <key>StandardErrorPath</key><string>{{ basic_memory_mcp_logs_dir }}/launchd.log</string>
