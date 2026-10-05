@@ -6,44 +6,24 @@ Implements:
   - Option C: Log Sinks & Filesystem Capture (structured notifications log)
 """
 
-from datetime import datetime
+import contextlib
 import json
 import os
 import socket
 import subprocess
 import sys
-
-
-def load_env():
-    """Load environment variables from site .env if available."""
-    env = dict(os.environ)
-    env_file = os.path.expanduser("{{ site_agents_home }}/ops/site-djbclark/.env")
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        k = k.strip()
-                        v = v.strip().strip("'\"")
-                        if k and k not in env:
-                            env[k] = v
-        except Exception:
-            pass
-    return env
+from datetime import UTC, datetime
 
 
 def parse_jobber_input():
     """Parse Jobber JSON record from stdin or environment fallback."""
     data = {}
     if not sys.stdin.isatty():
-        try:
+        # Unreadable or malformed input still yields a notice from the env fallbacks.
+        with contextlib.suppress(OSError, ValueError):
             raw = sys.stdin.read()
             if raw.strip():
                 data = json.loads(raw)
-        except Exception:
-            pass
 
     job_obj = data.get("job", {})
     job_name = job_obj.get("name") or os.environ.get("JOB_NAME") or "Unknown Job"
@@ -56,7 +36,7 @@ def parse_jobber_input():
     start_time = (
         data.get("startTime")
         or os.environ.get("JOB_START_TIME")
-        or datetime.now().isoformat()
+        or datetime.now(UTC).astimezone().isoformat()
     )
 
     stdout = data.get("stdout", "")
@@ -102,19 +82,20 @@ def send_hermes_notification(info):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=30,
+            check=False,
         )
-    except Exception as e:
+    except (OSError, subprocess.TimeoutExpired) as e:
         sys.stderr.write(f"Failed to send Hermes notification: {e}\n")
 
 
-def log_notification(info, env):
+def log_notification(info):
     """Option C: Log Sinks & Filesystem Capture."""
     state_dir = os.path.expanduser("{{ site_agents_jobber_state_dir }}")
     os.makedirs(state_dir, exist_ok=True)
     log_file = os.path.join(state_dir, "notifications.log")
 
     record = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(UTC).astimezone().isoformat(),
         "hostname": socket.gethostname(),
         "job": info["job_name"],
         "status": info["status"],
@@ -122,18 +103,15 @@ def log_notification(info, env):
         "error_snippet": info["error_snippet"],
     }
 
-    try:
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-    except Exception:
-        pass
+    # The log is best effort; the Hermes notice below must still go out.
+    with contextlib.suppress(OSError), open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
 
 
 def main():
-    env = load_env()
     info = parse_jobber_input()
 
-    log_notification(info, env)
+    log_notification(info)
     # Hermes only, no macOS notification (operator's choice, 2026-10-05).
     send_hermes_notification(info)
 
