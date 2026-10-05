@@ -2,8 +2,7 @@
 """Jobber failure notification handler.
 
 Implements:
-  - Option A: macOS Desktop Notifications (osascript)
-  - Option B: Telegram / Hermes Alerting (HTTP POST to Telegram Bot API)
+  - Option B: Hermes notice to the Telegram Inbox topic (hermes send)
   - Option C: Log Sinks & Filesystem Capture (structured notifications log)
 """
 
@@ -13,8 +12,6 @@ import os
 import socket
 import subprocess
 import sys
-import urllib.parse
-import urllib.request
 
 
 def load_env():
@@ -89,77 +86,25 @@ def parse_jobber_input():
     }
 
 
-def send_desktop_notification(info):
-    """Option A: macOS Desktop Notification via osascript."""
+def send_hermes_notification(info):
+    """Option B: Hermes notice to the operator's Telegram Inbox topic (the only alert channel)."""
     job_name = info["job_name"]
-    status = info["status"]
-    snippet = info["error_snippet"].replace('"', '\\"').replace("\n", " ")
-    if len(snippet) > 120:
-        snippet = snippet[:117] + "..."
-
-    title = f"Jobber Alert: {job_name}"
-    subtitle = f"Status: {status}"
-    script = f'display notification "{snippet}" with title "{title}" subtitle "{subtitle}"'
-
+    snippet = info["error_snippet"].replace("\n", " ")
+    if len(snippet) > 400:
+        snippet = snippet[:397] + "..."
+    msg = (
+        f"Jobber failure: {job_name} ({info['status']}) on {socket.gethostname()} "
+        f"at {info['start_time']}: {snippet}"
+    )
     try:
         subprocess.run(
-            ["osascript", "-e", script],
+            ["{{ site_agents_hermes_bin }}", "send", "-t", "telegram:838808636:22158", msg],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=5,
+            timeout=30,
         )
-    except Exception:
-        pass
-
-
-def send_telegram_notification(info, env):
-    """Option B: Telegram / Hermes Alerting."""
-    bot_token = env.get("TELEGRAM_BOT_TOKEN")
-    chat_id = env.get("TELEGRAM_HOME_CHANNEL") or env.get("TELEGRAM_ALLOWED_USERS")
-    if not bot_token or not chat_id:
-        return
-
-    chat_ids = [c.strip() for c in chat_id.split(",") if c.strip()]
-    if not chat_ids:
-        return
-
-    hostname = socket.gethostname()
-    job_name = info["job_name"]
-    status = info["status"]
-    time_str = info["start_time"]
-    snippet = info["error_snippet"]
-
-    snippet_html = (
-        snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    )
-
-    msg = (
-        f"🚨 <b>Jobber Failure Alert</b>\n"
-        f"<b>Job:</b> <code>{job_name}</code>\n"
-        f"<b>Status:</b> {status}\n"
-        f"<b>Host:</b> {hostname}\n"
-        f"<b>Time:</b> {time_str}\n\n"
-        f"<b>Error output:</b>\n"
-        f"<pre>{snippet_html}</pre>"
-    )
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    for cid in chat_ids:
-        payload = {
-            "chat_id": cid,
-            "text": msg,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        try:
-            req_data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                url, data=req_data, headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                pass
-        except Exception as e:
-            sys.stderr.write(f"Failed to send Telegram notification to {cid}: {e}\n")
+    except Exception as e:
+        sys.stderr.write(f"Failed to send Hermes notification: {e}\n")
 
 
 def log_notification(info, env):
@@ -189,8 +134,8 @@ def main():
     info = parse_jobber_input()
 
     log_notification(info, env)
-    send_desktop_notification(info)
-    send_telegram_notification(info, env)
+    # Hermes only, no macOS notification (operator's choice, 2026-10-05).
+    send_hermes_notification(info)
 
 
 if __name__ == "__main__":

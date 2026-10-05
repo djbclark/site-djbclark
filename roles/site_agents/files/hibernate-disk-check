@@ -24,4 +24,8 @@ fi
 
 mkdir -p "$(dirname "$STATE")"
 echo "$now" > "$STATE"
-osascript -e "display notification \"Only ${FREE_GB}GB free — an emergency hibernate write can need up to 16GB. Free up space soon.\" with title \"Low disk space for hibernation\" sound name \"Basso\""
+MSG="Only ${FREE_GB}GB free — an emergency hibernate write can need up to 16GB. Free up space soon."
+# Both a macOS banner and a Hermes notice (operator's choice, 2026-10-05).
+osascript -e "display notification \"${MSG}\" with title \"Low disk space for hibernation\" sound name \"Basso\"" || true
+"${HERMES_BIN:-$HOME/.local/bin/hermes}" send -t "${HERMES_TO:-telegram:838808636:22158}" \
+    "Low disk space for hibernation: ${MSG}" >/dev/null 2>&1 || true
