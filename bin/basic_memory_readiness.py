@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 DOC_ROOTS = [
-    Path.home() / "orca/projects/djbclark-ade/docs",
+    Path.home() / "src/djbclark-ade/docs",
     Path.home() / "ops/site-private/memory",
     Path.home() / "ops/site-djbclark/research",
 ]
@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             "   brew-free install:  uv tool install basic-memory\n"
             "   then register MCP:  claude mcp add --scope user basic-memory -- uvx basic-memory mcp\n"
             "   Rationale and the comparison against Link: "
-            "~/orca/projects/djbclark-ade/docs/ai-memory-landscape.md"
+            "~/src/djbclark-ade/docs/ai-memory-landscape.md"
         )
         return 10
     print(f"Basic Memory not needed yet — {s['files']} pages, {s['bytes'] // 1024}KB, "

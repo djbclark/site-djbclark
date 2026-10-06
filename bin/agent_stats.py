@@ -48,7 +48,7 @@ PROJECTS = Path.home() / ".claude/projects"
 # recurring tax. Anthropic's cost docs advise keeping each under 200 lines and
 # moving specialised material into skills, which load on demand.
 WATCHED_FILES: list[tuple[str, int]] = [
-    (str(Path.home() / "orca/projects/djbclark-ade/AGENTS.md"), 200),
+    (str(Path.home() / "src/djbclark-ade/AGENTS.md"), 200),
     (str(Path.home() / "ops/site-private/home-agents.md"), 200),
     (str(Path.home() / "ops/site-djbclark/AGENTS.md"), 200),
     (str(Path.home() / "ops/stayturgid/AGENTS.md"), 200),
