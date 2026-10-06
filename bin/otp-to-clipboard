@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""otp-to-clipboard — copy one-time codes from macOS notifications to the clipboard.
+
+Polls the Notification Center database (usernoted) for newly delivered
+notifications from ANY app (incl. iPhone-mirrored SMS, Mail, Slack, web
+push), pulls a verification code out of the title/body, and puts it on the
+pasteboard marked org.nspasteboard.ConcealedType so clipboard managers and
+Tahoe's clipboard history skip it. Prior art: Otifier (closed app),
+MessAuto (Messages/Mail only), notifwd (same DB trick).
+
+  otp-to-clipboard             run the watcher (what the LaunchAgent does)
+  otp-to-clipboard --selftest  check the extractor against sample texts
+  otp-to-clipboard --once N    scan the newest N rows, print app + whether a
+                               code was found (never the code), copy nothing
+
+DB: ~/Library/Group Containers/group.com.apple.usernoted/db2/db — needs Full
+Disk Access for whatever process runs this (grant it to the interpreter the
+LaunchAgent uses). Rows: record.data is a binary plist; req.titl/subt/body.
+Log: ~/Library/Logs/otp-to-clipboard.log — records app + code length, never
+the code. State: ~/.local/state/otp-to-clipboard/last_id.
+Env: OTP_POLL (seconds, default 1).
+"""
+import os, plistlib, re, sqlite3, subprocess, sys, time
+
+DB = os.path.expanduser("~/Library/Group Containers/group.com.apple.usernoted/db2/db")
+STATE = os.path.expanduser("~/.local/state/otp-to-clipboard/last_id")
+LOG = os.path.expanduser("~/Library/Logs/otp-to-clipboard.log")
+POLL = float(os.environ.get("OTP_POLL", "1"))
+
+KW = (r"(?:verification|verify|security|login|log-in|sign-?in|confirmation|authentication|"
+      r"one[- ]time|single[- ]use|access|auth|2fa|otp|passcode|pass code|code|pin|"
+      r"c[óo]digo|codice|code de|验证码|驗證碼|認証|인증)")
+HAS_KW = re.compile(KW, re.I)
+CODE = r"(?:\d{3}[- ]\d{3}|\d{4,8}|[A-Z0-9]{3}-[A-Z0-9]{3,5}|G-\d{6})"
+# "code is 123456", "code: 123456", "PIN 1234", "验证码：123456"
+AFTER = re.compile(KW + r"[^\n\d]{0,25}?(?:is|:|：|=|-|—)?\s*[\"'“‘(\[]?(" + CODE + r")(?![\d])", re.I)
+# "123456 is your code", "123456 is your verification code"
+BEFORE = re.compile(r"(?<![\w.$€£-])(" + CODE + r")\s+(?:is|es|est|ist)\b[^\n]{0,40}" + KW, re.I)
+# words between keyword and number that mean "not an OTP" ("Code review requested on PR 4412")
+VETO = re.compile(r"review|\bPR\b|pull|issue|ticket|request|commit|order|#|\bat\b|\bon\b", re.I)
+
+
+def extract(text):
+    """Return the code in text, or None. Needs a keyword; prefers a code next to it."""
+    if not text or not HAS_KW.search(text):
+        return None
+    for rx in (BEFORE, AFTER):
+        for m in rx.finditer(text):
+            if VETO.search(m.group(0)[:m.start(1) - m.start(0)]):
+                continue
+            return m.group(1).strip()
+    # fallback: exactly one bare 6-8 digit token and no obvious money/date noise
+    toks = re.findall(r"(?<![\w.$€£:/-])\d{6,8}(?![\w.:/%-])", text)
+    return toks[0] if len(set(toks)) == 1 else None
+
+
+def log(msg):
+    try:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%F %T ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def copy(code):
+    """Pasteboard write flagged concealed; fall back to clip."""
+    js = ("ObjC.import('AppKit');var p=$.NSPasteboard.generalPasteboard;"
+          "p.clearContents;var t=$.NSString.alloc.initWithUTF8String(ObjC.unwrap($.NSProcessInfo.processInfo.environment.objectForKey('OTP_CODE')));"
+          "p.declareTypesOwner(['public.utf8-plain-text','org.nspasteboard.ConcealedType'],null);"
+          "p.setStringForType(t,'public.utf8-plain-text');p.setStringForType($(''),'org.nspasteboard.ConcealedType');")
+    env = dict(os.environ, OTP_CODE=code)
+    r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", js], env=env,
+                       capture_output=True, timeout=15)
+    if r.returncode == 0:
+        return "concealed"
+    r = subprocess.run([os.path.expanduser("~/ops/site-private/bin/clip"), "-q"],
+                       input=code.encode(), capture_output=True, timeout=15)
+    return "clip" if r.returncode == 0 else "FAILED"
+
+
+def rows(con, after_id, limit=None):
+    q = "select r.rec_id, a.identifier, r.data from record r left join app a on a.app_id=r.app_id where r.rec_id>? order by r.rec_id"
+    cur = con.execute(q, (after_id,))
+    for rec_id, app, data in (cur.fetchmany(limit) if limit else cur):
+        try:
+            req = plistlib.loads(data).get("req", {})
+        except Exception:
+            req = {}
+        yield rec_id, app or "?", " \n".join(str(req.get(k, "")) for k in ("titl", "subt", "body"))
+
+
+def connect():
+    return sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
+
+
+def selftest():
+    cases = [
+        ("Your verification code is 482913", "482913"),
+        ("482913 is your Google verification code.", "482913"),
+        ("G-482913 is your Google verification code", "G-482913"),
+        ("Use code 7391 to sign in to Venmo", "7391"),
+        ("Your Amazon OTP is 123456. Do not share it.", "123456"),
+        ("Security code: 123-456", "123-456"),
+        ("Your Uber code is 4821", "4821"),
+        ("Código de verificación: 884102", "884102"),
+        ("您的验证码是 552031", "552031"),
+        ("Login code\n739 201", "739 201"),
+        ("Your order #12345678 shipped", None),
+        ("Meet at 10:30 on 2026-10-06", None),
+        ("Your balance is $1234.56", None),
+        ("Code review requested on PR 4412", None),
+        ("Your code is ready", None),
+    ]
+    bad = 0
+    for text, want in cases:
+        got = extract(text)
+        flag = "ok " if got == want else "BAD"
+        bad += got != want
+        print(flag, repr(text), "->", got)
+    sys.exit(1 if bad else 0)
+
+
+def main():
+    if "--selftest" in sys.argv:
+        selftest()
+    if "--once" in sys.argv:
+        con = connect()
+        n = int(sys.argv[sys.argv.index("--once") + 1])
+        top = con.execute("select max(rec_id) from record").fetchone()[0] or 0
+        for rec_id, app, text in rows(con, max(0, top - n)):
+            code = extract(text)
+            print(rec_id, app, "CODE(len %d)" % len(code) if code else "-")
+        return
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    con, warned = None, False
+    while con is None:  # no Full Disk Access yet, or the post-login TCC race: keep trying
+        try:
+            con = connect()
+            con.execute("select 1 from record limit 1")
+        except sqlite3.Error as e:
+            con = None
+            if not warned:
+                log("cannot read notification DB (%s); needs Full Disk Access for %s" % (e, sys.executable))
+                warned = True
+            time.sleep(30)
+    try:
+        last = int(open(STATE).read().strip())
+    except (OSError, ValueError):
+        last = con.execute("select coalesce(max(rec_id),0) from record").fetchone()[0]
+    log("started at rec_id %d" % last)
+    while True:
+        try:
+            for rec_id, app, text in rows(con, last):
+                last = rec_id
+                code = extract(text)
+                if code:
+                    how = copy(code)
+                    log("copied code (len %d) from %s [%s]" % (len(code), app, how))
+            open(STATE, "w").write(str(last))
+        except sqlite3.Error as e:
+            log("db error: %s" % e)
+            try:
+                con.close()
+                con = connect()
+            except sqlite3.Error:
+                pass
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    main()
