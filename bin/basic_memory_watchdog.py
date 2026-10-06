@@ -38,6 +38,12 @@ MAX_RESTART_ATTEMPTS = 3  # consecutive failed-then-restarted cycles before givi
 ESCALATION_COOLDOWN_S = 3600 * 6
 # Basic Memory can take several minutes to load its embedding model.
 STARTUP_GRACE_S = 300
+# Under heavy machine load (load average 100-300) a live server can take tens of
+# seconds to answer. A timeout means "slow", not "dead": restarting then makes it
+# worse (a cold start under load takes minutes, and every client loses its session),
+# so only a run of consecutive slow checks (~10 min at StartInterval 120) restarts it.
+HEALTH_TIMEOUT_S = 30
+SLOW_CHECKS_BEFORE_RESTART = 5
 
 
 def log(msg):
@@ -77,7 +83,10 @@ def save_state(state):
 
 
 def health_check():
-    """Real MCP initialize handshake, not a bare GET."""
+    """Real MCP initialize handshake, not a bare GET.
+
+    Returns "ok", "slow" (timed out waiting for a reply) or "down".
+    """
     payload = json.dumps(
         {
             "jsonrpc": "2.0",
@@ -100,15 +109,24 @@ def health_check():
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return 200 <= resp.status < 300
+        with urllib.request.urlopen(req, timeout=HEALTH_TIMEOUT_S) as resp:
+            return "ok" if 200 <= resp.status < 300 else "down"
     except urllib.error.HTTPError as e:
         # Some MCP servers return 4xx for a handshake without a session but
         # still prove the ASGI stack is alive and responsive.
-        return e.code < 500
-    except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as e:
+        return "ok" if e.code < 500 else "down"
+    except (TimeoutError, socket.timeout) as e:  # noqa: UP041 -- launchd runs this under Python 3.9, where they differ
+        log(f"health_check slow: {e!r}")
+        return "slow"
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (TimeoutError, socket.timeout)):
+            log(f"health_check slow: {e!r}")
+            return "slow"
         log(f"health_check failed: {e!r}")
-        return False
+        return "down"
+    except OSError as e:
+        log(f"health_check failed: {e!r}")
+        return "down"
 
 
 def notify(text):
@@ -133,10 +151,10 @@ def restart_service():
 
 def main():
     state = load_state()
-    healthy = health_check()
+    result = health_check()
     now = time.time()
 
-    if healthy:
+    if result == "ok":
         if state["status"] != "healthy":
             log("recovered")
             # MCP clients connect once at session start and do not retry, so a session that
@@ -147,9 +165,19 @@ def main():
             )
         state["status"] = "healthy"
         state["consecutive_failures"] = 0
+        state["consecutive_slow"] = 0
         state["attempts_since_healthy"] = 0
         save_state(state)
         return
+
+    if result == "slow":
+        state["consecutive_slow"] = state.get("consecutive_slow", 0) + 1
+        if state["consecutive_slow"] < SLOW_CHECKS_BEFORE_RESTART:
+            log(
+                f"slow, not restarting ({state['consecutive_slow']}/{SLOW_CHECKS_BEFORE_RESTART})"
+            )
+            save_state(state)
+            return
 
     last_restart_at = state.get("last_restart_at")
     if state.get("status") == "down" and isinstance(last_restart_at, (int, float)):
@@ -196,6 +224,7 @@ def main():
     log(f"restarting (attempt {attempts + 1}/{MAX_RESTART_ATTEMPTS})")
     restart_service()
     state["status"] = "down"
+    state["consecutive_slow"] = 0
     state["attempts_since_healthy"] = attempts + 1
     state["last_restart_at"] = time.time()
     save_state(state)

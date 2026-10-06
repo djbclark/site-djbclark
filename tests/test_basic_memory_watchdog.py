@@ -16,14 +16,65 @@ SPEC.loader.exec_module(watchdog)
 
 
 class HealthCheckTests(unittest.TestCase):
-    def test_socket_timeout_is_treated_as_unhealthy_not_crash(self) -> None:
+    def test_socket_timeout_is_reported_as_slow_not_crash(self) -> None:
         with (
-            mock.patch.object(watchdog.urllib.request, "urlopen", side_effect=socket.timeout("timed out")),
+            mock.patch.object(
+                watchdog.urllib.request,
+                "urlopen",
+                side_effect=socket.timeout("timed out"),
+            ),
             mock.patch.object(watchdog, "log") as log,
         ):
-            self.assertFalse(watchdog.health_check())
+            self.assertEqual(watchdog.health_check(), "slow")
 
         log.assert_called_once()
+
+    def test_connection_refused_is_down(self) -> None:
+        refused = watchdog.urllib.error.URLError(
+            ConnectionRefusedError(61, "Connection refused")
+        )
+        with (
+            mock.patch.object(watchdog.urllib.request, "urlopen", side_effect=refused),
+            mock.patch.object(watchdog, "log"),
+        ):
+            self.assertEqual(watchdog.health_check(), "down")
+
+
+class SlowServerTests(unittest.TestCase):
+    def _run(self, state: dict) -> mock.MagicMock:
+        with (
+            mock.patch.object(watchdog, "load_state", return_value=state),
+            mock.patch.object(watchdog, "health_check", return_value="slow"),
+            mock.patch.object(watchdog.time, "time", return_value=1000),
+            mock.patch.object(watchdog, "restart_service") as restart,
+            mock.patch.object(watchdog, "save_state"),
+            mock.patch.object(watchdog, "notify"),
+            mock.patch.object(watchdog, "log"),
+        ):
+            watchdog.main()
+        return restart
+
+    def test_slow_check_below_threshold_does_not_restart(self) -> None:
+        state = {
+            "status": "healthy",
+            "consecutive_failures": 0,
+            "attempts_since_healthy": 0,
+        }
+        restart = self._run(state)
+        restart.assert_not_called()
+        self.assertEqual(state["consecutive_slow"], 1)
+        self.assertEqual(state["status"], "healthy")
+
+    def test_slow_checks_at_threshold_restart(self) -> None:
+        state = {
+            "status": "healthy",
+            "consecutive_failures": 0,
+            "attempts_since_healthy": 0,
+            "consecutive_slow": watchdog.SLOW_CHECKS_BEFORE_RESTART - 1,
+        }
+        restart = self._run(state)
+        restart.assert_called_once()
+        self.assertEqual(state["consecutive_slow"], 0)
 
 
 class StartupGraceTests(unittest.TestCase):
@@ -36,7 +87,7 @@ class StartupGraceTests(unittest.TestCase):
         }
         with (
             mock.patch.object(watchdog, "load_state", return_value=state),
-            mock.patch.object(watchdog, "health_check", return_value=False),
+            mock.patch.object(watchdog, "health_check", return_value="down"),
             mock.patch.object(watchdog.time, "time", return_value=200),
             mock.patch.object(watchdog, "restart_service") as restart,
             mock.patch.object(watchdog, "save_state") as save_state,
@@ -57,7 +108,7 @@ class StartupGraceTests(unittest.TestCase):
         }
         with (
             mock.patch.object(watchdog, "load_state", return_value=state),
-            mock.patch.object(watchdog, "health_check", return_value=False),
+            mock.patch.object(watchdog, "health_check", return_value="down"),
             mock.patch.object(watchdog.time, "time", return_value=401),
             mock.patch.object(watchdog, "restart_service") as restart,
             mock.patch.object(watchdog, "save_state") as save_state,
