@@ -272,7 +272,9 @@ Skills are in git at `site-djbclark/skills/<name>/`, reached as
 `tell-chief-of-staff` are real there) and linked into every TUI by the
 `skill-everywhere` skill — edit the git copy, never a TUI copy. Ours:
 `bigteam`, `model-routing`, `herdr-orchestration`, `ralph-tui-orchestration`,
-`cow-workspaces`, `tell-chief-of-staff`. Tool-managed, not in git:
+`cow-workspaces`, `tell-chief-of-staff`, `session-finder` (which session is on a topic
+and where it lives: use it for every "tell the agent doing X" relay, and when reporting who
+got a message give its name, title and `where:` line). Tool-managed, not in git:
 `orchestration`, `herdr`, `orca-per-workspace-env`. Slash commands `/orc`,
 `/orc-meta`: `site-private/claude/commands/`. Sub-agents `adversary`,
 `backend`, `ux`, `fable-deep`: `site-private/claude/agents/` (`ocx-*` there are
