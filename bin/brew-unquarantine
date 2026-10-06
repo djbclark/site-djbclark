@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Strip macOS Gatekeeper quarantine from named Homebrew casks (default:
+# kotlin-lsp, whose bundled intellij-server binary is un-notarized and gets
+# blocked/SIGKILLed). Homebrew removed `--no-quarantine`, so this must be re-run
+# after every `brew upgrade`/reinstall of these casks:
+#     brew upgrade && brew-unquarantine
+# Deliberately scoped to named casks — never blanket-strips Caskroom.
+set -euo pipefail
+casks=("$@"); [ ${#casks[@]} -gt 0 ] || casks=(kotlin-lsp)
+root="$(brew --caskroom)"
+for c in "${casks[@]}"; do
+  [ -d "$root/$c" ] || { echo "skip $c: not installed" >&2; continue; }
+  n=$(xattr -rl "$root/$c" 2>/dev/null | grep -c com.apple.quarantine || true)
+  xattr -dr com.apple.quarantine "$root/$c"
+  echo "$c: cleared quarantine ($n flagged entries)"
+done

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# yt-transcript <url|id> [lang=en] — print plain-text captions via yt-dlp (no API credits).
+# Prefers manual subs, falls back to auto-generated. Set TS=1 to keep VTT timestamps.
+set -euo pipefail
+v="${1:?usage: yt-transcript <url|id> [lang]}"; lang="${2:-en}"
+[[ "$v" == http* ]] || v="https://www.youtube.com/watch?v=$v"
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+yt-dlp -q --no-warnings --skip-download --write-subs --write-auto-subs \
+  --sub-langs "$lang" --sub-format vtt -o "$d/t.%(ext)s" "$v" || true
+f=$(ls "$d"/t.*.vtt 2>/dev/null | head -1) || true
+[[ -n "${f:-}" ]] || { echo "no captions found for $v ($lang)" >&2; exit 1; }
+if [[ "${TS:-}" == 1 ]]; then cat "$f"; else
+  python3 - "$f" <<'PY'
+import re,sys
+out=[]
+for l in open(sys.argv[1],encoding="utf-8"):
+    l=l.strip()
+    if not l or l.startswith(("WEBVTT","Kind:","Language:","NOTE")) or "-->" in l: continue
+    l=re.sub(r"<[^>]+>","",l)
+    if not out or out[-1]!=l: out.append(l)
+print(" ".join(out))
+PY
+fi

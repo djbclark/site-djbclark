@@ -165,6 +165,25 @@ create. If `git pull` fails with a merge conflict, STOP and report it. Verify
 changes are yours before editing — if a file has unrelated modifications from
 another agent or the operator, leave it alone and report it.
 
+## Material moved here from site-private (2026-10-06)
+
+djbclark moved everything out of `site-private` that did not have to be
+private. It sits here at the same relative path it had there: `home-agents.md`,
+`skills/`, `claude/`, `codex/`, `cursor/`, `zcode/`, `shell/`, `macos/`,
+`gradle/`, and files added to `bin/`, `docs/` and `tests/`. `site-private` keeps
+a symlink at each old path, so `~/ops/site-private/bin/bg`,
+`site-private/skills/<name>` and the like still work and existing references
+were left alone. New work uses the `site-djbclark` path.
+
+1. This repo is public. These directories describe one machine's agent setup;
+   credentials, tokens and vault or item identifiers still never go in them.
+2. What stayed private: `memory/`, `web/`, `docs/books/`, `1password/`,
+   `skills/1password/`, `skills/tell-chief-of-staff/`, `bin/fleet-watch`.
+3. `site-private` enforces this with a pre-commit hook (`.githooks/pre-commit`
+   there): a regular file outside its private list is rejected.
+4. `codex/config.toml` is live local state and stays in `site-private/codex/`,
+   ignored. Never copy it here.
+
 ## Shareable tools published from this repo (2026-10-03)
 
 [`tools/book-to-kb/`](tools/book-to-kb/) is a **self-contained, MIT-licensed**

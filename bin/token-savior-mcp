@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# token-savior-mcp — launcher for the token-savior MCP server (token-savior-recall).
+#
+# Why a wrapper instead of registering `token-savior` directly:
+#
+#   * With WORKSPACE_ROOTS unset, token-savior auto-discovers projects from the
+#     server's cwd plus one level under ~/src, ~/dev, … capped at 40. On this
+#     machine that cap is hit inside ~/src alphabetically and the ~/ops repos —
+#     the ones actually worked on — never get registered.
+#   * With WORKSPACE_ROOTS pinned to a static list, a session in any other repo
+#     resolves symbol lookups against whichever pinned project happens to be
+#     active, which answers confidently from the wrong codebase.
+#
+# An MCP stdio server inherits the session's working directory, so the fix is to
+# compute the roots at launch: the current repo first (and promoted to active via
+# CLAUDE_PROJECT_ROOT, which no host sets — it is token-savior's own override),
+# followed by the standing ops checkouts so they stay reachable by name from
+# anywhere. Any other path still registers on demand when passed as `project=`.
+#
+# Bash-layer knobs are pinned off: rtk owns PreToolUse Bash compaction here
+# (`rtk hook claude` in ~/.claude/settings.json), and upstream's own guidance for
+# that overlap is "pick one — TS_BASH_COMPACT=0 to defer to RTK". Do not run
+# `ts init`; it would write a second, competing Bash hook.
+#
+# Every variable below is overridable by the caller (MCP config `env`, or the
+# shell), so a one-off experiment needs no edit here.
+
+set -uo pipefail
+
+# --- survive an env-filtering host -------------------------------------------
+# Codex (and other hosts) whitelist-filter the environment they hand an MCP
+# server, so neither HOME nor PATH is guaranteed to arrive. Without HOME the
+# uv-tool path and the ops checkouts cannot be found; without PATH `git` and
+# `command -v` fail and root detection silently degrades to the standing list.
+# Rebuilding both here means every client can register the identical command
+# with no per-client `env`/`env_vars` bookkeeping.
+: "${HOME:=$(eval echo "~$(id -un)")}"
+export HOME
+export PATH="${PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
+
+# --- active project: the repo the session is running in -----------------------
+# Resolved without trusting PATH. A host that passes a filtered PATH without git
+# would make `git rev-parse` fail silently, and the fallback below would answer
+# from one of the standing ~/ops checkouts — i.e. confidently from the wrong
+# codebase, the exact failure this wrapper exists to prevent. So: try git from an
+# explicit candidate list, and if there is no git at all, walk up for a project
+# marker in pure bash.
+_find_git() {
+  local c
+  for c in "$(command -v git 2>/dev/null)" /opt/homebrew/bin/git /usr/bin/git \
+           /usr/local/bin/git; do
+    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+_walk_up_for_marker() {
+  local dir="$PWD" m
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    for m in .git pyproject.toml package.json Cargo.toml go.mod pom.xml; do
+      [ -e "$dir/$m" ] && { printf '%s' "$dir"; return 0; }
+    done
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+repo=""
+if _git="$(_find_git)"; then
+  repo="$("$_git" -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+[ -n "$repo" ] || repo="$(_walk_up_for_marker || true)"
+
+# --- standing roots: always reachable by name, from any cwd -------------------
+ops_root="${OPS_ROOT:-$HOME/ops}"
+standing=(
+  "$ops_root/stayturgid"
+  "$ops_root/site-djbclark"
+  "$ops_root/site-private"
+)
+
+roots=()
+add_root() {
+  local d="$1" seen
+  [ -n "$d" ] && [ -d "$d" ] || return 0
+  for seen in ${roots[@]+"${roots[@]}"}; do
+    [ "$seen" = "$d" ] && return 0
+  done
+  roots+=("$d")
+}
+
+add_root "$repo"
+for d in "${standing[@]}"; do add_root "$d"; done
+
+if [ "${#roots[@]}" -gt 0 ]; then
+  joined="$(IFS=,; echo "${roots[*]}")"
+  export WORKSPACE_ROOTS="${WORKSPACE_ROOTS:-$joined}"
+  # Promote the session's own repo to active; harmless if it is not registered.
+  if [ -n "$repo" ]; then
+    export CLAUDE_PROJECT_ROOT="${CLAUDE_PROJECT_ROOT:-$repo}"
+  fi
+fi
+
+# --- profile ------------------------------------------------------------------
+# `optimized` is an alias for the tiny_plus manifest only. Upstream documents the
+# benchmarked configuration as that manifest *coupled with* TS_THIN_SCHEMAS=1 +
+# TS_CAPTURE_DISABLED=1 + TS_MEMORY_DISABLE=1 (server.py, _PROFILE_EXCLUDES), and
+# the profile alias sets none of those three. Thin schemas it does imply; the
+# other two are set here.
+export TOKEN_SAVIOR_PROFILE="${TOKEN_SAVIOR_PROFILE:-optimized}"
+export TOKEN_SAVIOR_CLIENT="${TOKEN_SAVIOR_CLIENT:-claude-code}"
+export TS_CAPTURE_DISABLED="${TS_CAPTURE_DISABLED:-1}"
+
+# --- memory: Basic Memory's job, not token-savior's ---------------------------
+# Basic Memory over ~/ops/site-private/memory is the shared, cross-agent system
+# of record. token-savior ships its own SQLite memory engine; a second durable
+# store that no other agent can read is state divergence, not redundancy.
+# TS_MEMORY_DISABLE=1 drops memory_*/reasoning_*/corpus_* from the manifest AND
+# from what `ts_search` can route to, so nothing reaches for the wrong store.
+export TS_MEMORY_DISABLE="${TS_MEMORY_DISABLE:-1}"
+
+# --- Bash layer: rtk's, not token-savior's ------------------------------------
+export TS_BASH_COMPACT="${TS_BASH_COMPACT:-0}"
+export TS_BASH_REWRITE="${TS_BASH_REWRITE:-0}"
+
+# --- exec the real server -----------------------------------------------------
+bin="${TOKEN_SAVIOR_BIN:-}"
+if [ -z "$bin" ]; then
+  for cand in \
+    "$HOME/.local/share/uv/tools/token-savior-recall/bin/token-savior" \
+    "$HOME/.local/bin/token-savior"
+  do
+    [ -x "$cand" ] && bin="$cand" && break
+  done
+fi
+[ -n "$bin" ] || bin="$(command -v token-savior || true)"
+
+if [ -z "$bin" ]; then
+  echo "token-savior-mcp: token-savior not found." >&2
+  echo "  install: uv tool install 'token-savior-recall[mcp]'" >&2
+  exit 127
+fi
+
+exec "$bin" "$@"

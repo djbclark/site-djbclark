@@ -1,0 +1,65 @@
+#!/bin/bash
+# sudo-ask: show the exact command in a macOS dialog, then run it with sudo.
+#
+# Why: the Touch ID sudo prompt (pam_tid) never shows the command, and a
+# cached sudo runs silently. This adds a per-command Allow/Deny gate that shows
+# what is about to run as root and from which directory. It fails closed: no
+# GUI session, Deny, or a timeout all mean the command does not run.
+#
+# Use `sudo-ask <command...>` instead of `sudo <command...>` (agents included).
+# The real `sudo` is not shadowed, so launchd/ansible/scripts are unaffected.
+# Every decision is appended to ~/.local/state/sudo-ask/log.
+
+set -u
+[ $# -gt 0 ] || { echo "usage: sudo-ask <command...>" >&2; exit 64; }
+
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/sudo-ask"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/log"
+
+# Shell-quoted form so arguments with spaces are unambiguous in the dialog.
+cmd=$(printf '%q ' "$@")
+cmd=${cmd% }
+shown=$cmd
+[ ${#shown} -gt 700 ] && shown="${shown:0:700}... [truncated, ${#cmd} chars]"
+
+log() { printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
+
+# Enter and Esc must never decide: the default button is "Wait" (a no-op that
+# re-shows the dialog), and Esc is mapped to it too. Only a mouse click on Allow
+# or Deny decides. Total wait is capped so an ignored dialog still fails closed.
+MAX_WAIT=${SUDO_ASK_MAX_WAIT:-600}
+start=$SECONDS
+while :; do
+  # Command goes to AppleScript via argv, never interpolated into the script text.
+  answer=$(/usr/bin/osascript - "$shown" "$PWD" 2>&1 <<'APPLESCRIPT'
+on run argv
+  set theCmd to item 1 of argv
+  set theDir to item 2 of argv
+  tell application "System Events"
+    activate
+    set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Deny", "Wait", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
+  end tell
+  return (button returned of r) & "|" & (gave up of r)
+end run
+APPLESCRIPT
+)
+  rc=$?
+
+  # Wait button, Enter, or Esc (AppleScript error -128): no-op, ask again.
+  if [ $rc -ne 0 ] && [[ "$answer" == *"-128"* ]]; then
+    [ $((SECONDS - start)) -ge "$MAX_WAIT" ] && { log "DENIED(timeout)"; echo "sudo-ask: timed out waiting" >&2; exit 1; }
+    continue
+  fi
+  if [ $rc -ne 0 ]; then
+    log NO_DIALOG; echo "sudo-ask: could not show dialog (no GUI session?): $answer" >&2; exit 1
+  fi
+  case "$answer" in
+    "Allow|false") break ;;
+    "Deny|false")  log DENIED; echo "sudo-ask: denied" >&2; exit 1 ;;
+    *)             log "DENIED($answer)"; echo "sudo-ask: not allowed ($answer)" >&2; exit 1 ;;
+  esac
+done
+
+log ALLOWED
+exec /usr/bin/sudo "$@"

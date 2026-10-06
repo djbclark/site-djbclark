@@ -1,0 +1,863 @@
+#!/usr/bin/env python3
+"""load-governor: dynamic, starvation-proof throttle for throughput work.
+
+When the machine is overloaded (CPU idle low, load average high, or system time
+high) this moves the heaviest build/test processes of the current user to
+background QoS (`taskpolicy -b -p PID`: efficiency cores only, lowest priority,
+throttled I/O), and puts them back (`taskpolicy -B -p PID`) when the machine is
+calm again. No pid stays throttled longer than `cap_s`: it is released for
+`grace_s` so it always makes progress.
+
+It is DRY-RUN unless you pass --apply. See docs/load-governor.md.
+
+    load-governor --once                 # evaluate one sample, change nothing
+    load-governor --apply                # run the loop, act
+    load-governor --undo-all             # restore every pid it ever throttled
+    load-governor --print-config         # effective config as TOML
+    load-governor --status               # what the state file says
+
+Python 3 standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import atexit
+import ctypes
+import dataclasses
+import fcntl
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+from typing import Callable, Dict, List, Optional, Tuple
+
+TASKPOLICY = "/usr/sbin/taskpolicy"
+HOME = os.path.expanduser("~")
+DEFAULT_CONFIG_PATH = os.path.join(HOME, ".config", "load-governor", "config.toml")
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+# Allow-list: throughput work. re.search against the full command line.
+DEFAULT_ALLOW = [
+    r"(^|/)swift-(frontend|build|test|driver|package|autolink-extract)(\s|$)",
+    r"(^|/)swift(c)?\s+(build|test|package)(\s|$)",
+    r"(^|/)swiftc(\s|$)",
+    r"(^|/)(xctest|xcodebuild|xcbuild|swiftpm-testing-helper)(\s|$)",
+    r"\.xctest(\s|/|$)",
+    r"\b(vitest|jest)\b",
+    r"\bpytest\b|\bpy\.test\b",
+    r"-m\s+(pytest|unittest)\b",
+    r"(^|/)go\s+(test|build|vet|install|generate|run)(\s|$)",
+    r"/pkg/tool/[^/]+/(compile|link|asm|cgo|vet)(\s|$)",
+    r"/go-build\d+/.*\.test(\s|$)",
+    r"org\.gradle\.|Gradle (Test Executor|Worker)|GradleWrapperMain|KotlinCompileDaemon",
+    r"(^|/)gradlew?(\s|$)",
+    r"(^|/)(cargo|rustc|rustdoc|clippy-driver)(\s|$)",
+    r"(^|/)(make|gmake|ninja|cmake|ctest)(\s|$)",
+    r"(^|/)(clang|clang\+\+|gcc|g\+\+|cc|c\+\+|ld|ld64|ld\.lld|lld|ccache|cc1|cc1plus)(\s|$)",
+    r"(^|[\s/])(tsc|eslint|prettier|esbuild|webpack|rollup|turbo|biome|oxlint|swc)(\.js|\.mjs)?(\s|$)",
+    r"(^|[\s/])(basedpyright|pyright|mypy|pylint|flake8|black|isort|tox|nox)(\s|$)",
+    r"(^|[\s/])ruff(?!\s+server)(\s|$)",
+]
+
+# Deny-list, part 1: matched (fullmatch, case-insensitive) against the process's
+# *identity names*: basename of argv0, and basename of argv1 when argv0 is an
+# interpreter (node, python, ruby, bash...). So `node /x/bin/codex.js` is
+# identified as `node` and `codex.js`.
+DEFAULT_DENY_NAMES = [
+    r"kernel_task|launchd|launchservicesd|logd|WindowServer|loginwindow|Finder|Dock|SystemUIServer|ControlCenter",
+    r"mds|mds_stores|mdworker.*|trustd|syspolicyd|coreaudiod|bluetoothd|powerd|notifyd|distnoted|cfprefsd|backupd",
+    r"claude(-agent-acp|\.js|\.exe)?|codex(-acp|\.js|\.mjs)?|copilot(\.js)?|cursor-agent|cursor(-agent)?\.js|opencode|hermes(\.py)?",
+    r"crush|muse|agy|agy_acp_server.*|zcode.*|grok.*",
+    r"Orca.*|orca(-cli)?|Ghostty|ghostty|CodexBar|OpenUsage|openusage.*",
+    r"load-governor|aiuse.*",
+    r"bash|zsh|sh|fish|dash|login|tmux|screen|herdr|ssh|sshd|sudo|su|Terminal|iTerm2|Safari|Google Chrome.*|Slack.*|Electron.*",
+    r"taskpolicy|powermetrics|fs_usage|top|htop",
+]
+# Deny-list, part 2: re.search against the full command line.
+DEFAULT_DENY_CMD = [
+    # Any GUI app bundle executable is interactive -- except Homebrew/framework Python,
+    # whose real binary is Python.app/Contents/MacOS/Python (that is how `python -m pytest` shows in ps).
+    r"\.app/Contents/MacOS/(?!Python( |$))",
+    r"claude-agent-acp|codex-acp|load-governor",
+]
+
+
+@dataclasses.dataclass
+class Config:
+    interval_s: float = 5.0
+    engage_idle_pct: float = 15.0
+    engage_load_per_core: float = 2.0
+    engage_sys_pct: float = 35.0
+    engage_samples: int = 3
+    release_idle_pct: float = 35.0
+    release_samples: int = 6
+    min_candidate_cpu_pct: float = 10.0
+    min_age_s: float = 5.0
+    initial_k: int = 2
+    max_k: int = 6
+    escalate_samples: int = 3
+    cap_s: float = 90.0
+    grace_s: float = 45.0
+    retry_after_failure_s: float = 30.0
+    state_dir: str = "~/.local/state/load-governor"
+    log_max_bytes: int = 5_000_000
+    allow: List[str] = dataclasses.field(default_factory=lambda: list(DEFAULT_ALLOW))
+    allow_extra: List[str] = dataclasses.field(default_factory=list)
+    deny_names: List[str] = dataclasses.field(default_factory=lambda: list(DEFAULT_DENY_NAMES))
+    deny_cmd: List[str] = dataclasses.field(default_factory=lambda: list(DEFAULT_DENY_CMD))
+
+    @property
+    def state_path(self) -> str:
+        return os.path.join(os.path.expanduser(self.state_dir), "state.json")
+
+    @property
+    def log_path(self) -> str:
+        return os.path.join(os.path.expanduser(self.state_dir), "governor.log")
+
+    @property
+    def lock_path(self) -> str:
+        return os.path.join(os.path.expanduser(self.state_dir), "governor.lock")
+
+
+CONFIG_DOCS = {
+    "interval_s": "seconds between samples",
+    "engage_idle_pct": "a sample is OVERLOADED when CPU idle% is below this ...",
+    "engage_load_per_core": "... AND 1-minute load average / cores is at least this ...",
+    "engage_sys_pct": "... OR (instead of the load test) system-time share is at least this %",
+    "engage_samples": "consecutive OVERLOADED samples needed to engage (hysteresis)",
+    "release_idle_pct": "a sample is CALM when CPU idle% is above this",
+    "release_samples": "consecutive CALM samples needed to release everything (hysteresis)",
+    "min_candidate_cpu_pct": "only consider processes using at least this % of one core since the last sample",
+    "min_age_s": "never throttle a process younger than this many seconds",
+    "initial_k": "how many of the heaviest processes to throttle when first engaged",
+    "max_k": "ceiling on simultaneously throttled processes",
+    "escalate_samples": "add one more throttled process every N samples while still engaged, up to max_k",
+    "cap_s": "starvation cap: no pid stays throttled longer than this",
+    "grace_s": "after the cap releases a pid it is left alone for this long",
+    "retry_after_failure_s": "wait this long before retrying a pid whose taskpolicy call failed",
+    "state_dir": "state.json, governor.log and governor.lock live here",
+    "log_max_bytes": "rotate governor.log to governor.log.1 beyond this size",
+    "allow": "regexes (re.search on the full command line): throughput work that may be throttled",
+    "allow_extra": "extra allow regexes, added to `allow` (what you would use for a one-off test pattern)",
+    "deny_names": "regexes (fullmatch, case-insensitive) on process identity names; DENY WINS over allow",
+    "deny_cmd": "regexes (re.search on the full command line); DENY WINS over allow",
+}
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, list):
+        if not v:
+            return "[]"
+        return "[\n" + "".join("  %s,\n" % _toml_value(x) for x in v) + "]"
+    return "'%s'" % str(v) if "'" not in str(v) else json.dumps(str(v))
+
+
+def config_to_toml(cfg: Config) -> str:
+    out = ["# load-governor effective configuration (defaults shown unless overridden)\n"]
+    for f in dataclasses.fields(cfg):
+        out.append("# %s\n%s = %s\n\n" % (CONFIG_DOCS.get(f.name, ""), f.name, _toml_value(getattr(cfg, f.name))))
+    return "".join(out)
+
+
+def load_config(path: Optional[str]) -> Config:
+    cfg = Config()
+    explicit = path is not None
+    path = path or DEFAULT_CONFIG_PATH
+    if not os.path.exists(path):
+        if explicit:
+            raise SystemExit("config file not found: %s" % path)
+        return cfg
+    try:
+        import tomllib  # Python 3.11+
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+    except ImportError:
+        with open(path) as fh:
+            data = json.load(fh)  # fall back to JSON on an old Python
+    names = {f.name for f in dataclasses.fields(Config)}
+    for k, v in data.items():
+        if k not in names:
+            raise SystemExit("unknown config key: %s" % k)
+        setattr(cfg, k, v)
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# Data and environment
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class Proc:
+    pid: int
+    ppid: int
+    uid: int
+    stat: str
+    cpu_s: float  # cumulative CPU seconds
+    start: str  # lstart text, the identity of the process incarnation
+    cmd: str  # full command line
+
+
+@dataclasses.dataclass
+class CpuTimes:
+    user: int
+    system: int
+    idle: int
+    nice: int
+
+
+@dataclasses.dataclass
+class Signals:
+    idle_pct: float
+    sys_pct: float
+    load_per_core: float
+
+
+def parse_cputime(s: str) -> float:
+    """ps time= text -> seconds. '1:02.50', '1:02:03.00', '2-01:02:03'."""
+    days = 0
+    if "-" in s:
+        d, s = s.split("-", 1)
+        days = int(d)
+    total = 0.0
+    for part in s.split(":"):
+        total = total * 60 + float(part)
+    return total + days * 86400
+
+
+def parse_ps_line(line: str) -> Optional[Proc]:
+    # pid ppid uid stat time  <5-token lstart>  command...
+    t = line.split(None, 10)
+    if len(t) < 11:
+        return None
+    try:
+        return Proc(int(t[0]), int(t[1]), int(t[2]), t[3], parse_cputime(t[4]),
+                    " ".join(t[5:10]), t[10].strip())
+    except ValueError:
+        return None
+
+
+def start_epoch(start: str) -> Optional[float]:
+    try:
+        return time.mktime(time.strptime(start, "%a %b %d %H:%M:%S %Y"))
+    except ValueError:
+        return None
+
+
+class RealEnv:
+    """Talks to the real machine. Tests substitute a fake with the same methods."""
+
+    def __init__(self):
+        self.cores = os.cpu_count() or 1
+        self._lib = None
+
+    def now(self) -> float:
+        return time.time()
+
+    def sleep(self, s: float) -> None:
+        time.sleep(s)
+
+    def uid(self) -> int:
+        return os.getuid()
+
+    def self_pid(self) -> int:
+        return os.getpid()
+
+    def loadavg(self) -> float:
+        return os.getloadavg()[0]
+
+    def list_procs(self) -> List[Proc]:
+        out = subprocess.run(
+            ["/bin/ps", "-axww", "-o", "pid=,ppid=,uid=,stat=,time=,lstart=,command="],
+            capture_output=True, text=True, timeout=60).stdout
+        return [p for p in (parse_ps_line(l) for l in out.splitlines()) if p]
+
+    def proc_identity(self, pid: int) -> Optional[Tuple[str, str]]:
+        r = subprocess.run(["/bin/ps", "-ww", "-o", "lstart=,command=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=30)
+        line = r.stdout.strip("\n")
+        t = line.split(None, 5)
+        if len(t) < 6:
+            return None
+        return " ".join(t[0:5]), t[5].strip()
+
+    def read_cpu(self) -> CpuTimes:
+        try:
+            lib = self._lib or ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            self._lib = lib
+            lib.mach_host_self.restype = ctypes.c_uint32
+            lib.host_statistics.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p,
+                                            ctypes.POINTER(ctypes.c_uint32)]
+            buf = (ctypes.c_uint32 * 4)()
+            cnt = ctypes.c_uint32(4)
+            if lib.host_statistics(lib.mach_host_self(), 3, ctypes.byref(buf), ctypes.byref(cnt)) == 0:
+                return CpuTimes(buf[0], buf[1], buf[2], buf[3])  # user, system, idle, nice
+        except Exception:
+            pass
+        # Fallback: one top sample, scaled to fake ticks.
+        out = subprocess.run(["/usr/bin/top", "-l", "2", "-n", "0", "-s", "1"],
+                             capture_output=True, text=True, timeout=30).stdout
+        m = None
+        for m in re.finditer(r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle", out):
+            pass
+        if not m:
+            raise RuntimeError("cannot read CPU usage")
+        u, s, i = (float(x) for x in m.groups())
+        # monotone counters whose per-sample delta reproduces the percentages
+        self._acc = [a + b for a, b in zip(getattr(self, "_acc", [0, 0, 0]), [u * 100, s * 100, i * 100])]
+        return CpuTimes(int(self._acc[0]), int(self._acc[1]), int(self._acc[2]), 0)
+
+    def taskpolicy(self, args: List[str]) -> Tuple[int, str]:
+        r = subprocess.run([TASKPOLICY] + args, capture_output=True, text=True, timeout=15)
+        return r.returncode, (r.stdout + r.stderr).strip()
+
+
+# ---------------------------------------------------------------------------
+# Matching
+# ---------------------------------------------------------------------------
+
+INTERPRETERS = re.compile(
+    r"(?i)^(node|nodejs|bun|deno|python[\d.]*|ruby|perl|bash|zsh|sh|java|uv|uvx|npx|env)$")
+
+
+def identity_names(cmd: str) -> List[str]:
+    toks = cmd.split()
+    if not toks:
+        return []
+    a0 = os.path.basename(toks[0])
+    names = [a0]
+    if INTERPRETERS.match(a0):
+        for t in toks[1:]:
+            if t.startswith("-"):
+                continue
+            names.append(os.path.basename(t))
+            break
+    return names
+
+
+class Matcher:
+    def __init__(self, cfg: Config, allow_only: Optional[List[str]] = None):
+        allow = list(allow_only) if allow_only else list(cfg.allow) + list(cfg.allow_extra)
+        self.allow = [re.compile(p) for p in allow]
+        self.deny_names = [re.compile(p, re.I) for p in cfg.deny_names]
+        self.deny_cmd = [re.compile(p) for p in cfg.deny_cmd]
+
+    def denied(self, cmd: str) -> Optional[str]:
+        for n in identity_names(cmd):
+            for rx in self.deny_names:
+                if rx.fullmatch(n):
+                    return "deny-name:%s" % n
+        for rx in self.deny_cmd:
+            if rx.search(cmd):
+                return "deny-cmd:%s" % rx.pattern
+        return None
+
+    def allowed(self, cmd: str) -> bool:
+        return any(rx.search(cmd) for rx in self.allow)
+
+    def classify(self, cmd: str) -> Optional[str]:
+        """None if throttle-eligible by command line, else the reason it is not."""
+        d = self.denied(cmd)
+        if d:
+            return d
+        if not self.allowed(cmd):
+            return "not-allow-listed"
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Governor
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class Rec:
+    pid: int
+    start: str
+    cmd: str
+    since: float
+    inherited_from: Optional[int] = None
+    applied: bool = True
+
+
+class Logger:
+    def __init__(self, path: Optional[str], max_bytes: int, echo: bool):
+        self.path, self.max_bytes, self.echo = path, max_bytes, echo
+        if path:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    def __call__(self, msg: str, level: str = "INFO") -> None:
+        line = "%s %-5s %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), level, msg)
+        if self.echo:
+            print(line, file=sys.stderr, flush=True)
+        if self.path:
+            try:
+                if os.path.exists(self.path) and os.path.getsize(self.path) > self.max_bytes:
+                    os.replace(self.path, self.path + ".1")
+                with open(self.path, "a") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
+
+
+class Governor:
+    def __init__(self, cfg: Config, env, apply: bool = False, log: Optional[Callable] = None,
+                 allow_only: Optional[List[str]] = None, force_engage: bool = False,
+                 persist: Optional[bool] = None):
+        self.cfg, self.env, self.apply = cfg, env, apply
+        self.log = log or (lambda m, l="INFO": None)
+        self.matcher = Matcher(cfg, allow_only)
+        self.force = force_engage
+        self.persist = apply if persist is None else persist
+        self.tracked: Dict[int, Rec] = {}
+        self.grace: Dict[int, Tuple[str, float]] = {}  # pid -> (start, until)
+        self.failed: Dict[int, float] = {}
+        self.engaged = False
+        self.over_n = 0
+        self.calm_n = 0
+        self.engaged_ticks = 0
+        self._prev_cpu: Optional[CpuTimes] = None
+        self._prev_proc: Dict[int, Tuple[str, float, float]] = {}
+        self.rate: Dict[int, float] = {}
+        self.ticks = 0
+        self.ever_throttled: Dict[str, dict] = {}
+
+    # -- taskpolicy ---------------------------------------------------------
+
+    def _tp(self, flag: str, pid: int) -> Tuple[int, str]:
+        if not self.apply:
+            self.log("DRYRUN would run: taskpolicy %s -p %d" % (flag, pid))
+            return 0, "dry-run"
+        return self.env.taskpolicy([flag, "-p", str(pid)])
+
+    def _verified(self, pid: int, start: str) -> Optional[str]:
+        """None when pid still is the incarnation with this start time, else why not."""
+        ident = self.env.proc_identity(pid)
+        if ident is None:
+            return "gone"
+        if ident[0] != start:
+            return "pid-reused (start %r != %r)" % (ident[0], start)
+        return None
+
+    # -- state --------------------------------------------------------------
+
+    def save_state(self) -> None:
+        if not self.persist:
+            return
+        for r in self.tracked.values():
+            self.ever_throttled[str(r.pid)] = {"start": r.start, "cmd": r.cmd}
+        while len(self.ever_throttled) > 500:  # bounded history, oldest first
+            self.ever_throttled.pop(next(iter(self.ever_throttled)))
+        data = {
+            "version": 1,
+            "updated": self.env.now(),
+            "engaged": self.engaged,
+            "tracked": {str(p): dataclasses.asdict(r) for p, r in self.tracked.items()},
+            "ever_throttled": self.ever_throttled,
+        }
+        path = self.cfg.state_path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(data, fh, indent=1)
+        os.replace(tmp, path)
+
+    # -- the tick -----------------------------------------------------------
+
+    def signals(self, cpu: CpuTimes) -> Optional[Signals]:
+        prev, self._prev_cpu = self._prev_cpu, cpu
+        if prev is None:
+            return None
+        M = 1 << 32
+        du, ds = (cpu.user - prev.user) % M, (cpu.system - prev.system) % M
+        di, dn = (cpu.idle - prev.idle) % M, (cpu.nice - prev.nice) % M
+        tot = du + ds + di + dn
+        if tot <= 0:
+            return None
+        return Signals(100.0 * di / tot, 100.0 * ds / tot,
+                       self.env.loadavg() / max(1, self.env.cores))
+
+    def _rates(self, procs: List[Proc], now: float) -> None:
+        prev, cur = self._prev_proc, {}
+        self.rate = {}
+        for p in procs:
+            cur[p.pid] = (p.start, p.cpu_s, now)
+            o = prev.get(p.pid)
+            if o and o[0] == p.start and now > o[2]:
+                self.rate[p.pid] = max(0.0, 100.0 * (p.cpu_s - o[1]) / (now - o[2]))
+        self._prev_proc = cur
+
+    def tick(self) -> dict:
+        """One evaluation. The first call only primes the baselines (warm-up)."""
+        cfg = self.cfg
+        t_before = self.env.now()
+        self.ticks += 1
+        procs = self.env.list_procs()
+        # ps reads CPU times somewhere inside its run, which can take seconds under
+        # load: stamp the snapshot with the midpoint of the call, not its start or end.
+        now = (t_before + self.env.now()) / 2.0
+        by_pid = {p.pid: p for p in procs}
+        sig = self.signals(self.env.read_cpu())
+        self._rates(procs, now)
+        decision = {"warmup": sig is None, "throttled": [], "released": [], "sig": sig}
+        if sig is None:
+            return decision
+
+        over = self.force or (sig.idle_pct < cfg.engage_idle_pct and (
+            sig.load_per_core >= cfg.engage_load_per_core or sig.sys_pct >= cfg.engage_sys_pct))
+        calm = (not self.force) and sig.idle_pct > cfg.release_idle_pct
+        decision["over"], decision["calm"] = over, calm
+
+        if not self.engaged:
+            self.over_n = self.over_n + 1 if over else 0
+            if self.over_n >= cfg.engage_samples:
+                self.engaged, self.engaged_ticks, self.calm_n = True, 0, 0
+                self.log("ENGAGE idle=%.1f%% sys=%.1f%% load/core=%.1f after %d overloaded samples"
+                         % (sig.idle_pct, sig.sys_pct, sig.load_per_core, self.over_n))
+        else:
+            self.engaged_ticks += 1
+            self.calm_n = self.calm_n + 1 if calm else 0
+            if self.calm_n >= cfg.release_samples:
+                self.log("RELEASE idle=%.1f%% after %d calm samples" % (sig.idle_pct, self.calm_n))
+                self.engaged, self.over_n = False, 0
+                for pid in list(self.tracked):
+                    decision["released"].append(self._release(pid, "calm", grace=False))
+                self.grace.clear()
+
+        # Reconcile: drop tracked pids that vanished or were reused.
+        for pid, rec in list(self.tracked.items()):
+            p = by_pid.get(pid)
+            if p is None:
+                self.log("GONE pid=%d %s (exited while throttled)" % (pid, rec.cmd[:80]))
+                del self.tracked[pid]
+            elif p.start != rec.start:
+                self.log("REUSE pid=%d recorded start=%r now=%r: NOT touching" % (pid, rec.start, p.start), "WARN")
+                del self.tracked[pid]
+        for pid, (start, until) in list(self.grace.items()):
+            p = by_pid.get(pid)
+            if p is None or p.start != start or until <= now:
+                del self.grace[pid]
+
+        if self.tracked and self.apply:
+            self._track_inherited(procs, by_pid, now)
+
+        # Starvation cap: nothing stays throttled longer than cap_s.
+        for pid, rec in list(self.tracked.items()):
+            if pid in self.tracked and now - rec.since >= cfg.cap_s:
+                decision["released"].append(self._release(pid, "cap %.0fs reached" % cfg.cap_s, grace=True))
+
+        if self.engaged:
+            k = min(cfg.max_k, cfg.initial_k + self.engaged_ticks // max(1, cfg.escalate_samples))
+            decision["k"] = k
+            held = sum(1 for r in self.tracked.values() if r.inherited_from is None)
+            for p in self._candidates(procs, by_pid, now):
+                if held >= k:
+                    break
+                if self._throttle(p, "idle=%.0f%% sys=%.0f%% load/core=%.1f k=%d"
+                                  % (sig.idle_pct, sig.sys_pct, sig.load_per_core, k)):
+                    decision["throttled"].append(p.pid)
+                    held += 1
+        if decision["throttled"] or decision["released"]:
+            self.save_state()
+        elif self.ticks % 12 == 0 or self.engaged:
+            self.log("TICK engaged=%s idle=%.1f%% sys=%.1f%% load/core=%.1f throttled=%d grace=%d"
+                     % (self.engaged, sig.idle_pct, sig.sys_pct, sig.load_per_core,
+                        len(self.tracked), len(self.grace)), "DEBUG")
+        return decision
+
+    # -- candidates ---------------------------------------------------------
+
+    def _ancestors(self, pid: int, by_pid: Dict[int, Proc]) -> List[int]:
+        seen, out = set(), []
+        while pid in by_pid and pid not in seen and pid > 1:
+            seen.add(pid)
+            pid = by_pid[pid].ppid
+            out.append(pid)
+        return out
+
+    def _candidates(self, procs: List[Proc], by_pid: Dict[int, Proc], now: float) -> List[Proc]:
+        cfg, me, uid = self.cfg, self.env.self_pid(), self.env.uid()
+        cands = []
+        for p in procs:
+            if p.uid != uid or p.pid <= 1 or p.pid == me or "Z" in p.stat:
+                continue
+            if p.pid in self.tracked or p.pid in self.grace:
+                continue
+            if self.failed.get(p.pid, 0) > now:
+                continue
+            if p.pid not in self.rate or self.rate[p.pid] < cfg.min_candidate_cpu_pct:
+                continue
+            e = start_epoch(p.start)
+            if e is not None and now - e < cfg.min_age_s:
+                continue
+            if p.ppid == me or me in self._ancestors(p.pid, by_pid):
+                continue  # never the governor's own children
+            if self.matcher.classify(p.cmd) is not None:
+                continue
+            cands.append(p)
+        cands.sort(key=lambda p: -self.rate[p.pid])
+        return cands
+
+    def _track_inherited(self, procs: List[Proc], by_pid: Dict[int, Proc], now: float) -> None:
+        """Descendants started after a pid was throttled inherit background QoS.
+        Track the allow-listed ones so the cap releases them too."""
+        kids: Dict[int, List[Proc]] = {}
+        for p in procs:
+            kids.setdefault(p.ppid, []).append(p)
+        for root in [r for r in self.tracked.values() if r.inherited_from is None]:
+            stack = list(kids.get(root.pid, []))
+            while stack:
+                c = stack.pop()
+                stack.extend(kids.get(c.pid, []))
+                if c.pid in self.tracked or c.pid in self.grace:
+                    continue
+                e = start_epoch(c.start)
+                if e is None or e < root.since - 1:
+                    continue  # started before the throttle: did not inherit it
+                if self.matcher.classify(c.cmd) is not None or c.uid != self.env.uid():
+                    continue
+                self.tracked[c.pid] = Rec(c.pid, c.start, c.cmd, max(e, root.since), root.pid)
+                self.log("INHERIT pid=%d %s (child of throttled pid %d)" % (c.pid, c.cmd[:80], root.pid))
+
+    # -- actions ------------------------------------------------------------
+
+    def _throttle(self, p: Proc, reason: str) -> bool:
+        bad = self._verified(p.pid, p.start)
+        if bad:
+            self.log("SKIP throttle pid=%d: %s" % (p.pid, bad), "WARN")
+            return False
+        rc, out = self._tp("-b", p.pid)
+        if rc != 0:
+            self.failed[p.pid] = self.env.now() + self.cfg.retry_after_failure_s
+            self.log("FAIL throttle pid=%d rc=%d %s" % (p.pid, rc, out), "WARN")
+            return False
+        self.tracked[p.pid] = Rec(p.pid, p.start, p.cmd, self.env.now(), None, self.apply)
+        self.log("THROTTLE%s pid=%d cpu=%.0f%% %s | %s"
+                 % ("" if self.apply else "(dry-run)", p.pid, self.rate.get(p.pid, 0.0), reason, p.cmd[:100]))
+        return True
+
+    def _release(self, pid: int, reason: str, grace: bool) -> int:
+        rec = self.tracked.pop(pid, None)
+        if rec is None:
+            return pid
+        bad = self._verified(pid, rec.start)
+        if bad:
+            self.log("SKIP release pid=%d: %s (nothing to restore)" % (pid, bad),
+                     "INFO" if bad == "gone" else "WARN")
+        else:
+            rc, out = self._tp("-B", pid)
+            if rc != 0:
+                self.log("FAIL release pid=%d rc=%d %s" % (pid, rc, out), "WARN")
+            else:
+                self.log("RELEASE%s pid=%d after %.0fs: %s | %s"
+                         % ("" if self.apply else "(dry-run)", pid, self.env.now() - rec.since, reason, rec.cmd[:100]))
+        if grace and not bad:
+            self.grace[pid] = (rec.start, self.env.now() + self.cfg.grace_s)
+        # Children that inherited background from this pid go back with it.
+        for cpid, c in list(self.tracked.items()):
+            if c.inherited_from == pid:
+                self._release(cpid, "parent %d released" % pid, grace)
+        return pid
+
+    def release_all(self, reason: str) -> int:
+        n = 0
+        for pid in list(self.tracked):
+            self._release(pid, reason, grace=False)
+            n += 1
+        self.save_state()
+        return n
+
+
+# ---------------------------------------------------------------------------
+# undo-all / status
+# ---------------------------------------------------------------------------
+
+def undo_all(cfg: Config, env, log: Callable, apply: bool = True) -> Tuple[int, int]:
+    """Restore every pid recorded in the state file (tracked now, or ever throttled)
+    whose incarnation (pid + start time) still matches. Returns (restored, skipped)."""
+    path = cfg.state_path
+    if not os.path.exists(path):
+        log("undo-all: no state file at %s, nothing to do" % path)
+        return 0, 0
+    with open(path) as fh:
+        data = json.load(fh)
+    recs = dict(data.get("ever_throttled", {}))
+    for pid, r in data.get("tracked", {}).items():
+        recs[pid] = {"start": r["start"], "cmd": r["cmd"]}
+    restored = skipped = 0
+    for pid_s, r in sorted(recs.items(), key=lambda kv: int(kv[0])):
+        pid = int(pid_s)
+        ident = env.proc_identity(pid)
+        if ident is None:
+            skipped += 1
+            continue
+        if ident[0] != r["start"]:
+            log("undo-all: pid %d was reused (start %r != %r), not touching" % (pid, ident[0], r["start"]), "WARN")
+            skipped += 1
+            continue
+        if apply:
+            rc, out = env.taskpolicy(["-B", "-p", str(pid)])
+        else:
+            rc, out = 0, "dry-run"
+        log("undo-all: %s pid=%d rc=%d %s | %s" % ("restored" if apply else "would restore", pid, rc, out, r["cmd"][:100]))
+        restored += 1 if rc == 0 else 0
+    if apply:
+        data["tracked"], data["ever_throttled"] = {}, {}
+        data["engaged"] = False
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(data, fh, indent=1)
+        os.replace(tmp, path)
+    return restored, skipped
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="load-governor", description=__doc__.split("\n\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true", help="actually run taskpolicy (default: dry-run, log only)")
+    ap.add_argument("--once", action="store_true",
+                    help="two samples --once-window apart, one evaluation (overload counts as sustained), then exit. "
+                         "With --apply the throttle is LEFT IN PLACE: run --undo-all afterwards")
+    ap.add_argument("--once-window", type=float, default=3.0, help="seconds between the two --once samples")
+    ap.add_argument("--undo-all", action="store_true", help="restore every pid recorded in the state file and exit")
+    ap.add_argument("--print-config", action="store_true", help="print the effective config as TOML and exit")
+    ap.add_argument("--status", action="store_true", help="summarise the state file and exit")
+    ap.add_argument("--config", help="TOML config path (default %s)" % DEFAULT_CONFIG_PATH)
+    ap.add_argument("--state-dir", help="override state_dir (state.json, governor.log, governor.lock)")
+    ap.add_argument("--interval", type=float, help="override interval_s")
+    ap.add_argument("--cap", type=float, help="override cap_s")
+    ap.add_argument("--grace", type=float, help="override grace_s")
+    ap.add_argument("--allow-extra", action="append", default=[], metavar="REGEX",
+                    help="add an allow-list regex (repeatable)")
+    ap.add_argument("--allow-only", action="append", default=[], metavar="REGEX",
+                    help="REPLACE the allow-list with these regexes (testing; deny-list still wins)")
+    ap.add_argument("--force-engage", action="store_true",
+                    help="treat every sample as overloaded and never release on calm (testing)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="also log to stderr")
+    return ap
+
+
+def main(argv: Optional[List[str]] = None, env=None) -> int:
+    args = build_parser().parse_args(argv)
+    cfg = load_config(args.config)
+    if args.state_dir:
+        cfg.state_dir = args.state_dir
+    if args.interval:
+        cfg.interval_s = args.interval
+    if args.cap:
+        cfg.cap_s = args.cap
+    if args.grace:
+        cfg.grace_s = args.grace
+    cfg.allow_extra = list(cfg.allow_extra) + args.allow_extra
+    if args.print_config:
+        sys.stdout.write(config_to_toml(cfg))
+        return 0
+
+    env = env or RealEnv()
+    one_shot = args.once or args.undo_all or args.status
+    log = Logger(cfg.log_path, cfg.log_max_bytes, echo=args.verbose or sys.stderr.isatty() or one_shot)
+
+    if args.status:
+        try:
+            with open(cfg.state_path) as fh:
+                d = json.load(fh)
+        except OSError:
+            print("no state file at %s" % cfg.state_path)
+            return 0
+        print("engaged=%s updated=%s" % (d.get("engaged"), time.strftime("%F %T", time.localtime(d.get("updated", 0)))))
+        for pid, r in d.get("tracked", {}).items():
+            print("  throttled pid=%s since=%s inherited_from=%s %s" % (
+                pid, time.strftime("%T", time.localtime(r["since"])), r.get("inherited_from"), r["cmd"][:100]))
+        print("  ever_throttled: %d pids on record" % len(d.get("ever_throttled", {})))
+        return 0
+
+    if args.undo_all:
+        r, s = undo_all(cfg, env, log, apply=True)
+        print("undo-all: restored %d, skipped %d (gone or pid reused)" % (r, s))
+        return 0
+
+    # Single-instance lock for the loop (a --once evaluation may overlap).
+    lock_fh = None
+    if not args.once:
+        os.makedirs(os.path.dirname(cfg.lock_path), exist_ok=True)
+        lock_fh = open(cfg.lock_path, "w")
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("another load-governor holds %s" % cfg.lock_path, file=sys.stderr)
+            return 1
+
+    if args.once:
+        cfg.engage_samples = 1
+    gov = Governor(cfg, env, apply=args.apply, log=log, allow_only=args.allow_only or None,
+                   force_engage=args.force_engage)
+    log("START mode=%s interval=%.1fs cap=%.0fs grace=%.0fs allow=%d patterns pid=%d"
+        % ("APPLY" if args.apply else "DRY-RUN", cfg.interval_s, cfg.cap_s, cfg.grace_s,
+           len(gov.matcher.allow), os.getpid()))
+
+    if args.apply and not args.once:
+        # A previous governor that died hard may have left pids throttled.
+        r, s = undo_all(cfg, env, log, apply=True)
+        if r:
+            log("START restored %d pid(s) left over from a previous run" % r)
+
+    stop = {"flag": False}
+
+    def on_signal(signum, _frame):
+        stop["flag"] = True
+        log("SIGNAL %d: restoring and exiting" % signum)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    if args.apply and not args.once:
+        atexit.register(lambda: gov.tracked and gov.release_all("exit"))
+
+    try:
+        if args.once:
+            gov.tick()  # warm-up baselines
+            env.sleep(args.once_window)
+            d = gov.tick()
+            s = d.get("sig")
+            if s:
+                print("idle=%.1f%% sys=%.1f%% load/core=%.1f over=%s calm=%s" % (
+                    s.idle_pct, s.sys_pct, s.load_per_core, d.get("over"), d.get("calm")))
+            if not gov.engaged:
+                print("not engaged: no action (this sample is not overloaded)")
+            for pid in d["throttled"]:
+                print("%s pid=%d %s" % ("throttled" if args.apply else "would throttle", pid, gov.tracked[pid].cmd[:100]))
+            if args.apply and gov.tracked:
+                print("NOTE: --once --apply leaves these throttled with no cap enforcement. "
+                      "Run `load-governor --undo-all` when done.", file=sys.stderr)
+            return 0
+        gov.tick()  # warm-up
+        while not stop["flag"]:
+            deadline = time.time() + cfg.interval_s
+            while not stop["flag"] and time.time() < deadline:
+                time.sleep(min(0.5, max(0.0, deadline - time.time())))
+            if stop["flag"]:
+                break
+            try:
+                gov.tick()
+            except Exception as e:  # keep the loop alive; log and carry on
+                log("ERROR tick failed: %r" % e, "ERROR")
+    finally:
+        if args.apply and not args.once:
+            n = gov.release_all("shutdown")
+            log("EXIT restored %d pid(s)" % n)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

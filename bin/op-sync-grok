@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# One-way sync of selected 1Password items into the "Shared with Grok Bot"
+# vault, so the Grok bot sees only what is listed in
+# 1password/sync-to-grok.list (or the file given as $1).
+#     op-sync-grok [-n|--dry-run] [list-file]
+# Source items are never modified. A copy is matched by title in the target
+# vault: missing -> created, differing -> overwritten from the source, same ->
+# left alone (no new item version). Items removed from the list are NOT deleted
+# from the target; do that by hand. Attachments and passkeys are not copied
+# (the op JSON template does not carry them).
+set -euo pipefail
+target="Shared with Grok Bot"
+dry=0
+[[ ${1:-} == -n || ${1:-} == --dry-run ]] && { dry=1; shift; }
+# The list names accounts and items, so it stays in site-private.
+list="${1:-${OPS_ROOT:-$HOME/ops}/site-private/1password/sync-to-grok.list}"
+
+# Strip identity/metadata so the JSON works as a create/edit template.
+strip='del(.id, .vault, .version, .created_at, .updated_at, .last_edited_by, .additional_information)'
+# Content that matters when deciding whether the copy is stale.
+norm='{title, category, tags: ((.tags // []) | sort),
+       urls: [(.urls // [])[] | {href, label, primary: (.primary // false)}],
+       fields: [(.fields // [])[] | {id, type, purpose, label,
+                section: .section.label, value: (.value // "")}] | sort_by(.id)}'
+
+n_ok=0 n_new=0 n_upd=0 n_err=0
+while IFS= read -r line || [[ -n $line ]]; do
+  line="${line%%#*}"; line="$(sed 's/[[:space:]]*$//' <<<"$line")"
+  [[ -z $line ]] && continue
+  vault="${line%%/*}" title="${line#*/}"
+  if [[ $vault == "$line" || $vault == "$target" ]]; then
+    echo "error: bad entry '$line' (want <vault>/<title>, vault != $target)" >&2
+    n_err=$((n_err+1)); continue
+  fi
+  if ! src="$(op item get "$title" --vault "$vault" --format json)"; then
+    echo "error: $line: not found (or ambiguous) in source vault" >&2
+    n_err=$((n_err+1)); continue
+  fi
+  ids="$(op item list --vault "$target" --format json \
+         | jq -r --arg t "$title" '.[] | select(.title == $t) | .id')"
+  count=$(grep -c . <<<"$ids" || true)
+  if (( count > 1 )); then
+    echo "error: $line: $count items titled '$title' in $target; fix by hand" >&2
+    n_err=$((n_err+1)); continue
+  fi
+  tmpl="$(jq "$strip" <<<"$src")"
+  if (( count == 0 )); then
+    echo "create  $line"
+    (( dry )) || op item create --vault "$target" --format json <<<"$tmpl" >/dev/null
+    n_new=$((n_new+1))
+  else
+    dst="$(op item get "$ids" --vault "$target" --format json)"
+    if [[ "$(jq -S "$norm" <<<"$src")" == "$(jq -S "$norm" <<<"$dst")" ]]; then
+      echo "same    $line"; n_ok=$((n_ok+1)); continue
+    fi
+    echo "update  $line"
+    (( dry )) || op item edit "$ids" --vault "$target" --format json <<<"$tmpl" >/dev/null
+    n_upd=$((n_upd+1))
+  fi
+done <"$list"
+(( dry )) && echo "(dry run: nothing written)"
+echo "created $n_new, updated $n_upd, unchanged $n_ok, errors $n_err"
+(( n_err == 0 ))

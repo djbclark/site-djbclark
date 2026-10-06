@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# gradle-limits — choose the machine-wide Gradle profile (gradle/profiles/<name>.properties).
+#
+#   gradle-limits status                    active profile, expiry, load
+#   gradle-limits set night --until 07:00   switch, reverting to low at that time (or --for 8h)
+#   gradle-limits low                       back to the default now
+#   gradle-limits check                     revert an expired profile (bg runs this; silent)
+#   gradle-limits link                      point every Gradle home at the live profile link
+#
+# Every Gradle home's gradle.properties links to ~/.local/state/gradle-limits/gradle.properties,
+# which links to the active profile, so a switch is one relink. Only daemons started after a
+# switch use the new settings; a running build keeps its own.
+set -euo pipefail
+repo="$HOME/ops/site-private"
+profiles="$repo/gradle/profiles"
+state="$HOME/.local/state/gradle-limits"
+live="$state/gradle.properties"
+expires_file="$state/expires"
+mkdir -p "$state"
+
+active() { basename "$(readlink "$live" 2>/dev/null || echo low.properties)" .properties; }
+
+activate() {
+  local name="$1"
+  [ -f "$profiles/$name.properties" ] || { echo "gradle-limits: no profile $name in $profiles" >&2; exit 2; }
+  ln -sfn "$profiles/$name.properties" "$live"
+}
+
+link_homes() {
+  local homes=("$HOME/.gradle")
+  [ -n "${GRADLE_USER_HOME:-}" ] && homes+=("$GRADLE_USER_HOME")
+  [ -d /Volumes/mac256usb/Caches/gradle ] && homes+=("/Volumes/mac256usb/Caches/gradle")
+  [ -L "$live" ] || activate low
+  local h dst
+  for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
+    mkdir -p "$h"
+    dst="$h/gradle.properties"
+    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$live" ]; then echo "ok      $dst"; continue; fi
+    if [ -e "$dst" ] && [ ! -L "$dst" ]; then echo "SKIP    $dst is a real file; merge it into a profile first" >&2; continue; fi
+    ln -sfn "$live" "$dst" && echo "linked  $dst"
+  done
+}
+
+until_epoch() { # HH:MM today, or tomorrow if already past
+  local t now
+  t=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%Y-%m-%d) $1" +%s) || exit 2
+  now=$(date +%s)
+  [ "$t" -le "$now" ] && t=$((t + 86400))
+  echo "$t"
+}
+
+for_epoch() { # 8h, 90m
+  local n="${1%[hm]}" unit="${1: -1}"
+  case "$unit" in h) echo $(( $(date +%s) + n * 3600 ));; m) echo $(( $(date +%s) + n * 60 ));;
+    *) echo "gradle-limits: --for takes e.g. 8h or 90m" >&2; exit 2;; esac
+}
+
+check() {
+  [ -f "$expires_file" ] || return 0
+  if [ "$(date +%s)" -ge "$(cat "$expires_file")" ]; then
+    activate low
+    rm -f "$expires_file"
+    echo "gradle-limits: profile expired; back to low" >&2
+  fi
+}
+
+cmd="${1:-status}"
+case "$cmd" in
+  status)
+    check
+    echo "profile: $(active)"
+    [ -f "$expires_file" ] && echo "expires: $(date -r "$(cat "$expires_file")" '+%Y-%m-%d %H:%M')"
+    echo "load:    $(sysctl -n vm.loadavg | tr -d '{}' | xargs) on $(sysctl -n hw.ncpu) cores"
+    ;;
+  set)
+    name="${2:?usage: gradle-limits set <profile> [--until HH:MM | --for 8h]}"
+    activate "$name"
+    case "${3:-}" in
+      --until) until_epoch "${4:?}" > "$expires_file" ;;
+      --for) for_epoch "${4:?}" > "$expires_file" ;;
+      "") if [ "$name" = low ]; then rm -f "$expires_file"; else
+            echo "gradle-limits: give --until or --for for a non-default profile" >&2; activate low; exit 2; fi ;;
+      *) echo "gradle-limits: unknown option $3" >&2; exit 2 ;;
+    esac
+    "$0" status
+    ;;
+  low) activate low; rm -f "$expires_file"; "$0" status ;;
+  check) check ;;
+  link) link_homes ;;
+  *) echo "usage: gradle-limits status|set <profile> [--until HH:MM|--for 8h]|low|check|link" >&2; exit 2 ;;
+esac

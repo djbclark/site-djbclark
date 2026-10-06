@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Make local skills (site-private/skills/<name>) visible to every agent TUI on
+# this machine by symlinking them into each TUI's user-level skills dir.
+#     skill-everywhere <name>...            link (idempotent)
+#     skill-everywhere --check <name>...    report per-TUI status, change nothing
+#     skill-everywhere --remove <name>...   remove links this script would make
+# Links point at the git checkout, so editing the skill in site-private updates
+# it everywhere; never copy (copies drift, e.g. ~/.agents/skills/handoff).
+# Hermes owns ~/.hermes/, so it is never edited here. Instead Hermes itself put
+# ~/.local/share/skill-everywhere/skills in its skills.external_dirs (done
+# 2026-10-03), and this script links into that dir.
+# A TUI whose binary is not installed is skipped. Being linked is not the same
+# as being loaded: re-verify with the per-TUI check in skills/skill-everywhere.
+# This script makes no model calls. When re-verifying, probe agy at most ONCE (one
+# batched prompt, --print-timeout): looped agy -p probes helped lock out its CLI on
+# 2026-10-03 (see skills/model-routing, "agy has a burst limit").
+set -euo pipefail
+# site-private/skills is the one root: public skills are symlinks there into
+# site-djbclark/skills, private ones are real directories. TUI links keep
+# pointing at site-private/skills/<name> whichever path this script runs from.
+src_root="${OPS_ROOT:-$HOME/ops}/site-private/skills"
+
+# binary|skills dir to link into, or "via <dir>" when the TUI already reads a
+# dir we fill (a second link there would list the skill twice), or "x <why>".
+# Verified 2026-10-03 by asking each TUI headlessly whether it saw 'steps'.
+targets='
+claude|~/.claude/skills
+codex|~/.agents/skills
+agy|~/.gemini/antigravity-cli/skills
+copilot|~/.copilot/skills
+opencode|~/.config/opencode/skills
+qwen|~/.qwen/skills
+crush|~/.config/crush/skills
+devin|~/.config/devin/skills
+cline|~/.cline/skills
+hermes|~/.local/share/skill-everywhere/skills
+cursor-agent|via ~/.claude/skills
+grok|~/.grok/skills
+muse|via ~/.claude/skills
+zcode|via ~/.agents/skills
+'
+
+mode=link
+case "${1:-}" in --check) mode=check; shift ;; --remove) mode=remove; shift ;; esac
+[[ $# -gt 0 ]] || { sed -n '2,6p' "$0" >&2; exit 2; }
+
+rc=0
+for name in "$@"; do
+  src="$src_root/$name"
+  [[ -f $src/SKILL.md ]] || { echo "error: no $src/SKILL.md" >&2; rc=1; continue; }
+  echo "== $name"
+  while IFS='|' read -r bin dir; do
+    [[ -z $bin ]] && continue
+    if ! command -v "$bin" >/dev/null; then printf '  %-13s not installed\n' "$bin"; continue; fi
+    if [[ $dir == via* || $dir == x* ]]; then printf '  %-13s %s\n' "$bin" "${dir#x }"; continue; fi
+    dir="${dir/#\~/$HOME}"; link="$dir/$name"
+    if [[ -L $link && "$(readlink "$link")" == "$src" ]]; then state=linked
+    elif [[ -L $link ]]; then state="other link -> $(readlink "$link")"
+    elif [[ -e $link ]]; then state="real dir/file (not ours)"
+    else state=missing; fi
+    case $mode in
+      check) printf '  %-13s %s\n' "$bin" "$state" ;;
+      remove)
+        if [[ $state == linked ]]; then rm "$link"; printf '  %-13s removed\n' "$bin"
+        else printf '  %-13s %s (left alone)\n' "$bin" "$state"; fi ;;
+      link)
+        if [[ $state == missing ]]; then
+          mkdir -p "$dir"; ln -s "$src" "$link"; printf '  %-13s linked\n' "$bin"
+        elif [[ $state == linked ]]; then printf '  %-13s already linked\n' "$bin"
+        else printf '  %-13s %s; left alone\n' "$bin" "$state"; rc=1; fi ;;
+    esac
+  done <<<"$targets"
+done
+
+if command -v hermes >/dev/null \
+   && ! grep -qF skill-everywhere/skills ~/.hermes/config.yaml 2>/dev/null; then
+  echo "warning: hermes no longer lists ~/.local/share/skill-everywhere/skills in" \
+       "skills.external_dirs; ask Hermes to re-add it" >&2
+fi
+exit $rc

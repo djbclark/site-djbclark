@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Kept for old references: gradle-limits does this now.
+exec "$(dirname "$0")/gradle-limits" link "$@"

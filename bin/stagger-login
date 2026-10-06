@@ -1,0 +1,145 @@
+#!/bin/sh
+# stagger-login — delay-launch TCC-noisy apps past the macOS 27.0.1 boot race.
+#
+# Why: for ~2 min after login, tccd cannot compute code identities
+# ("Failed to get code reference" in the tccd log), so any app launched in
+# that window gets its TCC requests refused and re-shows permission dialogs
+# even though the stored grants are intact (see ~/src/one-offs/AGENTS.md,
+# 2026-10-05 note). This script waits out the window, then launches the
+# configured apps/services staggered, so their first TCC check succeeds.
+#
+# Config: tab-separated lines, one target per line:
+#     <delay-seconds-after-login>\tapp\t</path/to/Some.app>
+#     <delay-seconds-after-login>\tlaunchd\tgui/<uid>/<label>\t</path/to/agent.plist>
+# Defaults to $STAGGER_CONF or ~/.config/stagger-login/apps.
+#
+# "app" targets: skipped if already running, else `open -g -a`.
+# "launchd" targets: the agent must be kept launchd-supervised, so the
+# agent is DISABLED in the per-user launchd DB (skipped at login) and this
+# script re-enables + starts it late, then re-disables (running instances
+# are unaffected by `launchctl disable`; verified 2026-10-05). Start chain:
+# enable -> kickstart (works if loaded-but-not-running) -> bootstrap
+# (RunAtLoad fires) if kickstart couldn't find the service.
+#
+# Flags: --dry-run (log the plan, do nothing), --now (skip base wait+gate).
+# Env: STAGGER_BASE (default 150) seconds before first target.
+# Log: ~/Library/Logs/stagger-login.log
+#
+# Installed 2026-10-05 by zcode; LaunchAgent com.djbclark.stagger-login.
+
+set -u
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+CONF="${STAGGER_CONF:-$HOME/.config/stagger-login/apps}"
+LOG="$HOME/Library/Logs/stagger-login.log"
+BASE="${STAGGER_BASE:-150}"
+UID_=$(id -u)
+DRY=0; NOW=0; tries=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY=1 ;;
+        --now) NOW=1; BASE=0 ;;
+        *) printf 'unknown flag: %s\n' "$arg" >&2; exit 2 ;;
+    esac
+done
+
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG"; }
+
+# Rotate if over 64 KB so launchd-opened fds stay sane-ish.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 65536 ]; then
+    tail -n 200 "$LOG" > "$LOG.1"
+    : > "$LOG"
+fi
+touch "$LOG"
+log "=== stagger-login start (pid $$, base=${BASE}s, dry=$DRY, conf=$CONF)"
+
+if [ ! -f "$CONF" ]; then
+    log "no config at $CONF — nothing to do"
+    exit 0
+fi
+
+if [ "$DRY" = 0 ] && [ "$NOW" = 0 ]; then
+    log "sleeping ${BASE}s (TCC race window)"
+    sleep "$BASE"
+    # Active gate: while tccd still fails code refs in the recent log,
+    # extend the wait (up to 6 x 15s). `log show` failure = proceed anyway.
+    tries=0
+    while [ "$tries" -lt 6 ]; do
+        n=$(/usr/bin/log show --last 20s --style compact \
+             --predicate 'process == "tccd" AND eventMessage CONTAINS "Failed to get code reference"' \
+             2>/dev/null | grep -c 'Failed to get code reference')
+        [ "${n:-0}" -gt 0 ] 2>/dev/null || break
+        log "gate: tccd still failing ($n hits in last 20s); +15s (try $((tries+1))/6)"
+        sleep 15
+        tries=$((tries + 1))
+    done
+    log "past base wait + gate (took $((BASE + tries * 15))s max)"
+fi
+
+app_running() {
+    pgrep -f "$1/Contents/MacOS" > /dev/null 2>&1
+}
+
+svc_state() {
+    launchctl print "$1" 2>/dev/null | awk -F' = ' '/^[[:space:]]*state =/ { print $2; exit }'
+}
+
+do_app() {
+    path="$1"
+    if app_running "$path"; then
+        log "skip (running): $path"
+        return
+    fi
+    log "open -g -a $path"
+    if [ "$DRY" = 1 ]; then return; fi
+    open -g -a "$path" && log "launched: $path" || log "FAILED: open -g -a $path"
+}
+
+do_launchd() {
+    svc="$1"; plist="$2"
+    if [ "$(svc_state "$svc")" = "running" ]; then
+        log "skip (running): $svc"
+    else
+        log "start: $svc"
+        if [ "$DRY" = 0 ]; then
+            launchctl enable "$svc" 2>/dev/null
+            if ! launchctl kickstart "$svc" 2>/dev/null; then
+                # Service not loaded in the session (e.g. bootout'd or never
+                # bootstrapped): bootstrap it; RunAtLoad in the plist fires.
+                launchctl bootstrap "gui/$UID_" "$plist" 2>&1 | head -1 >> "$LOG"
+            fi
+            sleep 2
+            if [ "$(svc_state "$svc")" = "running" ]; then
+                log "started: $svc"
+            else
+                log "FAILED to start: $svc (check launchctl print $svc)"
+            fi
+        fi
+    fi
+    # Re-arm the login skip whether we started it or found it running.
+    if [ "$DRY" = 0 ]; then
+        launchctl disable "$svc" 2>/dev/null && log "re-armed skip for next boot: $svc"
+    fi
+}
+
+# Entries sorted by delay; delays are absolute seconds-from-login, so credit
+# the base wait (+ any gate extension) already slept before the first entry.
+prev=$((BASE + tries * 15))
+grep -v '^[[:space:]]*#' "$CONF" | grep -v '^[[:space:]]*$' | sort -n | {
+    while IFS="$(printf '\t')" read -r delay kind a b; do
+        case "$kind" in
+            app) target="app $a" ;;
+            launchd) target="launchd $a $b" ;;
+            *) log "skip (unknown kind '$kind'): $delay $kind $a $b"; continue ;;
+        esac
+        delta=$(( ${delay:-0} - prev ))
+        if [ "$delta" -gt 0 ] && [ "$DRY" = 0 ]; then
+            sleep "$delta"
+        fi
+        prev=${delay:-0}
+        log "t+${prev}s $target"
+        [ "$kind" = "app" ] && do_app "$a" || do_launchd "$a" "$b"
+    done
+    log "=== stagger-login done"
+}

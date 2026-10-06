@@ -1,0 +1,711 @@
+# ~/.bashrc -- the single load-bearing shell config on this machine.
+#
+# Sourced by ALL of:
+#   * login shells        -- via ~/.bash_profile, which is now just a stub
+#   * interactive shells  -- bash's normal ~/.bashrc behavior
+#   * non-interactive     -- Claude Code's Bash tool sets BASH_ENV to this file
+#                           (see ~/.claude/settings.json); such shells read
+#                           BASH_ENV and nothing else -- no .bash_profile.
+#
+# ASCII ONLY: keep this file pure 7-bit ASCII, comments included. The fancy
+# Unicode that used to live in these comments (box-drawing rules, em dashes,
+# bullets, arrows) rendered as <E2><94><80>-style garbage on some terminals
+# and made grep/diff/file(1) treat the file as binary (2026-08-21).
+# Substitutes: -- for em dash, -> for arrow, * for bullet, --- / === for
+# section rules. Enforced by check 1b in ~/.config/bash/selftest.sh.
+#
+# == THE ONE RULE ==========================================================
+# This file has exactly two sections, split by the guard partway down.
+#
+#   TIER 1 (above the guard) -- PATH, exported env vars, PATH helpers.
+#     Runs in every shell, including scripts and agent Bash-tool calls.
+#     MUST BE SILENT and MUST NOT change parsing/globbing behavior.
+#
+#   TIER 2 (below the guard) -- aliases, functions, prompt, completion,
+#     fzf, shopt toggles. Interactive shells only.
+#
+# Deciding which side something goes on is the whole maintenance burden.
+# The test is: "would a script or an agent's Bash tool call need this?"
+#   yes -> tier 1.   no -> tier 2.   unsure -> tier 2 (the safe default:
+#   worst case something is missing and you notice loudly, rather than
+#   silently corrupting every non-interactive shell on the machine).
+#
+# == WHY TIER 1 MUST BE SILENT =============================================
+# Claude Code hooks return JSON on stdout, and BASH_ENV sourcing runs before
+# the hook script's body -- so anything in tier 1 that prints (a banner, a
+# version notice, an nvm/pyenv init, an "update available" line) prepends
+# itself to that JSON. The hook then fails SILENTLY: malformed JSON is
+# discarded with no error and no log line, and the blame lands on the hook
+# rather than on the .bashrc line added weeks earlier.
+#
+# == DON'T HAND-VERIFY -- RUN THE SELF-TEST =================================
+# After ANY edit to this file, ~/.bash_profile, or ~/.bashrc.local:
+#
+#     ~/.config/bash/selftest.sh
+#
+# It checks tier-1 silence, PATH ordering invariants (including the herdr
+# wrapper precedence that a stray `export PATH=` in .bashrc.local silently
+# broke for two weeks), duplicate PATH entries, and nesting stability.
+# ~/.claude/hooks/cswap_quota_context.sh also runs it at session start and
+# warns on stderr if anything regresses, so a break can't stay invisible.
+#
+# Then RE-BLESS the tamper-alarm golden(s) for whichever file you edited:
+#     cp ~/.bashrc ~/.config/bash/bashrc.expected
+#     cp ~/.bash_profile ~/.config/bash/bash_profile.expected
+# Until you do, every new interactive shell shows the change and prompts
+# [LATER/accept/revert] (the ~/.bashrc alarm) or a red banner (the
+# ~/.bash_profile alarm). Accept at that prompt does the same re-bless.
+#
+# ==========================================================================
+# == TIER 1: environment -- every shell, interactive or not. SILENT ONLY. ===
+# ==========================================================================
+
+# -- PATH helpers ---------------------------------------------------------
+# Both are IDEMPOTENT: a directory already on PATH is left where it is
+# rather than moved. First claim wins. This is what makes ordering
+# deterministic and makes nested shells (herdr panes spawn login shells
+# inside login shells) stop growing PATH without bound.
+#
+# ALWAYS use these instead of `export PATH="dir:$PATH"`. A raw prepend
+# outranks everything added before it, which is how ~/.bashrc.local ended up
+# shadowing the herdr self-closure-defense wrapper with the real binary.
+
+__path_prepend() {  # highest priority first; args applied so arg order == final order
+  local i d
+  for (( i = $#; i > 0; i-- )); do
+    d="${!i}"
+    [[ -d $d ]] || continue
+    case ":$PATH:" in *":$d:"*) continue ;; esac
+    PATH="$d${PATH:+:$PATH}"
+  done
+  return 0
+}
+
+__path_append() {
+  local d
+  for d in "$@"; do
+    [[ -d $d ]] || continue
+    case ":$PATH:" in *":$d:"*) continue ;; esac
+    PATH="${PATH:+$PATH:}$d"
+  done
+  return 0
+}
+
+# Force-to-front variant, for ordering decisions that must hold even when a
+# dir arrived on the INHERITED PATH in a losing position. Orca panes inherit
+# the daemon's environment, where ~/.local/bin already sits far below
+# /opt/homebrew/bin; the idempotent prepend saw it "already present" and
+# left it losing, so aiuse resolved to a broken Homebrew copy (2026-08-21).
+# Re-prepends unconditionally -- the same pattern as the brew block below --
+# and relies on __path_dedup at the end of tier 1 to drop the lower
+# duplicate, which is also what keeps nested shells from growing PATH.
+__path_prepend_force() {  # highest priority first; arg order == final order
+  local i d
+  for (( i = $#; i > 0; i-- )); do
+    d="${!i}"
+    [[ -d $d ]] || continue
+    PATH="$d${PATH:+:$PATH}"
+  done
+  return 0
+}
+
+# Drop duplicate PATH entries, keeping the first (highest-priority)
+# occurrence. Backstop for things that prepend unconditionally and are not
+# ours to change -- `brew shellenv` most notably, plus anything an installer
+# appends to ~/.bash_profile. Pure bash, no subshell: this runs on every
+# single Bash-tool invocation.
+__path_dedup() {
+  local IFS=: d out= seen=: reset_glob=
+  [[ $- == *f* ]] || { set -f; reset_glob=1; }   # don't glob-expand path entries
+  for d in $PATH; do
+    # Skip empties and "." -- an empty component and a literal "." both mean
+    # "current directory", which makes every cd into an untrusted tree a
+    # command-execution risk. bash's built-in default PATH contains ".", so
+    # this can arrive by inheritance rather than by anyone choosing it.
+    [[ -z $d || $d == "." || $seen == *":$d:"* ]] && continue
+    seen+="$d:"
+    out="${out:+$out:}$d"
+  done
+  [[ -n $reset_glob ]] && set +f
+  PATH="$out"
+  return 0
+}
+
+# -- Baseline system PATH -------------------------------------------------
+# Must come before `brew shellenv`. macOS assembles the system PATH in
+# /etc/profile via path_helper -- but /etc/profile runs for LOGIN shells
+# only. A non-login shell started from a minimal environment (launchd, cron,
+# `env -i bash`) gets bash's built-in default PATH, which is NOT exported.
+# `brew shellenv` is a subprocess and reads PATH from its own environment;
+# seeing none, it emits an unconditional assignment that replaces PATH
+# wholesale -- silently leaving /usr/bin and /bin off. The `export` below is
+# the load-bearing part; the seeding handles a genuinely empty PATH.
+
+case ":${PATH-}:" in
+  *:/usr/bin:*) : ;;   # already seeded (login shell, or inherited) -- leave as is
+  *)
+    if [ -x /usr/libexec/path_helper ]; then
+      eval "$(/usr/libexec/path_helper -s)"
+    else
+      PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    fi
+    ;;
+esac
+export PATH
+
+# -- Homebrew (arm64) -----------------------------------------------------
+# Inlined rather than `eval "$(brew shellenv)"`. That call spawns brew (a
+# Ruby program) plus a path_helper subprocess on EVERY shell -- ~40ms, which
+# tier 1 pays on every single agent Bash-tool call. What it actually does is
+# fully static for a fixed prefix, so it is reproduced literally below.
+#
+# The raw prepend (not __path_prepend) is deliberate and mirrors what
+# shellenv itself does: /etc/paths.d/homebrew already puts these dirs in the
+# SYSTEM section of PATH, below /usr/bin, and Homebrew must outrank /usr/bin
+# for the many names they share (python3, git, curl, openssl, ...). An
+# idempotent prepend would see them already present and leave them down
+# there. The duplicate this creates is removed by __path_dedup at the end of
+# tier 1, which keeps the first (highest-priority) occurrence.
+#
+# ~/.config/bash/selftest.sh asserts these values still match what
+# `brew shellenv` actually emits, so a Homebrew change cannot drift silently.
+
+export HOMEBREW_PREFIX="/opt/homebrew"
+export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+export HOMEBREW_REPOSITORY="/opt/homebrew"
+export HOMEBREW_NO_AUTO_UPDATE=1
+if [ -d /opt/homebrew/bin ]; then
+  PATH="/opt/homebrew/bin:/opt/homebrew/sbin${PATH:+:$PATH}"
+  # Guarded, unlike shellenv's unconditional prepend: shellenv re-prepends on
+  # every nested shell, growing INFOPATH one copy per nesting level forever
+  # (PATH has __path_dedup to clean that up; INFOPATH has nothing).
+  case ":${INFOPATH:-}:" in
+    *":/opt/homebrew/share/info:"*) : ;;
+    *) export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}" ;;
+  esac
+  [ -z "${MANPATH-}" ] || export MANPATH=":${MANPATH#:}"
+  # Guarded like INFOPATH above. Without /opt/homebrew/share present, GLib
+  # apps (e.g. czkawka_gui) can't find their compiled GSettings schemas
+  # (org.gtk.Settings.FileChooser etc.) and hard-abort with
+  # "No GSettings schemas are installed on the system". Nix's profile.d
+  # script sets XDG_DATA_DIRS to its own paths and never includes Homebrew's,
+  # so this has to be added explicitly rather than assumed inherited.
+  case ":${XDG_DATA_DIRS:-}:" in
+    *":/opt/homebrew/share:"*) : ;;
+    *) export XDG_DATA_DIRS="/opt/homebrew/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" ;;
+  esac
+fi
+
+# -- JDK 25, for Android Gradle / AutoJs6 ---------------------------------
+# Resolved BEFORE the PATH block below so its bin dir can take its correct
+# place in that ordering rather than jumping to the head. Set only if the
+# JDK actually exists, so a Homebrew openjdk upgrade that moves this path
+# degrades to the system java instead of leaving a dangling PATH entry.
+
+if [ -d "/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home" ]; then
+  export JAVA_HOME="/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home"
+fi
+
+# -- PATH, highest priority first -----------------------------------------
+# Order here is the order on PATH. Collisions this ordering deliberately
+# resolves (verified against the full 2596-command resolution map):
+#   herdr  -> .herdr-wrapper/bin beats .local/bin   (self-closure defense)
+#   cargo, rustc, rustfmt, clippy-driver, rustdoc
+#          -> rustup/bin beats .cargo/bin beats homebrew
+#   agent, grok        -> .local/bin beats .grok/bin
+#   composio           -> .local/bin beats .composio
+#   aiuse, ai, cursor, cursor-agent, tg -> .local/bin beats homebrew
+#   hermes             -> .local/bin (durable source venv install, full
+#                         messaging extra: Telegram/Discord/Slack) beats the
+#                         deprecated Homebrew formula and survives brew
+#                         upgrades (moved here from ~/.bashrc.local)
+#   opencode           -> .opencode/bin beats homebrew
+#   collie             -> .collie/current/bin (Herdr-managed install; `current` follows
+#                         `collie update`, so never pin a versions/vX dir here). No collision.
+#
+# Force variant, not plain __path_prepend: these collision decisions must
+# also hold in shells that INHERIT a PATH where one of these dirs is already
+# present below /opt/homebrew/bin (Orca panes inherit the daemon's env --
+# the 2026-08-21 aiuse defect; same class as the herdr case in note 1 of
+# the wrapper block below).
+
+# -- Tool environment -----------------------------------------------------
+
+# --- USB Drive Cache Redirection ---
+USB_DRIVE="/Volumes/mac256usb"
+
+# Test the mount table, not `[ -d "$USB_DRIVE" ]`: when the drive is detached,
+# a stale /Volumes/mac256usb directory left behind on the boot disk satisfies
+# the directory test, and every cache below would then be redirected onto the
+# very disk this block exists to keep free. Absolute /sbin/mount because this
+# runs before the PATH is assembled further down.
+if /sbin/mount | grep -q " on ${USB_DRIVE} "; then
+    export HOMEBREW_CACHE="$USB_DRIVE/Caches/Homebrew"
+    export npm_config_cache="$USB_DRIVE/Caches/npm"
+    export YARN_CACHE_FOLDER="$USB_DRIVE/Caches/yarn"
+    export PIP_CACHE_DIR="$USB_DRIVE/Caches/pip"
+    export GOCACHE="$USB_DRIVE/Caches/go-build"
+    export GOMODCACHE="$USB_DRIVE/Caches/go-mod"
+    export ANDROID_HOME="$USB_DRIVE/Android/sdk"
+    export GRADLE_USER_HOME="$USB_DRIVE/Caches/gradle"
+    export UV_CACHE_DIR="$USB_DRIVE/Caches/uv"
+    export HF_HOME="$USB_DRIVE/Caches/huggingface"
+fi
+
+__path_prepend_force \
+  "$HOME/.local/bin" \
+  "$HOME/.collie/current/bin" \
+  "/opt/homebrew/opt/rustup/bin" \
+  "$HOME/.composio" \
+  "$HOME/.opencode/bin" \
+  "$HOME/.bun/bin" \
+  "$HOME/.cargo/bin" \
+  ${JAVA_HOME:+"$JAVA_HOME/bin"} \
+  "${ANDROID_HOME}/platform-tools" \
+  "${ANDROID_HOME}/cmdline-tools/latest/bin" \
+  "$HOME/.maestro/bin" \
+  "$HOME/.grok/bin"
+
+# System floor. __path_append is idempotent, so in a normal login shell --
+# where path_helper already placed these -- every one of them is a no-op and
+# the existing order is untouched. It only does anything in a shell that
+# started from a bare environment, where bash's built-in default PATH
+# supplies /usr/bin and /bin but not the sbin dirs.
+__path_append /usr/local/bin /usr/bin /bin /usr/sbin /sbin
+
+# Appended, so packaged tools (e.g. Bun's `bd`) take priority over these.
+__path_append "$HOME/go/bin" "$HOME/.dotnet/tools"
+
+# -----------------------------------
+
+export COMPOSIO_INSTALL_DIR="$HOME/.composio"
+if [ -z "${ANDROID_HOME-}" ]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+fi
+
+# Superset desktop app home. Agent notify hooks (Grok/Claude/Codex) call
+# $SUPERSET_HOME_DIR/hooks/notify.sh. A live Superset terminal injects this;
+# outside one, default to ~/.superset so hooks still run. Do not override
+# if already set -- a pane inside the app wins.
+if [ -z "${SUPERSET_HOME_DIR-}" ] && [ -d "$HOME/.superset" ]; then
+  export SUPERSET_HOME_DIR="$HOME/.superset"
+fi
+
+# 1Password SSH agent.
+export SSH_AUTH_SOCK=~/.1password/agent.sock
+
+# Claude Code timeouts.
+export API_TIMEOUT_MS=600000
+export BASH_DEFAULT_TIMEOUT_MS=1800000
+
+# Toolchain for swiftc/xcrun/etc. Needs no sudo, unlike `xcode-select -s`.
+# Pointing to the active Xcode app so xcodebuild and actool function properly.
+export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+
+# -- Machine-local overrides (optional file, currently absent) ------------
+# ~/.bashrc.local was retired 2026-08-21: its two PATH lines had both become
+# no-ops (this file already prepends ~/.local/bin and appends ~/.dotnet/tools
+# above). The hook stays so the file can be recreated if a machine ever needs
+# genuinely local overrides. Tier-1 rules apply in full inside it: pure
+# ASCII, silent, no parsing changes, and __path_prepend / __path_append
+# rather than `export PATH=`.
+[[ -f ~/.bashrc.local ]] && source ~/.bashrc.local
+
+# -- herdr self-closure-defense wrapper -- must resolve FIRST --------------
+# The wrapper blocks a herdr pane from closing itself; it only works if it
+# shadows the real binary at ~/.local/bin/herdr (the upstream-default
+# install location). It lives in its own dedicated dir precisely so an
+# installer or updater can never clobber it.
+#
+# Two deliberate departures from the rules above, both load-bearing:
+#
+#  1. Raw prepend, not __path_prepend. Idempotence is WRONG here (the
+#     __path_prepend_force reasoning): a shell that inherits a PATH where ~/.local/bin
+#     already precedes the wrapper dir would see the wrapper "already
+#     present" and leave it in the losing position. That is not
+#     hypothetical -- it was the live state of every shell on this machine
+#     before 2026-08-17, and any process still running from before then
+#     passes that PATH to its children now.
+#  2. Positioned AFTER the ~/.bashrc.local source, dead last before
+#     __path_dedup, so NOTHING in this file or in local overrides can land
+#     in front of it. (The original defect was exactly a stray prepend in
+#     .bashrc.local; keeping this block below that source line makes the
+#     recurrence structurally impossible rather than merely detected.)
+#
+# __path_dedup below removes the now-duplicate lower entry.
+if [ -x "$HOME/.herdr-wrapper/bin/herdr" ]; then
+  PATH="$HOME/.herdr-wrapper/bin${PATH:+:$PATH}"
+fi
+
+# Final normalization. Keep this LAST in tier 1 -- it cleans up duplicates
+# introduced by brew shellenv in nested shells and by anything sourced above.
+__path_dedup
+export PATH
+
+# ==========================================================================
+# == GUARD -- interactive-only below this line ==============================
+# ==========================================================================
+# Non-interactive shells (scripts, Claude Code's Bash tool via BASH_ENV)
+# return here and never see aliases, prompt, or fzf/completion init.
+
+[[ $- == *i* ]] || return
+
+# ==========================================================================
+# == TIER 2: interactive shells only =======================================
+# ==========================================================================
+
+# -- ~/.bash_profile tamper alarm ------------------------------------------
+# Installers append `export PATH=...` to ~/.bash_profile (rustup did), where
+# it silently outranks every PATH decision made in tier 1. The selftest
+# catches that at Claude session start; this catches it at the very next
+# interactive shell, loudly. Zero subprocesses on the happy path: $(<file)
+# is a bash builtin read, so the compare costs two small file reads (<1ms).
+# The diff/printf work only runs after a real mismatch. After a DELIBERATE
+# edit to ~/.bash_profile, re-bless it with:
+#     cp ~/.bash_profile ~/.config/bash/bash_profile.expected
+if [[ -r ~/.config/bash/bash_profile.expected ]] &&
+   [[ ! -r ~/.bash_profile ||
+      "$(<~/.bash_profile)" != "$(<~/.config/bash/bash_profile.expected)" ]]; then
+  {
+    printf '\a\033[1;41;97m %s \033[0m\n' \
+      '!!  ~/.bash_profile CHANGED from its blessed state  !!'
+    printf '\033[1;31m%s\033[0m\n' \
+      '  something (an installer?) edited the deliberately-stub profile.' \
+      '  diff vs blessed copy (~/.config/bash/bash_profile.expected):'
+    diff ~/.config/bash/bash_profile.expected ~/.bash_profile 2>&1 | sed 's/^/    /'
+    printf '\033[1;31m%s\033[0m\n' \
+      '  if intentional:  cp ~/.bash_profile ~/.config/bash/bash_profile.expected' \
+      '  otherwise: revert it (see the WATCH OUT note in that file).'
+  } >&2
+fi
+
+# -- ~/.bashrc tamper alarm (self-referential) -----------------------------
+# Same blessed-copy idea as above, but interactive: on drift, a HUMAN shell
+# gets the selftest verdict for the changed config, a pretty diff, and a
+# [LATER/accept/revert] prompt (Enter = LATER; only the full word,
+# case-insensitive, is accepted; 120s timeout = LATER).
+#
+# Two hard constraints shape the gating below:
+#   * selftest.sh spawns `bash -i` shells that source this very file; if
+#     those ran the full alarm they would run selftest again -> infinite
+#     recursion. `env -i` wipes any guard variable, so the human-shell test
+#     (tty stdin/stderr and no BASH_EXECUTION_STRING, i.e. not `bash -ic
+#     '...'`) is what breaks the loop -- selftest's shells all use -c.
+#   * The same test keeps Orca/herdr pane launches and other automation
+#     from blocking on a prompt they can never answer. Orca/herdr panes DO
+#     allocate a tty, so a bare interactive shell in one would otherwise
+#     look human and hold the pane launch at the prompt for up to 120s;
+#     ORCA_PANE_KEY / HERDR_PANE_ID identify those panes and demote them to
+#     the one-line warning. Resolve drift from a plain terminal (Ghostty,
+#     Terminal.app, ssh).
+# Happy path stays fork-free: $(<file) is a builtin read (~0.2ms).
+# /bin/bash 3.2 also parses this (selftest clean shells): keep it bash3-safe
+# (no ${var,,}, no arrays) and pure ASCII.
+__bashrc_tamper_alarm() {
+  local expected="$HOME/.config/bash/bashrc.expected" current="$HOME/.bashrc"
+  [ -r "$expected" ] && [ -r "$current" ] || return 0
+  [[ "$(<"$current")" == "$(<"$expected")" ]] && return 0
+
+  if [[ ! -t 0 || ! -t 2 || -n ${BASH_EXECUTION_STRING-} ||
+        -n ${ORCA_PANE_KEY-} || -n ${HERDR_PANE_ID-} ]]; then
+    printf 'WARNING: ~/.bashrc differs from its blessed copy -- resolve in a plain terminal (not an Orca/herdr pane)\n' >&2
+    return 0
+  fi
+
+  {
+    printf '\a\033[1;41;97m %s \033[0m\n' \
+      '!!  ~/.bashrc CHANGED from its blessed state  !!'
+    printf '  checking the changed config with ~/.config/bash/selftest.sh ...\n'
+    if "$HOME/.config/bash/selftest.sh" >/dev/null 2>&1; then
+      printf '  the changed config \033[1;42;97m PASSES \033[0m the self-test\n'
+    else
+      printf '  the changed config \033[1;41;97m FAILS \033[0m the self-test (run it for details)\n'
+    fi
+    printf '  diff (blessed -> current):\n'
+    if command -v git >/dev/null 2>&1 && command -v delta >/dev/null 2>&1; then
+      git --no-pager diff --no-index -- "$expected" "$current" 2>/dev/null \
+        | delta --paging=never 2>/dev/null
+    elif command -v git >/dev/null 2>&1; then
+      git --no-pager diff --no-index --color=always -- "$expected" "$current" \
+        | tail -n +5 | sed 's/^/    /'
+    else
+      diff -u "$expected" "$current" | tail -n +3 | sed 's/^/    /'
+    fi
+  } >&2
+
+  local ans
+  while :; do
+    printf '\033[1m  Keep this change? [LATER/accept/revert] (Enter = LATER): \033[0m' >&2
+    if ! read -r -t 120 ans; then
+      printf '\n  no answer -- LATER (will ask again in the next interactive shell)\n' >&2
+      return 0
+    fi
+    case "$ans" in
+      ""|[Ll][Aa][Tt][Ee][Rr])
+        printf '  LATER -- will ask again in the next interactive shell\n' >&2
+        return 0 ;;
+      [Aa][Cc][Cc][Ee][Pp][Tt])
+        cp "$current" "$expected" \
+          && printf '  accepted -- blessed copy updated\n' >&2 \
+          || printf '  ERROR: could not update %s\n' "$expected" >&2
+        return 0 ;;
+      [Rr][Ee][Vv][Ee][Rr][Tt])
+        local qdir="$HOME/.config/bash/quarantine" stamp
+        stamp=$(date +%Y%m%d-%H%M%S)
+        if mkdir -p "$qdir" \
+           && cp "$current" "$qdir/bashrc.rejected.$stamp" \
+           && cp "$expected" "$current"; then
+          printf '  reverted -- rejected version saved to %s\n' \
+            "$qdir/bashrc.rejected.$stamp" >&2
+          printf '  NOTE: this shell already sourced the rejected version; run: exec bash\n' >&2
+        else
+          printf '  ERROR: revert failed -- ~/.bashrc left untouched\n' >&2
+        fi
+        return 0 ;;
+      *)
+        printf '  type the full word (later / accept / revert) or press Enter\n' >&2 ;;
+    esac
+  done
+}
+__bashrc_tamper_alarm
+
+# -- Aliases ---------------------------------------------------------------
+
+alias tgh='tg read "Hermes Mac" --limit 12 --chrono'
+
+alias brew-fast-upgrade='brew update && brew outdated --json | jq -r ".formulae + .casks | .[].name" | xargs -P0 -L1 brew fetch && brew upgrade -y'
+
+# Disk usage: dua over the whole boot volume with nothing counted twice.
+# -x drops the genuinely separate volumes reached from / (/System/Volumes/VM,
+# Preboot, Update, /Volumes/Recovery, external /Volumes mounts, the autofs
+# /System/Volumes/Data/home, and Carbon Copy Cloner's read-only snapshot
+# mounted under /private/tmp). -x ALONE IS NOT ENOUGH: in an APFS volume group
+# the system and data volumes report the SAME device id, so dua descends into
+# /System/Volumes/Data and counts /Users, /private, /Applications, /Library,
+# /opt and /usr/local a second time -- hence the explicit ignore. Nothing is
+# lost by it: every one of those paths is already reachable from / through the
+# firmlinks in /usr/share/firmlinks. /Volumes/Macintosh HD needs no flag at
+# all -- it is a plain symlink to /, and dua does not follow symlinks.
+# Trade-off: excluding /System/Volumes/VM hides swap/sleepimage, so the total
+# reads lower than df.
+alias du-all='sudo dua i -x -i /System/Volumes/Data -- /'
+
+# Process management
+alias btop='btop'
+alias htop='htop'
+alias km='fkill'
+alias multikill='fkill'
+
+# herdr agent multiplexer
+alias h='herdr'
+alias hs='herdr status'
+alias hreload='herdr server reload-config'
+alias hstop='herdr server stop'
+
+# Agent TUIs: default each tool into its "YOLO" mode, but only add the flag
+# when it is not already on the command line. Orca launches agent panes with
+# the flag already present, and re-adding it made clap-style CLIs abort on
+# the duplicate (2026-08-21). Dedup rather than an ORCA_* env-var guard so a
+# command typed by hand inside an Orca terminal pane still gets the flag.
+# These are FUNCTIONS, not aliases, on purpose: Orca's generated bash rcfile
+# defines its own wrappers AFTER sourcing this file, and bash alias-expands
+# function names at parse time -- an alias here turned Orca's codex() wrapper
+# into a syntax error at every pane launch (2026-08-21).
+__agent_default_flag() {
+  # usage: __agent_default_flag <cmd> <flag> [args...]
+  local cmd=$1 flag=$2 a
+  shift 2
+  for a in "$@"; do
+    [[ $a == "$flag" ]] && { command "$cmd" "$@"; return; }
+  done
+  command "$cmd" "$flag" "$@"
+}
+__opencode_tui() {
+  local restore_monitor=0 status
+  if [[ $- == *m* ]]; then
+    set +m
+    restore_monitor=1
+  fi
+  command opencode "$@"
+  status=$?
+  (( restore_monitor )) && set -m
+  return "$status"
+}
+agy()          { __agent_default_flag agy          --dangerously-skip-permissions "$@"; }
+claude()       { __agent_default_flag claude       --dangerously-skip-permissions "$@"; }
+cursor-agent() { __agent_default_flag cursor-agent --yolo                         "$@"; }
+opencode() {
+  case ${1:-} in
+    completion|acp|mcp|debug|providers|auth|agent|upgrade|uninstall|serve|web|models|stats|export|import|github|session|plugin|db)
+      command opencode "$@" ;;
+    run)
+      __agent_default_flag opencode --auto "$@" ;;
+    attach|pr)
+      __opencode_tui "$@" ;;
+    *)
+      # OpenCode/OpenTUI can lose the foreground process group under Bash
+      # job control, suspending itself and leaving mouse reporting enabled.
+      local arg
+      for arg in "$@"; do
+        [[ $arg == --auto ]] && { __opencode_tui "$@"; return; }
+      done
+      __opencode_tui --auto "$@" ;;
+  esac
+}
+copilot()      { __agent_default_flag copilot      --allow-all                    "$@"; }
+grok()         { __agent_default_flag grok         --always-approve               "$@"; }
+# codex: with codex already a function, Orca's rcfile skips its own wrapper
+# (its guard wants an executable path from `command -v`), so the launch
+# preflight that wrapper would have run is replicated here, gated on Orca's
+# own env var.
+codex() {
+  if [[ -n "${ORCA_CODEX_LAUNCH_PREFLIGHT:-}" && -x "${ORCA_CODEX_LAUNCH_PREFLIGHT}" ]]; then
+    "${ORCA_CODEX_LAUNCH_PREFLIGHT}" agent hooks prepare-codex >/dev/null 2>&1 || :
+  fi
+  __agent_default_flag codex --dangerously-bypass-approvals-and-sandbox "$@"
+}
+
+# Hermes: keep the normal local safety flag, but make restart use the
+# launchd-aware gateway service operation. This function lives in shell config
+# rather than the generated launcher so Hermes upgrades cannot clobber it.
+hermes() {
+  if [[ "${1:-}" == "restart" ]]; then
+    shift
+    command hermes gateway restart "$@"
+  else
+    __agent_default_flag hermes --yolo "$@"
+  fi
+}
+
+# More agent TUIs in YOLO mode (2026-09-24). Each flag was checked against the
+# tool's own --help or README. These tools also take a competing mode option
+# (--approval-mode, --permission-mode, --auto-approve ...), so the default is
+# skipped when ANY of the listed options is already on the command line, not
+# only the exact flag. Same function-not-alias rule as above.
+__agent_has_opt() {
+  # usage: __agent_has_opt "<opt1> <opt2> ..." [args...]  -> 0 if any arg is one of
+  # the opts, or <opt>=value
+  local opts=$1 a o
+  shift
+  for a in "$@"; do
+    for o in $opts; do
+      [[ $a == "$o" || $a == "$o="* ]] && return 0
+    done
+  done
+  return 1
+}
+__agent_default_opts() {
+  # usage: __agent_default_opts <cmd> "<guard opts>" <default args...> -- [args...]
+  local cmd=$1 guard=$2
+  shift 2
+  local n=0 a
+  for a in "$@"; do n=$((n+1)); [[ $a == "--" ]] && break; done
+  local defaults=("${@:1:n-1}")
+  shift "$n"
+  if __agent_has_opt "$guard" "$@"; then command "$cmd" "$@"
+  else command "$cmd" "${defaults[@]}" "$@"; fi
+}
+qwen()  { __agent_default_opts qwen  "--yolo -y --approval-mode"       --yolo -- "$@"; }
+crush() { __agent_default_opts crush "--yolo -y"                       --yolo -- "$@"; }
+aider() { __agent_default_opts aider "--yes-always --no-yes-always"    --yes-always -- "$@"; }
+devin() { __agent_default_opts devin "--permission-mode"               --permission-mode dangerous -- "$@"; }
+# cline: --yolo is a ONE-SHOT mode (exits after the turn), so the interactive
+# equivalent is --auto-approve true.
+cline() { __agent_default_opts cline "--auto-approve --yolo"           --auto-approve true -- "$@"; }
+# zcode: --mode takes a value and is global (accepted before any subcommand),
+# so prepending works for plain TUI launches, `tui`, and headless -p alike.
+zcode() { __agent_default_opts zcode "--mode" --mode yolo -- "$@"; }
+# omp: Orca's rcfile REPLACES this with its own omp() (status extension) in
+# Orca panes, so this only applies outside Orca. Its subcommands (config,
+# install, ...) don't take the flag, so only add it to interactive launches,
+# mirroring Orca's __orca_omp_should_skip_extension list.
+omp() {
+  case "${1:-}" in
+    help|--help|-h|--version|-v|__complete|acp|agents|auth-broker|auth-gateway|bench|commit|completions|config|dry-balance|gallery|grep|grievances|install|join|models|plugin|read|say|search|setup|shell|ssh|stats|tiny-models|token|ttsr|update|usage|worktree|q|wt)
+      command omp "$@" ;;
+    *) __agent_default_opts omp "--auto-approve --approval-mode" --auto-approve -- "$@" ;;
+  esac
+}
+
+# -- fzf (fuzzy finder) --------------------------------------------------
+
+if command -v fzf >/dev/null 2>&1; then
+  eval "$(fzf --bash)" 2>/dev/null || true
+fi
+
+# Search only under current directory with Spotlight
+fzf-spotlight() {
+  local query="${1-}"
+  shift 2>/dev/null || true
+  local cmd='mdfind -onlyin . "kMDItemFSName = *"'
+  FZF_DEFAULT_COMMAND="$cmd" fzf --query="$query" "$@"
+}
+
+# Search your entire home directory with Spotlight
+fzf-home() {
+  local query="${1-}"
+  shift 2>/dev/null || true
+  local cmd='mdfind -onlyin ~ "kMDItemFSName = *"'
+  FZF_DEFAULT_COMMAND="$cmd" fzf --query="$query" "$@"
+}
+
+alias fzs='fzf-spotlight'
+alias fzh='fzf-home'
+
+# -- bash-completion ------------------------------------------------------
+
+if [ -f /opt/homebrew/etc/profile.d/bash_completion.sh ]; then
+  source /opt/homebrew/etc/profile.d/bash_completion.sh
+elif [ -f /usr/local/etc/profile.d/bash_completion.sh ]; then
+  source /usr/local/etc/profile.d/bash_completion.sh
+fi
+
+# -- Prompt ---------------------------------------------------------------
+
+PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+
+# -- Wildcard/glob behavior -----------------------------------------------
+# Interactive only -- must NOT move to tier 1: it changes how any unmatched
+# glob in a command is parsed, which would break scripted/tool Bash calls
+# that rely on default bash glob passthrough.
+
+# Make bash error on unmatched wildcards (like zsh)
+shopt -s failglob
+
+# -- mise (runtime version manager) ---------------------------------------
+# Interactive only: it installs a chpwd hook and shim dir. `mise ls` is
+# currently empty, so this manages nothing -- kept for when it does.
+
+if [ -x "$HOME/.local/bin/mise" ]; then
+  eval "$("$HOME/.local/bin/mise" activate bash)"
+fi
+
+# -- ~/s farm ------------------------------------------------------------
+# Inside ~/s, `just NAME` with a NAME that is not a recipe changes to the
+# matching ~/src directory (exact, glob, partial, abbreviation, typo; several
+# matches open an fzf list). Outside ~/s it defines nothing. Kept after mise
+# because it appends a prompt hook. Detail: site-djbclark/tools/s-farm.
+
+if [ -r "${OPS_ROOT:-$HOME/ops}/site-djbclark/tools/s-farm/shell-init.bash" ]; then
+  . "${OPS_ROOT:-$HOME/ops}/site-djbclark/tools/s-farm/shell-init.bash"
+fi
+
+# cow shell integration (v3)
+function cowcd() { cd "$(cow cd "$1")"; }
+_cow_pasture_names() { cow list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null; }
+function _cow() {
+  local subcmds="create list status diff extract remove sync cd path run materialise fetch-from recreate migrate install mcp gc stats clean"
+  local name_cmds="status diff extract remove cd path run materialise fetch-from recreate clean"
+  if (( COMP_CWORD == 1 )); then
+    COMPREPLY=($(compgen -W "$subcmds" -- "${COMP_WORDS[1]}"))
+  elif (( COMP_CWORD == 2 )) && [[ " $name_cmds " == *" ${COMP_WORDS[1]} "* ]]; then
+    COMPREPLY=($(compgen -W "$(_cow_pasture_names)" -- "${COMP_WORDS[2]}"))
+  fi
+}
+complete -F _cow cow
+function _cowcd() { COMPREPLY=($(compgen -W "$(_cow_pasture_names)" -- "${COMP_WORDS[1]}")); }
+complete -F _cowcd cowcd
+
+# Hermes Agent - ensure ~/.local/bin is on PATH
+# Added by Maestro CLI installer
+export PATH="$HOME/.local/bin:$PATH"

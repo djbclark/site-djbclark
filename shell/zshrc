@@ -1,0 +1,20 @@
+# ~/.zshrc — NOT the active shell config (bash is this machine's default
+# shell; ~/.bashrc is the single load-bearing file — see its header).
+#
+# This file cannot just source ~/.bashrc: the __path_prepend/__path_dedup
+# helpers there use bash-only constructs. So it keeps the one invariant that
+# must hold in ANY shell that starts: the herdr self-closure-defense wrapper
+# resolves ahead of the real binary at ~/.local/bin/herdr.
+#
+# ~/.config/bash/selftest.sh asserts this for zsh too (`zsh -ic`), so
+# reordering these lines breaks the session-start check, not just herdr.
+# Keep the wrapper prepend LAST so nothing lands in front of it.
+
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.herdr-wrapper/bin:$PATH"
+
+# Same default as ~/.bashrc tier 1. zsh is not the active shell; keep this
+# so a stray zsh still finds Superset notify hooks.
+if [ -z "${SUPERSET_HOME_DIR-}" ] && [ -d "$HOME/.superset" ]; then
+  export SUPERSET_HOME_DIR="$HOME/.superset"
+fi

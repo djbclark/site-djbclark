@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+# hook-deadline — run a hook command with a hard internal deadline; exit 0 silently on timeout.
+#
+#   hook-deadline <seconds> <command> [args...]
+#
+# For Claude Code hooks whose real command we do not own (e.g. graft's generated
+# graft-hooks.cjs, which spawnSync()s a child and so cannot arm its own timer).
+# On 2026-10-05 ~21:00 the load average hit 223 on 8 cores and the UserPromptSubmit
+# hooks were killed at their 10 s / 20 s configured timeouts, delaying every prompt.
+# Put this in front of the command in settings.json and keep the configured timeout as
+# the backstop.
+#
+# Contract:
+#   - the command runs in its own process group, stdin is inherited;
+#   - its stdout is buffered and forwarded only if it finishes in time, so a timeout
+#     can never leave a half-written JSON blob on stdout;
+#   - stderr is inherited (an exit-0 hook's stderr is ignored by Claude Code);
+#   - finished in time: same stdout, same exit code as the command;
+#   - deadline hit: the whole process group gets SIGTERM, then SIGKILL 0.2 s later,
+#     nothing is printed, exit 0.
+# Needs only /usr/bin/perl (core modules), which starts in ~10 ms.
+use strict;
+use warnings;
+use POSIX ();
+use Time::HiRes ();
+
+my $secs = shift @ARGV;
+die "usage: hook-deadline <seconds> <command> [args...]\n"
+    unless defined $secs && $secs =~ /^\d+(?:\.\d+)?$/ && @ARGV;
+
+pipe(my $rd, my $wr) or exit 0;
+my $pid = fork();
+exit 0 unless defined $pid;
+if ($pid == 0) {
+    POSIX::setpgid(0, 0);
+    close $rd;
+    open(STDOUT, '>&', $wr) or POSIX::_exit(127);
+    close $wr;
+    { no warnings 'exec'; exec { $ARGV[0] } @ARGV; }
+    POSIX::_exit(127);
+}
+POSIX::setpgid($pid, $pid);    # also from the parent, to close the fork/exec race
+close $wr;
+
+sub give_up {
+    kill 'TERM', -$pid;
+    select(undef, undef, undef, 0.2);
+    kill 'KILL', -$pid;
+    waitpid($pid, POSIX::WNOHANG());
+    POSIX::_exit(0);           # silent: nothing buffered is ever written
+}
+POSIX::sigaction(POSIX::SIGALRM(), POSIX::SigAction->new(\&give_up));  # no SA_RESTART: interrupts sysread
+Time::HiRes::alarm($secs);
+
+my $buf = '';
+while (1) {
+    my $n = sysread($rd, my $chunk, 65536);
+    if (!defined $n) { next if $!{EINTR}; last; }
+    last if $n == 0;
+    $buf .= $chunk;
+}
+waitpid($pid, 0);
+my $st = $?;
+Time::HiRes::alarm(0);
+binmode(STDOUT);
+print STDOUT $buf;
+close STDOUT;
+POSIX::_exit(($st & 127) ? 128 + ($st & 127) : $st >> 8);

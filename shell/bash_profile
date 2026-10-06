@@ -1,0 +1,35 @@
+# ~/.bash_profile -- login shell entry point. Deliberately a stub.
+#
+# ASCII ONLY, comments included -- see the note in ~/.bashrc's header
+# (enforced by check 1b in ~/.config/bash/selftest.sh).
+#
+# Everything real lives in ~/.bashrc, which is the single load-bearing shell
+# config on this machine (see its header for the tier-1/tier-2 rule).
+#
+# WHY THIS IS EMPTY:
+# This file used to hold PATH entries and env vars "because they're only
+# needed at login". That was never true -- Claude Code's Bash tool, launchd
+# agents, and cron get their environment from BASH_ENV (-> ~/.bashrc) or
+# from inheritance, never from here. The split created a third place to
+# guess wrong about and produced two real bugs. Do not repopulate it:
+# new PATH/env additions go in ~/.bashrc's tier 1, machine-local ones in
+# ~/.bashrc.local.
+#
+# WATCH OUT: installers append `export PATH=...` to the END of this file.
+# Because that runs after the source line below, such a line silently
+# outranks every deliberate ordering decision in ~/.bashrc. (rustup did
+# exactly this.) Nothing can prevent that -- but ~/.config/bash/selftest.sh
+# asserts the expected head of PATH and the Claude Code session-start hook
+# runs it, so a stray append gets caught within one session instead of
+# lingering. If you find one below, move it into ~/.bashrc's tier 1
+# __path_prepend list where its priority is explicit, and delete it here.
+#
+# TAMPER ALARM: any drift of this file from its blessed copy
+# (~/.config/bash/bash_profile.expected) triggers a loud red warning in
+# every new interactive shell -- see the alarm block at the top of
+# ~/.bashrc tier 2. After a DELIBERATE edit here, re-bless with:
+#     cp ~/.bash_profile ~/.config/bash/bash_profile.expected
+
+[[ -f ~/.bashrc ]] && source ~/.bashrc
+
+# Hermes Agent - ensure ~/.local/bin is on PATH

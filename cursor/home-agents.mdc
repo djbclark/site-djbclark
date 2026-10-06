@@ -1,0 +1,330 @@
+---
+description: djbclark home-directory operating rules (canonical copy at ~/ops/site-private/home-agents.md)
+alwaysApply: true
+---
+
+# Notes for AI sessions working in the home directory
+
+This is djbclark's home directory (`~`), not a git repo itself. The projects
+are `stayturgid`, `site-djbclark`, and `site-private` (this file lives in
+`site-djbclark`; `site-private/home-agents.md` links to it) — each with its own `AGENTS.md`.
+
+Canonical source: `~/ops/site-private/home-agents.md`. This file is a condensed
+copy for the Cursor CLI (`cursor-agent`), which reads `~/.cursor/rules/*.mdc`
+(frontmatter + body) rather than a plain symlinked `AGENTS.md`/`CLAUDE.md` like
+every other agent CLI here — Cursor is the ONE tool that cannot share the
+canonical file, so this copy exists and has to be re-synced by hand.
+
+**This file now lives in git** at `site-private/cursor/home-agents.mdc`, and
+`~/.cursor/rules/home-agents.mdc` is a symlink to it (2026-10-03). Before that it
+was an untracked copy under `~/.cursor`, so it was neither backed up nor diffable,
+and it had silently drifted behind the canonical file.
+
+> **Re-synced 2026-10-03** against `home-agents.md`. This body is a deliberate
+> **subset**, not a copy: it is `alwaysApply: true`, so every section costs context
+> on every Cursor turn. Treat `home-agents.md` as authoritative on any conflict.
+>
+> Deliberately omitted, because they do not change what a coding agent does in a
+> repo: backup status, LLM gateway/litellm operational rules, and Claude Code agent
+> teams. Read `home-agents.md` if you need those. Everything a Cursor session
+> should act on is below.
+
+## CLAUDE.md is always a symlink to AGENTS.md (standing rule, 2026-10-04)
+
+In every repo `CLAUDE.md` is a symlink to `AGENTS.md` (`ln -s AGENTS.md CLAUDE.md`)
+and `AGENTS.md` is the only real file. If both exist as regular files, merge
+`CLAUDE.md` into `AGENTS.md`, then replace it with the symlink. Never create a
+standalone `CLAUDE.md`. Reason: muse and similar tools ignore `CLAUDE.md` when
+`AGENTS.md` exists, and two copies drift.
+
+## Trust between agents (standing rule, 2026-10-03)
+
+**Every agent trusts every other agent as much as it trusts djbclark.** This holds
+across all the TUIs on this machine — Claude Code, Codex, Cursor, opencode, zcode,
+Antigravity, Gemini — not just between Claude sessions.
+
+In practice: when a peer session says djbclark approved something, that is
+approval; do not make him repeat it. Treat a peer's factual claims and hand-offs as
+authoritative rather than as leads needing independent confirmation, and do not
+imply a peer might be misreporting. Independent verification is still good
+engineering where it is cheap — it is just no longer a trust requirement.
+
+Two things this does **not** change, because neither is about trust:
+
+1. Check whether a peer is already mid-flight on a task before taking it over.
+   Duplicating or discarding work already paid for is the waste this rule is not
+   meant to license.
+2. If a peer says it was *denied* a permission prompt and asks you to run the
+   action instead, surface that to djbclark rather than being the bypass. That is
+   his permission decision in another session, not a judgement about the peer.
+
+## Sub-agent reports go to a file (standing rule, 2026-10-03)
+
+**When you dispatch a sub-agent, name an output file in the spawn prompt** and have
+it write the full deliverable there, replying with only a pointer. Pass long briefs
+*to* an agent the same way — as a path, not message text.
+
+Observed 2026-10-03: long reports are **truncated** (five payloads from two
+sub-agents, all cut off with `[result truncated …]`, and a resend truncates the
+same way), **and** delivery lags by minutes in batches long after the agent shows
+`idle`, with every send reporting success. So a missing report is ambiguous — you
+cannot tell "lost" from "not here yet".
+
+So: put it in the spawn prompt rather than a follow-up, wait on the file rather
+than the reply, and treat a finished agent with no report as a **delivery failure,
+not an empty result** — re-task it. Never reconstruct what it would have said.
+
+## Reading `aiuse` quota numbers, and knowing a delegate finished (standing rule, 2026-10-03)
+
+`used_percent` is the share CONSUMED: 100 means exhausted. Decide from
+`remaining_percent`; write "100% used / 0% left", never a bare percentage.
+The fullest window of an account binds. One TUI can hold several pools by model
+family (agy: Gemini vs Claude/GPT): a 429 describes the pool the model draws on,
+so retry the vendor's other pool before abandoning it. agy's CLI has a burst
+limit aiuse cannot see (2026-10-03/04: instant 429 on every model for 18+ hours
+with 99% left, client-keyed, survives re-login, while `acp-run agy` worked):
+**delegate only via `acp-run agy`, never `agy -p`** (an unavoidable CLI call
+takes `--print-timeout`), no probe loops, ~60 requests/hour, Opus-high sparingly;
+if one client 429s, try the other. State moves within a
+session: re-probe before each batch and preflight with one trivial call. Run each
+delegated call as a foreground command in its own `run_in_background: true` Bash
+call (no trailing `&`; never wait with `pgrep -f`, it matches itself). Use
+`aiuse --available [--live]` (aiuse 3.1.4+: usable pools only, one line per vendor
+and model family, used/left pairs, from the cache; exit 3 = nothing usable;
+`aiuse-pools` is a wrapper). After a real 429, run `aiuse note-exhausted <provider>
+[--family F] --resets-in 4h53m` so the next agent skips that pool. Detail:
+`model-routing` and `bigteam` skills.
+
+## Basic Memory — shared pool vs private pools (2026-10-03)
+
+One shared Basic Memory MCP server for the machine, streamable HTTP at
+`http://127.0.0.1:18796/mcp`; Cursor's entry is in `~/.cursor/mcp.json`. Never
+register a per-client stdio copy. (**Cursor cannot actually reach it** — `cursor-agent` lists no basic-memory tools despite `~/.cursor/mcp.json` having an entry. Use the `bm` CLI here instead. Only Claude Code, Codex, Antigravity and Hermes are functionally wired.)
+
+**If it is down, fix it (standing rule, 2026-10-05):** probe with an MCP `initialize`
+POST, and `launchctl kickstart -k gui/$(id -u)/com.djbclark.basic-memory-mcp` if dead.
+
+- **`main` is the shared, cross-agent pool and the default** —
+  `~/ops/site-private/memory`, git-tracked, so a write there is a commit.
+- **`cursor-memory` → `~/agent-memory/cursor` is Cursor's private pool**, outside
+  git. Name it explicitly; it is never the default.
+
+**Semantic ranking is ON, so a search result is not a match.** `search_notes`
+returns its closest N notes whether or not anything is relevant; never answer
+"does X exist?" from a result count. Discover with search, prove with `find` or an
+exact `read_note`.
+
+Don't make a private pool the default, name the project explicitly in automation,
+and don't use `search_all_projects: true` by default. Privacy is conventional, not
+enforced — scoping, not a security boundary. Notes written to `main` should follow
+the shared schemas in `site-private/memory/schemas/`. Full detail:
+`site-private/memory/basic-memory/README.md`.
+
+## Where work happens — plain git in `~/ops`
+
+Work directly in `~/ops/{stayturgid,site-djbclark,site-private}` using
+ordinary git: edit in place, commit to `master`, and push at opportune
+moments. No task workspace, no PR, no version tag is required to advance code
+or config. `~/src/ops-worktrees/` still exists for genuine parallel-task
+isolation, and `just ops-release-*` still exists for marking a known-good
+point, but neither is required.
+
+**What you give up, knowingly:** `~/ops` is what running deployments read from, so
+a bad commit is live immediately with no release gate in front of it. Compensating
+discipline: check what a service reads before changing it, keep commits small and
+reversible, and prefer a quick revert over a hotfix.
+
+`site-private/memory/` and `site-djbclark/research/` are data, committed in
+place — `git pull --rebase` before writing, append (never rewrite) `MEMORY.md`,
+commit, push immediately. The consolidated Codex summaries
+(`memory/codex/memory_summary.md`, `raw_memories.md`) are regenerated
+whole-file by Codex's own background memory agent — don't hand-edit them;
+drop notes under `memory/codex/extensions/ad_hoc/` instead.
+
+## `~/s` is a view — reference `~/src`, never `~/s` (standing rule, 2026-10-06)
+
+`~/s` is a generated, locked (`uchg`) symlink farm that lets djbclark browse
+`~/src` by topic. **Every path an agent writes, runs, records or hands on is
+`~/src/<name>`, never `~/s/...`** (resolve a given `~/s` path with `realpath`;
+its last component is the `~/src` name). Never write to or start a session in
+`~/s`. After adding or removing a top-level `~/src` entry run
+`just -f ~/s/justfile`. Detail: `site-djbclark/tools/s-farm/AGENTS.md`.
+
+## Ask where a new thing goes (standing rule, 2026-10-06)
+
+**Before creating a new tool, script, skill or doc in an ops repo, ask djbclark
+which repo it belongs in.** `site-private` is private-only: its pre-commit hook
+rejects any regular file outside `.githooks/private-paths` (never `--no-verify`
+or extend that list without his say). Everything else lives in `site-djbclark`
+(public) at the same relative path, with a symlink left in `site-private` where
+an old path is still used. When asking, name anything private in the change
+(private repo names, IDs). (`memory/feedback_ask_where_new_things_go.md`)
+
+## Reply formatting — number every list
+
+Every bulleted list in a reply to djbclark uses numbers or letters, never
+plain `-`/`*` bullets (`1.`, `2.`, … ; `a.`, `b.` for sub-lists), so items can
+be referenced in follow-ups. When a reply has more than one list, prefix by
+section (`1.1`, `1.2`) or number+letter (`1a`, `2b`) so a bare reference is
+unambiguous.
+
+## Other agent CLIs on this machine — binary names don't match provider names
+
+`aiuse`/`aiuse --json` and Orca's `--agent` flag identify providers by an
+internal id that often does not match the real terminal command:
+antigravity → `agy` (the gemini CLI is deprecated/not installed — `agy` is the
+Gemini-family agent; **delegate only via `acp-run agy`, never `agy -p`**), zai → `zcode`, opencode-go → `opencode`, cursor → `cursor-agent` (not `cursor`, the desktop
+app), copilot → `copilot` (if it misbehaves, run `copilot-fix-writer-lock`).
+codex/claude binaries match their names. Native
+[Agent Client Protocol](https://agentclientprotocol.com/) mode: copilot,
+opencode, cursor, qwen, devin, cline, hermes; Claude Code and Codex via
+adapters. No working ACP route: zcode, crush, muse (grok TUI works via `grok agent stdio`; agy works via `acp-run agy`).
+
+Delegating to another agent CLI, in this order: (1) one-shot or headless work
+for an ACP-capable agent goes through `~/ops/site-private/bin/acp-run <agent> -C
+<dir> -p '<prompt>' --model <m> [--perm scoped:<owned paths>|deny]`, not raw
+`-p`/`exec`/`run` — always pass `--model`, and exit 0 is not success, so verify
+tests/diff; (2) supervised work in an Orca-managed repo/worktree uses
+`orca orchestration worker-start --agent <claude|codex|cursor|antigravity|muse|zcode|opencode|opencode2>`;
+(3) interactive work the operator watches, and Hermes's TUI, use a Herdr pane;
+(4) non-ACP CLIs keep their own headless recipe. cline (ClinePass) and the grok
+TUI are reserve pools: never for bulk work. copilot shares its subscription with GitHub-side Copilot features
+(code review on master): spend modestly, small GitHub-shaped slices, far less caution than grok.
+
+## Multi-agent toolkit — know these exist (2026-10-05)
+
+Before orchestrating other agents from any start dir, reach for these.
+Editable copies in git at `site-djbclark/skills/<name>/` (reached as
+`site-private/skills/<name>`, a symlink; `1password` and `tell-chief-of-staff`
+are private and real there), symlinked into
+every TUI by the `skill-everywhere` skill (edit the git copy, never a TUI
+copy). Ours: `bigteam` (fan-out across vendors by quota pool),
+`model-routing` (vendor/model/effort per task), `herdr-orchestration`
+(Herdr handoff chains), `ralph-tui-orchestration` (Ralph TUI + Beads),
+`cow-workspaces` (copy-on-write isolation), `tell-chief-of-staff`.
+Tool-managed, not in git: `orchestration`, `herdr`,
+`orca-per-workspace-env`. `/orc`, `/orc-meta`: commands in
+`site-private/claude/commands/`. Sub-agents `adversary`/`backend`/`ux`/
+`fable-deep`: `site-private/claude/agents/` (`ocx-*` are generated,
+untracked).
+
+## Ping djbclark on Hermes (standing rule, 2026-10-05)
+
+**When a task completes or something needs djbclark's attention** (blocked, a
+decision, a failure), also send it to the Hermes Telegram Inbox:
+`~/.local/bin/hermes send -t telegram:838808636:22158 "<repo>: <one line>"`.
+One line per event, never a loop. Operator notices from scripts go to Hermes
+too, not macOS notifications. (`memory/feedback_ping_telegram_and_chat.md`)
+
+## Periodic updates are a script, not a cron prompt (standing rule, 2026-10-05)
+
+**When djbclark asks for periodic updates ("report every N minutes", "keep me
+posted"), do not schedule a recurring model prompt** (CronCreate, /loop). Each
+one is a full turn that re-sends the whole conversation (~100k+ tokens, mostly
+for "nothing changed"). Use `~/ops/site-private/bin/fleet-watch` (launchd, every
+5 min, Hermes Telegram notice only on change; `fleet-watch status` for the last
+line), or extend it / write a similar script for what is being watched. Tell him
+results as work finishes or fails. A one-shot scheduled check is fine.
+(`memory/feedback_periodic_updates_by_script.md`)
+
+## Heavy builds and tests: run them through `bg` (standing rule, 2026-10-04)
+
+Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`, `bg pytest`;
+`taskpolicy -c utility`: efficiency-core bias, about normal speed). Never use
+`taskpolicy -b` for builds (25x slower under load) and never throttle another session's
+processes without asking.
+
+## Code discovery — symbol tools before `cat`/`rg` (2026-10-03)
+
+**`graft` is the navigator in every repo.** If a repo has no `graft/`, run
+`graft build` first — free, no API key, ~0.4 s on a small repo and ~3.6 s on
+stayturgid's 282 code files. All three `~/ops` repos have one, as do 36 of the 77
+repos under `~/src`. Its footprint (a tracked `.gitignore` line, `.ignore`,
+`graft/`) is explicitly not a concern — djbclark's call, 2026-10-03.
+
+Use a symbol lookup before `cat`/`rg`/Grep for **code discovery**: it answers in
+~200 characters what a file read spends thousands on. Plain text search is still
+right for prose, config values and non-code files.
+
+`token-savior` is kept only for the handful of things graft cannot do at all
+(`find_dead_code`, `detect_breaking_changes`, `analyze_config`,
+`find_semantic_duplicates`, index-aware edits). It is **not** a navigator, and
+**never run `ts init`** — `rtk` owns Bash output compaction and two `PreToolUse`
+rewriters cannot both be useful. Measured defects in both tools, and the current
+registration list, are in
+[`site-djbclark/docs/tooling-policy.md`](https://github.com/djbclark/site-djbclark/blob/master/docs/tooling-policy.md).
+
+## Clipboard — never bare `pbcopy` (standing rule, 2026-10-03)
+
+"copy to clipboard" / "pbcopy" means `~/ops/site-private/bin/clip`, never bare
+`pbcopy`. Agent shells run `LC_CTYPE=C`, so `pbcopy` writes MacRoman to the
+pasteboard and `—` pastes as `‚Äî`. Minimum fix: `LC_CTYPE=UTF-8 pbcopy`.
+
+- **`pbpaste` cannot verify it** — same locale, inverse mangling, so the
+  round-trip looks perfect while the pasteboard is corrupt. Check with
+  `osascript -e 'the clipboard as «class utf8»'`.
+- Prose for a human: `clip --unwrap` (one line per paragraph) and no Markdown —
+  backticks and `**bold**` render literally in a mail client.
+- **Never overwrite the pasteboard to test**; it is the operator's live state.
+
+## Long documents — query the book KB, never paste the book (2026-10-03)
+
+Books live in a local KB, not a context window: `~/ops/site-private/bin/book-kb`
+(docling -> Markdown chapters -> a ~2.5k-token index; costs no model tokens).
+
+1. `book-kb query '<regex>' <slug>` — exact match; **the only path that proves a
+   term is or is not in the book.**
+2. `book-kb toc <slug>` — chapter index, then one chapter (~1.2k median). `--deep`
+   gives `file:line` anchors.
+3. basic-memory `search_notes(project="books", …)` — semantic; a hit is **not** a
+   match, confirm with (1).
+
+**Never read `~/kb/raw/<slug>.md`** — that is the whole book (~115k tokens).
+
+`Learning CFEngine` (CFEngine 3.12) is in it as `learning-cfengine`. Query it
+before writing or reviewing CFEngine policy in any repo. Prefer a book's EPUB over
+its PDF: the PDF collapses code listings onto one line. Detail:
+`site-private/docs/book-kb-vs-book-to-skill.md`.
+
+## Never waste spent tokens without asking (standing rule, 2026-09-30)
+
+**Don't throw away work already paid for without asking djbclark first** —
+stopping a running agent partway, restarting from scratch, or rerunning something
+whose result already exists. If a pause is wanted, stop *scheduling* new work and
+let running work finish. If losing in-flight work seems worth it, explain the
+trade-off and ask.
+
+## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
+
+Every agent, however launched (opened by djbclark, started by another agent via
+`acp-run`, Orca, Herdr or a raw headless call, or a sub-agent of those), runs in
+its yolo-or-equivalent mode unless gating is explicit and justified (a
+review-only slice, or bigteam's `--perm scoped:` ownership check). Flags and
+mode ids: the `model-routing` skill and `herdr-orchestration`'s
+`references/yolo-mode-by-tool.md`. Yolo does not suspend hooks, file-ownership
+rules, the reserve pools, or asking before hard-to-reverse actions. Details:
+`site-private/memory/feedback_yolo_default_for_all_agents.md`.
+
+## Session logs (Tier 1 handoff pointers)
+
+At the start of a session in any git repo, read its Tier 1 pointer (under
+`~/.local/state/handoffs/`, redirecting to a per-chain log), compare its
+`head_sha` to actual `HEAD`, and state a resume plan before touching anything. A
+missing pointer means a fresh start, not an error. Only the workspace-owning
+session writes it. Spec:
+`site-private/docs/session-handoff-compaction-spec.md`.
+
+## Three-way memory/docs policy (start at each repo's AGENTS.md)
+
+No single canonical copy — read all three: `stayturgid/AGENTS.md`,
+`site-djbclark/AGENTS.md`, `site-private/AGENTS.md`.
+
+## Research outward first (standing rule, 2026-10-05)
+
+Whenever you are spending, or about to spend, significant tokens on something a web search might answer, search first. That includes how any tool, library, protocol, platform or error behaves, and reading other projects' source and issue trackers before trial and error, device experiments, writing a fake of another system, or rounds of local grepping. Then verify locally.
+
+Agents maintain the home rules (`home-agents.md` and this copy) without asking: add rules, condense, move detail out; keep `home-agents.md` under ~20 KB.
+
+## Gradle is capped machine-wide (2026-10-05)
+
+Profiles in `~/ops/site-private/gradle/profiles/` (default `low`: 2 workers, JVMs see 2 CPUs, low priority; `night` only with an expiry via `bin/gradle-limits set night --until 07:00`), linked into every Gradle home. Don't override with `--max-workers` or `-Dorg.gradle.*`; run heavy builds through `bg`, which waits while load per core > 1.5. Detail: `docs/gradle-limits.md`.

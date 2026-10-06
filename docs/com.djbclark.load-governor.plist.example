@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  load-governor launchd agent TEMPLATE. NOT installed by anything in this repo.
+  Install (see docs/load-governor.md, "Installing the launchd agent"):
+    cp docs/com.djbclark.load-governor.plist.example ~/Library/LaunchAgents/com.djbclark.load-governor.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.djbclark.load-governor.plist
+  Remove:
+    launchctl bootout gui/$(id -u)/com.djbclark.load-governor ; load-governor --undo-all
+
+  Deliberately NOT set: ProcessType=Background. That would run the governor itself at
+  background QoS, i.e. starved exactly when the machine is overloaded and it is needed.
+  Nice 5 and LowPriorityIO only soften its footprint; its own cost is one `ps` per interval.
+  Python must be an absolute path: launchd has no Homebrew PATH. Python >= 3.11 gives
+  TOML config; older Pythons only read a JSON config file.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.djbclark.load-governor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3</string>
+    <string>/Users/djbclark/ops/site-private/bin/load-governor</string>
+    <string>--apply</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- do not respawn in a tight loop if it crashes at startup -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- SIGTERM makes the governor restore every throttled pid; give it time to -->
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+
+  <key>Nice</key>
+  <integer>5</integer>
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/djbclark/.local/state/load-governor/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/djbclark/.local/state/load-governor/launchd.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

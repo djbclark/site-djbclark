@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# bg — run a command at utility QoS (taskpolicy -c utility).
+#
+# Utility QoS is biased toward the efficiency cores and lower power, but it still
+# gets close to a normal share of CPU (measured 2026-10-04: 0.48 of a core against
+# 0.52 for a normal process, with the machine at load 30-100), so a build or test
+# run finishes in about normal time without crowding the UI. Children inherit it.
+#
+# Do NOT use `taskpolicy -b` for this: background QoS gave 0.02 of a core under the
+# same load (25x slower). If you really want that, use `bgb`. `renice` does little
+# on Apple silicon.
+#
+#   bg swift test
+#   bg pytest -q tests/
+#
+# For a process that is already running: taskpolicy -B -p <pid> undoes background
+# mode; there is no per-pid utility clamp, restart the command through bg instead.
+#
+# Admission gate: before starting, wait while the 1-minute load average per core is above
+# BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s for at most
+# BG_LOAD_WAIT seconds (default 900), then start anyway so nothing starves. Piling another
+# build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate.
+# Also reverts an expired Gradle profile (gradle-limits check).
+if [ "$#" -eq 0 ]; then
+  echo "usage: bg <command> [args...]" >&2
+  exit 2
+fi
+"$(dirname "$0")/gradle-limits" check 2>/dev/null || true
+max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
+wait_s="${BG_LOAD_WAIT:-900}"
+if [ "$wait_s" -gt 0 ]; then
+  cores=$(sysctl -n hw.ncpu)
+  waited=0
+  while :; do
+    load1=$(sysctl -n vm.loadavg | awk '{print $2}')
+    over=$(awk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
+    [ "$over" = 1 ] || break
+    if [ "$waited" -ge "$wait_s" ]; then
+      echo "bg: load $load1 still above $max_per_core per core after ${waited}s; starting anyway" >&2
+      break
+    fi
+    [ "$waited" -eq 0 ] && echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting (BG_LOAD_WAIT=0 to skip)" >&2
+    sleep 15
+    waited=$((waited + 15))
+  done
+fi
+exec taskpolicy -c utility "$@"

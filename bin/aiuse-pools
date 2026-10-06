@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# aiuse-pools — thin wrapper, kept for muscle memory: delegates to `aiuse --available`.
+#
+#   aiuse-pools            usable pools from the snapshot cache, instant
+#   aiuse-pools --live     force a live collect (~30-60 s)
+#   aiuse-pools --json     machine-readable (schema 1.1: state/usable_now/pool_family/semantics)
+#
+# Exit 0: at least one usable pool. Exit 3: nothing usable right now (data is
+# fine, the quota is not). Exit 1: hard error. Freshness is in the output
+# itself (`age_seconds` / `fresh`; STALE shown on stderr) — no side-channel.
+#
+# Since aiuse 3.1.4 the JSON is self-describing (window `state`, account
+# `usable_now`, `pool_family` per model family, top-level `summary_lines` and
+# `semantics`), honours `aiuse note-exhausted` overrides, and exit 3 means
+# "nothing usable". All pools including exhausted ones:
+#   aiuse --json -q | jq -r '.summary_lines[]'
+set -euo pipefail
+
+# aiuse cannot see agy's per-CLI burst limit (2026-10-03: every agy CLI request
+# 429ed from 15:42 to past 23:50 with Gemini and Claude+GPT both 100% left, while
+# `acp-run agy` worked). So an agy line here means "has quota", not "can generate":
+# print a caveat on stderr (stdout and the exit code stay exactly aiuse's).
+rc=0
+out=$(aiuse --available "$@") || rc=$?
+printf '%s\n' "$out"
+if grep -qiE 'antigravity|agy' <<<"$out"; then
+  echo "note: agy headroom is quota only. The agy CLI has a burst limit (~60 requests/hour per login) that aiuse cannot see;" \
+       "use 'acp-run agy', pass --print-timeout to 'agy -p', never loop probes. See skills/model-routing." >&2
+fi
+exit "$rc"

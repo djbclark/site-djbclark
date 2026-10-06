@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# copilot-fix-writer-lock — repair GitHub Copilot CLI's stale MCP writer binding.
+#
+# Symptom: every `copilot mcp` subcommand dies with
+#
+#     Error: The shared writer lock or its directory changed.
+#
+# and headless `copilot -p … --allow-all-tools` stops completing. The message
+# names neither the file nor the cause, which is what makes this worth a script.
+#
+# Cause: ~/.copilot/.mcp-writer.binding persists Unix filesystem identities —
+# `{"root":{"device":N,"inode":N},"lock":{"device":N,"inode":N}}`. The device id
+# drifts (reported upstream after reboots and OS updates; seen here with no
+# reboot at all), Copilot reads the mismatch as the lock directory having been
+# replaced, and refuses to start its MCP subsystem.
+#
+# Fix, from upstream github/copilot-cli#4998: rewrite only the two `device`
+# values to the id `stat` reports now, leaving the inodes alone. Moving the file
+# aside does NOT work — Copilot does not regenerate it and fails differently
+# ("Shared writer storage I/O failed").
+#
+# Idempotent: exits 0 with "nothing to do" when the ids already match.
+
+set -euo pipefail
+
+BINDING="${COPILOT_BINDING:-$HOME/.copilot/.mcp-writer.binding}"
+TARGET_DIR="$(dirname "$BINDING")"
+
+if [ ! -f "$BINDING" ]; then
+  echo "copilot-fix-writer-lock: no binding file at $BINDING" >&2
+  echo "  Nothing to repair. If copilot still fails, the cause is elsewhere." >&2
+  exit 0
+fi
+
+current_dev="$(stat -f '%d' "$TARGET_DIR")"
+
+read -r root_dev lock_dev <<<"$(
+  python3 - "$BINDING" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get("root", {}).get("device"), d.get("lock", {}).get("device"))
+PY
+)"
+
+if [ "$root_dev" = "$current_dev" ] && [ "$lock_dev" = "$current_dev" ]; then
+  echo "copilot-fix-writer-lock: nothing to do (device $current_dev already matches)"
+  exit 0
+fi
+
+backup="$BINDING.bak-$(date -u +%Y%m%d-%H%M%S)"
+cp -p "$BINDING" "$backup"
+
+python3 - "$BINDING" "$current_dev" <<'PY'
+import json, sys
+path, dev = sys.argv[1], int(sys.argv[2])
+d = json.load(open(path))
+for key in ("root", "lock"):
+    if key in d:
+        d[key]["device"] = dev
+# Compact, matching how Copilot writes it.
+open(path, "w").write(json.dumps(d, separators=(",", ":")))
+PY
+
+echo "copilot-fix-writer-lock: device $root_dev/$lock_dev -> $current_dev (inodes untouched)"
+echo "  backup: $backup"
+
+if command -v copilot >/dev/null 2>&1; then
+  echo "  verifying..."
+  if copilot mcp list >/dev/null 2>&1; then
+    echo "  ✓ copilot mcp list works"
+  else
+    echo "  ✗ copilot mcp list still fails — see github/copilot-cli#4998" >&2
+    exit 1
+  fi
+fi

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# bgb — run a command at hard background QoS (taskpolicy -b).
+#
+# Efficiency cores only, lowest priority, throttled I/O. Under load this starved a
+# test process to 0.02 of a core (25x slower than normal, 2026-10-04), so use it only
+# for work that may take hours: indexing, backups, bulk conversion. For builds and
+# tests use `bg`. Children inherit it; undo for a running pid: taskpolicy -B -p <pid>.
+if [ "$#" -eq 0 ]; then
+  echo "usage: bgb <command> [args...]" >&2
+  exit 2
+fi
+exec taskpolicy -b "$@"

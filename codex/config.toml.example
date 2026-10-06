@@ -1,0 +1,23 @@
+# Copy this file to config.toml when bootstrapping a new machine. The live
+# config.toml is intentionally ignored because Codex updates model choices,
+# trusted projects, plugin state, marketplace timestamps, and desktop settings.
+
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+personality = "pragmatic"
+service_tier = "default"
+
+[features]
+hooks = true
+js_repl = false
+memories = true
+
+[memories]
+generate_memories = true
+use_memories = true
+
+# Add machine-specific notification, marketplace, plugin, trusted-project,
+# desktop, MCP-server, hook-state, and shell-environment settings only to the
+# ignored live config.toml.
