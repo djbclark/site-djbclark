@@ -30,34 +30,18 @@ symlink (Cursor `.mdc`). Why: muse and similar ignore `CLAUDE.md` when
 
 ## Where work happens — plain git in `~/ops`
 
-Work directly in `~/ops/{stayturgid,site-djbclark,site-private}` with ordinary
-git: edit in place, commit to `master`, and **push at opportune moments**, as in
-every other repo here. No task workspace, PR or release is required (branches
-and PRs only when _you_ want review on something risky; `~/src/ops-worktrees/`
-is optional isolation).
+Work directly in `~/ops/{stayturgid,site-djbclark,site-private}`: edit in place,
+commit to `master`, **push at opportune moments** (branches/PRs only when you
+want review). **Running deployments read from `~/ops`**, so a bad commit is live
+at once: check what reads a file first, keep commits small, prefer a quick revert.
 
-**The trade-off:** running deployments read from `~/ops`, so a bad commit is
-live immediately. Check what a service reads before changing it, keep commits
-small and reversible, prefer a quick revert over a hotfix. `${OPS_ROOT:-~/ops}`
-in configs/docs resolves to these checkouts.
-
-### Data directories (commit in place)
-
-`site-private/memory/` (including `memory/codex/`) and `site-djbclark/research/`
-are data, not code; commit to them in place on `master`. **site-djbclark is
-public** — no secrets or private-only context under `research/`.
-
-Memory-writing rules: **don't overwrite** — one fact per file; append lines to
-`MEMORY.md`, never rewrite it wholesale; `git pull --rebase` first, commit,
-push immediately, leave the tree clean; plain git, not `just ops-memory-sync`.
-Never hand-edit the regenerated Codex summaries under `memory/codex/` (use
-`memory/codex/extensions/ad_hoc/`).
-`site-private/codex/config.toml` is ignored local state (`~/.codex/config.toml`
-symlinks to it): never stage or commit it.
-**`git pull --rebase` refuses while another agent has unstaged edits in the
-same checkout:** never stash, add or reset their files; `git fetch`, and if you
-are only ahead, plain `git push`; if behind, wait or ask the owning session.
-
+**Data, committed in place:** `site-private/memory/` and `site-djbclark/research/`
+(**site-djbclark is public** — nothing private under `research/`). Memory: one
+fact per file, append to `MEMORY.md` (never rewrite it), `git pull --rebase`,
+commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
+or hand-edit the generated `memory/codex/` summaries. **If another agent has
+unstaged edits in the checkout,** never stash, add or reset their files: `git
+fetch`; if only ahead, plain `git push`; if behind, wait or ask.
 Detail: [[reference_agent_rules_ops_housekeeping]].
 
 ## `~/s` is a view — reference `~/src`, never `~/s` (standing rule, 2026-10-06)
@@ -130,44 +114,26 @@ Why: [[reference_agent_rules_ops_housekeeping]].
 ## Reading `aiuse` quota numbers (standing rule, 2026-10-03)
 
 **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from
-`remaining_percent`; write "100% used / 0% left", never a bare percentage.
-
-1. **The fullest window binds** — usable only if every window has headroom.
-2. **One TUI can hold several pools** (agy Gemini vs Claude/GPT; Claude ordinary
-   vs Fable; Cursor Auto vs other). A 429 describes the pool, not the vendor:
-   try the vendor's other pool before abandoning it.
-3. **Pool state moves** — re-probe before each batch and preflight each target
-   with one `"Reply with exactly: OK"` call through the exact invocation/model.
-4. **Run each delegated call as a foreground command in its own Bash call with
-   `run_in_background: true`** — no trailing `&`, never
-   `until ! pgrep -f '<pattern>'` (it matches its own shell).
-5. **agy has a burst limit `aiuse` cannot see** (~60 requests/hour/login, no
-   probe loops); **dispatch only via `acp-run agy`, never `agy -p`** (the CLI's
-   429 throttle is client-keyed and survives re-login).
-
-Prefer **`aiuse --available [--json]`** (the cache; `--live` only when stale;
-exit 3 = nothing usable): it encodes these rules. Detail:
-[[reference_agent_rules_aiuse_quota_and_agy]].
+`remaining_percent`; write "100% used / 0% left", never a bare percentage. Use
+**`aiuse --available [--json]`** (the cache; `--live` only when stale; exit 3 =
+nothing usable): it applies the rules (the fullest window binds; one TUI can hold
+several pools; re-probe before each batch). Preflight each target with one
+`"Reply with exactly: OK"` call through the exact invocation/model. **agy: only
+via `acp-run agy`, never `agy -p`** (a ~60 requests/hour burst limit `aiuse`
+cannot see; no probe loops). Detail: [[reference_agent_rules_aiuse_quota_and_agy]].
 
 ## Basic Memory — shared pool vs private pools (2026-10-03)
 
-One shared Basic Memory MCP server (streamable HTTP,
-`http://127.0.0.1:18796/mcp`). **Configured is not working:** only Claude Code,
-Codex, Antigravity (interactive only) and Hermes can call its tools; **zcode,
-opencode, Cursor and crush cannot** (`bm` CLI in Cursor; no MCP-dependent work
-for opencode). Test by asking an agent to list its MCP tools, never by grepping
-its config. Never register a per-client stdio `basic-memory mcp` (13 cost
-~2.6 GB). **If it is down, fix it** (steps in the `todo` skill); a session
-started while it was down needs `/mcp` → reconnect.
-Tools take a `project` argument: **`main` is the shared, cross-agent default**
-(`~/ops/site-private/memory`, git-tracked: pull --rebase, commit, push);
-**`<agent>-memory`** is that agent's private scratch pool — name it explicitly,
-never make it the default, no `search_all_projects: true` in a default prompt,
-no secrets (privacy is by convention). **A semantic search result is not a
-match** (it always returns its closest N): never answer "does X exist?" from a
-result count — use `find` or an exact `read_note`. Never reset the two indexing
-flags in `~/.basic-memory/config.json`. CLI: `bm tool search-notes`. Detail:
-[[reference_agent_rules_basic_memory_pools]], `memory/basic-memory/README.md`.
+One shared MCP server (`http://127.0.0.1:18796/mcp`). Only Claude Code, Codex,
+Antigravity (interactive) and Hermes can call it; **zcode, opencode, Cursor and
+crush cannot** (Cursor: the `bm` CLI). Never register a per-client stdio
+`basic-memory mcp`. **If it is down, fix it** (`todo` skill), then `/mcp` →
+reconnect. Tools take a `project`: **`main`** is the shared default
+(`~/ops/site-private/memory`, git-tracked); `<agent>-memory` is that agent's
+private scratch, named explicitly, never the default, no secrets. **A semantic
+search result is not a match** (it always returns its closest N): answer "does X
+exist?" with `find` or an exact `read_note`.
+Detail: [[reference_agent_rules_basic_memory_pools]].
 
 ## Start slow commands in the background (standing rule, 2026-10-04)
 
@@ -220,20 +186,13 @@ him results as work finishes or fails. A one-shot scheduled check is fine.
 
 ## Heavy builds and tests: run them through `bg` (standing rule, 2026-10-04)
 
-Run throughput work through `~/ops/site-private/bin/bg` (`bg swift test`, `bg pytest`,
-`bg gradlew …`; also vitest, `go test`, cargo, make). It is `taskpolicy -c utility`:
-efficiency-core bias, a normal share of CPU, inherited by children. **Never use
-`taskpolicy -b` for builds** (25x slower under load; `bgb` is for hours-long
-bulk jobs). Never throttle another session's processes without asking; undo
-with `taskpolicy -B -p <pid>`. **Gradle is capped machine-wide**:
-`gradle/profiles/` here, symlinked into every Gradle home (`bin/gradle-limits
-status|set night --until 07:00|low`; default `low`: 2 workers, JVMs see 2 CPUs).
-`bg` waits at load/core > 1.5; see `docs/gradle-limits.md`. Why:
-[[project_machine_load_diagnosis_2026-10-04]].
-
-**One Gradle build at a time, machine-wide** (2026-10-06): check `pgrep -fl
-GradleWrapperMain` first. "Waiting for the machine-wide Gradle slot" means queued,
-not hung. Never SIGSTOP another agent's process (the harness reaps it).
+Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`,
+`bg pytest`, `bg gradlew …`; `taskpolicy -c utility`, waits at load/core > 1.5).
+**Never `taskpolicy -b` for builds** (25x slower under load; `bgb` is for
+hours-long bulk jobs). Never throttle or SIGSTOP another session's processes.
+**Gradle: one build at a time, machine-wide** (check `pgrep -fl
+GradleWrapperMain` first; "Waiting for the machine-wide Gradle slot" means
+queued, not hung), capped by `bin/gradle-limits` (`docs/gradle-limits.md`).
 (`memory/feedback_gradle_one_at_a_time.md`)
 
 ## Code discovery — symbol tools before `cat`/`rg` (2026-10-03)

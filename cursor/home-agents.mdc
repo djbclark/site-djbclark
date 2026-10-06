@@ -140,6 +140,9 @@ commit, push immediately. The consolidated Codex summaries
 (`memory/codex/memory_summary.md`, `raw_memories.md`) are regenerated
 whole-file by Codex's own background memory agent — don't hand-edit them;
 drop notes under `memory/codex/extensions/ad_hoc/` instead.
+If `git pull --rebase` refuses because another agent has unstaged edits in the
+checkout, never stash, add or reset their files: `git fetch`; if only ahead,
+plain `git push`; if behind, wait or ask.
 
 ## `~/s` is a view — reference `~/src`, never `~/s` (standing rule, 2026-10-06)
 
