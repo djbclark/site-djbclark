@@ -106,8 +106,14 @@ TUIs as unverified, not as broken, and re-check once the account works.
 Hermes Telegram `/name` is a **slash command**, not a skill lookup. Linking
 via this tool puts the skill in `skills.external_dirs`; it does **not**
 register `/steps`. That lives in `~/.hermes/plugins/skill-slash` (`/steps`,
-`/skill <name>`). Enable `skill-slash` in `plugins.enabled` and restart the
-gateway from Terminal. Claude Code slash wrappers live in
+`/skill <name>`). Enable `skill-slash` in `plugins.enabled`. Since 2026-10-06
+`skill-everywhere` auto-nudges the running gateway (`reload-plugins` control
+socket) so a plugin command like `/helm` or `/steps` dispatches immediately —
+no manual gateway restart. The Telegram pull-up `/` menu is only republished
+at adapter (re)connect, so a just-added command may not autocomplete until the
+next restart, but typing it still works and `/commands` lists it. If you cannot
+run `skill-everywhere` (e.g. changing the plugin without a skill), ask Hermes
+to run `reload-plugins` the same way. Claude Code slash wrappers live in
 `site-private/claude/commands/` (symlink into `~/.claude/commands/`).
 
 ## 4. When the table is wrong

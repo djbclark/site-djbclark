@@ -77,4 +77,37 @@ if command -v hermes >/dev/null \
   echo "warning: hermes no longer lists ~/.local/share/skill-everywhere/skills in" \
        "skills.external_dirs; ask Hermes to re-add it" >&2
 fi
+
+# After linking, nudge the running Hermes gateway to force plugin re-discovery
+# (#87770). A skill that also adds a Telegram slash command (e.g. /helm, /steps,
+# registered by ~/.hermes/plugins/skill-slash) does not reach the live gateway
+# until plugins reload; this makes it dispatch immediately instead of waiting
+# for a manual gateway restart from Terminal. Idempotent and cheap. Does nothing
+# when the gateway is not running or predates the verb.
+if [[ $mode == link ]] && command -v hermes >/dev/null; then
+  hpy="$(head -1 "$(command -v hermes)")"     # shebang = the venv python
+  hpy="${hpy#\#!}"
+  if [[ ! -x $hpy ]]; then hpy="$(command -v python3)"; fi
+  # Pipeline through python must run from a cwd inside the agent project, else
+  # the editable install's __editable___hermes_agent_finder still needs the
+  # project root on sys.path. Inject it so the nudge works from any directory.
+  HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" "$hpy" -c '
+import os, sys
+from pathlib import Path
+bin_dir = Path(sys.executable).parent
+root = bin_dir.parent.parent.resolve() if bin_dir.name == ".venv" else bin_dir.parent.parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
+try:
+    from gateway.control_socket import reload_gateway_plugins
+except Exception:
+    raise SystemExit
+os.environ.setdefault("HERMES_HOME", os.path.expanduser("~/.hermes"))
+try:
+    r = reload_gateway_plugins(Path(os.environ["HERMES_HOME"]), timeout=20)
+    print("hermes gateway: plugins %s" % ("reloaded" if r and r.get("reloaded") else "not reloaded (no answer)"))
+except Exception as e:
+    print("hermes gateway: plugin nudge skipped: %s" % e)
+' 2>/dev/null || true
+fi
 exit $rc
