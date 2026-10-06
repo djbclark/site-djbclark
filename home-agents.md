@@ -176,6 +176,14 @@ status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
 (`memory/feedback_exit_status_through_pipe.md`)
 
+## Run commands yourself — never hand djbclark a `!` command (standing rule, 2026-10-06)
+
+**Run every command yourself, including ones that need Touch ID / `sudo-ask` or
+an interactive confirmation** — don't tell djbclark to type `! <command>`.
+Privileged steps still go through their sanctioned path (`sudo-ask`, a
+setup recipe), never a bypass; only if a command truly cannot run from your
+shell, say why. (`memory/feedback_run_commands_yourself.md`)
+
 ## Fix the cause of a tool-calling mistake (standing rule, 2026-10-06)
 
 **When you make a tool-calling mistake of a kind that can recur** (lost exit
