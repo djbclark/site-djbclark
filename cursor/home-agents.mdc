@@ -273,6 +273,13 @@ registration list, are in
 Run every command yourself, including Touch ID / `sudo-ask` steps; never tell
 djbclark to type a `!` command. Privileged steps still use their sanctioned path.
 
+## One Gradle build at a time (standing rule, 2026-10-06)
+
+Machine-wide: check `pgrep -fl GradleWrapperMain` and wait if one runs. A build
+printing "Waiting for the machine-wide Gradle slot" is queued, not hung; don't kill
+or retry it (`~/.local/state/gradle-slot/STATUS`). Never SIGSTOP another agent's
+process: its shell moves on and the harness kills the tree.
+
 ## Waiting on background work
 
 Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
