@@ -75,6 +75,7 @@ Topology background:
 | [`docs/operations/sessions/`](docs/operations/sessions/)                                   | Durable session handoffs (e.g. herdr workstation); prefer these over chat-only wrap-ups                                        | Each handoff                            |
 | [`roles/mac_dns/README.md`](roles/mac_dns/README.md)                                       | This Mac's tailnet DNS plumbing (/etc/resolver, search domains, accept-dns); data = `inventory/group_vars/all.yml` `tailnet_*` | When the tailnet/MagicDNS facts change  |
 | [`roles/launchd_path/README.md`](roles/launchd_path/README.md) | launchd user PATH = login-shell PATH (`launchctl config user path`, root applier, live after reboot); runs in `just deploy-mac` | When PATH handling or the applier changes |
+| [`roles/watchdogd/README.md`](roles/watchdogd/README.md) | One launchd watchdog (`com.djbclark.watchdogd`) for every site service; `watchdogd.d/<service>.toml` schema, the C2 rules, what it replaced | When a watched service or a rule changes |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml)     | Port/path allocation authorities — check before adding either                                                                  | As allocations change                   |
 | [`human/`](human/)                                                                         | Operator-only tasks, credentials checklists, decision records                                                                  | As needed                               |
 | `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                  | Public product — code, fleet conventions, product policy slice                                                                 | N/A (other repo)                        |
@@ -85,6 +86,9 @@ Topology background:
 - Follow the relay protocol (`docs/relay/PROTOCOL.md`) for the ongoing
   segmentation/AI-stack work — read the baton before re-planning.
 - `just lint` and `bin/registry_lint.py` gate changes to `registry/`.
+- **`ruff format` only the files you changed, by name**, never a directory
+  (`ruff format tests/`): most existing files here are not ruff-formatted, so a
+  directory run rewrites a dozen unrelated files into your diff.
 - **Run tests with `just test`** (or `just lint` for the unittest sweep), never
   a bare `python3 -m pytest` / `-m unittest`. Both recipes run under
   `uv run --with pytest --with pyyaml`; the system interpreter has no pytest,
