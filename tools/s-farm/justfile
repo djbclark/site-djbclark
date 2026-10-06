@@ -1,0 +1,51 @@
+# ~/s: a locked, generated symlink view of ~/src for human navigation.
+# ~/s/justfile is a symlink to this file; the tool lives in site-djbclark/tools/s-farm.
+#
+#   just -f ~/s/justfile          # update the farm to match ~/src (also: cd ~/s && just)
+#   just -f ~/s/justfile plan     # show what an update would change
+#
+# Layout rules: layout.conf beside this file. Background: AGENTS.md beside this file.
+
+tool := env("OPS_ROOT", home_directory() / "ops") / "site-djbclark/tools/s-farm"
+src := env("SFARM_SRC", home_directory() / "src")
+farm := env("SFARM_FARM", home_directory() / "s")
+sfarm := "python3 " + quote(tool / "sfarm.py") + " --src " + quote(src) + " --farm " + quote(farm)
+
+# Update the farm to match the source directory: unlock, add and prune links, lock again.
+default: update
+
+# Unlock, add missing links, prune stale ones, lock again.
+update:
+    @{{ sfarm }} update
+
+# Show what `update` would change, without changing anything.
+plan:
+    @{{ sfarm }} plan
+
+# Exit 1 if the farm is out of date or any of its directories is unlocked.
+check:
+    @{{ sfarm }} check
+
+# Lock state, link counts, dangling and foreign entries, pending changes.
+status:
+    @{{ sfarm }} status
+
+# Print the farm as a tree (directories and link names only).
+tree:
+    @cd {{ quote(farm) }} && find . -mindepth 1 -not -name '.*' | sort -f | sed -e 's|^\./||' -e 's|[^/]*/|    |g'
+
+# Print the farm path(s) and the real path of every entry whose name contains NAME.
+where name:
+    @find {{ quote(farm) }} -type l -iname {{ quote("*" + name + "*") }} -not -path '*/by-*' -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' _ {} \;
+
+# Open the layout rules in $EDITOR.
+layout:
+    ${EDITOR:-vi} {{ quote(tool / "layout.conf") }}
+
+# Re-apply the lock (mode 0555 + uchg on every farm directory) without rebuilding.
+lock:
+    @{{ sfarm }} lock
+
+# Remove the lock for manual inspection or repair. Run `just lock` or `just` afterwards.
+unlock:
+    @{{ sfarm }} unlock
