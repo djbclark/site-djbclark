@@ -194,6 +194,9 @@ hosts:
       - {port: 17500, bind: "*",         owner: unmanaged, service: dropbox-lansync, status: active}
       - {port: 17600, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-helper, status: active}
       - {port: 17603, bind: "127.0.0.1", owner: unmanaged, service: dropbox-local-api,    status: active}
+      - {port: 8384,  bind: "127.0.0.1", owner: unmanaged, service: syncthing-gui,        status: active,
+         must_be_up: false,  # personal Syncthing.app GUI; unmanaged never pages
+         note: "2026-10-05: Syncthing.app loopback GUI. Personal file-sync, not a site/stayturgid service."}
       - {port: 7265,  bind: "127.0.0.1", owner: unmanaged, service: raycast-helper,       status: active}
       - {port: 44438, bind: "127.0.0.1", owner: unmanaged, service: zed-editor-helper,     status: active}
       - {port: 59869, bind: "*",         owner: unmanaged, service: logi-options-daemon,  status: active}
