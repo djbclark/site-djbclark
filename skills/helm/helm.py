@@ -436,6 +436,8 @@ def cmd_scan(a, state):
 def cmd_wait(a, state):
     deadline = time.time() + a.timeout if a.timeout else None
     while True:
+        state.clear()
+        state.update(load())  # other helm commands (answer, skip, audit) write it meanwhile
         ss, items = snapshot(state)
         fresh, started = [], []
         for s, it in zip(ss, items):
