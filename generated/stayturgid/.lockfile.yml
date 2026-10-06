@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: d3c73303b9f025744f4e813fbc83c134f1a005aa
-synced: '2026-10-06T19:16:59Z'
+product_commit: 7a568b958dead3191216e40b6e379fb0067cb8e7
+synced: '2026-10-06T21:45:56Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
