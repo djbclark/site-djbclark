@@ -1,9 +1,15 @@
-# Local Claude skills (tracked here, symlinked from `~/.claude/skills/`)
+# Local agent skills (tracked here, reached through `site-private/skills/`)
 
-These are the operator's **local, hand-maintained** Claude skills. Content lives
-in git here (site-private is private — the correct home for them), and each is
-symlinked back into `~/.claude/skills/<name>` so Claude Code still resolves it.
-Same pattern as `~/CLAUDE.md`: content-in-git + symlink.
+These are the operator's **local, hand-maintained** skills. Since 2026-10-06
+the content lives in git here, in `site-djbclark/skills/<name>/` (public).
+`site-private/skills/<name>` is a symlink to it, and every agent TUI links to
+that `site-private` path (`~/.claude/skills/<name>` and the rest), so one root
+serves public and private skills alike. Same pattern as `~/CLAUDE.md`:
+content-in-git + symlink.
+
+Two skills are private and are real directories in `site-private/skills/`:
+`1password` and `tell-chief-of-staff`. This repo is public: no credentials,
+tokens, vault or item identifiers in a skill here.
 
 Only hand-maintained local skills belong here. **Tool-managed skills stay where
 their tool put them** and are NOT tracked here:
@@ -20,23 +26,34 @@ their tool put them** and are NOT tracked here:
 
 ## Add a new local skill
 
-1. Create it under this directory: `skills/<name>/SKILL.md` (plus any support
-   files).
-2. Link it into every agent TUI (Claude Code, Codex, Copilot, Hermes, …):
+1. Ask djbclark whether it is public or private (standing rule, 2026-10-06).
+2. **Public** (the default): create `~/ops/site-djbclark/skills/<name>/SKILL.md`
+   (plus any support files), then add the link that puts it under the one root:
+   `ln -s ../../site-djbclark/skills/<name> ~/ops/site-private/skills/<name>`.
+   **Private**: create it as a real directory in
+   `~/ops/site-private/skills/<name>/` and add `skills/<name>/` to
+   `~/ops/site-private/.githooks/private-paths`; the pre-commit hook there
+   rejects it otherwise.
+3. Link it into every agent TUI (Claude Code, Codex, Copilot, Hermes, …):
    `~/ops/site-private/bin/skill-everywhere <name>`. Never copy a skill folder
    into another TUI's dir: copies go stale (11 had, until 2026-10-03). The
    `skill-everywhere` skill says which TUIs this covers and how to verify.
-3. Commit + push (direct to `master`, `git pull --rebase` first — see
-   `../AGENTS.md`).
+4. Commit + push both repos (direct to `master`, `git pull --rebase` first —
+   see `../AGENTS.md`): the skill here, the symlink in `site-private`.
 
 ## Move an existing local skill under version control
 
 ```sh
 name=<skill>
-cp -a ~/.claude/skills/$name ~/ops/site-private/skills/$name
-diff -r ~/.claude/skills/$name ~/ops/site-private/skills/$name   # must be clean
+cp -a ~/.claude/skills/$name ~/ops/site-djbclark/skills/$name
+diff -r ~/.claude/skills/$name ~/ops/site-djbclark/skills/$name   # must be clean
+ln -s ../../site-djbclark/skills/$name ~/ops/site-private/skills/$name
 rm -rf ~/.claude/skills/$name
 ln -s ~/ops/site-private/skills/$name ~/.claude/skills/$name
 ```
+
+That is the public case. For a private skill copy it to
+`~/ops/site-private/skills/$name` instead, skip the first `ln -s`, and add it
+to `.githooks/private-paths` there.
 
 Never move a symlinked or tool-managed skill; when unsure, leave it in place.

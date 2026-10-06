@@ -12,8 +12,10 @@ description: >-
 
 # skill-everywhere — one skill, every local TUI
 
-The skill lives once, in `~/ops/site-private/skills/<name>/`. Every TUI gets a
-**symlink** to it, so editing the git copy updates every agent. Never copy: a
+The skill lives once, in git at `~/ops/site-djbclark/skills/<name>/`, and is
+reached at `~/ops/site-private/skills/<name>` (a symlink; the private skills
+`1password` and `tell-chief-of-staff` are real directories there). Every TUI gets a
+**symlink** to that `site-private` path, so editing the git copy updates every agent. Never copy: a
 copy drifts silently. `~/.agents/skills/handoff` is a symlink to the git
 copy. The stale copy is `~/.agents/skills/.trash/`. Grok walks that tree
 and can advertise the trash skill under the live name. Hide it with
@@ -28,8 +30,8 @@ and can advertise the trash skill under the live name. Hide it with
 ~/ops/site-private/bin/skill-everywhere --remove <name>... # undo
 ```
 
-If the skill is not in `site-private/skills/` yet, move it there first; see
-`skills/README.md`. The script skips TUIs that aren't installed. If a path
+If the skill is not reachable at `site-private/skills/<name>` yet, put it in
+place first; `skills/README.md` has the steps for a public and a private skill. The script skips TUIs that aren't installed. If a path
 already exists and isn't our link, the script leaves it alone and exits non-zero.
 Report that rather than overwriting it.
 
