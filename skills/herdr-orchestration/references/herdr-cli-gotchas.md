@@ -20,3 +20,11 @@ Last verified 2026-09-26.
   pane is dead; see djbclark-ade `docs/agent-sleep.md`).
 - Do not send a pane `/exit` while its composer holds unsent text — the
   draft is lost with the process.
+
+- **Keys sent before a prompt is on screen land in the agent's input box** (2026-10-06:
+  a digit meant for an AskUserQuestion that had not rendered yet sat in the Claude input
+  line as type-ahead). Read the screen first (`herdr agent read <pane> --source visible`,
+  which prints plain text, not JSON) and send only when the prompt is there.
+- **`herdr agent wait --until idle` timed out on a turn that had already finished**
+  (2026-10-06); `--until idle --until done` returned. To know a tool call was answered,
+  check the transcript for its result instead of the pane state.

@@ -206,7 +206,8 @@ copy). Ours: `bigteam` (fan-out across vendors by quota pool),
 `model-routing` (vendor/model/effort per task), `herdr-orchestration`
 (Herdr handoff chains), `ralph-tui-orchestration` (Ralph TUI + Beads),
 `cow-workspaces` (copy-on-write isolation), `tell-chief-of-staff`,
-`session-finder` (find the session on a topic across agents and say where it lives).
+`session-finder` (find the session on a topic across agents and say where it lives),
+`helm` (answer every waiting session's prompt from one window).
 Tool-managed, not in git: `orchestration`, `herdr`,
 `orca-per-workspace-env`. `/orc`, `/orc-meta`: commands in
 `site-private/claude/commands/`. Sub-agents `adversary`/`backend`/`ux`/

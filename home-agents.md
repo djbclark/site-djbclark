@@ -276,8 +276,9 @@ grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*)
 Before orchestrating other agents, reach for our skills (git copies in
 `site-djbclark/skills/<name>/`, linked into every TUI by `skill-everywhere`; edit the git
 copy): `bigteam`, `model-routing`, `herdr-orchestration`, `ralph-tui-orchestration`,
-`cow-workspaces`, `tell-chief-of-staff`, and `session-finder` (use it for every "tell the
-agent doing X" relay). Slash commands, sub-agents and the full list:
+`cow-workspaces`, `tell-chief-of-staff`, `session-finder` (use it for every "tell the
+agent doing X" relay), and `helm` (answer every waiting session's prompt from one
+window). Slash commands, sub-agents and the full list:
 [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
