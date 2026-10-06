@@ -134,8 +134,9 @@ sure vendors are automatically used again when more tokens become available"):
 
 1. **The grok vendor (xAI's SuperGrok subscription)** — excluded 2026-10-06,
    operator: "Stop using grok (the vendor) in /bigteams etc. for now. You can
-   still use grok models via several other vendors." End condition: until the
-   operator lifts it. Covers every route that bills SuperGrok: the `grok`
+   still use grok models via several other vendors." End condition: none —
+   permanent until the operator explicitly lifts it (confirmed 2026-10-06); don't
+   ask for an end date or re-check it per batch. Covers every route that bills SuperGrok: the `grok`
    TUI/CLI, `acp-run grok`, Ralph's `grok` plugin, and LiteLLM's `grok-sub`
    model (the `xai_oauth_bridge`). Grok *models* through another vendor's pool
    (opencode, cursor, copilot, …) stay allowed, under that pool's own rules
