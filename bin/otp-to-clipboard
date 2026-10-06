@@ -13,7 +13,7 @@ MessAuto (Messages/Mail only), notifwd (same DB trick).
 
   otp-to-clipboard             run the watcher (what the LaunchAgent does)
   otp-to-clipboard --selftest  check the extractor against sample texts
-  otp-to-clipboard --text      read one notification's text on stdin (used by the
+  otp-to-clipboard --text [--app NAME]  read one notification's text on stdin (used by the
                                push watcher otp-banner-watch, which reads banners
                                via the Accessibility API the instant they appear)
   otp-to-clipboard --once N    scan the newest N rows, print app + whether a
@@ -128,26 +128,32 @@ def copy(code):
           "p.declareTypesOwner(['public.utf8-plain-text','org.nspasteboard.ConcealedType'],null);"
           "p.setStringForType(t,'public.utf8-plain-text');p.setStringForType($(''),'org.nspasteboard.ConcealedType');")
     env = dict(os.environ, OTP_CODE=code)
-    r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", js], env=env,
-                       capture_output=True, timeout=15)
-    if r.returncode == 0:
-        return "concealed"
-    r = subprocess.run([os.path.expanduser("~/ops/site-private/bin/clip"), "-q"],
-                       input=code.encode(), capture_output=True, timeout=15)
-    return "clip" if r.returncode == 0 else "FAILED"
+    try:
+        r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", js], env=env,
+                           capture_output=True, timeout=5)
+        if r.returncode == 0:
+            return "concealed"
+    except subprocess.SubprocessError:
+        pass
+    try:
+        r = subprocess.run([os.path.expanduser("~/ops/site-private/bin/clip"), "-q"],
+                           input=code.encode(), capture_output=True, timeout=10)
+        return "clip" if r.returncode == 0 else "FAILED"
+    except subprocess.SubprocessError:
+        return "FAILED"
 
 
 SEEN = os.path.expanduser("~/.local/state/otp-to-clipboard/last_copied")
 
 
 def handle(text, source):
-    """Extract, dedupe across the DB and banner paths (same code within 120 s), copy."""
+    """Extract, dedupe across the DB and banner paths (same code within 30 s: the DB row lands ~6 s after the banner), copy."""
     code = extract(text)
     if not code:
         return
     try:
         prev_code, prev_t = open(SEEN).read().split()
-        if prev_code == code and time.time() - float(prev_t) < 120:
+        if prev_code == code and time.time() - float(prev_t) < 30:
             return
     except (OSError, ValueError):
         pass
@@ -223,7 +229,8 @@ def main():
     if "--selftest" in sys.argv:
         selftest()
     if "--text" in sys.argv:
-        handle(sys.stdin.read(), "banner")
+        app = sys.argv[sys.argv.index("--app") + 1] if "--app" in sys.argv else "?"
+        handle(sys.stdin.read(), "banner:" + app)
         return
     if "--once" in sys.argv:
         con = connect()
@@ -245,7 +252,9 @@ def main():
                 log("cannot read notification DB (%s); needs Full Disk Access for %s" % (e, sys.executable))
                 warned = True
             time.sleep(30)
-    try:
+    try:  # resume after a quick restart only; never replay old notifications into the clipboard
+        if time.time() - os.path.getmtime(STATE) > 120:
+            raise ValueError("stale")
         last = int(open(STATE).read().strip())
     except (OSError, ValueError):
         last = con.execute("select coalesce(max(rec_id),0) from record").fetchone()[0]
@@ -256,8 +265,8 @@ def main():
                 last = rec_id
                 handle(text, "db:" + app)
             open(STATE, "w").write(str(last))
-        except sqlite3.Error as e:
-            log("db error: %s" % e)
+        except Exception as e:  # never let one bad row or copy kill the watcher
+            log("loop error: %s: %s" % (type(e).__name__, e))
             try:
                 con.close()
                 con = connect()

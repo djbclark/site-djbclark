@@ -61,30 +61,37 @@ func bannerElements(_ el: AXUIElement, depth: Int = 0, into out: inout [AXUIElem
     for c in (attr(el, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { bannerElements(c, depth: depth + 1, into: &out) }
 }
 
-var seen: [String: Date] = [:]
+var present = Set<String>()   // banner texts visible on the previous tick
 var appEl: AXUIElement!
 
 func scan() {
     var banners: [AXUIElement] = []
     for w in (attr(appEl, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { bannerElements(w, into: &banners) }
+    var now = Set<String>()
     for b in banners {
         var all: [String] = []
         texts(b, into: &all)
         let text = all.joined(separator: "\n")
         guard !text.isEmpty else { continue }
-        seen = seen.filter { Date().timeIntervalSince($0.value) < 120 }
-        if seen[text] != nil { continue }
-        seen[text] = Date()
+        now.insert(text)
+        // Only a banner that was not on screen last tick is new. Keying on "newly
+        // appeared" (not a time window) means a banner that lingers in the stack never
+        // re-copies, while a genuinely re-sent identical code, after the old one is
+        // gone, does.
+        if present.contains(text) { continue }
         if dump { log("banner: \(all)") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        p.arguments = [extractor, "--text"]
+        // Banner description is "<App>, <title>, <body>": pass only the app name for the log.
+        let appName = (attr(b, kAXDescriptionAttribute) as? String)?.components(separatedBy: ", ").first ?? "?"
+        p.arguments = [extractor, "--text", "--app", appName]
         let pipe = Pipe()
         p.standardInput = pipe
         do { try p.run() } catch { log("spawn failed: \(error)"); continue }
         pipe.fileHandleForWriting.write(text.data(using: .utf8)!)
         try? pipe.fileHandleForWriting.close()
     }
+    present = now
 }
 
 func schedule() { scan() }

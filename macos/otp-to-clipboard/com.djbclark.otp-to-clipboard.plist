@@ -6,7 +6,7 @@
     <string>com.djbclark.otp-to-clipboard</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python</string>
         <string>/Users/djbclark/ops/site-djbclark/bin/otp-to-clipboard</string>
     </array>
     <key>RunAtLoad</key>
@@ -16,7 +16,9 @@
     <key>ThrottleInterval</key>
     <integer>30</integer>
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
     <key>StandardErrorPath</key>
     <string>/Users/djbclark/Library/Logs/otp-to-clipboard.launchd.log</string>
     <key>StandardOutPath</key>
