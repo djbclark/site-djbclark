@@ -141,6 +141,12 @@ sure vendors are automatically used again when more tokens become available"):
    model (the `xai_oauth_bridge`). Grok *models* through another vendor's pool
    (opencode, cursor, copilot, …) stay allowed, under that pool's own rules
    (prepaid ones like openrouter still need a fresh operator decision).
+   **Not enforced by tooling (verified 2026-10-06):** `aiuse --available`
+   still lists `provider: grok` as usable (skip it by hand), `acp-run --list`
+   still shows `grok`, and LiteLLM still puts `grok-sub` in other models'
+   fallback chains (`roles/litellm/templates/litellm-config.yaml.j2`,
+   gated by `litellm_xai_bridge_enabled`), so Hermes traffic can land there.
+   Pool state then: SuperGrok weekly 81% used / 19% left, resets 2026-10-08.
 
 ### Reserve pools — never run them out
 
