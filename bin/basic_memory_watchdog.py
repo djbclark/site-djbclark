@@ -17,6 +17,7 @@ This gives three Telegram outcomes, not an endless stream:
     sent once, then watchdog goes quiet on this incident until it recovers
     or state file is cleared)
 """
+
 import json
 import subprocess
 import sys
@@ -31,9 +32,11 @@ URL = "http://127.0.0.1:18796/mcp"
 HERMES_BIN = "/Users/djbclark/.local/bin/hermes"
 NOTIFY_TARGET = "telegram:838808636:22158"  # Inbox topic (per hermes-messaging skill)
 
-MAX_RESTART_ATTEMPTS = 3   # consecutive failed-then-restarted cycles before giving up
-ESCALATION_COOLDOWN_S = 3600 * 6  # don't re-escalate more than once per 6h while still down
-STARTUP_GRACE_S = 300  # Basic Memory can take several minutes to load its embedding model
+MAX_RESTART_ATTEMPTS = 3  # consecutive failed-then-restarted cycles before giving up
+# Don't re-escalate more than once per 6h while still down.
+ESCALATION_COOLDOWN_S = 3600 * 6
+# Basic Memory can take several minutes to load its embedding model.
+STARTUP_GRACE_S = 300
 
 
 def log(msg):
@@ -53,8 +56,18 @@ def load_state() -> dict:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
-        return {"status": "healthy", "consecutive_failures": 0, "last_escalation": 0, "attempts_since_healthy": 0}
-    return {"status": "healthy", "consecutive_failures": 0, "last_escalation": 0, "attempts_since_healthy": 0}
+        return {
+            "status": "healthy",
+            "consecutive_failures": 0,
+            "last_escalation": 0,
+            "attempts_since_healthy": 0,
+        }
+    return {
+        "status": "healthy",
+        "consecutive_failures": 0,
+        "last_escalation": 0,
+        "attempts_since_healthy": 0,
+    }
 
 
 def save_state(state):
@@ -64,15 +77,26 @@ def save_state(state):
 
 def health_check():
     """Real MCP initialize handshake, not a bare GET."""
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                   "clientInfo": {"name": "watchdog", "version": "1.0"}},
-    }).encode()
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "watchdog", "version": "1.0"},
+            },
+        }
+    ).encode()
     req = urllib.request.Request(
-        URL, data=payload, method="POST",
-        headers={"Content-Type": "application/json",
-                 "Accept": "application/json, text/event-stream"},
+        URL,
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
@@ -88,17 +112,22 @@ def health_check():
 
 def notify(text):
     try:
-        subprocess.run([HERMES_BIN, "send", "--to", NOTIFY_TARGET, text],
-                        timeout=30, check=False,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [HERMES_BIN, "send", "--to", NOTIFY_TARGET, text],
+            timeout=30,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except (OSError, subprocess.SubprocessError) as e:
         log(f"notify failed: {e!r}")
 
 
 def restart_service():
-    subprocess.run(["launchctl", "kickstart", "-k",
-                     f"gui/{__import__('os').getuid()}/{LABEL}"],
-                    check=False)
+    subprocess.run(
+        ["launchctl", "kickstart", "-k", f"gui/{__import__('os').getuid()}/{LABEL}"],
+        check=False,
+    )
 
 
 def main():
@@ -109,7 +138,12 @@ def main():
     if healthy:
         if state["status"] != "healthy":
             log("recovered")
-            notify("✅ Basic Memory MCP recovered and is responding again.")
+            # MCP clients connect once at session start and do not retry, so a session that
+            # started during the outage stays without basic-memory until it reconnects.
+            notify(
+                "✅ Basic Memory MCP recovered and is responding again. Agent sessions "
+                "started while it was down need /mcp -> reconnect basic-memory."
+            )
         state["status"] = "healthy"
         state["consecutive_failures"] = 0
         state["attempts_since_healthy"] = 0
@@ -120,7 +154,9 @@ def main():
     if state.get("status") == "down" and isinstance(last_restart_at, (int, float)):
         elapsed = now - last_restart_at
         if 0 <= elapsed < STARTUP_GRACE_S:
-            log(f"startup grace active ({STARTUP_GRACE_S - elapsed:.0f}s remaining); not restarting")
+            log(
+                f"startup grace active ({STARTUP_GRACE_S - elapsed:.0f}s remaining); not restarting"
+            )
             return
 
     # unhealthy
@@ -130,8 +166,10 @@ def main():
     if state.get("status") == "escalated":
         # already gave up this incident; only re-notify on a cooldown, no restarts
         if now - state.get("last_escalation", 0) > ESCALATION_COOLDOWN_S:
-            notify("⚠️ Basic Memory MCP is still down. Watchdog has stopped auto-restarting "
-                   "this incident (hit the retry limit) -- needs a manual look.")
+            notify(
+                "⚠️ Basic Memory MCP is still down. Watchdog has stopped auto-restarting "
+                "this incident (hit the retry limit) -- needs a manual look."
+            )
             state["last_escalation"] = now
         save_state(state)
         return
@@ -139,16 +177,20 @@ def main():
     attempts = state.get("attempts_since_healthy", 0)
     if attempts >= MAX_RESTART_ATTEMPTS:
         log("giving up -- escalating, will not auto-restart further")
-        notify(f"🛑 Basic Memory MCP failed to come back after {attempts} restart attempts. "
-               "Giving up auto-restart to avoid a crash loop -- needs manual investigation. "
-               f"(label: {LABEL}, port 18796)")
+        notify(
+            f"🛑 Basic Memory MCP failed to come back after {attempts} restart attempts. "
+            "Giving up auto-restart to avoid a crash loop -- needs manual investigation. "
+            f"(label: {LABEL}, port 18796)"
+        )
         state["status"] = "escalated"
         state["last_escalation"] = now
         save_state(state)
         return
 
     if state["status"] == "healthy":
-        notify("🔻 Basic Memory MCP went down (health check failed). Restarting it now...")
+        notify(
+            "🔻 Basic Memory MCP went down (health check failed). Restarting it now..."
+        )
 
     log(f"restarting (attempt {attempts + 1}/{MAX_RESTART_ATTEMPTS})")
     restart_service()
