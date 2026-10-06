@@ -337,9 +337,10 @@ def snapshot(state):
 
 def find(ident, state):
     ss, items = snapshot(state)
-    hits = [(s, it) for s, it in zip(ss, items) if s["id"] == ident or s["id"].startswith(ident) or s["name"] == ident]
+    # Exact id or session name only: a prefix once matched the wrong session.
+    hits = [(s, it) for s, it in zip(ss, items) if ident in (s["id"], s["name"])]
     if len(hits) != 1:
-        sys.exit(f"helm: {len(hits)} sessions match {ident!r}; ids: {', '.join(s['id'] for s in ss)}")
+        sys.exit(f"helm: no session with id or name {ident!r}; ids: {', '.join(s['id'] for s in ss)}")
     return hits[0]
 
 
