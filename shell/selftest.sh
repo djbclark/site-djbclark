@@ -263,6 +263,7 @@ check_resolves adb /opt/homebrew/bin
 check_resolves sqlite3 /usr/bin
 check_resolves grok  "$HOME/.local/bin"
 check_resolves opencode "$HOME/.opencode/bin"
+check_resolves codex "$HOME/.opencodex/bin"   # opencodex 2.78+ shim beats the native launcher
 check_resolves aiuse "$HOME/.local/bin"
 
 # The Orca defect of 2026-08-21: panes inherit the daemon's PATH, where
