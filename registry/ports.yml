@@ -197,6 +197,9 @@ hosts:
       - {port: 8384,  bind: "127.0.0.1", owner: unmanaged, service: syncthing-gui,        status: active,
          must_be_up: false,  # personal Syncthing.app GUI; unmanaged never pages
          note: "2026-10-05: Syncthing.app loopback GUI. Personal file-sync, not a site/stayturgid service."}
+      - {port: 10100, bind: "127.0.0.1", owner: unmanaged, service: opencodex-dashboard,  status: active,
+         must_be_up: false,  # OpenCodex CLI proxy dashboard; unmanaged never pages
+         note: "2026-10-05: bun @bitkyc08/opencodex start --port 10100. Loopback proxy dashboard; not stayturgid opencode-web :4096."}
       - {port: 7265,  bind: "127.0.0.1", owner: unmanaged, service: raycast-helper,       status: active}
       - {port: 44438, bind: "127.0.0.1", owner: unmanaged, service: zed-editor-helper,     status: active}
       - {port: 59869, bind: "*",         owner: unmanaged, service: logi-options-daemon,  status: active}
