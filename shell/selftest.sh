@@ -257,7 +257,10 @@ check_resolves() {  # name expected-prefix
 }
 check_resolves brew  /opt/homebrew/bin
 check_resolves cargo /opt/homebrew/opt/rustup/bin
-check_resolves_contains adb "platform-tools"
+# Android SDK tools are appended, not prepended (2026-10-06): its old sqlite3 must
+# not shadow macOS sqlite3, and adb comes from Homebrew (same release).
+check_resolves adb /opt/homebrew/bin
+check_resolves sqlite3 /usr/bin
 check_resolves grok  "$HOME/.local/bin"
 check_resolves opencode "$HOME/.opencode/bin"
 check_resolves aiuse "$HOME/.local/bin"

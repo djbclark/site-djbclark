@@ -290,8 +290,6 @@ __path_prepend_force \
   "$HOME/.bun/bin" \
   "$HOME/.cargo/bin" \
   ${JAVA_HOME:+"$JAVA_HOME/bin"} \
-  "${ANDROID_HOME}/platform-tools" \
-  "${ANDROID_HOME}/cmdline-tools/latest/bin" \
   "$HOME/.maestro/bin" \
   "$HOME/.grok/bin"
 
@@ -304,6 +302,18 @@ __path_append /usr/local/bin /usr/bin /bin /usr/sbin /sbin
 
 # Appended, so packaged tools (e.g. Bun's `bd`) take priority over these.
 __path_append "$HOME/go/bin" "$HOME/.dotnet/tools"
+
+# Android SDK tools go LAST (2026-10-06). Prepended, the SDK's older sqlite3
+# (3.50) shadowed macOS's (3.54); adb is the same release in Homebrew's cask,
+# which also stays put when the USB stick is unmounted. Strip any inherited copy
+# first so the order holds in shells that inherit an older PATH.
+if [ -n "${ANDROID_HOME-}" ]; then
+  PATH=":$PATH:"
+  PATH="${PATH//:"$ANDROID_HOME/platform-tools":/:}"
+  PATH="${PATH//:"$ANDROID_HOME/cmdline-tools/latest/bin":/:}"
+  PATH="${PATH#:}"; PATH="${PATH%:}"
+  __path_append "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/cmdline-tools/latest/bin"
+fi
 
 # -----------------------------------
 
