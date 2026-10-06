@@ -226,13 +226,10 @@ status|set night --until 07:00|low`; default `low`: 2 workers, JVMs see 2 CPUs).
 `bg` waits at load/core > 1.5; see `docs/gradle-limits.md`. Why:
 [[project_machine_load_diagnosis_2026-10-04]].
 
-**One Gradle build at a time, machine-wide** (standing rule, 2026-10-06; 9
-parallel worktree test runs filled 14/15 GB of swap at load 224). Before starting
-one, check `pgrep -fl GradleWrapperMain`; if another runs, wait. A build that sits
-at start printing "Waiting for the machine-wide Gradle slot" is queued, not hung:
-don't kill or retry it (`~/.local/state/gradle-slot/STATUS`). **Never SIGSTOP
-another agent's process:** its shell moves past the stopped job and the harness
-reaps the tree (8 builds lost). (`memory/feedback_gradle_one_at_a_time.md`)
+**One Gradle build at a time, machine-wide** (2026-10-06): check `pgrep -fl
+GradleWrapperMain` first. "Waiting for the machine-wide Gradle slot" means queued,
+not hung. Never SIGSTOP another agent's process (the harness reaps it).
+(`memory/feedback_gradle_one_at_a_time.md`)
 
 ## Code discovery — symbol tools before `cat`/`rg` (2026-10-03)
 
