@@ -24,11 +24,14 @@
 # BG_LOAD_WAIT=0, or a busy machine holds the test for the full 15 minutes.
 #
 # Gradle slots: a command that runs gradle or gradlew (also behind `env VAR=… ./gradlew`) takes
-# one of BG_GRADLE_SLOTS machine-wide slots (default 2) for its whole run, waiting up to
+# one of BG_GRADLE_SLOTS machine-wide slots (default 1) for its whole run, waiting up to
 # BG_GRADLE_WAIT seconds (default 1800) for one, then starts anyway. On 2026-10-06 eight agents
 # built at once, each worktree started its own daemon, and the 16 GB Mac went 11 GB into swap.
 # A slot is a shlock(1) file holding the build's pid (exec keeps the pid), so a killed build
-# frees its slot. --stop/--status/--version don't take one. BG_GRADLE_SLOTS=0 disables it.
+# frees its slot. --stop/--status/--version don't take one. BG_GRADLE_SLOTS=0 disables it
+# (don't advertise that in messages agents see: they'd bypass the queue). Every build is also
+# gated inside Gradle by gradle/init.d/machine-slot.gradle (one at a time, all callers); this
+# slot just waits before a JVM starts, so a queued bg build costs no idle daemon.
 #
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
@@ -66,7 +69,7 @@ if [ "$wait_s" -gt 0 ]; then
   done
 fi
 
-slots="${BG_GRADLE_SLOTS:-2}"
+slots="${BG_GRADLE_SLOTS:-1}"
 if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
   slot_dir="$HOME/.local/state/bg/gradle-slots"
   mkdir -p "$slot_dir"
@@ -84,7 +87,7 @@ if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
     fi
     if [ "$waited" -eq 0 ]; then
       held=$(cat "$slot_dir"/slot.* 2>/dev/null | tr '\n' ' ')
-      echo "bg: all $slots Gradle slots busy (pids $held); waiting (BG_GRADLE_SLOTS=0 to skip)" >&2
+      echo "bg: waiting for the machine-wide Gradle slot (held by pid $held); this is normal, do not kill or retry" >&2
     fi
     sleep 10
     waited=$((waited + 10))

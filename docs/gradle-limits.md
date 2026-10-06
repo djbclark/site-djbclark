@@ -20,8 +20,17 @@ several agents building at once everything slowed down.
 4. **Gradle slots in `bg`**: a `bg` command that runs `gradle`/`gradlew` (also behind
    `env VAR=… ./gradlew`) takes one of `BG_GRADLE_SLOTS` machine-wide slots (default 2) for its
    whole run, waiting up to `BG_GRADLE_WAIT` seconds (default 1800). Slots are `shlock` files
-   under `~/.local/state/bg/gradle-slots/`; a dead pid frees its slot. Only builds started
-   through `bg` are counted, so an agent calling `./gradlew` directly bypasses the cap.
+   under `~/.local/state/bg/gradle-slots/`; a dead pid frees its slot. It waits before any
+   JVM starts, so a queued build costs nothing; builds outside `bg` are caught by item 5.
+5. **Machine-wide Gradle slot** (`gradle/init.d/machine-slot.gradle`, linked into every Gradle
+   home's `init.d` by `gradle-limits link`): **one Gradle build at a time on the machine**, for
+   every caller (plain `./gradlew`, `--no-daemon`, IDE syncs, any agent). At build start it
+   takes an OS file lock on `~/.local/state/gradle-slot/slot.lock`, printing "Waiting for the
+   machine-wide Gradle slot …" every 60 s and writing the holder to `STATUS`. It's released at
+   build end, or by the OS if the JVM dies; after 90 min of waiting a build starts anyway.
+   Added 2026-10-06 after 9 concurrent `--no-daemon` runs outside `bg` took the load to 224.
+   For djbclark only, not for agent-facing text: `GRADLE_SLOT=off` skips the gate for one
+   build. A waiting build already has a JVM (~200 MB), which is far cheaper than thrashing.
 
 ## Memory (2026-10-06)
 

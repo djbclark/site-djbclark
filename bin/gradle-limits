@@ -41,6 +41,14 @@ link_homes() {
     if [ -e "$dst" ] && [ ! -L "$dst" ]; then echo "SKIP    $dst is a real file; merge it into a profile first" >&2; continue; fi
     ln -sfn "$live" "$dst" && echo "linked  $dst"
   done
+  # The machine-wide one-build-at-a-time slot (gradle/init.d/machine-slot.gradle).
+  local slot="$repo/gradle/init.d/machine-slot.gradle"
+  for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
+    mkdir -p "$h/init.d"
+    dst="$h/init.d/machine-slot.gradle"
+    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$slot" ]; then echo "ok      $dst"; continue; fi
+    ln -sfn "$slot" "$dst" && echo "linked  $dst"
+  done
 }
 
 until_epoch() { # HH:MM today, or tomorrow if already past

@@ -1,0 +1,90 @@
+// Machine-wide Gradle slot: one Gradle build at a time on this Mac (djbclark, 2026-10-06).
+//
+// Linked into every Gradle home's init.d by `gradle-limits link`, so it gates every build
+// that uses those homes: plain ./gradlew, --no-daemon, bg, IDE syncs, any worktree, any agent.
+// On 2026-10-06, 9 concurrent `./gradlew --no-daemon` runs drove the load to 224 and swap to
+// 14 of 15 GB; a `bg` slot cap didn't help because the builds didn't go through bg.
+//
+// How: at the start of a build, take an OS file lock (FileChannel.tryLock) on
+// ~/.local/state/gradle-slot/slot.lock, retrying every 2 s and printing a note every 60 s.
+// The holder's pid, project dir and tasks go into STATUS next to it. A BuildService releases
+// the lock in close() at the end of the build; if the JVM dies, the OS releases it.
+//
+//   GRADLE_SLOT=off     skip the gate for one build (env of the gradle/gradlew call)
+//   GRADLE_SLOT_DIR=…   use another lock dir (tests)
+// After 90 min of waiting the build starts anyway with a warning, so a leaked lock can't wedge
+// the machine. Never pause (SIGSTOP) another agent's build: its harness reaps the tree.
+// A config-cache hit skips init scripts, so such a build isn't gated (Pastiera doesn't
+// enable the config cache).
+
+import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
+import java.nio.channels.OverlappingFileLockException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
+import java.time.Instant
+import org.gradle.api.logging.Logging
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+
+abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.None>, AutoCloseable {
+    private FileChannel channel
+    private FileLock lock
+    private boolean done
+
+    synchronized void acquire(String who) {
+        if (done) return            // an included build in the same build tree
+        done = true
+        def log = Logging.getLogger('machine-gradle-slot')
+        def env = System.getenv('GRADLE_SLOT_DIR')
+        Path dir = env ? Paths.get(env) : Paths.get(System.getProperty('user.home'), '.local', 'state', 'gradle-slot')
+        Files.createDirectories(dir)
+        Path status = dir.resolve('STATUS')
+        channel = FileChannel.open(dir.resolve('slot.lock'), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        long start = System.currentTimeMillis()
+        long lastNote = 0
+        while (true) {
+            try {
+                lock = channel.tryLock()
+            } catch (OverlappingFileLockException ignored) {
+                // This JVM already holds it (a nested build); don't wait on ourselves.
+                channel.close(); channel = null
+                return
+            }
+            if (lock != null) break
+            long now = System.currentTimeMillis()
+            if (now - start > 90L * 60 * 1000) {
+                log.warn("machine-gradle-slot: waited 90 min for the Gradle slot; starting anyway. Holder: ${read(status)}")
+                channel.close(); channel = null
+                return
+            }
+            if (now - lastNote >= 60_000) {
+                lastNote = now
+                log.lifecycle("Waiting for the machine-wide Gradle slot (one build at a time); held by ${read(status)}. " +
+                    "This is normal; do not kill or retry. See ${status}.")
+            }
+            Thread.sleep(2000)
+        }
+        Files.write(status, "${ProcessHandle.current().pid()} ${who} since ${Instant.now()}\n".getBytes('UTF-8'))
+        long waited = (System.currentTimeMillis() - start).intdiv(1000)
+        if (waited >= 5) log.lifecycle("machine-gradle-slot: got the Gradle slot after ${waited} s")
+    }
+
+    private static String read(Path p) {
+        try { return new String(Files.readAllBytes(p), 'UTF-8').trim() } catch (Exception ignored) { return '?' }
+    }
+
+    @Override
+    void close() {
+        try { lock?.release() } catch (Exception ignored) { }
+        try { channel?.close() } catch (Exception ignored) { }
+    }
+}
+
+if (System.getenv('GRADLE_SLOT') != 'off') {
+    def sp = gradle.startParameter
+    def who = "${sp.currentDir} ${sp.taskNames.join(' ')}".trim()
+    gradle.sharedServices.registerIfAbsent('machineGradleSlot', MachineGradleSlot) { }.get().acquire(who)
+}
