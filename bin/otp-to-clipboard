@@ -10,6 +10,9 @@ MessAuto (Messages/Mail only), notifwd (same DB trick).
 
   otp-to-clipboard             run the watcher (what the LaunchAgent does)
   otp-to-clipboard --selftest  check the extractor against sample texts
+  otp-to-clipboard --text      read one notification's text on stdin (used by the
+                               push watcher otp-banner-watch, which reads banners
+                               via the Accessibility API the instant they appear)
   otp-to-clipboard --once N    scan the newest N rows, print app + whether a
                                code was found (never the code), copy nothing
 
@@ -78,6 +81,26 @@ def copy(code):
     return "clip" if r.returncode == 0 else "FAILED"
 
 
+SEEN = os.path.expanduser("~/.local/state/otp-to-clipboard/last_copied")
+
+
+def handle(text, source):
+    """Extract, dedupe across the DB and banner paths (same code within 120 s), copy."""
+    code = extract(text)
+    if not code:
+        return
+    try:
+        prev_code, prev_t = open(SEEN).read().split()
+        if prev_code == code and time.time() - float(prev_t) < 120:
+            return
+    except (OSError, ValueError):
+        pass
+    how = copy(code)
+    os.makedirs(os.path.dirname(SEEN), exist_ok=True)
+    open(SEEN, "w").write("%s %f" % (code, time.time()))
+    log("copied code (len %d) via %s [%s]" % (len(code), source, how))
+
+
 def rows(con, after_id, limit=None):
     q = "select r.rec_id, a.identifier, r.data from record r left join app a on a.app_id=r.app_id where r.rec_id>? order by r.rec_id"
     cur = con.execute(q, (after_id,))
@@ -123,6 +146,9 @@ def selftest():
 def main():
     if "--selftest" in sys.argv:
         selftest()
+    if "--text" in sys.argv:
+        handle(sys.stdin.read(), "banner")
+        return
     if "--once" in sys.argv:
         con = connect()
         n = int(sys.argv[sys.argv.index("--once") + 1])
@@ -152,10 +178,7 @@ def main():
         try:
             for rec_id, app, text in rows(con, last):
                 last = rec_id
-                code = extract(text)
-                if code:
-                    how = copy(code)
-                    log("copied code (len %d) from %s [%s]" % (len(code), app, how))
+                handle(text, "db:" + app)
             open(STATE, "w").write(str(last))
         except sqlite3.Error as e:
             log("db error: %s" % e)
