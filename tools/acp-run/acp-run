@@ -1,0 +1,382 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["agent-client-protocol>=0.9"]
+# ///
+"""Run one prompt through a coding agent over the Agent Client Protocol (ACP).
+
+    acp-run <agent> [-C DIR] [-p PROMPT | -f FILE | stdin] [--perm POLICY]
+            [--model M] [--mode M] [--set ID=VALUE]... [--timeout SECS]
+            [--log PATH] [--json] [--handshake-tries N] [--no-fallback]
+    acp-run --list            agents and the command each one runs
+    acp-run <agent> --info    initialize + session/new only; print modes,
+                              config options (models) and auth methods
+
+The agent's final message goes to stdout. A summary line goes to stderr
+(stop reason, seconds, tool calls, permissions, tokens, cost, log path). Every
+ACP event is logged as JSONL; the default log is under ~/.local/state/acp-run/.
+
+--perm decides each session/request_permission the agent sends:
+    all              allow everything (default)
+    deny             refuse everything (read-only review)
+    scoped:P1,P2     allow reads, searches, fetches, thinking and commands;
+                     allow edit/delete/move only when every path the tool call
+                     names is under one of P1,P2 (relative to -C); refuse the rest
+--set applies any config option --info lists (e.g. --set provider=cline-pass).
+Some agents get defaults (DEFAULT_SET below): cline always runs on cline-pass.
+Agents decide what to ask about: some auto-allow by their own settings (use
+--mode to pick a stricter one; --info lists the modes).
+
+Exit codes: 0 end_turn with some output; 1 other stop reason, agent error, or an
+empty reply (no text, no tool calls); 2 usage error;
+124 timed out (session/cancel sent first, then the process is killed).
+"""
+import argparse, asyncio, json, logging, os, shutil, subprocess, sys, time
+from pathlib import Path
+
+from acp import PROTOCOL_VERSION, Client, RequestError, connect_to_agent
+from acp.schema import (AgentMessageChunk, AllowedOutcome, ClientCapabilities,
+                        DeniedOutcome, Implementation, RequestPermissionResponse,
+                        TextContentBlock)
+
+# name: (command, auth method id or None). DEFAULT_SET holds ACP session config
+# options always applied for an agent (before --set): its ACP mode can ignore
+# the TUI's own settings. Verified 2026-10-03 unless noted;
+# see site-djbclark/research/acp-trial/ and memory/reference_acp_support_*.md.
+AGENTS = {
+    "claude":   (["claude-agent-acp"], None),        # npm -g @agentclientprotocol/claude-agent-acp
+    "codex":    (["codex-acp"], None),               # npm -g @agentclientprotocol/codex-acp
+    "copilot":  (["copilot", "--acp"], None),
+    "opencode": (["opencode", "acp"], None),
+    "cursor":   (["cursor-agent", "acp"], "cursor_login"),
+    "qwen":     (["qwen", "--acp"], None),
+    "devin":    (["devin", "acp"], None),
+    "cline":    (["cline", "--acp"], None),
+    "hermes":   (["hermes", "acp"], None),
+    "agy":      ([os.path.expanduser("~/.local/share/agy-acp-server/1.3.0/agy_acp_server.par")], None),  # Google LLC signed; registry antigravity-acp (dl.google.com)
+    "grok":     (["grok", "agent", "--always-approve", "stdio"], None),  # native ACP; xAI registry entry grok-build (a reserve pool: GrokBot)
+}
+DEFAULT_SET = {
+    # cline's ACP mode defaults to provider "cline" (paid Cline account) even
+    # though the TUI is set up for ClinePass; djbclark uses cline-pass.
+    "cline": {"provider": "cline-pass"},
+}
+# djbclark 2026-10-03: "yolo or equivalent should be default for all agents,
+# and all agents called from other agents". Applied unless the caller asks for
+# gating with --perm scoped:/deny (those need the agent to send permission
+# requests), and always overridable with --mode/--set. Values are the agent's
+# own mode ids from `acp-run <agent> --info`; agents missing here have no
+# auto-approve mode (opencode, cursor, cline, hermes) and follow their own
+# settings, or take a flag instead (grok: --always-approve in AGENTS).
+YOLO_SET = {
+    "claude":  {"mode": "bypassPermissions"},
+    "codex":   {"mode": "agent-full-access"},
+    "copilot": {"mode": "https://agentclientprotocol.com/protocol/session-modes#autopilot"},
+    "qwen":    {"mode": "yolo"},
+    "devin":   {"mode": "bypass"},
+    "agy":     {"mode": "yolo"},
+}
+# Launch-command variants for agents whose ACP session has no auto-approve mode
+# but whose CLI takes a flag (audited 2026-10-03: cline --auto-approve true is
+# its documented switch; opencode's --auto belongs to the root command, not
+# `acp`, and breaks it, but opencode's default already allows in-workspace
+# work). Applied under the same condition as YOLO_SET.
+YOLO_CMD = {
+    "cline":    ["cline", "--acp", "--auto-approve", "true"],
+}
+# Extra environment per agent. agy's ACP server runs the user's global hooks in
+# ~/.gemini/config/hooks.json (Orca/Moshi status hooks); the Orca PreToolUse
+# hook makes every tool call fail there ("External hook 'orca-status' failed to
+# execute"). GEMINI_HOME points it at a shadow home that symlinks everything
+# in ~/.gemini (login included) except an empty hooks.json. See
+# ensure_agy_home() and memory/reference_acp_adapter_vetting_2026-10-03.md.
+READ_KINDS = {"read", "search", "fetch", "think", "switch_mode", "other", "execute"}
+
+
+def dump(o):
+    if isinstance(o, (list, tuple)):
+        return [dump(x) for x in o]
+    return o.model_dump(mode="json", by_alias=True, exclude_none=True) if hasattr(o, "model_dump") else o
+
+
+class RunClient(Client):
+    def __init__(self, log, perm, root):
+        self.log, self.perm, self.root = log, perm, root
+        self.text, self.tools, self.allowed, self.denied, self.usage = [], 0, 0, 0, None
+
+    def rec(self, kind, data):
+        self.log.write(json.dumps({"t": round(time.time(), 3), "kind": kind, "data": data}) + "\n")
+        self.log.flush()
+
+    def decide(self, tool_call):
+        if self.perm == "all":
+            return True
+        if self.perm == "deny":
+            return False
+        kind = getattr(tool_call, "kind", None) or "other"
+        if kind in READ_KINDS:
+            return True
+        paths = [Path(l.path) for l in (getattr(tool_call, "locations", None) or [])]
+        if not paths:
+            return False
+        scopes = [(self.root / s).resolve() for s in self.perm.split(":", 1)[1].split(",") if s]
+        return all(any(p.resolve().is_relative_to(s) for s in scopes) for p in paths)
+
+    async def request_permission(self, session_id, tool_call, options, **kw):
+        ok = self.decide(tool_call)
+        want = ("allow_once", "allow_always") if ok else ("reject_once", "reject_always")
+        pick = next((o for o in options if o.kind in want), None)
+        self.rec("permission", {"tool_call": dump(tool_call), "options": [dump(o) for o in options],
+                                "decision": "allow" if ok else "deny"})
+        if ok and pick:
+            self.allowed += 1
+            return RequestPermissionResponse(outcome=AllowedOutcome(outcome="selected", option_id=pick.option_id))
+        self.denied += 1
+        if pick:
+            return RequestPermissionResponse(outcome=AllowedOutcome(outcome="selected", option_id=pick.option_id))
+        return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+
+    async def session_update(self, session_id, update, **kw):
+        self.rec("update", dump(update))
+        kind = getattr(update, "session_update", "")
+        if isinstance(update, AgentMessageChunk) and isinstance(update.content, TextContentBlock):
+            self.text.append(update.content.text)
+        elif kind == "tool_call":
+            self.tools += 1
+        elif kind == "usage_update":
+            self.usage = dump(update)
+
+    async def ext_method(self, method, params):
+        raise RequestError.method_not_found(method)
+
+    async def ext_notification(self, method, params):
+        pass
+
+
+def pick_config(options, want, category):
+    """Find a select config option (e.g. category 'model') and the value matching want."""
+    for opt in options or []:
+        o = dump(opt)
+        if o.get("id") != category and o.get("category") != category:
+            continue
+        values = []
+        for v in o.get("options", []):
+            values += v.get("options", [v]) if "options" in v else [v]
+        for v in values:
+            if want in (v.get("value"), v.get("name")):
+                return o["id"], v["value"]
+        raise SystemExit(f"acp-run: no {category} '{want}'; have: "
+                         + ", ".join(str(v.get("value")) for v in values))
+    raise SystemExit(f"acp-run: agent offers no '{category}' config option (try --info)")
+
+
+def ensure_agy_home() -> str:
+    """Shadow ~/.gemini with symlinks to everything but hooks.json (see YOLO_SET note)."""
+    src, dst = Path.home() / ".gemini", Path.home() / ".local/share/agy-acp-home"
+    (dst / "config").mkdir(parents=True, exist_ok=True)
+    hooks = dst / "config" / "hooks.json"
+    if not hooks.exists():
+        hooks.write_text("{}\n")
+    for base, tgt in ((src, dst), (src / "config", dst / "config")):
+        for f in base.iterdir():
+            link = tgt / f.name
+            if f.name == "config" and base == src or f.name.startswith("hooks.json"):
+                continue
+            if not link.is_symlink() and not link.exists():
+                link.symlink_to(f)
+    return str(dst)
+
+
+async def _kill(proc):
+    if proc is None or proc.returncode is not None:
+        return
+    proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), 5)
+    except asyncio.TimeoutError:
+        proc.kill()
+        try:
+            await asyncio.wait_for(proc.wait(), 5)
+        except asyncio.TimeoutError:
+            pass
+
+
+def fallback_cli(a) -> int:
+    """Headless CLI when ACP handshake hangs (claude-agent-acp session/new)."""
+    if a.agent != "claude":
+        return 1
+    model = a.model or "sonnet"
+    cmd = ["claude", "-p", a.prompt_text, "--model", model]
+    if a.perm == "all":
+        cmd.append("--dangerously-skip-permissions")
+    print("acp-run: ACP handshake failed; fallback to claude CLI", file=sys.stderr)
+    return subprocess.run(cmd, cwd=str(Path(a.dir).resolve())).returncode
+
+
+async def run(a):
+    cmd, auth = AGENTS[a.agent]
+    auth = a.auth or auth
+    if a.perm == "all" and not a.mode and a.agent in YOLO_CMD:
+        cmd = YOLO_CMD[a.agent]
+    if not shutil.which(cmd[0]):
+        raise SystemExit(f"acp-run: {cmd[0]} not installed")
+    root = Path(a.dir).resolve()
+    state = Path.home() / ".local/state/acp-run"
+    state.mkdir(parents=True, exist_ok=True)
+    log_path = Path(a.log) if a.log else state / f"{time.strftime('%Y%m%d-%H%M%S')}-{a.agent}-{os.getpid()}.jsonl"
+    log = open(log_path, "w")
+    err = open(log_path.with_suffix(".stderr"), "w")
+    env = dict(os.environ)
+    if a.agent == "agy":
+        env["GEMINI_HOME"] = ensure_agy_home()
+    t0, out, code = time.time(), {"agent": a.agent, "log": str(log_path)}, 1
+    handshake_timeout = 40
+    tries = max(1, a.handshake_tries)
+    proc = client = conn = init = sess = None
+    for attempt in range(1, tries + 1):
+        proc = await asyncio.create_subprocess_exec(*cmd, cwd=root, env=env, stdin=asyncio.subprocess.PIPE,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=err,
+                                                    limit=64 * 1024 * 1024)
+        client = RunClient(log, a.perm, root)
+        conn = connect_to_agent(client, proc.stdin, proc.stdout)
+        try:
+            init = await asyncio.wait_for(conn.initialize(
+                protocol_version=PROTOCOL_VERSION, client_capabilities=ClientCapabilities(),
+                client_info=Implementation(name="acp-run", title="acp-run", version="1")), handshake_timeout)
+            client.rec("initialize", dump(init))
+            if auth:
+                await asyncio.wait_for(conn.authenticate(method_id=auth), 300)
+            sess = await asyncio.wait_for(conn.new_session(mcp_servers=[], cwd=str(root)), handshake_timeout)
+            client.rec("new_session", dump(sess))
+            break
+        except asyncio.TimeoutError:
+            client.rec("handshake_timeout", {"attempt": attempt, "tries": tries})
+            print(f"acp-run: handshake timeout attempt {attempt}/{tries}", file=sys.stderr)
+            await _kill(proc)
+            proc = None
+    else:
+        out["error"] = f"TimeoutError: handshake after {tries} tries (session/new hung)"
+        if not a.no_fallback and a.agent == "claude" and not a.info:
+            log.close()
+            err.close()
+            return fallback_cli(a)
+        code = 124
+    try:
+        if proc is None:
+            pass
+        elif a.info:
+            print(json.dumps({"agent": dump(init.agent_info), "auth_methods": dump(init.auth_methods),
+                              "modes": dump(sess.modes), "config_options": dump(sess.config_options)}, indent=1))
+            return 0
+        else:
+            if a.mode:
+                await conn.set_session_mode(session_id=sess.session_id, mode_id=a.mode)
+            sets = dict(DEFAULT_SET.get(a.agent, {}))
+            if a.perm == "all" and not a.mode:
+                sets.update(YOLO_SET.get(a.agent, {}))
+            sets.update(kv.split("=", 1) for kv in a.set)
+            for key, want in sets.items():  # provider before model: models depend on it
+                cid, val = pick_config(sess.config_options, want, key)
+                await conn.set_config_option(config_id=cid, session_id=sess.session_id, value=val)
+                client.rec("set_config", {"id": cid, "value": val})
+            if a.model:
+                cid, val = pick_config(sess.config_options, a.model, "model")
+                await conn.set_config_option(config_id=cid, session_id=sess.session_id, value=val)
+            task = asyncio.ensure_future(conn.prompt(session_id=sess.session_id,
+                                                     prompt=[TextContentBlock(type="text", text=a.prompt_text)]))
+            try:
+                resp = await asyncio.wait_for(asyncio.shield(task), a.timeout)
+                out["stop_reason"] = resp.stop_reason
+                if resp.usage:
+                    out["usage"] = dump(resp.usage)
+                code = 0 if resp.stop_reason == "end_turn" else 1
+            except asyncio.TimeoutError:
+                await conn.cancel(session_id=sess.session_id)
+                try:
+                    resp = await asyncio.wait_for(task, 15)
+                    out["stop_reason"] = resp.stop_reason
+                except Exception:
+                    out["stop_reason"] = "timeout"
+                code = 124
+    except SystemExit:
+        raise
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"[:500]
+    finally:
+        logging.disable(logging.CRITICAL)  # a half-written line at shutdown is noise
+        await _kill(proc)
+    if client is None:
+        out.update(seconds=round(time.time() - t0, 1), tool_calls=0, permissions={"allowed": 0, "denied": 0})
+        print("acp-run: " + f"agent={a.agent} stop=error secs={out['seconds']} error={out.get('error')!r} log={log_path}", file=sys.stderr)
+        return code
+    if client.usage:
+        out["usage_update"] = client.usage
+    out.update(seconds=round(time.time() - t0, 1), tool_calls=client.tools,
+               permissions={"allowed": client.allowed, "denied": client.denied})
+    text = "".join(client.text)
+    if code == 0 and not text.strip() and client.tools == 0:
+        code, out["error"] = 1, "empty reply: end_turn with no text and no tool calls"
+    if a.json:
+        print(json.dumps({**out, "text": text}, indent=1))
+    else:
+        sys.stdout.write(text + ("\n" if text and not text.endswith("\n") else ""))
+        u = out.get("usage") or {}
+        cost = (client.usage or {}).get("cost", {}).get("amount")
+        bits = [f"agent={a.agent}", f"stop={out.get('stop_reason', 'error')}", f"secs={out['seconds']}",
+                f"tools={client.tools}", f"perm={client.allowed}+/{client.denied}-"]
+        tok = u.get("totalTokens") or u.get("total_tokens")
+        if tok:
+            bits.append(f"tokens={tok}")
+        if cost is not None:
+            bits.append(f"cost=${cost:.4f}")
+        if "error" in out:
+            bits.append(f"error={out['error']!r}")
+        print("acp-run: " + " ".join(bits) + f" log={log_path}", file=sys.stderr)
+    return code
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="acp-run", description=__doc__.split("\n")[0])
+    ap.add_argument("agent", nargs="?")
+    ap.add_argument("-C", "--dir", default=".")
+    ap.add_argument("-p", "--prompt")
+    ap.add_argument("-f", "--prompt-file")
+    ap.add_argument("--perm", default="all")
+    ap.add_argument("--model")
+    ap.add_argument("--mode")
+    ap.add_argument("--set", action="append", default=[], metavar="ID=VALUE",
+                    help="set an ACP session config option (see --info); repeatable")
+    ap.add_argument("--timeout", type=float, default=1800)
+    ap.add_argument("--auth", help="ACP auth method id to authenticate with (see --info), overriding the agent default; e.g. agy: oauth-personal")
+    ap.add_argument("--log")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--info", action="store_true")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--handshake-tries", type=int, default=2,
+                    help="ACP initialize+session/new attempts before fallback (default 2)")
+    ap.add_argument("--no-fallback", action="store_true",
+                    help="do not fall back to the agent's CLI if ACP handshake hangs")
+    a = ap.parse_args()
+    if a.list:
+        for n, (c, auth) in AGENTS.items():
+            ok = "ok " if shutil.which(c[0]) else "-- "
+            print(f"{ok}{n:9} {' '.join(c)}" + (f"  (auth {auth})" if auth else ""))
+        return 0
+    if a.agent not in AGENTS:
+        ap.error(f"agent must be one of: {', '.join(AGENTS)}")
+    if not (a.perm in ("all", "deny") or a.perm.startswith("scoped:")):
+        ap.error("--perm must be all, deny or scoped:PATH[,PATH...]")
+    if not a.info:
+        if a.prompt_file:
+            a.prompt_text = Path(a.prompt_file).read_text()
+        elif a.prompt:
+            a.prompt_text = a.prompt
+        elif not sys.stdin.isatty():
+            a.prompt_text = sys.stdin.read()
+        else:
+            ap.error("give a prompt with -p, -f or stdin")
+    return asyncio.run(run(a))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
