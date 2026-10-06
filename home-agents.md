@@ -197,18 +197,25 @@ queued, not hung), capped by `bin/gradle-limits` (`docs/gradle-limits.md`).
 
 ## Code discovery — symbol tools before `cat`/`rg` (2026-10-03)
 
-**`graft` is the navigator in every repo** (`graft build` first if a repo has no
-`graft/`: free, no API key, seconds). Use graft or `token-savior` before
-`cat`/`rg`/`Grep` for _code discovery_; plain text search is right for prose,
-config and non-code files. token-savior is for unbuilt repos and what graft
-lacks (dead code, breaking changes, config analysis, semantic duplicates, entry
-points, index-aware edits). Traps: `get_function_source` can return a stub
-(pass `force_full: true`); `find_dead_code` is leads only (~43% false
-positives); `find_symbol` collapses ambiguity; neither resolves alias-qualified
-callers, so back a blast radius with a grep. **Relay graft's "tokens saved ≈ N"
-banner** as a total at the end of a reply that made graft calls. `rtk` owns
-Bash output compaction — **never run `ts init`**.
-Detail: [[reference_agent_rules_code_discovery_and_cli_table]].
+**`graft` is the navigator in every repo** (`graft build` first if it has no `graft/`).
+Use graft or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_; plain text
+search is right for prose and config. **Relay graft's "tokens saved ≈ N" banner** as a
+total. `rtk` owns Bash output compaction — **never run `ts init`**. Traps and the
+token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
+
+## Tools and habits (standing rules, 2026-10-06)
+
+1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
+   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd`
+   for literal replace, `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   (rtk compacts them). Greps run on Android devices stay `grep`.
+   (`memory/feedback_modern_cli_tools.md`)
+2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place:
+   a running bash reads the new bytes and dies. (`memory/feedback_edit_running_scripts_atomically.md`)
+3. **Default browser:** open pages with `open <url>` (Orion), not Chrome.
+   (`memory/feedback_always_use_default_browser_orion.md`)
+4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
+   (`memory/feedback_all_agents_includes_hermes.md`)
 
 ## Research outward first (standing rule, 2026-10-05)
 
@@ -266,34 +273,20 @@ grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*)
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
-Before orchestrating other agents, reach for these.
-Skills are in git at `site-djbclark/skills/<name>/`, reached as
-`site-private/skills/<name>` (a symlink; the private `1password` and
-`tell-chief-of-staff` are real there) and linked into every TUI by the
-`skill-everywhere` skill — edit the git copy, never a TUI copy. Ours:
-`bigteam`, `model-routing`, `herdr-orchestration`, `ralph-tui-orchestration`,
-`cow-workspaces`, `tell-chief-of-staff`, `session-finder` (which session is on a topic
-and where it lives: use it for every "tell the agent doing X" relay, and when reporting who
-got a message give its name, title and `where:` line). Tool-managed, not in git:
-`orchestration`, `herdr`, `orca-per-workspace-env`. Slash commands `/orc`,
-`/orc-meta`: `site-private/claude/commands/`. Sub-agents `adversary`,
-`backend`, `ux`, `fable-deep`: `site-private/claude/agents/` (`ocx-*` there are
-generated, untracked). Detail: [[reference_agent_rules_multi_agent_toolkit]].
+Before orchestrating other agents, reach for our skills (git copies in
+`site-djbclark/skills/<name>/`, linked into every TUI by `skill-everywhere`; edit the git
+copy): `bigteam`, `model-routing`, `herdr-orchestration`, `ralph-tui-orchestration`,
+`cow-workspaces`, `tell-chief-of-staff`, and `session-finder` (use it for every "tell the
+agent doing X" relay). Slash commands, sub-agents and the full list:
+[[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
 
-**Every agent, however launched** (by djbclark, by another agent, or as a
-sub-agent), runs in its yolo-or-equivalent mode unless there is a specific,
-stated reason to gate it (a review-only slice: `codex exec -s read-only`,
-`acp-run --perm deny`; bigteam's per-file ownership check: `--perm scoped:`).
-Use the agent's own bypass (`model-routing` skill;
-`skills/herdr-orchestration/references/yolo-mode-by-tool.md`; `acp-run` applies
-it itself). Yolo does not skip hooks, file-ownership contracts, no-git-writes in
-a shared checkout, reserve pools, or asking before hard-to-reverse or
-outward-facing actions. Agents with no auto-approve (opencode, cursor, cline,
-hermes over ACP) follow their own settings — check once so an unattended run
-doesn't hang. Note: `feedback_yolo_default_for_all_agents.md`; detail:
-[[reference_agent_rules_code_discovery_and_cli_table]].
+**Every agent, however launched, runs in its yolo-or-equivalent mode** unless a stated
+reason gates it (review-only slices, bigteam's `--perm scoped:`). Yolo does not skip hooks,
+file-ownership contracts, no-git-writes in a shared checkout, reserve pools, or asking
+before hard-to-reverse or outward-facing actions. Per-tool switches and agents without
+auto-approve: `feedback_yolo_default_for_all_agents.md`.
 
 ## LLM gateway, backups
 

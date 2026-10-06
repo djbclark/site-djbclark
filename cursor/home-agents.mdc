@@ -290,6 +290,20 @@ process: its shell moves on and the harness kills the tree.
 Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
 `pgrep -f '<pattern>'`: the waiting shell matches its own pattern.
 
+## Tools and habits (standing rules, 2026-10-06)
+
+1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
+   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd`
+   for literal replace, `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   (rtk compacts them). Greps run on Android devices stay `grep`.
+   (`memory/feedback_modern_cli_tools.md`)
+2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place:
+   a running bash reads the new bytes and dies. (`memory/feedback_edit_running_scripts_atomically.md`)
+3. **Default browser:** open pages with `open <url>` (Orion), not Chrome.
+   (`memory/feedback_always_use_default_browser_orion.md`)
+4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
+   (`memory/feedback_all_agents_includes_hermes.md`)
+
 ## Clipboard — never bare `pbcopy` (standing rule, 2026-10-03)
 
 "copy to clipboard" / "pbcopy" means `~/ops/site-private/bin/clip`, never bare
