@@ -26,7 +26,9 @@ Currently configured:
   `github-copilot`, `pi`, `cursor` (fixed 2026-08-02, was hitting the
   wrong binary via a PATH collision), `antigravity` (custom built-in
   plugin, wraps `agy` — the built-in `gemini` plugin is dead for this
-  account, don't use it), `grok` (custom built-in plugin). `opencode-go`
+  account, don't use it), `grok` (custom built-in plugin; **excluded since 2026-10-06** — the
+  SuperGrok vendor pool is off-limits for now, see bigteam's *Current
+  exclusions*). `opencode-go`
   exists but is currently disabled — see its own comment block in
   config.toml for why (a real, tracked upstream bug, not fixable locally).
 - **Prepaid-balance agents (`deepseek`, `opencode-zen`, `openrouter`) —

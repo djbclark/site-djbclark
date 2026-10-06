@@ -187,9 +187,10 @@ for an ACP-capable agent goes through `~/ops/site-private/bin/acp-run <agent> -C
 tests/diff; (2) supervised work in an Orca-managed repo/worktree uses
 `orca orchestration worker-start --agent <claude|codex|cursor|antigravity|muse|zcode|opencode|opencode2>`;
 (3) interactive work the operator watches, and Hermes's TUI, use a Herdr pane;
-(4) non-ACP CLIs keep their own headless recipe. cline (ClinePass) and the grok
-TUI are reserve pools: never for bulk work. copilot shares its subscription with GitHub-side Copilot features
-(code review on master): spend modestly, small GitHub-shaped slices, far less caution than grok.
+(4) non-ACP CLIs keep their own headless recipe. cline (ClinePass) is a reserve pool: never for bulk work. The grok vendor (SuperGrok: `grok` TUI,
+`acp-run grok`, LiteLLM `grok-sub`) is excluded for now (2026-10-06); grok models via other vendors' pools are fine.
+copilot shares its subscription with GitHub-side Copilot features
+(code review on master): spend modestly, small GitHub-shaped slices, far less caution than clinepass.
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 

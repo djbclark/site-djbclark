@@ -295,9 +295,10 @@ ACP-capable agent: **`acp-run`** (`acp-run <agent> -C <dir> -p '<prompt>' --mode
 is not success, verify the outcome); (2) supervised work in an Orca repo: `orca
 orchestration worker-start --agent …`; (3) interactive/long-lived work the
 operator watches: a Herdr pane; (4) agents with no ACP mode: their headless recipe
-in the `model-routing` skill. cline (ClinePass, which Hermes depends on) and the
-grok TUI (GrokBot's pool): sparingly, never bulk; copilot: small GitHub-shaped
-slices only.
+in the `model-routing` skill. cline (ClinePass, which Hermes depends on): sparingly, never bulk;
+copilot: small GitHub-shaped slices only. **The grok vendor (SuperGrok: `grok`
+TUI, `acp-run grok`, LiteLLM `grok-sub`) is excluded for now** (2026-10-06);
+grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*).
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 

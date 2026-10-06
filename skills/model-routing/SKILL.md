@@ -148,7 +148,7 @@ Rules for any agent that dispatches to agy:
 - **Monthly subscription windows**: claude (5h/weekly/+Fable bucket),
   codex (ChatGPT Plus weekly), antigravity/agy (Google AI Pro — also
   exposes Claude/GPT windows), copilot (premium requests), cursor Pro,
-  grok (SuperGrok; reserve for GrokBot), zai GLM lite (via the zcode TUI), clinepass (Cline windows, also the crush TUI; feeds
+  grok (SuperGrok; reserve for GrokBot; **excluded from delegation since 2026-10-06**, see bigteam's *Current exclusions*), zai GLM lite (via the zcode TUI), clinepass (Cline windows, also the crush TUI; feeds
   hermes via LiteLLM :4000; reserve, never run out), devin (disabled in Orca on
   purpose).
 - **Free**: opencode-go bundled models; sipb (MIT-hosted, `opencode`
@@ -176,7 +176,7 @@ acp-run <agent> --info      # its models, modes and auth methods
 
 - **Agents** (`--list`): claude (via the `claude-agent-acp` adapter), codex
   (via `codex-acp`), copilot, opencode, cursor, qwen, devin, cline,
-  hermes, grok (`grok agent stdio`; a reserve pool, keep it small), agy
+  hermes, grok (`grok agent stdio`; **excluded since 2026-10-06** — bigteam's *Current exclusions*), agy
   (Google's signed `agy_acp_server.par`; verified 2026-10-03 22:54, 6.5 s; fails
   independently of the `agy` CLI, see "agy has a burst limit" above).
   Which ones currently work end to end, and what the others need, is
@@ -293,14 +293,16 @@ Herdr-hosted TUIs (driving agents in Herdr panes; verified 2026-09-26):
    low for mechanical, fable/xhigh for hardest adjudication — Fable has
    its own weekly bucket).
 3. **Reserve pools: never run them out.** clinepass (Hermes runs on it
-   via LiteLLM :4000) and the `grok` TUI's SuperGrok pool (GrokBot runs on
-   it). Both can be used, carefully. Grok *models* through another TUI bill
-   that TUI's pool instead. Claude gets the same care:
+   via LiteLLM :4000), used carefully, and the `grok` TUI's SuperGrok pool
+   (GrokBot runs on it), which is **excluded for now** (operator, 2026-10-06:
+   no `grok` TUI, `acp-run grok` or LiteLLM `grok-sub`; see bigteam's *Current
+   exclusions*). Grok *models* through another TUI bill that TUI's pool
+   instead and stay allowed. Claude gets the same care:
    use it, but orchestration runs from it, so an empty Claude window stops
    every other agent too. Detail: the `bigteam` skill's *Reserve pools*.
    **Copilot** is a lighter case: it shares a subscription with GitHub-side
    Copilot features (code review on `master`), so spend it modestly, small
-   slices, GitHub-shaped work only; much less caution than grok.
+   slices, GitHub-shaped work only; much less caution than clinepass.
    Never prepaid without an explicit fresh operator decision.
 4. Levers: `acp-run <agent> --model <m> [--mode <m>]` for one-shot calls
    to ACP-capable agents (`--info` lists the values); Claude workflows

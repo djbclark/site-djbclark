@@ -110,7 +110,7 @@ Classify every pool before assigning anything:
 | **fresh subscription** | monthly/weekly window largely unused | bulk, mechanical, writing, research — use heavily |
 | **tight** | >40% of the binding window burned | one slice at most, or skip |
 | **exhausted** | `remaining_percent` ≈ 0 on ANY window of that pool | skip that pool entirely (the same vendor's other model-family pool may be fine) |
-| **lifeline** | another agent runs on it | use with care and never let it run out; see *Reserve pools* below (clinepass, the grok TUI, and Claude itself) |
+| **lifeline** | another agent runs on it | use with care and never let it run out; see *Reserve pools* below (clinepass and Claude itself) |
 | **shared allowance** | a GitHub-side feature draws on the same subscription | usable, but spend modestly and keep a margin; see *Copilot* under *Reserve pools* below |
 | **prepaid** | real money | never without a fresh explicit operator decision |
 | **excluded** | operator has ruled it out | respect it, with its end condition (below) |
@@ -130,17 +130,29 @@ sure vendors are automatically used again when more tokens become available"):
    condition each batch; when it has passed, the vendor is back in the pool. If no
    end condition was given, ask for one rather than excluding indefinitely.
 
+**Current exclusions** (keep this list short; delete an entry when it lapses):
+
+1. **The grok vendor (xAI's SuperGrok subscription)** — excluded 2026-10-06,
+   operator: "Stop using grok (the vendor) in /bigteams etc. for now. You can
+   still use grok models via several other vendors." End condition: until the
+   operator lifts it. Covers every route that bills SuperGrok: the `grok`
+   TUI/CLI, `acp-run grok`, Ralph's `grok` plugin, and LiteLLM's `grok-sub`
+   model (the `xai_oauth_bridge`). Grok *models* through another vendor's pool
+   (opencode, cursor, copilot, …) stay allowed, under that pool's own rules
+   (prepaid ones like openrouter still need a fresh operator decision).
+
 ### Reserve pools — never run them out
 
-Three pools have something else depending on them. Running one dry breaks that
+These pools have something else depending on them. Running one dry breaks that
 dependant, which costs more than any slice saves:
 
 1. **clinepass** — Hermes runs on it, through the LiteLLM gateway on `:4000`.
    Never bulk-route to it.
 2. **The grok TUI** (`grok`, the SuperGrok subscription) — GrokBot, the cloud
-   "Chief of Staff", runs on it. Using the `grok` CLI is fine, but keep the
-   slices small and check its window first. Grok *models* reached through
-   another TUI (opencode, cursor, copilot, …) bill that TUI's pool instead.
+   "Chief of Staff", runs on it. **Currently excluded entirely** (see *Current
+   exclusions* above); when that lapses, small slices only, window checked
+   first. Grok *models* reached through another TUI (opencode, cursor,
+   copilot, …) bill that TUI's pool instead and are fine.
 3. **Claude** — do use it; it does the judgment, integration and review. But
    orchestration runs from Claude, so if its 5-hour or weekly window runs out,
    nothing else gets dispatched, integrated or committed either. Check
@@ -154,7 +166,7 @@ reserve.
 GitHub Copilot subscription that GitHub-side features use, notably automatic
 Copilot code review of commits to `master` (djbclark's note of 2026-07-30), so a
 drained allowance can also stop those reviews. Be careful, but far less than
-with the grok TUI: nothing of the operator's runs on it, it is not a bulk pool
+with clinepass: nothing of the operator's runs on it, it is not a bulk pool
 (its direct-use allowance is small), and it is opt-in only for slices that lean
 on GitHub context. Check its remaining premium requests first and give it one
 small slice at most, never a whole batch.
