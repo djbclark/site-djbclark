@@ -1,13 +1,21 @@
-// otp-banner-watch: push-based notification banner watcher for otp-to-clipboard.
+// otp-banner-watch: near-instant notification banner watcher for otp-to-clipboard.
 //
-// Registers an AXObserver on the Notification Center process, so the moment a
-// banner window is created the text is read from its accessibility tree (no
-// polling, unlike Otifier's 1.5 s AX poll, and ~8 s sooner than the usernoted
-// DB, which is written late). Each new banner's text is piped to
-// `otp-to-clipboard --text`, which owns extraction, dedupe, and the copy.
+// Reads the text of notification banners straight from Notification Center's
+// accessibility tree and pipes each new banner to `otp-to-clipboard --text`,
+// which owns extraction, dedupe and the copy. Banners show up ~8 s before the
+// usernoted DB row exists, and the DB can't be read without Full Disk Access.
+//
+// Push vs poll: an AXObserver is registered (window/created/layout events) but
+// on macOS 27 Notification Center never delivers those events (verified: zero
+// callbacks with 9 notification types, with and without the AX enable flags),
+// so the real trigger is a 0.25 s tick that only reads each window's top few
+// AX levels and descends into elements whose subrole is AXNotificationCenter*
+// (banner / alert / alert stack). The desktop-widget windows that live in the
+// same process (Weather, Calendar, Photos) never match. Otifier does a full
+// tree walk every 1.5 s; this is ~6x faster and much cheaper per tick.
 //
 //   otp-banner-watch                 run (what the LaunchAgent does)
-//   otp-banner-watch --dump          log each banner's text tree to stderr
+//   otp-banner-watch --dump          log banner text and AX events to stderr
 //   otp-banner-watch --request-permissions   trigger the Accessibility prompt
 //
 // Needs Accessibility. Run it from a launchd job so the prompt names it.
@@ -37,48 +45,54 @@ func attr(_ el: AXUIElement, _ name: String) -> AnyObject? {
 
 /// Collect every text-bearing string under el (depth-capped).
 func texts(_ el: AXUIElement, depth: Int = 0, into out: inout [String]) {
-    if depth > 14 { return }
-    let role = attr(el, kAXRoleAttribute) as? String ?? ""
-    for k in [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute] {
-        if let s = attr(el, k) as? String, !s.isEmpty, !out.contains(s) {
-            out.append(s)
-            if dump { log("  " + String(repeating: " ", count: depth) + "\(role).\(k)=\(s)") }
-        }
+    if depth > 8 { return }
+    for k in [kAXTitleAttribute, kAXValueAttribute] {
+        if let s = attr(el, k) as? String, !s.isEmpty, !out.contains(s) { out.append(s) }
     }
     for c in (attr(el, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { texts(c, depth: depth + 1, into: &out) }
 }
 
+/// Find banner/alert/stack elements (subrole AXNotificationCenter*) near the top of a window.
+func bannerElements(_ el: AXUIElement, depth: Int = 0, into out: inout [AXUIElement]) {
+    if depth > 4 { return }
+    if let sr = attr(el, kAXSubroleAttribute) as? String, sr.hasPrefix("AXNotificationCenter") {
+        out.append(el); return
+    }
+    for c in (attr(el, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { bannerElements(c, depth: depth + 1, into: &out) }
+}
+
 var seen: [String: Date] = [:]
-var pending: DispatchWorkItem?
 var appEl: AXUIElement!
 
 func scan() {
-    var all: [String] = []
-    for w in (attr(appEl, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { texts(w, into: &all) }
-    let text = all.joined(separator: "\n")
-    guard !text.isEmpty else { return }
-    seen = seen.filter { Date().timeIntervalSince($0.value) < 120 }
-    if seen[text] != nil { return }
-    seen[text] = Date()
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-    p.arguments = [extractor, "--text"]
-    let pipe = Pipe()
-    p.standardInput = pipe
-    do { try p.run() } catch { log("spawn failed: \(error)"); return }
-    pipe.fileHandleForWriting.write(text.data(using: .utf8)!)
-    try? pipe.fileHandleForWriting.close()
+    var banners: [AXUIElement] = []
+    for w in (attr(appEl, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { bannerElements(w, into: &banners) }
+    for b in banners {
+        var all: [String] = []
+        texts(b, into: &all)
+        let text = all.joined(separator: "\n")
+        guard !text.isEmpty else { continue }
+        seen = seen.filter { Date().timeIntervalSince($0.value) < 120 }
+        if seen[text] != nil { continue }
+        seen[text] = Date()
+        if dump { log("banner: \(all)") }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [extractor, "--text"]
+        let pipe = Pipe()
+        p.standardInput = pipe
+        do { try p.run() } catch { log("spawn failed: \(error)"); continue }
+        pipe.fileHandleForWriting.write(text.data(using: .utf8)!)
+        try? pipe.fileHandleForWriting.close()
+    }
 }
 
-// Banner contents can settle a beat after the window appears; coalesce events.
-func schedule() {
-    pending?.cancel()
-    let w = DispatchWorkItem { scan() }
-    pending = w
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: w)
-}
+func schedule() { scan() }
 
-let callback: AXObserverCallback = { _, _, _, _ in schedule() }
+let callback: AXObserverCallback = { _, el, note, _ in
+    if dump { log("event \(note) role=\(attr(el, kAXRoleAttribute) as? String ?? "?") subrole=\(attr(el, kAXSubroleAttribute) as? String ?? "?")") }
+    schedule()
+}
 
 func attach() -> Bool {
     guard let app = NSWorkspace.shared.runningApplications.first(where: { ncBundleIDs.contains($0.bundleIdentifier ?? "") }) else {
@@ -88,7 +102,9 @@ func attach() -> Bool {
     var obs: AXObserver?
     guard AXObserverCreate(app.processIdentifier, callback, &obs) == .success, let o = obs else { log("AXObserverCreate failed"); return false }
     var added = 0
-    for n in [kAXWindowCreatedNotification, kAXCreatedNotification, kAXLayoutChangedNotification] {
+    for n in [kAXWindowCreatedNotification, kAXCreatedNotification, kAXLayoutChangedNotification,
+              "AXChildrenChanged", kAXUIElementDestroyedNotification, kAXFocusedUIElementChangedNotification,
+              kAXMainWindowChangedNotification, kAXFocusedWindowChangedNotification, kAXApplicationShownNotification] {
         if AXObserverAddNotification(o, appEl, n as CFString, nil) == .success { added += 1 }
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode)
@@ -107,4 +123,5 @@ NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunch
         _ = attach()
     }
 }
+Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in scan() }
 RunLoop.main.run()

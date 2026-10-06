@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """otp-to-clipboard — copy one-time codes from macOS notifications to the clipboard.
 
-Polls the Notification Center database (usernoted) for newly delivered
-notifications from ANY app (incl. iPhone-mirrored SMS, Mail, Slack, web
+Two sources, one extractor. FAST: macOS/otp-to-clipboard/otp-banner-watch reads
+banners from Notification Center's accessibility tree (~0.25 s tick) and pipes
+each to `--text`. FALLBACK (this daemon): polls the usernoted database, which
+lags the banner by ~8 s but also catches notifications that never show a banner
+(Focus/DND) and needs Full Disk Access. Both cover notifications from ANY app (incl. iPhone-mirrored SMS, Mail, Slack, web
 push), pulls a verification code out of the title/body, and puts it on the
 pasteboard marked org.nspasteboard.ConcealedType so clipboard managers and
 Tahoe's clipboard history skip it. Prior art: Otifier (closed app),
@@ -30,31 +33,84 @@ STATE = os.path.expanduser("~/.local/state/otp-to-clipboard/last_id")
 LOG = os.path.expanduser("~/Library/Logs/otp-to-clipboard.log")
 POLL = float(os.environ.get("OTP_POLL", "1"))
 
-KW = (r"(?:verification|verify|security|login|log-in|sign-?in|confirmation|authentication|"
-      r"one[- ]time|single[- ]use|access|auth|2fa|otp|passcode|pass code|code|pin|"
-      r"c[óo]digo|codice|code de|验证码|驗證碼|認証|인증)")
-HAS_KW = re.compile(KW, re.I)
-CODE = r"(?:\d{3}[- ]\d{3}|\d{4,8}|[A-Z0-9]{3}-[A-Z0-9]{3,5}|G-\d{6})"
-# "code is 123456", "code: 123456", "PIN 1234", "验证码：123456"
-AFTER = re.compile(KW + r"[^\n\d]{0,25}?(?:is|:|：|=|-|—)?\s*[\"'“‘(\[]?(" + CODE + r")(?![\d])", re.I)
-# "123456 is your code", "123456 is your verification code"
-BEFORE = re.compile(r"(?<![\w.$€£-])(" + CODE + r")\s+(?:is|es|est|ist)\b[^\n]{0,40}" + KW, re.I)
-# words between keyword and number that mean "not an OTP" ("Code review requested on PR 4412")
-VETO = re.compile(r"review|\bPR\b|pull|issue|ticket|request|commit|order|#|\bat\b|\bon\b", re.I)
+# --- extraction -----------------------------------------------------------
+# Two stages (idea from Otifier): find keyword spans and candidate spans, take
+# the best candidate near a keyword. Plus 2FHey's multilingual keywords and
+# alphanumeric codes, and Otifier's rejects (masked card tails, money, order
+# numbers, repeated digits, "Code review ... PR 4412").
+STRONG = re.compile(
+    r"verification|verify|one[- ]?time|single[- ]?use|\botp\b|passcode|pass code|\b2fa\b|\bmfa\b|"
+    r"security code|auth(?:entication)? code|confirmation code|login code|sign-?in code|"
+    r"vérification|verification|c[óo]digo de|codice|bestätigung|verifizierung|sicherheitscode|"
+    r"验证码|驗證碼|校验码|动态码|安全码|認証|認証コード|コード|인증|код подтверждения|doğrulama|"
+    r"\bpin\b", re.I)
+WEAK = re.compile(r"\bcode\b|\bauth\b|\baccess\b|\blogin\b|\blog-in\b|sign-?in|\bcodigo\b|\bcodice\b|\bkod\b|\bcode d", re.I)
+NEGATIVE = re.compile(
+    r"\border\b|tracking|invoice|receipt|shipping|transaction|\bpayment\b|balance|\bphone\b|appointment|"
+    r"\baddress\b|zip code|promo|coupon|discount|\bdelivery\b|reservation", re.I)
+# words just before a digit run that make it NOT an OTP
+PREFIX_REJECT = re.compile(
+    r"(?:\bending(?:\s+in)?|\baccount(?:\s+(?:number|no\.?|#))?|\bcard|\border|\btracking|\binvoice|\bphone|"
+    r"\bzip|\bappointment|\bamount|\bPR|\bissue|\bticket|\bcommit|\bline|[\$€£#])[^A-Za-z0-9]{0,5}$", re.I)
+VETO = re.compile(r"review|\bPR\b|pull|issue|ticket|request|commit", re.I)
+CAND = re.compile(
+    r"(?<![A-Za-z0-9.$€£#:/-])(?:"
+    r"G-\d{4,8}"                                   # Google
+    r"|\d{3}[- ]\d{3,4}"                             # 123-456 / 123 456
+    r"|\d{4,8}"                                     # plain
+    r"|(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{3}-?[A-Z0-9]{3,5}"  # ABC123 / X7Y-9Z2
+    r")(?![A-Za-z0-9]|[.,]\d|\s?%|:\d)")
+FILLER = re.compile(r"^[\s:：=\-—–,.\"'“”‘’()\[\]【】「」]*(?:(?:is|are|was|es|est|ist|lautet|é|是|为|为：|:)[\s:：]*)?$", re.I)
+PROX = 60
 
 
 def extract(text):
-    """Return the code in text, or None. Needs a keyword; prefers a code next to it."""
-    if not text or not HAS_KW.search(text):
+    """Return the most plausible OTP in text, or None."""
+    if not text:
         return None
-    for rx in (BEFORE, AFTER):
-        for m in rx.finditer(text):
-            if VETO.search(m.group(0)[:m.start(1) - m.start(0)]):
-                continue
-            return m.group(1).strip()
-    # fallback: exactly one bare 6-8 digit token and no obvious money/date noise
-    toks = re.findall(r"(?<![\w.$€£:/-])\d{6,8}(?![\w.:/%-])", text)
-    return toks[0] if len(set(toks)) == 1 else None
+    strong = list(STRONG.finditer(text))
+    kws = strong + list(WEAK.finditer(text))
+    if not kws:
+        return None
+    neg = bool(NEGATIVE.search(text)) and not strong
+    best = None  # (rank, code)
+    for m in CAND.finditer(text):
+        code = m.group(0)
+        digits = re.sub(r"\D", "", code)
+        if digits and len(set(digits)) == 1 and len(digits) == len(code.replace("G-", "")):
+            continue                                   # all one digit
+        if PREFIX_REJECT.search(text[max(0, m.start() - 25):m.start()]):
+            continue
+        # distance to nearest keyword, and whether it is directly adjacent
+        rank = None
+        for k in kws:
+            if m.start() >= k.end():
+                gap = text[k.end():m.start()]
+                if len(gap) > PROX or VETO.search(gap):
+                    continue
+                adj = len(gap) <= 25 and "\n" not in gap.strip()
+                r = (0 if adj else 2, len(gap))
+            elif k.start() >= m.end():
+                gap = text[m.end():k.start()]
+                if len(gap) > PROX or VETO.search(gap):
+                    continue
+                r = (1 if re.match(r"\s*(?:is|es|est|ist|as|=|:)?\s*(?:your|the|ur|tu|votre|ihr|my|this|su)\b", gap, re.I) else 3, len(gap))
+            else:
+                r = (0, 0)
+            rank = r if rank is None or r < rank else rank
+        if rank is None:
+            continue
+        if code.startswith("G-"):
+            rank = (-1, 0)
+        elif re.search(r"[A-Z]", code) and not re.search(r"\d", code):
+            continue
+        elif re.search(r"[A-Z]", code) and rank[0] > 1:
+            continue                                   # alphanumeric needs adjacency
+        if best is None or rank < best[0]:
+            best = (rank, code)
+    if best and neg and best[0][0] != 0:
+        return None                                    # order/receipt text, code not right after a keyword
+    return best[1].strip() if best else None
 
 
 def log(msg):
@@ -133,6 +189,26 @@ def selftest():
         ("Your balance is $1234.56", None),
         ("Code review requested on PR 4412", None),
         ("Your code is ready", None),
+        ("Your code for order 4417 is 882013", "882013"),
+        ("Your verification code for order #55123 is 604412", "604412"),
+        ("Your order 884412 has shipped. Track with code ABC", None),
+        ("Card ending in 43001 was used for $12481.16", None),
+        ("Your code is 111111", None),
+        ("Your Amazon code is 000000. Security code expires soon", None),
+        ("【Alipay】验证码123456，请勿泄露", "123456"),
+        ("Dein Bestätigungscode lautet 904412", "904412"),
+        ("Votre code de vérification est 330918", "330918"),
+        ("Your code is X7Y9Z2", "X7Y9Z2"),
+        ("Use ABC-123 as your login code", "ABC-123"),
+        ("Verification code: 4821 (valid 10 min). Call 5551234 for help", "4821"),
+        ("2FA: 55 21 77", None),
+        ("Chase: your one-time code is 774519. Never share it.", "774519"),
+        ("Your Apple ID Code is: 847 291. Don't share it with anyone.", "847 291"),
+        ("Hi! Your PIN is 4821", "4821"),
+        ("You have 3 new messages, verification pending", None),
+        ("Delivery code 7781 for your package", "7781"),
+        ("Zoom: 123456 is your Zoom verification code", "123456"),
+        ("Meeting ID 987654321 passcode 112233", "112233"),
     ]
     bad = 0
     for text, want in cases:
