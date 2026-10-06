@@ -52,6 +52,8 @@ else
   case "${TERM_PROGRAM:-}" in
     iTerm.app)
       where="iTerm2"
+      # Unverified (2026-10-06): format from iTerm2's docs, never tried on a live session;
+      # it may want the full $ITERM_SESSION_ID rather than the part after the colon.
       [ -n "${ITERM_SESSION_ID:-}" ] && link="iterm2:reveal?sessionid=${ITERM_SESSION_ID#*:} (Mac only)" ;;
     ghostty) where="Ghostty" ;;
     Apple_Terminal) where="Terminal.app" ;;
