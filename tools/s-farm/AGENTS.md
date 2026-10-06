@@ -42,8 +42,9 @@ not permitted`. That failure is intended. Do not work around it with
 
 ## How it is built
 
-The tool is three files in `~/ops/site-djbclark/tools/s-farm/` (git, `master`):
-`justfile` (linked as `~/s/justfile`), `sfarm.py` and `layout.conf`.
+The tool lives in `~/ops/site-djbclark/tools/s-farm/` (git, `master`):
+`justfile` (linked as `~/s/justfile`), `sfarm.py` and `layout.conf` build the
+farm; `shell-init.bash` and `go.py` are the interactive jump described below.
 
 | Command | Effect |
 | --- | --- |
@@ -59,6 +60,37 @@ The tool is three files in `~/ops/site-djbclark/tools/s-farm/` (git, `master`):
 The update is not automatic. Run it after adding, removing or renaming
 anything at the top level of `~/src` (a new clone, a new worktree). It is safe
 to run at any time and takes under a second.
+
+## Jumping to a project (interactive bash only)
+
+For djbclark at a prompt, not for agents: agents already know the `~/src` path.
+While the working directory is inside `~/s`, `just NAME` with a NAME that is
+not a recipe changes to the matching directory in `~/src` and prints it.
+
+| Typed in `~/s` | Kind of match | Result |
+| --- | --- | --- |
+| `just herdr` | exact name, any case | `cd ~/src/herdr` |
+| `just physi*`, `just *-worktrees` | glob (`*`, `?`, `[...]`), any case | list |
+| `just chess` | partial (substring) | list |
+| `just hredr`, `just physibaord` | near miss: one or two edits, swaps count as one | `cd` to the one close name |
+| `just stcf` | abbreviation: letters in order | list |
+| `just telegrum-bot` | looser misspelling | list |
+
+One match is taken at once. Several open an `fzf` list: arrow keys and Enter,
+type to narrow, Esc to cancel. The stages run in that order and the first that
+finds anything wins. Matching covers top-level directories of `~/src`.
+
+1. `~/.bashrc` sources `shell-init.bash` in its interactive section. A prompt
+   hook defines an alias for `just` on entering `~/s` and removes it on leaving,
+   so outside `~/s` `just` is untouched.
+2. The alias turns globbing off for that one command line, because bash (with
+   `failglob`) would otherwise reject `just physi*` before `just` ran. Recipes
+   still work: `just plan`, `just where NAME`.
+3. The alias appears at the next prompt, so `cd ~/s && just NAME` on one line
+   does not jump; `cd ~/s` first.
+4. `go.py` is a `uv` script (PEP 723) that depends on `rapidfuzz`; `uv`
+   fetches it on first run. `./go.py --list NAME` prints the matches without
+   prompting or changing directory.
 
 ## Layout
 

@@ -4,6 +4,9 @@
 #   just -f ~/s/justfile          # update the farm to match ~/src (also: cd ~/s && just)
 #   just -f ~/s/justfile plan     # show what an update would change
 #
+#   just NAME                    # inside ~/s, interactive bash: cd to the ~/src directory
+#                                # matching NAME (typos, partials, globs); see shell-init.bash
+#
 # Layout rules: layout.conf beside this file. Background: AGENTS.md beside this file.
 
 tool := env("OPS_ROOT", home_directory() / "ops") / "site-djbclark/tools/s-farm"
