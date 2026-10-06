@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# hermes-ping — send djbclark a Hermes (Telegram Inbox) ping that says where it came from.
+#
+#   hermes-ping "<repo>: <one line>"
+#
+# Prefixes the message with the container the calling agent runs in (herdr, Orca, tmux,
+# iTerm2, Ghostty, Terminal.app, VS Code/Cursor, ssh, Claude Code cloud), the workspace /
+# tab / pane names it can find, the Claude Code session name and title, and the cwd. Adds a
+# link when one exists that opens the place: https for Claude Code cloud sessions (works on
+# the phone); iterm2:/cursor:/vscode: links only open on the Mac. herdr, Orca, Ghostty,
+# Terminal.app and tmux have no URL scheme (checked 2026-10-06), so for those it adds the
+# command that focuses the place instead.
+#
+# Standing rule (djbclark, 2026-10-06): every Hermes ping includes the interface and,
+# where available, workspace/tab/pane, plus a link when possible. Use this, not a bare
+# `hermes send`. HERMES_PING_TARGET overrides the target, HERMES_BIN the hermes binary;
+# HERMES_PING_DRY=1 prints instead of sending.
+# Every lookup has a short timeout: a ping must never hang a session.
+set -u
+target="${HERMES_PING_TARGET:-telegram:838808636:22158}"
+[ "$#" -gt 0 ] || { echo "usage: hermes-ping \"<repo>: <message>\"" >&2; exit 2; }
+msg="$*"
+t() { timeout 3 "$@" 2>/dev/null; }
+short() { case "$1" in "$HOME"*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
+
+where="" link="" focus=""
+cwd="$(short "$PWD")"
+
+if [ "${CLAUDE_CODE_REMOTE:-}" = true ]; then
+  where="Claude Code cloud"
+  sid="${CLAUDE_CODE_REMOTE_SESSION_ID:-}"
+  [ -n "$sid" ] && link="https://claude.ai/code/${sid/#cse_/session_}"
+elif [ -n "${HERDR_ENV:-}" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  hb="${HERDR_BIN_PATH:-herdr}"
+  ws=$(t "$hb" workspace get "${HERDR_WORKSPACE_ID:-}" | jq -r '.result.workspace | "\(.label // "?")#\(.number // "?")"' 2>/dev/null)
+  tab=$(t "$hb" tab get "${HERDR_TAB_ID:-}" | jq -r '.result.tab | "\(.label // "?")#\(.number // "?")"' 2>/dev/null)
+  pane_json=$(t "$hb" pane current)
+  pane=$(jq -r '.result.pane | (.label // .agent // "pane")' <<<"$pane_json" 2>/dev/null)
+  sess="${HERDR_SESSION:-}"
+  where="herdr${sess:+ session $sess} · ws ${ws:-$HERDR_WORKSPACE_ID} · tab ${tab:-$HERDR_TAB_ID} · pane ${pane:-$HERDR_PANE_ID}"
+  focus="herdr tab focus $HERDR_TAB_ID"
+elif [ -n "${ORCA_PANE_KEY:-}" ] || [ "${TERM_PROGRAM:-}" = Orca ]; then
+  wt=$(t orca worktree current --json | jq -r '.. | .name? // empty' 2>/dev/null | head -1)
+  [ -n "$wt" ] || wt=$(basename "${ORCA_WORKSPACE_ROOT:-$PWD}")
+  where="Orca · worktree $wt${ORCA_TAB_ID:+ · tab $ORCA_TAB_ID}"
+  [ -n "${ORCA_TERMINAL_HANDLE:-}" ] && focus="orca terminal switch --terminal $ORCA_TERMINAL_HANDLE"
+elif [ -n "${TMUX:-}" ]; then
+  tp=$(t tmux display -p -t "${TMUX_PANE:-}" '#S:#I.#P #W')
+  where="tmux ${tp:-?}"
+  [ -n "${TMUX_PANE:-}" ] && focus="tmux switch-client -t ${TMUX_PANE}"
+else
+  case "${TERM_PROGRAM:-}" in
+    iTerm.app)
+      where="iTerm2"
+      [ -n "${ITERM_SESSION_ID:-}" ] && link="iterm2:reveal?sessionid=${ITERM_SESSION_ID#*:} (Mac only)" ;;
+    ghostty) where="Ghostty" ;;
+    Apple_Terminal) where="Terminal.app" ;;
+    vscode)
+      case "${__CFBundleIdentifier:-}" in
+        com.todesktop.*) where="Cursor"; link="cursor://file$PWD/ (Mac only)" ;;
+        *) where="VS Code"; link="vscode://file$PWD/ (Mac only)" ;;
+      esac ;;
+    *)
+      # No terminal: a launchd job (launchd sets XPC_SERVICE_NAME to the job label) or a script.
+      if [ -n "${XPC_SERVICE_NAME:-}" ] && [ "$XPC_SERVICE_NAME" != 0 ]; then
+        where="launchd ${XPC_SERVICE_NAME}"
+      else
+        where="${TERM_PROGRAM:-script $(ps -o comm= -p "$PPID" 2>/dev/null | sed 's#.*/##')}"
+      fi ;;
+  esac
+fi
+[ -n "${SSH_CONNECTION:-}" ] && where="$where · ssh $(hostname -s)"
+
+# The agent itself: Claude Code session name and title, else whatever herdr reports.
+agent=""
+if [ -n "${CLAUDE_PID:-}" ] && [ -r "$HOME/.claude/sessions/$CLAUDE_PID.json" ]; then
+  agent="claude $(jq -r '.name // empty' "$HOME/.claude/sessions/$CLAUDE_PID.json" 2>/dev/null)"
+fi
+if [ -n "${pane_json:-}" ]; then
+  title=$(jq -r '.result.pane.terminal_title_stripped // empty' <<<"$pane_json" 2>/dev/null)
+  [ -n "$title" ] && agent="${agent:+$agent }\"$title\""
+fi
+
+text="$msg
+[$where${agent:+ · $agent} · $cwd]"
+[ -n "$link" ] && text="$text
+$link"
+[ -n "$focus" ] && text="$text
+focus: $focus"
+
+if [ -n "${HERMES_PING_DRY:-}" ]; then printf '%s\n' "$text"; exit 0; fi
+exec "${HERMES_BIN:-$HOME/.local/bin/hermes}" send -t "$target" "$text"

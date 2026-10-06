@@ -220,7 +220,9 @@ the skill that covers it, this file, or a memory note. Say what you changed.
 
 **When a task completes or something needs djbclark's attention** (blocked, a
 decision, a failure), also send it to the Hermes Telegram Inbox:
-`~/.local/bin/hermes send -t telegram:838808636:22158 "<repo>: <one line>"`.
+`~/.local/bin/hermes-ping "<repo>: <one line>"`, never bare `hermes send`: it
+adds the interface (herdr/Orca/Ghostty/…), workspace/tab/pane, session and a link
+or focus command (2026-10-06; detail in the script header).
 One line per event, never a loop. Operator notices from scripts go to Hermes
 too, not macOS notifications. (`memory/feedback_ping_telegram_and_chat.md`)
 
