@@ -201,8 +201,11 @@ fi
 # place in that ordering rather than jumping to the head. Set only if the
 # JDK actually exists, so a Homebrew openjdk upgrade that moves this path
 # degrades to the system java instead of leaving a dangling PATH entry.
+# Only when JAVA_HOME is unset: every script re-reads this file via BASH_ENV,
+# and overriding the caller's choice made `bg ./gradlew` run Pastiera on JDK 25,
+# which its Gradle/Kotlin rejects (2026-10-06).
 
-if [ -d "/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home" ]; then
+if [ -z "${JAVA_HOME:-}" ] && [ -d "/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home" ]; then
   export JAVA_HOME="/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home"
 fi
 
@@ -250,6 +253,14 @@ if /sbin/mount | grep -q " on ${USB_DRIVE} "; then
     export GRADLE_USER_HOME="$USB_DRIVE/Caches/gradle"
     export UV_CACHE_DIR="$USB_DRIVE/Caches/uv"
     export HF_HOME="$USB_DRIVE/Caches/huggingface"
+fi
+
+# Gradle's home moved back to the internal SSD on 2026-10-06: builds do many small
+# random reads, which the USB stick serves badly. The move script creates the marker
+# only after the final copy, then turns the USB path into a symlink here, so shells
+# that still hold the old value keep working.
+if [ -e "$HOME/.cache/gradle/.moved-from-usb" ]; then
+    export GRADLE_USER_HOME="$HOME/.cache/gradle"
 fi
 
 __path_prepend_force \

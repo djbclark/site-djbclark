@@ -17,10 +17,34 @@ several agents building at once everything slowed down.
    is above `BG_MAX_LOAD_PER_CORE` (default 1.5), for at most `BG_LOAD_WAIT` seconds (default
    900), then starts anyway. `BG_LOAD_WAIT=0` skips the wait. It also runs
    `gradle-limits check`.
+4. **Gradle slots in `bg`**: a `bg` command that runs `gradle`/`gradlew` (also behind
+   `env VAR=… ./gradlew`) takes one of `BG_GRADLE_SLOTS` machine-wide slots (default 2) for its
+   whole run, waiting up to `BG_GRADLE_WAIT` seconds (default 1800). Slots are `shlock` files
+   under `~/.local/state/bg/gradle-slots/`; a dead pid frees its slot. Only builds started
+   through `bg` are counted, so an agent calling `./gradlew` directly bypasses the cap.
+
+## Memory (2026-10-06)
+
+On 2026-10-06 eight agents were building Pastiera worktrees at once. Each started its own
+daemon at `-Xmx4g`, plus a Kotlin daemon, and the 16 GB Mac sat 11 GB deep in swap. Most of
+the "disk load" was paging: about 25k page decompressions per second and 6-8k small I/O
+operations per second on the SSD. Changes:
+
+1. Heap `-Xmx2g` in `low` (3g in `night`). Pastiera and ShizukuTendCF ask for 2g themselves.
+2. `-XX:G1PeriodicGCInterval=60000 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30`: an idle
+   daemon gives freed heap back to the OS. **Min must be set with Max**: Max=30 alone fails
+   against the default Min of 40, and the JVM refuses to start. Test any new flag with
+   `java <args> -version` on JDK 21 and 25 before it goes live.
+3. Daemon idle timeout of 10 min; the Kotlin daemon gets the same through
+   `-Dkotlin.daemon.jvm.options=autoshutdownIdleSeconds=600`.
+4. `GRADLE_USER_HOME` moved from the USB stick to `~/.cache/gradle`. The USB stick serves
+   Gradle's many small random reads badly. `~/.bashrc` switches once the marker
+   `~/.cache/gradle/.moved-from-usb` exists. The old USB path becomes a symlink, so shells
+   started before the switch keep working.
 
 ## Notes
 
-1. A profile switch only affects daemons started after it. Idle daemons exit after 30 min
+1. A profile switch only affects daemons started after it. Idle daemons exit after 10 min
    (`org.gradle.daemon.idletimeout`), so old settings don't linger.
 2. `-XX:ActiveProcessorCount` caps the thread pools inside the daemon JVM (R8, D8, the
    compiler, GC). That cap is what actually bounds a release build. `org.gradle.workers.max`

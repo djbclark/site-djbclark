@@ -20,12 +20,33 @@
 # BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s for at most
 # BG_LOAD_WAIT seconds (default 900), then start anyway so nothing starves. Piling another
 # build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate.
-# Also reverts an expired Gradle profile (gradle-limits check).
+# Also reverts an expired Gradle profile (gradle-limits check). When testing bg itself, pass
+# BG_LOAD_WAIT=0, or a busy machine holds the test for the full 15 minutes.
+#
+# Gradle slots: a command that runs gradle or gradlew (also behind `env VAR=… ./gradlew`) takes
+# one of BG_GRADLE_SLOTS machine-wide slots (default 2) for its whole run, waiting up to
+# BG_GRADLE_WAIT seconds (default 1800) for one, then starts anyway. On 2026-10-06 eight agents
+# built at once, each worktree started its own daemon, and the 16 GB Mac went 11 GB into swap.
+# A slot is a shlock(1) file holding the build's pid (exec keeps the pid), so a killed build
+# frees its slot. --stop/--status/--version don't take one. BG_GRADLE_SLOTS=0 disables it.
+#
+# JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
+# default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
 if [ "$#" -eq 0 ]; then
   echo "usage: bg <command> [args...]" >&2
   exit 2
 fi
 "$(dirname "$0")/gradle-limits" check 2>/dev/null || true
+
+is_gradle=0
+for a in "$@"; do
+  case "$a" in
+    --stop|--status|--version|-v) is_gradle=0; break ;;
+  esac
+  case "${a##*/}" in
+    gradle|gradlew) is_gradle=1 ;;
+  esac
+done
 max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
 wait_s="${BG_LOAD_WAIT:-900}"
 if [ "$wait_s" -gt 0 ]; then
@@ -42,6 +63,31 @@ if [ "$wait_s" -gt 0 ]; then
     [ "$waited" -eq 0 ] && echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting (BG_LOAD_WAIT=0 to skip)" >&2
     sleep 15
     waited=$((waited + 15))
+  done
+fi
+
+slots="${BG_GRADLE_SLOTS:-2}"
+if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
+  slot_dir="$HOME/.local/state/bg/gradle-slots"
+  mkdir -p "$slot_dir"
+  gwait="${BG_GRADLE_WAIT:-1800}"
+  waited=0
+  got=
+  while :; do
+    for i in $(seq 1 "$slots"); do
+      if shlock -f "$slot_dir/slot.$i" -p $$ 2>/dev/null; then got=$i; break; fi
+    done
+    [ -n "$got" ] && break
+    if [ "$waited" -ge "$gwait" ]; then
+      echo "bg: no Gradle slot free after ${waited}s; starting anyway" >&2
+      break
+    fi
+    if [ "$waited" -eq 0 ]; then
+      held=$(cat "$slot_dir"/slot.* 2>/dev/null | tr '\n' ' ')
+      echo "bg: all $slots Gradle slots busy (pids $held); waiting (BG_GRADLE_SLOTS=0 to skip)" >&2
+    fi
+    sleep 10
+    waited=$((waited + 10))
   done
 fi
 exec taskpolicy -c utility "$@"

@@ -30,6 +30,8 @@ link_homes() {
   local homes=("$HOME/.gradle")
   [ -n "${GRADLE_USER_HOME:-}" ] && homes+=("$GRADLE_USER_HOME")
   [ -d /Volumes/mac256usb/Caches/gradle ] && homes+=("/Volumes/mac256usb/Caches/gradle")
+  # Internal-SSD home since 2026-10-06; the USB path above is then a symlink to it.
+  [ -d "$HOME/.cache/gradle" ] && homes+=("$HOME/.cache/gradle")
   [ -L "$live" ] || activate low
   local h dst
   for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
