@@ -171,6 +171,7 @@ waits, agent dispatches) **starts with `run_in_background: true`** — don't mak
 djbclark press ctrl-b. Wait on the notification, never poll; kill strays you
 started. Short commands stay foreground.
 (`memory/feedback_start_slow_commands_in_background.md`)
+**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`**: the waiting shell's own command line contains the pattern, so it matches itself and never ends (use `while kill -0 <pid>` or `until [ -s <file> ]`).
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
 status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.

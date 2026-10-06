@@ -271,6 +271,11 @@ registration list, are in
 Run every command yourself, including Touch ID / `sudo-ask` steps; never tell
 djbclark to type a `!` command. Privileged steps still use their sanctioned path.
 
+## Waiting on background work
+
+Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
+`pgrep -f '<pattern>'`: the waiting shell matches its own pattern.
+
 ## Clipboard — never bare `pbcopy` (standing rule, 2026-10-03)
 
 "copy to clipboard" / "pbcopy" means `~/ops/site-private/bin/clip`, never bare
