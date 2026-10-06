@@ -1,0 +1,13 @@
+---
+# roles/launchd_path — keep launchd's per-user PATH (`launchctl config user path`)
+# equal to the operator's login-shell PATH, so launchd jobs and Dock-launched apps
+# find the same tools a terminal does. See roles/launchd_path/README.md.
+
+# Root-owned applier + its sudoers rule, installed once by `just launchd-path-setup`
+# (Touch ID). The role refuses to run until both match the repo copy, so an
+# unattended run can never silently drift.
+launchd_path_apply_bin: /usr/local/libexec/launchd-path-apply
+launchd_path_sudoers_file: /etc/sudoers.d/launchd-path
+
+# Computes the desired PATH (clean `$SHELL -lic`, deduplicated).
+launchd_path_sync_bin: "{{ playbook_dir }}/../bin/launchd-path-sync"

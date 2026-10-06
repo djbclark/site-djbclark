@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Keep launchd's per-user PATH equal to the operator's login-shell PATH.
+
+launchd jobs and Dock-launched apps do not read ~/.bashrc; they get the PATH that
+`launchctl config user path` stored (default /usr/bin:/bin:/usr/sbin:/sbin). This
+reads PATH from a clean login shell, removes duplicates, and compares it with the
+stored value. Writing goes through the root-owned applier installed by
+`just launchd-path-setup` (roles/launchd_path); a change takes effect at the next
+reboot, and a job whose plist sets its own PATH keeps that one.
+
+  launchd-path-sync desired   print the PATH launchd should have
+  launchd-path-sync status    desired vs stored; exit 0 in sync, 3 out of sync
+  launchd-path-sync apply     store it (sudo -n applier); prints changed/unchanged
+"""
+
+from __future__ import annotations
+
+import os
+import plistlib
+import pwd
+import subprocess
+import sys
+
+APPLIER = "/usr/local/libexec/launchd-path-apply"
+CONFIG_FILE = "/private/var/db/com.apple.xpc.launchd/config/user.plist"
+MARKER = "__LAUNCHD_PATH_SYNC__="
+
+
+def dedupe(path: str) -> str:
+    """Keep the first occurrence of each absolute entry, in order."""
+    seen: list[str] = []
+    for entry in path.split(":"):
+        if not entry.startswith("/"):
+            continue  # empty ("::") or relative entries never belong in launchd's PATH
+        entry = entry.rstrip("/") or "/"
+        if entry not in seen:
+            seen.append(entry)
+    return ":".join(seen)
+
+
+def login_shell_path() -> str:
+    """PATH as a fresh interactive login shell sets it (no inherited PATH)."""
+    user = pwd.getpwuid(os.getuid())
+    env = {
+        "HOME": user.pw_dir,
+        "USER": user.pw_name,
+        "LOGNAME": user.pw_name,
+        "SHELL": user.pw_shell,
+        "TERM": "dumb",
+    }
+    out = subprocess.run(
+        [user.pw_shell, "-lic", f'printf "\\n{MARKER}%s\\n" "$PATH"'],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    ).stdout
+    for line in out.splitlines():
+        if line.startswith(MARKER):
+            return dedupe(line[len(MARKER) :])
+    sys.exit(f"launchd-path-sync: could not read PATH from {user.pw_shell} -lic")
+
+
+def stored_path() -> str | None:
+    """The stored launchd user PATH, "" if never set, None if unreadable."""
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            return plistlib.load(f).get("PathEnvironmentVariable", "")
+    except FileNotFoundError:
+        return ""
+    except (OSError, plistlib.InvalidFileException):
+        return None
+
+
+def main(argv: list[str]) -> int:
+    cmd = argv[1] if len(argv) > 1 else "status"
+    if cmd == "desired":
+        print(login_shell_path())
+        return 0
+    if cmd == "status":
+        want = login_shell_path()
+        have = stored_path()
+        print(f"desired: {want}")
+        print(
+            f"stored:  {'(unreadable)' if have is None else have or '(unset: launchd default /usr/bin:/bin:/usr/sbin:/sbin)'}"
+        )
+        if have == want:
+            print(
+                "in sync (a change applied since the last boot is live only after a reboot)"
+            )
+            return 0
+        print("out of sync: run `just launchd-path-apply`, then reboot")
+        return 3
+    if cmd == "apply":
+        if not os.path.exists(APPLIER):
+            sys.exit(
+                f"launchd-path-sync: {APPLIER} missing; run `just launchd-path-setup` once (Touch ID)"
+            )
+        return subprocess.run(
+            ["sudo", "-n", APPLIER, login_shell_path()], check=False
+        ).returncode
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

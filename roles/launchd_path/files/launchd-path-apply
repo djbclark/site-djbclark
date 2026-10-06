@@ -1,0 +1,83 @@
+#!/bin/sh
+# launchd-path-apply — the ONLY privileged step of site-djbclark roles/launchd_path.
+#
+# Installed root-owned at /usr/local/libexec/launchd-path-apply by
+# `just launchd-path-setup` and allowed NOPASSWD for the operator via
+# /etc/sudoers.d/launchd-path, so `just launchd-path-apply` (and `just deploy-mac`)
+# can keep launchd's per-user PATH equal to the operator's login-shell PATH
+# without a password prompt.
+#
+# The one thing it does is `launchctl config user path <PATH>` (persistent; takes
+# effect at the next reboot; applies to every user domain on this Mac, and a job
+# whose plist sets its own PATH keeps that one). It never takes a file path when
+# run as root, never reads the environment, and refuses a PATH that is not a
+# plain list of absolute directories or that drops /usr/bin, /bin, /usr/sbin or
+# /sbin, so the NOPASSWD rule cannot be used to brick the session or write
+# anywhere else.
+#
+# Usage:
+#   launchd-path-apply [--check] [--config-file F] <PATH>
+#
+# --config-file is honoured only when NOT running as root (unit tests); root
+# always reads /private/var/db/com.apple.xpc.launchd/config/user.plist.
+#
+# Prints exactly one of "changed" / "unchanged" on stdout (with --check:
+# "would-change" / "unchanged"). Exit 2 = invalid input, 1 = runtime failure.
+set -eu
+set -f # no globbing: PATH entries are split on ':' below and must stay literal
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+CONFIG_FILE=/private/var/db/com.apple.xpc.launchd/config/user.plist
+
+die() { printf 'launchd-path-apply: %s\n' "$1" >&2; exit "${2:-1}"; }
+usage() { die "usage: launchd-path-apply [--check] <PATH>" 2; }
+
+CHECK=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check) CHECK=1; shift ;;
+    --config-file)
+      [ $# -ge 2 ] || usage
+      [ "$(id -u)" -ne 0 ] || die "--config-file is not accepted when running as root" 2
+      CONFIG_FILE=$2; shift 2 ;;
+    *) break ;;
+  esac
+done
+[ $# -eq 1 ] || usage
+want=$1
+
+[ -n "$want" ] || die "invalid PATH: empty" 2
+[ "${#want}" -le 4096 ] || die "invalid PATH: longer than 4096 characters" 2
+case "$want" in :*|*:|*::*) die "invalid PATH: empty entry" 2 ;; esac
+
+seen=:
+old_ifs=$IFS
+IFS=:
+for entry in $want; do
+  printf '%s' "$entry" | grep -Eq '^/[A-Za-z0-9._@+/-]*$' \
+    || die "invalid PATH entry '$entry': must be an absolute path of [A-Za-z0-9._@+/-]" 2
+  case "/$entry/" in */../*|*/./*) die "invalid PATH entry '$entry': no . or .. components" 2 ;; esac
+  case "$seen" in *":$entry:"*) die "invalid PATH: duplicate entry '$entry'" 2 ;; esac
+  seen="$seen$entry:"
+done
+IFS=$old_ifs
+for required in /usr/bin /bin /usr/sbin /sbin; do
+  case "$seen" in *":$required:"*) ;; *) die "invalid PATH: must include $required" 2 ;; esac
+done
+
+have=
+if [ -f "$CONFIG_FILE" ]; then
+  have=$(/usr/libexec/PlistBuddy -c 'Print :PathEnvironmentVariable' "$CONFIG_FILE" 2>/dev/null || true)
+fi
+
+if [ "$have" = "$want" ]; then
+  echo unchanged
+  exit 0
+fi
+if [ "$CHECK" -eq 1 ]; then
+  echo would-change
+  exit 0
+fi
+[ "$(id -u)" -eq 0 ] || die "must run as root (sudo -n $0 ...)" 1
+launchctl config user path "$want" >/dev/null || die "launchctl config user path failed" 1
+echo changed

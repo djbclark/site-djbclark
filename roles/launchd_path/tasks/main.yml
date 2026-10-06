@@ -1,0 +1,49 @@
+---
+# Every privileged action goes through launchd_path_apply_bin (root-owned,
+# sudoers NOPASSWD, validates its own input). Nothing here uses `become`.
+
+- name: Stat the installed applier and its sudoers rule
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ launchd_path_apply_bin }}"
+    - "{{ launchd_path_sudoers_file }}"
+    - "{{ role_path }}/files/launchd-path-apply"
+  register: _launchd_path_installed
+
+- name: Refuse to run until `just launchd-path-setup` has installed the root-owned applier
+  ansible.builtin.assert:
+    that:
+      - _launchd_path_installed.results[0].stat.exists
+      - _launchd_path_installed.results[0].stat.pw_name == 'root'
+      - _launchd_path_installed.results[0].stat.checksum == _launchd_path_installed.results[2].stat.checksum
+      - _launchd_path_installed.results[1].stat.exists
+    fail_msg: >-
+      {{ launchd_path_apply_bin }} is missing, not root-owned, or differs from
+      roles/launchd_path/files/launchd-path-apply (or {{ launchd_path_sudoers_file }}
+      is missing). Run `just launchd-path-setup` once (Touch ID) and re-run.
+
+- name: Read the login-shell PATH
+  ansible.builtin.command:
+    argv: ["{{ launchd_path_sync_bin }}", "desired"]
+  register: _launchd_path_desired
+  changed_when: false
+  check_mode: false
+
+- name: Store it as launchd's user PATH (live after the next reboot)
+  ansible.builtin.command:
+    argv: >-
+      {{ ['sudo', '-n', launchd_path_apply_bin]
+         + (['--check'] if ansible_check_mode else [])
+         + [_launchd_path_desired.stdout | trim] }}
+  register: _launchd_path_apply
+  changed_when: _launchd_path_apply.stdout in ['changed', 'would-change']
+  check_mode: false
+
+- name: Note that the new PATH needs a reboot
+  ansible.builtin.debug:
+    msg: >-
+      launchd user PATH {{ 'would change' if ansible_check_mode else 'changed' }};
+      launchd jobs and Dock-launched apps get it after the next reboot.
+  when: _launchd_path_apply is changed

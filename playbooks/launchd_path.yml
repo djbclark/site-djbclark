@@ -1,0 +1,9 @@
+---
+# launchd's per-user PATH = the login-shell PATH (roles/launchd_path). Runs from
+# `just launchd-path-apply` and as the last step of `just deploy-mac`.
+- name: Sync launchd user PATH with the login shell
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: launchd_path

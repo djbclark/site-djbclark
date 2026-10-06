@@ -27,6 +27,12 @@ deploy:
 deploy-check:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" STAYTURGID_SITE_DIR="{{ site_dir }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" deploy-check
 
+# The product's Mac workstation play, then the site's Mac-only steps
+# (roles/launchd_path: launchd user PATH = login-shell PATH).
+deploy-mac:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" STAYTURGID_SITE_DIR="{{ site_dir }}" just --justfile "{{ stayturgid_root }}/justfile" deploy-mac
+    just launchd-path-apply
+
 dryrun-termux:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" STAYTURGID_ROOT="{{ stayturgid_root }}" STAYTURGID_SITE_DIR="{{ site_dir }}" hosts="{{ hosts }}" just --justfile "{{ stayturgid_root }}/justfile" dryrun-termux
 
@@ -216,6 +222,21 @@ mac-dns-status:
     @echo "tailscale: $(tailscale dns status 2>/dev/null | grep -m1 '^Tailscale DNS:' || echo unknown)"
     @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | grep ip_address || echo 'NO ANSWER')"
     @echo "probe example.com: $(dscacheutil -q host -a name example.com | grep -m1 ip_address || echo 'NO ANSWER')"
+
+# launchd's per-user PATH = the login-shell PATH (roles/launchd_path). Takes
+# effect at the next reboot. `launchd-path-setup` is the one privileged step
+# (Touch ID): installs the root-owned applier + sudoers rule.
+launchd-path-setup:
+    roles/launchd_path/files/launchd-path-setup.sh
+
+launchd-path-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/launchd_path.yml {{ args }}
+
+launchd-path-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/launchd_path.yml {{ args }}
+
+launchd-path-status:
+    bin/launchd-path-sync status
 
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
