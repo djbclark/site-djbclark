@@ -223,6 +223,9 @@ fi
 #                         deprecated Homebrew formula and survives brew
 #                         upgrades (moved here from ~/.bashrc.local)
 #   opencode           -> .opencode/bin beats homebrew
+#   codex              -> .opencodex/bin (opencodex 2.78+ autostart shim, kept
+#                         off package-manager paths; it execs the native
+#                         launcher it recorded) beats .local/bin and homebrew
 #   collie             -> .collie/current/bin (Herdr-managed install; `current` follows
 #                         `collie update`, so never pin a versions/vX dir here). No collision.
 #
@@ -282,6 +285,7 @@ if [ -e "$HOME/.cache/go-mod/.moved-from-usb" ]; then
 fi
 
 __path_prepend_force \
+  "$HOME/.opencodex/bin" \
   "$HOME/.local/bin" \
   "$HOME/.collie/current/bin" \
   "/opt/homebrew/opt/rustup/bin" \
