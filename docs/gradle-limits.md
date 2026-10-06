@@ -18,7 +18,7 @@ several agents building at once everything slowed down.
    900), then starts anyway. `BG_LOAD_WAIT=0` skips the wait. It also runs
    `gradle-limits check`.
 4. **Gradle slots in `bg`**: a `bg` command that runs `gradle`/`gradlew` (also behind
-   `env VAR=… ./gradlew`) takes one of `BG_GRADLE_SLOTS` machine-wide slots (default 2) for its
+   `env VAR=… ./gradlew`) takes one of `BG_GRADLE_SLOTS` machine-wide slots (default 1) for its
    whole run, waiting up to `BG_GRADLE_WAIT` seconds (default 1800). Slots are `shlock` files
    under `~/.local/state/bg/gradle-slots/`; a dead pid frees its slot. It waits before any
    JVM starts, so a queued build costs nothing; builds outside `bg` are caught by item 5.
