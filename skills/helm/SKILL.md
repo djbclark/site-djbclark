@@ -105,8 +105,8 @@ notification arrives, relay them (section 2) and start it again.
 
 ## 5. Hermes and the phone
 
-1. **Hermes** (on Telegram: `/skill helm`; the `skill-slash` plugin
-   registers only `/steps` as a bare command). Same script. Per item, one `clarify`: the question starts with
+1. **Hermes** (on Telegram: `/helm`, registered by Hermes's `skill-slash`
+   plugin since 2026-10-06; `/skill helm` also works). Same script. Per item, one `clarify`: the question starts with
    `project · where — `, then the session's question; `choices` are its option
    labels (under about 60 characters each, first one is its recommendation).
    Then `$H answer`. Hermes is not re-invoked by a background command, so it
