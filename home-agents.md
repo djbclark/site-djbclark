@@ -54,6 +54,10 @@ Never hand-edit the regenerated Codex summaries under `memory/codex/` (use
 `memory/codex/extensions/ad_hoc/`).
 `site-private/codex/config.toml` is ignored local state (`~/.codex/config.toml`
 symlinks to it): never stage or commit it.
+**`git pull --rebase` refuses while another agent has unstaged edits in the
+same checkout:** never stash, add or reset their files; `git fetch`, and if you
+are only ahead, plain `git push`; if behind, wait or ask the owning session.
+
 Detail: [[reference_agent_rules_ops_housekeeping]].
 
 ## `~/s` is a view — reference `~/src`, never `~/s` (standing rule, 2026-10-06)
