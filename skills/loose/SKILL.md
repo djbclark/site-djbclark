@@ -49,6 +49,9 @@ Work the list; each line is a command, not a memory.
 4. **Claims you made but did not verify.** Scan your own replies for assertions
    stated flatly. Anything you inferred rather than observed either gets checked
    now or gets downgraded to "assumed" in the audit.
+   A pass you read through a pipe (`cmd | tail`) is in this class: the exit
+   status was the last stage's, not the command's. Re-run it to a file with
+   `echo "rc=$?"`, or downgrade it.
 5. **Findings that exist only in chat.** A measurement, a defect, a workaround,
    a decision and its reasoning — if it is not in a repo, a doc, or memory, it is
    gone at session end. Put it somewhere durable before reporting the loose end.

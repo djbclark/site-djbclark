@@ -179,6 +179,18 @@ Detail and per-agent evidence: [[reference_agent_rules_basic_memory_pools]],
 waits, agent dispatches) **starts with `run_in_background: true`** — don't make
 djbclark press ctrl-b. Wait on the notification, never poll; kill strays you started.
 Short commands stay foreground. (`memory/feedback_start_slow_commands_in_background.md`)
+**Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
+status is the last stage's and the summary line can be cut off. Write to a file,
+print the status, then read: `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
+(`memory/feedback_exit_status_through_pipe.md`)
+
+## Fix the cause of a tool-calling mistake (standing rule, 2026-10-06)
+
+**When you make a tool-calling mistake of a kind that can recur** (a lost exit
+status, a wrong flag, a wait that never ends, a filter that hid the result),
+**fix the instructions that would have prevented it in the same turn, unasked**:
+the skill that covers it, this file, or a memory note. Say what you changed.
+(`memory/feedback_fix_instructions_after_tool_mistake.md`)
 
 ## Ping djbclark on Hermes (standing rule, 2026-10-05)
 
