@@ -1,0 +1,45 @@
+# Hermes gateway (stayturgid role, {{ watchdogd_hermes_gateway_label }}).
+# Rendered by roles/watchdogd; edit the role. Replaces
+# ai.hermes.gateway-restart-watcher (~/.hermes/bin/gateway-restart-watcher.sh):
+# restart requests filed by the gateway-restart Hermes plugin are carried out
+# here, with the same 600 s cooldown and 1 h staleness limit. watchdogd does
+# not depend on the gateway: alerts go out even while it is down.
+name = "hermes-gateway"
+interval_s = 60
+
+[launchd]
+label = "{{ watchdogd_hermes_gateway_label }}"
+
+[probe]
+# The loop-tick witness: a UNIX socket answered by the gateway's own asyncio
+# loop with one byte "1" (hermes_cli/gateway.py _probe_loop_tick_socket). A
+# heartbeat file can stay fresh for a dead loop; this cannot.
+kind = "unix"
+path = "{{ watchdogd_hermes_home }}/state/gateway.loop-tick.{launchd_pid}.sock"
+expect = "1"
+timeout_s = 2
+
+[policy]
+# Alert only. Hermes itself treats one silent tick as ambiguous; 3 in a row
+# (3 min) is worth a ping. Auto-restarting a wedged gateway is an open question.
+slow_before_action = 3
+down_before_action = 3
+grace_s = 300
+action = "alert"
+
+[strays]
+# A second gateway (nohup'd or orphaned) would fight launchd's over Telegram.
+match = 'hermes-agent/hermes gateway run'
+term_wait_s = 15
+
+[restart_request]
+file = "{{ watchdogd_gateway_restart_request }}"
+max_age_s = 3600
+cooldown_s = 600
+# The plugin reads this to report the cooldown back to the agent.
+cooldown_file = "{{ watchdogd_gateway_restart_cooldown }}"
+# Graceful: waits for in-flight runs (up to ~30 min), so it runs detached.
+command = ["{{ watchdogd_hermes_bin }}", "gateway", "restart"]
+env = { HERMES_HOME = "{{ watchdogd_hermes_home }}" }
+# The gateway refuses a restart from a process carrying this.
+unset_env = ["_HERMES_GATEWAY"]

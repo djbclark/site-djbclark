@@ -1,0 +1,8 @@
+---
+# One launchd watchdog for every site service (roles/watchdogd). Default limit
+# is the live mac host only.
+- name: Configure watchdogd
+  hosts: site_watchdogd
+  gather_facts: true
+  roles:
+    - role: watchdogd

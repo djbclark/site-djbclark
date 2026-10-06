@@ -1,0 +1,122 @@
+---
+- name: Assert watchdogd runs on the managed macOS host
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Darwin'
+    fail_msg: watchdogd supervises launchd jobs and supports macOS only.
+  tags: [watchdogd, watchdogd_config]
+
+
+# The plist runs `/usr/bin/env python3`; with Apple's 3.9 first on that PATH
+# there is no tomllib and watchdogd checks nothing.
+- name: Require Python 3.11+ first on the job's PATH
+  ansible.builtin.command:
+    argv: [/usr/bin/env, python3, -I, -S, -c, "import sys, tomllib; print(sys.version.split()[0])"]
+  environment:
+    PATH: "{{ watchdogd_service_path if not (watchdogd_inherit_path | bool) else ansible_facts.env.PATH }}"
+  register: _watchdogd_python
+  changed_when: false
+  check_mode: false
+  tags: [watchdogd, watchdogd_config]
+
+- name: Ensure watchdogd directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ watchdogd_config_dir }}", mode: "0700"}
+    - {path: "{{ watchdogd_conf_d }}", mode: "0700"}
+    - {path: "{{ watchdogd_state_dir }}", mode: "0700"}
+    - {path: "{{ watchdogd_logs_dir }}", mode: "0700"}
+    - {path: "{{ watchdogd_plist_dir }}", mode: "0755"}
+  tags: [watchdogd, watchdogd_config]
+
+- name: Render watchdogd global settings
+  ansible.builtin.template:
+    src: watchdogd.toml.j2
+    dest: "{{ watchdogd_config_dir }}/watchdogd.toml"
+    mode: "0600"
+  register: _watchdogd_global
+  tags: [watchdogd, watchdogd_config]
+
+- name: Render one watchdogd.d entry per watched service
+  ansible.builtin.template:
+    src: "watchdogd.d/{{ item }}.toml.j2"
+    dest: "{{ watchdogd_conf_d }}/{{ item }}.toml"
+    mode: "0600"
+  loop: "{{ watchdogd_services }}"
+  register: _watchdogd_entries
+  tags: [watchdogd, watchdogd_config]
+
+- name: Find watchdogd.d entries
+  ansible.builtin.find:
+    paths: "{{ watchdogd_conf_d }}"
+    patterns: "*.toml"
+  register: _watchdogd_found
+  tags: [watchdogd, watchdogd_config]
+
+- name: Remove watchdogd.d entries no longer listed in watchdogd_services
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _watchdogd_found.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: (item.path | basename | regex_replace('\.toml$', '')) not in watchdogd_services
+  tags: [watchdogd, watchdogd_config]
+
+- name: Validate the rendered watchdogd config
+  ansible.builtin.command:
+    argv: [/usr/bin/env, python3, -I, -S, "{{ watchdogd_script }}", --check-config, --config-dir, "{{ watchdogd_config_dir }}"]
+  environment:
+    PATH: "{{ watchdogd_service_path if not (watchdogd_inherit_path | bool) else ansible_facts.env.PATH }}"
+  register: _watchdogd_validate
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+  tags: [watchdogd, watchdogd_config]
+
+- name: Render watchdogd LaunchAgent
+  ansible.builtin.template:
+    src: watchdogd.plist.j2
+    dest: "{{ watchdogd_plist_path }}"
+    mode: "0644"
+  register: _watchdogd_plist
+  tags: [watchdogd, watchdogd_launchd]
+
+- name: Probe watchdogd LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ watchdogd_uid }}/{{ watchdogd_label }}"]
+  register: _watchdogd_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [watchdogd, watchdogd_launchd]
+
+- name: Boot out changed watchdogd LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ watchdogd_uid }}/{{ watchdogd_label }}"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _watchdogd_plist.changed
+    - _watchdogd_loaded.rc == 0
+  tags: [watchdogd, watchdogd_launchd]
+
+
+# launchd teardown race: bootstrap right after bootout can fail with rc=5
+# until launchd finishes tearing the job down. Retry, don't sleep.
+- name: Bootstrap watchdogd LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ watchdogd_uid }}", "{{ watchdogd_plist_path }}"]
+  register: _watchdogd_bootstrap
+  changed_when: _watchdogd_bootstrap.rc == 0
+  failed_when: _watchdogd_bootstrap.rc != 0
+  until: _watchdogd_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - _watchdogd_loaded.rc != 0 or _watchdogd_plist.changed
+  tags: [watchdogd, watchdogd_launchd]

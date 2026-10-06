@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ watchdogd_label }}</string>
+  {#- `env python3` must resolve to Homebrew's (3.11+ for tomllib), not Apple's
+      /usr/bin/python3 (3.9, and an Xcode shim that dies when Xcode updates).
+      -I -S: stdlib only, no user site or PYTHON* variables. #}
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>-I</string>
+    <string>-S</string>
+    <string>{{ watchdogd_script }}</string>
+    <string>--once</string>
+    <string>--config-dir</string><string>{{ watchdogd_config_dir }}</string>
+    <string>--state-dir</string><string>{{ watchdogd_state_dir }}</string>
+    <string>--log-dir</string><string>{{ watchdogd_logs_dir }}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>{{ watchdogd_start_interval }}</integer>
+{% if watchdogd_watch_paths | length > 0 %}
+  {#- Restart requests (Hermes gateway-restart plugin) are acted on at once,
+      as ai.hermes.gateway-restart-watcher did, not at the next interval. #}
+  <key>WatchPaths</key>
+  <array>
+{% for p in watchdogd_watch_paths %}
+    <string>{{ p }}</string>
+{% endfor %}
+  </array>
+{% endif %}
+  {#- Standard, not Background: launchd defers and throttles Background jobs,
+      and the watchdog matters most when the machine is busiest. #}
+  <key>ProcessType</key><string>Standard</string>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>StandardOutPath</key><string>{{ watchdogd_logs_dir }}/launchd.log</string>
+  <key>StandardErrorPath</key><string>{{ watchdogd_logs_dir }}/launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{ watchdogd_home }}</string>
+{% if not (watchdogd_inherit_path | bool) %}
+    <key>PATH</key><string>{{ watchdogd_service_path }}</string>
+{% endif %}
+  </dict>
+</dict>
+</plist>

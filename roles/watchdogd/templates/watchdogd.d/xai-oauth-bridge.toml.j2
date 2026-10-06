@@ -1,0 +1,29 @@
+# xAI OAuth bridge (roles/litellm). Rendered by roles/watchdogd; edit the role.
+# Replaces the xai-oauth-bridge row of the Hermes cron "Gateway Process Health".
+name = "xai-oauth-bridge"
+interval_s = 120
+
+[launchd]
+label = "{{ watchdogd_xai_bridge_label }}"
+port = {{ watchdogd_xai_bridge_port }}
+
+[probe]
+# GET / is answered by the bridge itself with 404 "only /v1/* is bridged":
+# a real HTTP round trip that never touches xAI or the OAuth grant.
+kind = "http"
+url = "http://127.0.0.1:{{ watchdogd_xai_bridge_port }}/"
+ok_status = ["404"]
+timeout_s = 15
+
+[policy]
+slow_before_action = 3
+down_before_action = 2
+grace_s = 120
+action = "kickstart"
+max_restarts = 3
+healthy_reset_s = 21600
+renotify_s = 21600
+
+[strays]
+match = 'xai_oauth_bridge\.py --host 127\.0\.0\.1 --port {{ watchdogd_xai_bridge_port }}\b'
+term_wait_s = 10

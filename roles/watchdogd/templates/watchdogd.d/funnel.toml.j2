@@ -1,0 +1,31 @@
+# Public Tailscale Funnel. Rendered by roles/watchdogd; edit the role.
+# Replaces com.djbclark.funnel-healthcheck
+# (~/.local/libexec/funnel-healthcheck/check.sh) and the Hermes cron
+# "Funnel Health" that relayed its log: same probe, same heal (quit and reopen
+# the Tailscale app after 2 all-down runs, at most every 30 min).
+name = "funnel"
+interval_s = 300
+
+[probe]
+# Exit 0 any endpoint answered, 1 all failed, 75 this Mac is offline (skip).
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/funnel_probe.sh"]
+skip_exit_codes = [75]
+timeout_s = 240
+
+[policy]
+slow_before_action = 2
+down_before_action = 2
+# The app needs ~45 s to bring Funnel back; verified on the next pass.
+grace_s = 60
+action = "command"
+command = ["/bin/sh", "-c", "osascript -e 'quit app \"Tailscale\"'; sleep 4; open -a Tailscale"]
+timeout_s = 60
+min_action_interval_s = 1800
+max_restarts = 6
+healthy_reset_s = 21600
+renotify_s = 21600
+
+[notify]
+down = "{name} DOWN: public Tailscale Funnel unreachable from every vantage ({detail}){tail}"
+recovered = "{name} RECOVERED: public Tailscale Funnel answers again ({detail})"

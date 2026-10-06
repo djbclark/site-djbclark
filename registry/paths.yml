@@ -38,6 +38,10 @@ prefixes:
     - "~/.local/state/litellm/**"               # E5: Linux LiteLLM logs/state
     - "~/ai-stack/**"                           # AI-stack runtime dir (step0), if kept
     - "~/.litellm/**"                           # LiteLLM config/cache (step0)
+    - "~/.config/djbclark/watchdogd.toml"       # roles/watchdogd global settings
+    - "~/.config/djbclark/watchdogd.d/**"       # roles/watchdogd: one TOML per watched service
+    - "~/.local/state/watchdogd/**"             # watchdogd per-service state, lock
+    - "~/Library/Logs/watchdogd/**"             # watchdogd log (size-capped) + launchd.log
     - "~/system-state/**"                       # F1: system-state-backup mirror output
     - "/opt/homebrew/var/system-state/**"       # F1: arm64 canonical capture dir
     - "/opt/homebrew/var/log/system-state-backup.log"

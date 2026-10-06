@@ -1,0 +1,48 @@
+# LiteLLM proxy (roles/litellm). Rendered by roles/watchdogd; edit the role.
+# Replaces the litellm row of the Hermes cron "Gateway Process Health"
+# (~/.hermes/scripts/check-gateway-process-health.sh: ORPHAN, NOPORT,
+# STALLLOG, UNSUPERVISED), which restarted a healthy proxy on 2026-10-06.
+name = "litellm"
+interval_s = 120
+
+[launchd]
+label = "{{ watchdogd_litellm_label }}"
+plist = "{{ watchdogd_litellm_plist }}"
+port = {{ watchdogd_litellm_port }}
+
+[probe]
+# A real completion through proxy + auth + router. The model is a config-side
+# mock deployment (roles/litellm litellm_watchdog_mock_model), so no provider
+# is called. The bearer is LITELLM_MASTER_KEY, read from the plist at run time.
+kind = "http"
+method = "POST"
+url = "http://127.0.0.1:{{ watchdogd_litellm_port }}/v1/chat/completions"
+headers = { "Content-Type" = "application/json" }
+bearer_from_plist_env = "LITELLM_MASTER_KEY"
+body = '{"model": "{{ watchdogd_litellm_probe_model }}", "max_tokens": 1, "cache": {"no-cache": true}, "messages": [{"role": "user", "content": "watchdogd probe"}]}'
+ok_status = ["200"]
+expect_body = '"OK"'
+timeout_s = 30
+
+[policy]
+# 3 slow (6 min) or 2 refused/5xx probes in a row. Cold starts under load took
+# up to 10.5 min on 2026-10-06: 15 min grace before any restart.
+slow_before_action = 3
+down_before_action = 2
+grace_s = 900
+action = "kickstart"
+max_restarts = 3
+healthy_reset_s = 21600
+renotify_s = 21600
+
+[stall]
+# Only a sustained Prisma failure counts (litellm prints this after a single
+# self-healing client timeout too), and only while the real probe also fails.
+log = "{{ watchdogd_litellm_log }}"
+pattern = 'Prisma DB reconnect failed \((?P<count>\d+) consecutive\)'
+min_count = 3
+
+[strays]
+# The proxy itself (or an old logpipe wrapper) reparented to pid 1.
+match = '\.local/bin/litellm --config \S*/\.litellm/config\.yaml .*--port {{ watchdogd_litellm_port }}\b'
+term_wait_s = 20

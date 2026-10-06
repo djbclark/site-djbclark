@@ -1,0 +1,9 @@
+# watchdogd global settings. Rendered by roles/watchdogd; edit the role, not this file.
+load_per_cpu = {{ watchdogd_stress_load_per_cpu }}
+load_window_min = {{ watchdogd_stress_load_window_min }}
+swap_percent = {{ watchdogd_stress_swap_percent }}
+memory_pressure_level = {{ watchdogd_stress_memory_pressure_level }}
+alert_command = {{ watchdogd_alert_command | to_json }}
+alert_timeout_s = {{ watchdogd_alert_timeout_s }}
+log_max_bytes = {{ watchdogd_log_max_bytes }}
+log_backups = {{ watchdogd_log_backups }}

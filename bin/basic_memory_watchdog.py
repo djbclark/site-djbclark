@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Watchdog for the basic-memory-mcp launchd service (port 18796).
 
+SUPERSEDED (2026-10-06) by bin/watchdogd.py, entry watchdogd.d/basic-memory-mcp.toml
+(roles/watchdogd), which keeps these thresholds. Delete this file and its test
+once com.djbclark.basic-memory-watchdog is booted out (roles/watchdogd/README.md).
+
 Runs periodically (via launchd StartInterval). Each run:
   1. Health-checks the MCP endpoint with a real POST (not a bare GET -- the
      streamable-http transport only replies to a session-initiated POST).

@@ -1,0 +1,21 @@
+# Hermes LLM providers. Rendered by roles/watchdogd; edit the role.
+# Replaces the Hermes cron "Provider Health Watchdog"
+# (~/.hermes/scripts/provider-health-watchdog.sh, every 12 h): the same script
+# is the probe. Alert only, and on change only (the cron re-sent a failure
+# every 12 h). The full output goes to the watchdogd log.
+name = "provider-health"
+interval_s = 43200
+
+[probe]
+kind = "command"
+command = ["{{ watchdogd_hermes_home }}/scripts/provider-health-watchdog.sh"]
+timeout_s = 300
+
+[policy]
+slow_before_action = 1
+down_before_action = 1
+action = "alert"
+
+[notify]
+down = "{name} DOWN: {detail} (full output: ~/Library/Logs/watchdogd/watchdogd.log)"
+recovered = "{name} RECOVERED: Hermes provider probe and hermes doctor pass again"

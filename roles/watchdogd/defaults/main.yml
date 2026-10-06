@@ -1,0 +1,83 @@
+---
+# roles/watchdogd: ONE launchd watchdog (com.<site_ns>.watchdogd) for every
+# site service, with one watchdogd.d/<service>.toml per watched service.
+# Program: bin/watchdogd.py. Schema, rules and what it replaced: README.md.
+watchdogd_home: >-
+  {{
+    (ansible_facts.get('env') or {}).get('HOME')
+    | default(lookup('env', 'HOME'), true)
+  }}
+watchdogd_uid: "{{ ansible_facts['user_uid'] }}"
+watchdogd_label: "com.{{ site_ns }}.watchdogd"
+watchdogd_repo_bin: "{{ playbook_dir | dirname }}/bin"
+watchdogd_script: "{{ watchdogd_repo_bin }}/watchdogd.py"
+watchdogd_config_dir: "{{ watchdogd_home }}/.config/{{ site_ns }}"
+watchdogd_conf_d: "{{ watchdogd_config_dir }}/watchdogd.d"
+watchdogd_state_dir: "{{ watchdogd_home }}/.local/state/watchdogd"
+watchdogd_logs_dir: "{{ watchdogd_home }}/Library/Logs/watchdogd"
+watchdogd_plist_dir: "{{ watchdogd_home }}/Library/LaunchAgents"
+watchdogd_plist_path: "{{ watchdogd_plist_dir }}/{{ watchdogd_label }}.plist"
+
+# How often launchd runs a pass. Each service sets its own probe interval in
+# its TOML (basic-memory 120 s); a pass only probes the services that are due.
+watchdogd_start_interval: 60
+
+# PATH. site-private memory project_launchd_inherit_path_after_reboot: the
+# launchd user PATH is stored but only live after the next reboot, and a plist
+# without its own PATH gets /usr/bin:/bin until then, where `env python3` is
+# Apple's 3.9 (no tomllib). So for now the plist sets an explicit PATH with
+# Homebrew first. After that reboot (and `just launchd-path-status` in sync),
+# set this true: the PATH key is dropped and the job inherits launchd's.
+watchdogd_inherit_path: false
+watchdogd_service_path: "{{ watchdogd_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Machine stress (rule C2.2): restarts are deferred while load per CPU or swap
+# is above these. 0 disables a test. memory_pressure_level uses
+# kern.memorystatus_vm_pressure_level (1 normal, 2 warn, 4 critical).
+watchdogd_stress_load_per_cpu: 3.0
+watchdogd_stress_load_window_min: 1
+watchdogd_stress_swap_percent: 70
+watchdogd_stress_memory_pressure_level: 0
+
+# Alerts: one line per state change, through hermes-ping (standing rule),
+# with a short timeout; undelivered alerts land in the watchdogd log.
+watchdogd_alert_command:
+  - "{{ watchdogd_home }}/.local/bin/hermes-ping"
+watchdogd_alert_timeout_s: 20
+watchdogd_log_max_bytes: 2000000
+watchdogd_log_backups: 3
+
+# One watchdogd.d/<name>.toml per entry, from templates/watchdogd.d/<name>.toml.j2.
+# A TOML in watchdogd.d that is not listed here is removed.
+watchdogd_services:
+  - litellm
+  - xai-oauth-bridge
+  - basic-memory-mcp
+  - hermes-gateway
+  - funnel
+  - provider-health
+
+# Labels and ports of the watched services (owned by other roles; repeated here
+# because a role's defaults are not visible to another role).
+watchdogd_litellm_label: "com.{{ site_ns }}.litellm"
+watchdogd_litellm_port: 4000
+watchdogd_litellm_plist: "{{ watchdogd_plist_dir }}/{{ watchdogd_litellm_label }}.plist"
+watchdogd_litellm_log: "{{ watchdogd_home }}/Library/Logs/litellm/litellm.log"
+# A config-side mock deployment in roles/litellm (litellm_watchdog_mock_model):
+# the probe exercises proxy + auth + router and never calls a provider. A
+# client-sent "mock_response" does NOT work: this LiteLLM strips it unless the
+# key's metadata sets allow_client_mock_response (litellm_pre_call_utils.py).
+watchdogd_litellm_probe_model: watchdogd-mock
+watchdogd_xai_bridge_label: "com.{{ site_ns }}.xai-oauth-bridge"
+watchdogd_xai_bridge_port: 14011
+watchdogd_basic_memory_label: "com.{{ site_ns }}.basic-memory-mcp"
+watchdogd_basic_memory_port: 18796
+watchdogd_hermes_gateway_label: com.stayturgid.hermes-gateway
+watchdogd_hermes_home: "{{ watchdogd_home }}/.hermes"
+watchdogd_hermes_bin: "{{ watchdogd_home }}/.local/bin/hermes"
+# The gateway-restart Hermes plugin files restart requests here (it used to be
+# ai.hermes.gateway-restart-watcher's WatchPaths file); watchdogd watches it too.
+watchdogd_gateway_restart_request: "{{ watchdogd_hermes_home }}/state/gateway_restart_request.json"
+watchdogd_gateway_restart_cooldown: "{{ watchdogd_hermes_home }}/state/gateway_restart_cooldown.json"
+watchdogd_watch_paths:
+  - "{{ watchdogd_gateway_restart_request }}"

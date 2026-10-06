@@ -1,0 +1,43 @@
+# Shared Basic Memory MCP server (roles/basic_memory_mcp). Rendered by
+# roles/watchdogd; edit the role. Replaces com.djbclark.basic-memory-watchdog
+# (bin/basic_memory_watchdog.py) and keeps its semantics: a 30 s health
+# timeout is "slow", only 5 slow checks in a row (~10 min at 120 s) restart
+# it, and connection refused (process dead) restarts at once. An 8 s
+# restart-on-first-timeout under load 180+ caused an outage: never go back.
+name = "basic-memory-mcp"
+interval_s = 120
+
+[launchd]
+label = "{{ watchdogd_basic_memory_label }}"
+port = {{ watchdogd_basic_memory_port }}
+
+[probe]
+# A real MCP initialize (the streamable-http transport only answers a POST).
+# Any reply below 500 proves the ASGI stack is alive (as before).
+kind = "http"
+method = "POST"
+url = "http://127.0.0.1:{{ watchdogd_basic_memory_port }}/mcp"
+headers = { "Content-Type" = "application/json", "Accept" = "application/json, text/event-stream" }
+body = '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "watchdogd", "version": "1.0"}}}'
+ok_status = ["200-499"]
+timeout_s = 30
+
+[policy]
+slow_before_action = 5
+down_before_action = 1
+# Basic Memory can take several minutes to load its embedding model.
+grace_s = 300
+action = "kickstart"
+max_restarts = 3
+healthy_reset_s = 21600
+renotify_s = 21600
+
+[strays]
+match = 'basic-memory mcp --transport streamable-http --host 127\.0\.0\.1 --port {{ watchdogd_basic_memory_port }}\b'
+term_wait_s = 10
+
+[notify]
+down = "{name} DOWN ({detail}; {counts}){tail}"
+# MCP clients connect once at session start and never retry.
+recovered = "Basic Memory MCP recovered and is responding again. Agent sessions started while it was down need /mcp -> reconnect basic-memory."
+exhausted = "Basic Memory MCP failed to come back after {used} restart attempts. Not restarting it again until it recovers or someone looks ({detail}). Label {{ watchdogd_basic_memory_label }}, port {{ watchdogd_basic_memory_port }}."

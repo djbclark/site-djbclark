@@ -180,6 +180,25 @@ basic-memory-mcp-status:
     @code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:18796/mcp); \
       if [ "$code" = "400" ] || [ "$code" = "200" ]; then echo "HTTP 18796: up ($code)"; else echo "HTTP 18796: not responding ($code)"; fi
 
+# One launchd watchdog for every site service (roles/watchdogd; schema and
+# rollout notes in roles/watchdogd/README.md).
+watchdogd_hosts := env_var_or_default("WATCHDOGD_HOSTS", "mac")
+
+watchdogd-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/watchdogd.yml --limit "{{ watchdogd_hosts }}" {{ args }}
+
+watchdogd-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check --diff playbooks/watchdogd.yml --limit "{{ watchdogd_hosts }}" {{ args }}
+
+# What watchdogd would do right now against live state, acting on nothing.
+watchdogd-dry-run *args:
+    bin/watchdogd.py --once --dry-run --all-due {{ args }}
+
+watchdogd-status:
+    @launchctl print "gui/$(id -u)/com.djbclark.watchdogd" 2>/dev/null | grep -E '^\s+(state|pid|runs|last exit code) =' || echo "launchd: not loaded (com.djbclark.watchdogd)"
+    @tail -n 20 "$HOME/Library/Logs/watchdogd/watchdogd.log" 2>/dev/null || echo "no log yet"
+
+
 # Install/configure Open WebUI.
 # Default limit mac (live).
 open_webui_hosts := env_var_or_default("OPEN_WEBUI_HOSTS", "mac")
