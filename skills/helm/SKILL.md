@@ -116,6 +116,9 @@ notification arrives, relay them (section 2) and start it again.
    once per round and relay them the same way.
 3. **Collie**: the helm pane is an ordinary herdr pane, so its prompts are
    answerable from the phone with nothing extra.
+4. **Notices**: `fleet-watch` (launchd, every 5 minutes, no model) calls
+   `helm.py brief` and sends one Hermes line when a session starts waiting or
+   asks a new question. Nothing is sent when one is answered.
 
 ## 6. Limits (verified 2026-10-06, herdr 0.9.1, Claude Code 2.1.291)
 
@@ -133,4 +136,5 @@ notification arrives, relay them (section 2) and start it again.
 1. Not an orchestrator: it starts no work (`orc`, `bigteam` do).
 2. Not an auto-responder. agent-deck's conductor answers routine questions
    itself; helm deliberately does not.
-3. Not a status feed. Periodic status is `fleet-watch`.
+3. Not a status feed. Periodic status is `fleet-watch`, which also sends the
+   "new session waiting" notice (section 5).

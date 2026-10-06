@@ -11,6 +11,7 @@
     helm.py audit <id>                  send /loose and remember that this session was audited
     helm.py skip <id>                   hide this item until the session changes
     helm.py keys <id> <key>...          raw keys, for a prompt helm cannot parse (read `show` first)
+    helm.py brief                       one token for fleet-watch: N:project@id/mark,... (blocked sessions)
 
 Sessions come from herdr (`herdr agent list`: state, pane, title), the Claude Code session
 registry (~/.claude/sessions) and each Claude transcript's tail, where a pending
@@ -22,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -37,7 +39,7 @@ except ImportError:
 CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 STATE_DIR = Path(os.environ.get("HELM_STATE_DIR", Path.home() / ".local/state/helm"))
 STATE = STATE_DIR / "state.json"
-HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
+HERDR = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
 HOME = str(Path.home())
 TAIL = 600_000   # bytes of transcript read from the end
 COLD = 55 * 60   # idle longer than this: the prompt cache (1 h) is gone, an audit re-reads it all
@@ -464,6 +466,16 @@ def cmd_wait(a, state):
         time.sleep(POLL)
 
 
+def cmd_brief(a, state):
+    """Sessions blocked on the operator, as one space-free token. The mark changes with each
+    new prompt, so a watcher can tell a new question from one it has already reported."""
+    _, items = snapshot(state)
+    safe = lambda t: "".join(c if c.isalnum() or c in "._-" else "_" for c in t)  # noqa: E731
+    waiting = [f"{safe(it['project'])}@{safe(it['id'])}/{it['fp'][-6:]}"
+               for it in items if it["open"] and it["kind"] != "idle"]
+    print(f"{len(waiting)}:{','.join(sorted(waiting))}")
+
+
 def cmd_show(a, state):
     s, it = find(a.id, state)
     it.setdefault("screen", screen(s, 22))
@@ -579,6 +591,7 @@ def main():
     p.add_argument("--timeout", type=int, default=0)
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_wait)
+    sub.add_parser("brief").set_defaults(fn=cmd_brief)
     p = sub.add_parser("show")
     p.add_argument("id")
     p.add_argument("--json", action="store_true")

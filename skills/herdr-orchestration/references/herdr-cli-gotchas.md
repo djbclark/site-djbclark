@@ -25,6 +25,8 @@ Last verified 2026-09-26.
   a digit meant for an AskUserQuestion that had not rendered yet sat in the Claude input
   line as type-ahead). Read the screen first (`herdr agent read <pane> --source visible`,
   which prints plain text, not JSON) and send only when the prompt is there.
-- **`herdr agent wait --until idle` timed out on a turn that had already finished**
-  (2026-10-06); `--until idle --until done` returned. To know a tool call was answered,
-  check the transcript for its result instead of the pane state.
+- **A finished turn in a pane nobody has looked at is `done`, not `idle`** (by design:
+  herdr's skill says both mean "ready for input" and differ only by its seen state;
+  reproduced three times 2026-10-06, each `herdr agent wait --until idle` timed out while
+  `agent get` said `done`). Wait with `--until idle --until done`, or with no `--until`.
+  To know a tool call was answered, check the transcript for its result.
