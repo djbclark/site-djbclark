@@ -246,7 +246,7 @@ locally.
 `~/ops/site-private/bin/clip`** — never bare `pbcopy` (agent shells have
 `LC_CTYPE=C`, so `—` pastes as `‚Äî`). `pbpaste` cannot verify a `pbcopy`
 (`clip` verifies; by hand: `osascript -e 'the clipboard as «class utf8»'`).
-Human-bound prose gets `clip --unwrap`, no Markdown. Never overwrite the
+Human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to hand to another agent also goes to the clipboard via `clip`, unasked** (2026-10-06; `memory/feedback_prompts_go_to_clipboard.md`). Never overwrite the
 pasteboard to test: save and restore it (`LC_CTYPE=UTF-8 pbpaste >
 /tmp/clip.bak`). Detail: [[reference_pbcopy_needs_lc_ctype_utf8]].
 

@@ -278,6 +278,8 @@ pasteboard and `—` pastes as `‚Äî`. Minimum fix: `LC_CTYPE=UTF-8 pbcopy`.
 - Prose for a human: `clip --unwrap` (one line per paragraph) and no Markdown —
   backticks and `**bold**` render literally in a mail client.
 - **Never overwrite the pasteboard to test**; it is the operator's live state.
+- **Prompts for another agent go to the clipboard too, unasked**: whenever you
+  write djbclark a prompt to hand on, also `clip` it (standing rule, 2026-10-06).
 
 ## Long documents — query the book KB, never paste the book (2026-10-03)
 
