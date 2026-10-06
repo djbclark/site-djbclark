@@ -15,6 +15,15 @@
       LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
       an auth/master-key design), and Darwin or Linux.
 
+- name: Assert the log filter stops the service before launchd kills the filter
+  ansible.builtin.assert:
+    that:
+      - (litellm_logpipe_kill_after | int) < (litellm_exit_timeout | int)
+    fail_msg: >-
+      litellm_logpipe_kill_after ({{ litellm_logpipe_kill_after }}) must be below
+      litellm_exit_timeout ({{ litellm_exit_timeout }}), or launchd SIGKILLs the
+      filter first and orphans the service (2026-10-06).
+
 # ── The LiteLLM *install* is deliberately not managed here ───────────────────
 #
 # This host runs LiteLLM from a git checkout (a fork of BerriAI/litellm) at

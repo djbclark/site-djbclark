@@ -3,9 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>Label</key><string>{{ basic_memory_mcp_label }}</string>
-  {#- bin/litellm_logpipe.py supervises the server (forwards launchd's SIGTERM,
-      filters repeats, size-caps the log). One shared server per machine; every
-      agent session reaches it at {{ basic_memory_mcp_url }}. #}
+  {#- bin/litellm_logpipe.py supervises the server (own process group; forwards
+      launchd's SIGTERM to it, SIGKILL after --kill-after s, below ExitTimeOut;
+      a reaper kills the group if the filter dies; filters repeats, size-caps
+      the log). One shared server per machine; every agent session reaches it
+      at {{ basic_memory_mcp_url }}. -I -S: logpipe is stdlib-only. #}
   {#- NOT /usr/bin/python3 below: that is the Xcode CommandLineTools shim
       (/Applications/Xcode.app/Contents/Developer/usr/bin/python3), which dies with
       "unable to locate xcodebuild" whenever Xcode updates or its selected developer
@@ -18,10 +20,13 @@
   <array>
     <string>/usr/bin/env</string>
     <string>python3</string>
+    <string>-I</string>
+    <string>-S</string>
     <string>{{ basic_memory_mcp_logpipe_script }}</string>
     <string>--out</string><string>{{ basic_memory_mcp_logs_dir }}/basic-memory-mcp.log</string>
     <string>--max-bytes</string><string>{{ basic_memory_mcp_log_max_bytes | string }}</string>
     <string>--backups</string><string>{{ basic_memory_mcp_log_backups | string }}</string>
+    <string>--kill-after</string><string>{{ basic_memory_mcp_logpipe_kill_after | string }}</string>
     <string>--</string>
     <string>{{ basic_memory_mcp_bin }}</string>
     <string>mcp</string>
@@ -34,6 +39,8 @@
   <key>KeepAlive</key>
   <dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>30</integer>
+  <key>ExitTimeOut</key><integer>{{ basic_memory_mcp_exit_timeout }}</integer>
+  <key>AbandonProcessGroup</key><false/>
   <!-- Standard, not Background: launchd defers and throttles Background jobs at login, so after the
        2026-10-05 reboot the server was not listening for ~5 min and every agent session resumed
        in that window came up without basic-memory (clients do not retry). -->

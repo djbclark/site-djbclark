@@ -6,6 +6,12 @@
       - ansible_facts.os_family == 'Darwin'
     fail_msg: The shared basic-memory MCP server stays loopback-only and currently supports the managed macOS host only.
 
+- name: Assert the log filter stops the server before launchd kills the filter
+  ansible.builtin.assert:
+    that:
+      - (basic_memory_mcp_logpipe_kill_after | int) < (basic_memory_mcp_exit_timeout | int)
+    fail_msg: basic_memory_mcp_logpipe_kill_after must be below basic_memory_mcp_exit_timeout, or launchd SIGKILLs the filter first and orphans the server.
+
 - name: Locate the basic-memory binary
   ansible.builtin.stat:
     path: "{{ basic_memory_mcp_bin }}"

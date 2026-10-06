@@ -5,10 +5,14 @@
 <dict>
     <key>Label</key>
     <string>{{ litellm_label }}</string>
-    {#- The log filter is the PARENT: it starts litellm, reads its merged output,
-        forwards launchd's SIGTERM (SIGKILL after 20 s) and rotates the log. A
-        `sh -c 'litellm | logpipe'` wrapper orphaned a wedged proxy on :4000
-        when launchd signalled only the shell (2026-09-26). #}
+    {#- The log filter is the PARENT: it starts litellm in its own process group,
+        reads its merged output, forwards launchd's SIGTERM to the whole group
+        (SIGKILL after --kill-after s, which must stay below ExitTimeOut) and
+        rotates the log; a reaper kills the group if the filter itself dies.
+        A `sh -c 'litellm | logpipe'` wrapper orphaned a wedged proxy on :4000
+        when launchd signalled only the shell (2026-09-26); launchd's default
+        5 s ExitTimeOut SIGKILLing the filter before its old 20 s child kill
+        orphaned it again on 2026-10-06. -I -S: logpipe is stdlib-only. #}
     {#- NOT /usr/bin/python3 below: that is the Xcode CommandLineTools shim
         (/Applications/Xcode.app/Contents/Developer/usr/bin/python3), which dies with
         "unable to locate xcodebuild" whenever Xcode updates or its selected developer
@@ -21,6 +25,8 @@
     <array>
         <string>/usr/bin/env</string>
         <string>python3</string>
+        <string>-I</string>
+        <string>-S</string>
         <string>{{ litellm_logpipe_script }}</string>
         <string>--out</string>
         <string>{{ litellm_logs_dir }}/litellm.log</string>
@@ -28,6 +34,8 @@
         <string>{{ litellm_log_max_bytes }}</string>
         <string>--backups</string>
         <string>{{ litellm_log_backups }}</string>
+        <string>--kill-after</string>
+        <string>{{ litellm_logpipe_kill_after }}</string>
         <string>--</string>
         <string>{{ litellm_bin }}</string>
         <string>--config</string>
@@ -41,6 +49,14 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    {#- Time between launchd's SIGTERM and its SIGKILL of the filter; must exceed
+        --kill-after so the filter always stops the proxy itself. #}
+    <key>ExitTimeOut</key>
+    <integer>{{ litellm_exit_timeout }}</integer>
+    <key>AbandonProcessGroup</key>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>{{ litellm_throttle_interval }}</integer>
     <key>ProcessType</key>
     <string>Background</string>
     <key>Umask</key>
@@ -65,6 +81,11 @@
         <string>1</string>
         <key>LITELLM_LOG</key>
         <string>INFO</string>
+        <!-- litellm's DB health check (SELECT 1 every 30 s) reports "Prisma DB
+             reconnect failed" after one 5 s client-side timeout; under load that
+             fired on a healthy database (2026-10-06). -->
+        <key>PRISMA_HEALTH_WATCHDOG_PROBE_TIMEOUT_SECONDS</key>
+        <string>{{ litellm_prisma_probe_timeout_s }}</string>
         <key>SERVER_ROOT_PATH</key>
         <string>{{ litellm_server_root_path }}</string>
 {# Only keys for backends a model_list entry can reach are injected:

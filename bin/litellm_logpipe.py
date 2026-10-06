@@ -11,10 +11,28 @@ quota limits, provider outages), and stdout.log was one uvicorn access line
 per successful request. launchd now runs `logpipe --out FILE -- litellm ...`:
 this script starts the service as its child, reads the child's merged
 stdout/stderr, and forwards SIGTERM/SIGINT/SIGHUP to it (SIGKILL after
-KILL_AFTER s). It is the parent on purpose: the first version ran
+--kill-after s, default 15). It is the parent on purpose: the first version ran
 `sh -c 'litellm 2>&1 | logpipe'`, and on 2026-09-26 a launchd stop signalled
 only the shell, leaving the old proxy orphaned, wedged, and still holding
-:4000. With nothing after `--` it filters stdin instead. Then it:
+:4000. With nothing after `--` it filters stdin instead.
+
+Child supervision (C1, 2026-10-06; site-private memory
+project_litellm_watchdog_restart_orphans_2026-10-06). launchd's default
+ExitTimeOut is 5 s, and the old 20 s child kill meant launchd SIGKILLed this
+wrapper first and the proxy was reparented to pid 1, sometimes still holding
+:4000. So:
+
+  * the child runs in its own session (start_new_session), and every signal
+    goes to its whole process group (killpg), grandchildren included;
+  * --kill-after (default 15) must stay below the plist's ExitTimeOut (30);
+  * a separate reaper process (this file run with --reap, in its own session so
+    launchd's process-group cleanup does not take it down) waits on a kqueue
+    NOTE_EXIT for this wrapper and kills the child's group if the wrapper dies
+    first, even by SIGKILL; it exits as soon as the child does;
+  * after stdout EOF the wrapper waits at most --kill-after for the child to
+    exit, then kills the group.
+
+Then it:
 
   * collapses each record's continuation block (tracebacks, multi-line JSON
     error bodies) to its first CONT_KEEP lines plus the final exception line;
@@ -58,7 +76,7 @@ DROP_CONT_AFTER_NOISE = True   # the noise record's own continuation goes too
 CONT_KEEP = 3
 TAIL_KEEP = 2      # the innermost frames are where a stack dump says what it was doing
 MAX_LINE = 2000
-KILL_AFTER = 20
+KILL_AFTER = 15   # default for --kill-after; keep below the plist ExitTimeOut (30)
 REPEAT_WINDOW = 60
 NEVER_DEDUPE = re.compile(r"Successful fallback b/w models|acompletion\(model=[^)]*\) 200 OK")
 NORM = [(re.compile(r"\b[0-9a-f]{16,}\b"), "H"), (re.compile(r"\d+"), "N")]
@@ -105,28 +123,104 @@ class Sink:
             print(f"logpipe: write failed: {e}", file=sys.stderr)
 
 
+def killpg(pgid, sig):
+    """Signal a whole process group; False if it is already gone."""
+    try:
+        os.killpg(pgid, sig)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def group_alive(pgid):
+    return killpg(pgid, 0)
+
+
+def stop_group(pgid, sig, kill_after, alive=None):
+    """Send `sig` to the group, wait up to kill_after s, then SIGKILL it."""
+    alive = alive or (lambda: group_alive(pgid))
+    killpg(pgid, sig)
+    deadline = time.time() + kill_after
+    while alive() and time.time() < deadline:
+        time.sleep(0.2)
+    if alive():
+        killpg(pgid, signal.SIGKILL)
+
+
+def reap(wrapper_pid, pgid, kill_after):
+    """--reap mode: kill the child's group if the wrapper dies before the child.
+
+    Runs in its own session, so launchd's cleanup of the job's process group
+    (AbandonProcessGroup false) does not kill it along with the wrapper. kqueue
+    NOTE_EXIT fires for any death, SIGKILL included. Registration failing with
+    ESRCH means that pid is already gone.
+    """
+    for sig in (signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_IGN)
+    kq = select.kqueue()
+    flags = select.KQ_EV_ADD | select.KQ_EV_ONESHOT
+    gone = set()
+    for pid in (wrapper_pid, pgid):
+        try:
+            kq.control([select.kevent(pid, filter=select.KQ_FILTER_PROC, flags=flags,
+                                      fflags=select.KQ_NOTE_EXIT)], 0, 0)
+        except ProcessLookupError:
+            gone.add(pid)
+    if os.getppid() != wrapper_pid:
+        gone.add(wrapper_pid)
+    while not gone:
+        try:
+            for ev in kq.control(None, 2, None):
+                gone.add(ev.ident)
+        except InterruptedError:
+            continue
+    if pgid in gone and wrapper_pid not in gone:
+        return 0                    # the child exited first: the wrapper handles it
+    if group_alive(pgid):
+        stop_group(pgid, signal.SIGTERM, kill_after)
+    return 0
+
+
+def start_reaper(pgid, kill_after):
+    try:
+        return subprocess.Popen(
+            [sys.executable, "-I", "-S", os.path.abspath(__file__), "--reap",
+             str(os.getpid()), str(pgid), str(kill_after)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True)
+    except OSError as e:   # never take the service down over its safety net
+        print(f"logpipe: reaper not started: {e}", file=sys.stderr)
+        return None
+
+
 def main():
+    if sys.argv[1:2] == ["--reap"]:
+        wrapper_pid, pgid, kill_after = sys.argv[2:5]
+        sys.exit(reap(int(wrapper_pid), int(pgid), float(kill_after)))
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-bytes", type=int, default=20_000_000)
     ap.add_argument("--backups", type=int, default=3)
+    ap.add_argument("--kill-after", type=float, default=KILL_AFTER,
+                    help="seconds between forwarding a stop signal and SIGKILL; "
+                         "keep below the launchd ExitTimeOut")
     ap.add_argument("cmd", nargs=argparse.REMAINDER, help="-- program args (run as child)")
     a = ap.parse_args()
     cmd = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
     sink = Sink(a.out, a.max_bytes, a.backups)
+    kill_after = a.kill_after
 
     child = None
     if cmd:
-        child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        # Own session: the child's pid is its process-group id, so killpg reaches
+        # anything it spawns, and launchd's group cleanup never races our own.
+        child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        start_reaper(child.pid, kill_after)
 
         def forward(signum, _frame):
             if child.poll() is None:
-                child.send_signal(signum)
-                deadline = time.time() + KILL_AFTER
-                while child.poll() is None and time.time() < deadline:
-                    time.sleep(0.2)
-                if child.poll() is None:
-                    child.kill()
+                stop_group(child.pid, signum, kill_after, alive=lambda: child.poll() is None)
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(sig, forward)
 
@@ -213,7 +307,15 @@ def main():
     close_block()
     flush_repeats(force=True)
     if child:
-        rc = child.wait()
+        # stdout EOF does not mean the child has exited (it may have closed its
+        # output, or be stuck in shutdown): bounded wait, then kill the group.
+        try:
+            rc = child.wait(timeout=kill_after)
+        except subprocess.TimeoutExpired:
+            sink.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} logpipe: child still running "
+                       f"{kill_after:g}s after its output closed; killing its process group")
+            killpg(child.pid, signal.SIGKILL)
+            rc = child.wait()
         sink.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} logpipe: child exited with {rc}")
         sys.exit(rc if rc >= 0 else 128 - rc)
 

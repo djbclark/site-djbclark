@@ -157,6 +157,19 @@ model_list:
       model: {{ g.model }}
       api_key: os.environ/GEMINI_API_KEY
 {% endfor %}
+{% if litellm_watchdog_mock_model | length > 0 %}
+
+  # watchdogd's health probe (roles/watchdogd, 2026-10-06). mock_response set
+  # on the deployment answers "OK" without calling any provider, so the probe
+  # exercises proxy + auth + router for free. A client cannot send
+  # mock_response itself: the proxy strips it (litellm_pre_call_utils.py,
+  # _UNTRUSTED_ROOT_CONTROL_FIELDS). Never put this in a fallback chain.
+  - model_name: {{ litellm_watchdog_mock_model }}
+    litellm_params:
+      model: openai/{{ litellm_watchdog_mock_model }}
+      api_key: no-key-mock-only
+      mock_response: "OK"
+{% endif %}
 
 litellm_settings:
   cache: true

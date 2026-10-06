@@ -36,6 +36,11 @@ basic_memory_mcp_logs_dir: "{{ basic_memory_mcp_home }}/Library/Logs/basic-memor
 basic_memory_mcp_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"
 basic_memory_mcp_log_max_bytes: 5000000
 basic_memory_mcp_log_backups: 2
+# launchd SIGKILLs the filter ExitTimeOut s after its SIGTERM (default 5); the
+# filter SIGKILLs the server --kill-after s after forwarding it. kill_after
+# must stay below exit_timeout or the server is orphaned (2026-10-06 litellm).
+basic_memory_mcp_exit_timeout: 30
+basic_memory_mcp_logpipe_kill_after: 15
 basic_memory_mcp_plist_dir: "{{ basic_memory_mcp_home }}/Library/LaunchAgents"
 basic_memory_mcp_label: "com.{{ site_ns }}.basic-memory-mcp"
 basic_memory_mcp_plist_path: "{{ basic_memory_mcp_plist_dir }}/{{ basic_memory_mcp_label }}.plist"
