@@ -263,6 +263,24 @@ if [ -e "$HOME/.cache/gradle/.moved-from-usb" ]; then
     export GRADLE_USER_HOME="$HOME/.cache/gradle"
 fi
 
+# uv, npm and the Go caches moved back to the internal SSD on 2026-10-06 (copy only:
+# ~/.local/state/usb-cache-move). uv cannot clone or hardlink across volumes, so with
+# its cache on the USB stick every install was a full copy; npx packages ran from the
+# stick; Go re-reads module sources on every build. Each marker appears only after its
+# copy completes; the USB originals stay until removed by hand.
+if [ -e "$HOME/.cache/uv/.moved-from-usb" ]; then
+    export UV_CACHE_DIR="$HOME/.cache/uv"
+fi
+if [ -e "$HOME/.cache/npm/.moved-from-usb" ]; then
+    export npm_config_cache="$HOME/.cache/npm"
+fi
+if [ -e "$HOME/.cache/go-build/.moved-from-usb" ]; then
+    export GOCACHE="$HOME/.cache/go-build"
+fi
+if [ -e "$HOME/.cache/go-mod/.moved-from-usb" ]; then
+    export GOMODCACHE="$HOME/.cache/go-mod"
+fi
+
 __path_prepend_force \
   "$HOME/.local/bin" \
   "$HOME/.collie/current/bin" \
