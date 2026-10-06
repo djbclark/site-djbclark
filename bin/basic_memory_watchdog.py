@@ -19,6 +19,7 @@ This gives three Telegram outcomes, not an endless stream:
 """
 
 import json
+import socket
 import subprocess
 import sys
 import time
@@ -105,7 +106,7 @@ def health_check():
         # Some MCP servers return 4xx for a handshake without a session but
         # still prove the ASGI stack is alive and responsive.
         return e.code < 500
-    except (urllib.error.URLError, TimeoutError) as e:
+    except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as e:
         log(f"health_check failed: {e!r}")
         return False
 

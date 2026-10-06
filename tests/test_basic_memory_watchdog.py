@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import socket
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +13,17 @@ assert SPEC and SPEC.loader
 watchdog = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = watchdog
 SPEC.loader.exec_module(watchdog)
+
+
+class HealthCheckTests(unittest.TestCase):
+    def test_socket_timeout_is_treated_as_unhealthy_not_crash(self) -> None:
+        with (
+            mock.patch.object(watchdog.urllib.request, "urlopen", side_effect=socket.timeout("timed out")),
+            mock.patch.object(watchdog, "log") as log,
+        ):
+            self.assertFalse(watchdog.health_check())
+
+        log.assert_called_once()
 
 
 class StartupGraceTests(unittest.TestCase):
