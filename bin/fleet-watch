@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# fleet-watch — zero-token status of agent work and the phones, notifying only on change.
+#
+#   fleet-watch            one check: print the status line, notify if it changed
+#   fleet-watch status     print the last status line and when it was taken
+#   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
+#   fleet-watch install    write the launchd agent (every 5 min) and load it
+#   fleet-watch uninstall  unload and remove the launchd agent
+#
+# Replaces a model-driven "status report every N minutes", which re-sent the whole
+# conversation each time. This runs no model: it reads processes and each phone's
+# last repair STATUS line over ssh, keeps the result in ~/.local/state/fleet-watch,
+# and, only when something changed, sends a notice to the operator's Hermes
+# Telegram Inbox topic (no macOS notification).
+#
+# helm: agent sessions blocked on the operator, from the helm skill's no-model collector
+# (`helm.py brief`). A notice goes out only when a session starts waiting or asks a new
+# question, never when one is answered. Added 2026-10-06.
+#
+# Phones: FLEET_WATCH_HOSTS (default "s24 p7a t2e hd8"; ssh aliases). hd8 was left
+# out until 2026-10-05, when the operator asked for it back in.
+#
+# GitHub repos: FLEET_WATCH_REPOS (default "pkb-rocks/plektra", added 2026-10-06: notify
+# when Plektra, Pastiera's successor, first publishes code so the private port can move).
+# Each repo is "<head sha>/<release count>", fetched with gh at most every
+# FLEET_WATCH_REPO_INTERVAL seconds (default 3600) and cached in between; a failed fetch
+# keeps the cached value, so a network blip is not reported as a change.
+
+set -uo pipefail
+
+LABEL=com.djbclark.fleet-watch
+STATE_DIR="$HOME/.local/state/fleet-watch"
+LAST="$STATE_DIR/last"
+LOG="$STATE_DIR/fleet-watch.log"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+HOSTS="${FLEET_WATCH_HOSTS:-s24 p7a t2e hd8}"
+INTERVAL="${FLEET_WATCH_INTERVAL:-300}"
+REPOS="${FLEET_WATCH_REPOS-pkb-rocks/plektra}"
+REPO_INTERVAL="${FLEET_WATCH_REPO_INTERVAL:-3600}"
+
+mkdir -p "$STATE_DIR"
+
+# Where change notices go: the operator's Hermes Telegram Inbox topic (see
+# memory/feedback_ping_telegram_and_chat.md); nothing else.
+HERMES="${FLEET_WATCH_HERMES:-$HOME/.local/bin/hermes}"
+HERMES_TO="${FLEET_WATCH_TO:-telegram:838808636:22158}"
+
+notify() {
+  # Hermes only: the operator does not want macOS notifications (2026-10-05).
+  # hermes send fails loudly (non-zero) on a dead transport; record that rather
+  # than pretend the operator was told.
+  # hermes-ping adds where the notice comes from (launchd com.djbclark.fleet-watch).
+  if ! HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" \
+       "$HOME/.local/bin/hermes-ping" "$1: $2" >>"$STATE_DIR/hermes.log" 2>&1; then
+    printf '%s hermes send FAILED for: %s\n' "$(date '+%F %T')" "$2" >>"$LOG"
+  fi
+}
+
+count() { pgrep -f "$1" 2>/dev/null | wc -l | tr -d ' '; }
+
+HELM="${FLEET_WATCH_HELM:-$HOME/ops/site-private/skills/helm/helm.py}"
+
+waiting() {
+  # "N:project@id/mark,..." for sessions blocked on the operator; "unknown" if helm is missing.
+  local t
+  t=$(python3 -I "$HELM" brief 2>/dev/null) && [[ "$t" == *:* ]] && echo "$t" || echo "unknown"
+}
+
+phone() {
+  # One word per phone: down (no ssh), stale (no repair pass for 40 min), or
+  # the repair line's shizuku state, with "+unanswered" when the key is not accepted.
+  local h=$1 line
+  line=$(ssh -o ConnectTimeout=6 -o BatchMode=yes "$h" \
+    'f=~/.stayturgid/logs/repair.log; tail -1 "$f" 2>/dev/null; echo; date +%s; stat -c %Y "$f" 2>/dev/null' 2>/dev/null) || {
+    echo "down"
+    return
+  }
+  local status now mtime shz auth
+  status=$(printf '%s\n' "$line" | sed -n 1p)
+  now=$(printf '%s\n' "$line" | sed -n 3p)
+  mtime=$(printf '%s\n' "$line" | sed -n 4p)
+  if [[ -n "$now" && -n "$mtime" ]] && ((now - mtime > 2400)); then
+    echo "stale"
+    return
+  fi
+  shz=$(grep -o 'shizuku=[a-z]*' <<<"$status" | head -1 | cut -d= -f2)
+  auth=$(grep -o 'shizuku_auth=[a-z]*' <<<"$status" | head -1 | cut -d= -f2)
+  echo "${shz:-unknown}${auth:+$([[ $auth == unanswered ]] && echo +unanswered)}"
+}
+
+repo() {
+  # "<head sha>/<releases>" for a GitHub repo, from a cache refreshed at most every REPO_INTERVAL.
+  local r=$1 cache="$STATE_DIR/repo-${1//\//_}" now sha rels
+  now=$(date +%s)
+  if [[ -f "$cache" ]] && ((now - $(stat -f %m "$cache") < REPO_INTERVAL)); then
+    cat "$cache"
+    return
+  fi
+  sha=$(gh api "repos/$r/commits?per_page=1" --jq '.[0].sha[0:7]' 2>/dev/null)
+  rels=$(gh api "repos/$r/releases?per_page=100" --jq 'length' 2>/dev/null)
+  if [[ -n "$sha" && -n "$rels" ]]; then
+    echo "$sha/$rels" | tee "$cache"
+  elif [[ -f "$cache" ]]; then
+    cat "$cache"
+  else
+    echo "unknown"
+  fi
+}
+
+check() {
+  local agents builds deploys parts=() h
+  # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
+  agents=$(count 'bin/python[0-9.]* [^ ]*/site-private/bin/acp-run ')
+  # A running build, not an idle Gradle daemon left over from an earlier one.
+  builds=$(count 'GradleWrapperMain')
+  deploys=$(count 'deploy_fleet.py')
+  parts+=("agents=$agents" "builds=$builds" "deploy=$deploys" "helm=$(waiting)")
+  for h in $HOSTS; do parts+=("$h=$(phone "$h")"); done
+  local r
+  for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
+  local now_line="${parts[*]}"
+  local prev_line=""
+  [[ -f "$LAST" ]] && prev_line=$(sed -n 2p "$LAST")
+  printf '%s\n%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$now_line" >"$LAST"
+  echo "$now_line"
+
+  [[ -z "$prev_line" || "$prev_line" == "$now_line" ]] && return 0
+  printf '%s %s -> %s\n' "$(date '+%F %T')" "$prev_line" "$now_line" >>"$LOG"
+
+  # Say what changed in words, one notification per run.
+  local msgs=() key old new
+  for key in agents builds deploy helm $HOSTS $REPOS; do
+    old=$(tr ' ' '\n' <<<"$prev_line" | grep "^$key=" | cut -d= -f2)
+    new=$(tr ' ' '\n' <<<"$now_line" | grep "^$key=" | cut -d= -f2)
+    [[ "$old" == "$new" ]] && continue
+    case $key in
+      agents | builds | deploy)
+        if [[ "$new" == 0 ]]; then msgs+=("$key finished"); elif [[ "$old" == 0 ]]; then msgs+=("$key started"); fi
+        ;;
+      helm)
+        # Only what is newly waiting: a token absent from the previous check.
+        [[ "$new" == *:* ]] || continue  # helm could not be read: say nothing
+        local gained=() tok
+        for tok in $(tr ',' ' ' <<<"${new#*:}"); do
+          [[ ",${old#*:}," == *",$tok,"* ]] || gained+=("${tok%%@*}")
+        done
+        ((${#gained[@]})) && msgs+=("helm: ${new%%:*} waiting on you, new: ${gained[*]} (send /helm)")
+        ;;
+      *) msgs+=("$key: ${old:-?} -> $new") ;;
+    esac
+  done
+  ((${#msgs[@]})) && notify "fleet-watch" "$(
+    IFS=';'
+    echo "${msgs[*]}"
+  )"
+  return 0
+}
+
+case "${1:-check}" in
+  check) check ;;
+  status)
+    if [[ -f "$LAST" ]]; then cat "$LAST"; else echo "no check has run yet"; fi
+    ;;
+  test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && tail -2 "$STATE_DIR/hermes.log" ;;
+  install)
+    cat >"$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$HOME/ops/site-private/bin/fleet-watch</string>
+    <string>check</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>$INTERVAL</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>$STATE_DIR/launchd.out</string>
+  <key>StandardErrorPath</key><string>$STATE_DIR/launchd.err</string>
+</dict>
+</plist>
+EOF
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" && echo "installed: every ${INTERVAL}s, state in $STATE_DIR"
+    ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST" && echo "removed $LABEL"
+    ;;
+  *)
+    sed -n '2,8p' "$0"
+    exit 1
+    ;;
+esac

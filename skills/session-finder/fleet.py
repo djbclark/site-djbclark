@@ -469,6 +469,9 @@ def launch_state(d):
                 cur.append((data.get("content") or {}).get("text") or "")
             elif k == "new_session" and data.get("sessionId"):
                 d["acp_session"] = data["sessionId"]
+            elif k == "load_session":
+                d["acp_session"] = data.get("sessionId") or d.get("resumed") or d.get("acp_session")
+                d["load_session"] = True   # it loaded once, so it can load again
             elif k == "initialize":
                 d["load_session"] = bool((data.get("agentCapabilities") or {}).get("loadSession"))
             elif k == "turn":
