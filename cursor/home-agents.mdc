@@ -198,7 +198,9 @@ copilot shares its subscription with GitHub-side Copilot features
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
 Before orchestrating other agents from any start dir, reach for these.
-Editable copies in git at `site-djbclark/skills/<name>/` (reached as
+Editable copies in git: orchestration and session hygiene (these skills,
+`acp-run`, `fleet-watch`, `/orc`) at `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade,
+since 2026-10-08), the rest at `site-djbclark/skills/<name>/` (all reached as
 `site-private/skills/<name>`, a symlink; `1password` and `tell-chief-of-staff`
 are private and real there), symlinked into
 every TUI by the `skill-everywhere` skill (edit the git copy, never a TUI

@@ -287,15 +287,16 @@ grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*)
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
-Before orchestrating other agents, reach for our skills (git copies in
-`site-djbclark/skills/<name>/`, linked into every TUI by `skill-everywhere`; edit the git
-copy): `bigteam`, `model-routing`, `herdr-orchestration`, `ralph-tui-orchestration`,
-`cow-workspaces`, `tell-chief-of-staff`, `session-finder` (use it for every "tell the
-agent doing X" relay; it decides message / `/baton` / resume / clean agent and
-checks `fleet.py conflicts` first), `session-finder-all` (ended sessions and handoffs
-too), `helm` (answer every waiting session of every TUI from one window, ranked by
-work unlocked) and `helm-all` (plus ended sessions with open work). New sessions
-start over ACP via `launch.py` (2026-10-08). Slash commands, sub-agents and the full list:
+Before orchestrating other agents, reach for our skills. Orchestration and session
+hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
+`~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
+reaches them via `skill-everywhere` (edit the git copy): `bigteam`, `model-routing`,
+`herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
+`tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; decides
+message / `/baton` / resume / clean agent after `fleet.py conflicts`),
+`session-finder-all` (plus ended sessions), `helm` (answer every waiting session of
+every TUI from one window, ranked by work unlocked), `helm-all` (plus ended sessions
+with open work). New sessions start over ACP via `launch.py`. Full list:
 [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)

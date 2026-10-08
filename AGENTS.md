@@ -179,7 +179,17 @@ were left alone. New work uses the `site-djbclark` path.
 1. This repo is public. These directories describe one machine's agent setup;
    credentials, tokens and vault or item identifiers still never go in them.
 2. What stayed private: `memory/`, `web/`, `docs/books/`, `1password/`,
-   `skills/1password/`, `skills/tell-chief-of-staff/`, `bin/fleet-watch`.
+   `skills/1password/`, `skills/tell-chief-of-staff/`.
+5. **Moved on to djbclark-ade (2026-10-08).** The orchestration and
+   session-hygiene skills (`bigteam`, `model-routing`, `effort-routing`,
+   `helm`, `helm-all`, `session-finder`, `session-finder-all`,
+   `herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
+   `handoff`, `baton`, `resume`, `session-handoff`, `steps`, `loose`,
+   `skill-everywhere`), `tools/acp-run`, `bin/fleet-watch` and
+   `claude/commands/orc{,-meta}.md` now live in git at
+   `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade). Their paths here
+   are absolute symlinks into it; edit them there. Their history up to the
+   move stays here.
 3. `site-private` enforces this with a pre-commit hook (`.githooks/pre-commit`
    there): a regular file outside its private list is rejected.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,

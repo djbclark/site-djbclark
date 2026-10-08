@@ -7,6 +7,17 @@ that `site-private` path (`~/.claude/skills/<name>` and the rest), so one root
 serves public and private skills alike. Same pattern as `~/CLAUDE.md`:
 content-in-git + symlink.
 
+**Orchestration and session-hygiene skills live in djbclark-ade (2026-10-08).**
+`bigteam`, `model-routing`, `effort-routing`, `helm`, `helm-all`,
+`session-finder`, `session-finder-all`, `herdr-orchestration`,
+`ralph-tui-orchestration`, `cow-workspaces`, `handoff`, `baton`, `resume`,
+`session-handoff`, `steps`, `loose` and `skill-everywhere` are absolute
+symlinks here into `~/src/djbclark-ade/skills/<name>/`
+(github.com/djbclark/djbclark-ade, whose README describes them as one
+project). Edit and commit them there; the chain `site-private/skills/<name>`
+→ here → djbclark-ade is unchanged for every TUI. A new skill of that kind goes
+in djbclark-ade too, with the same symlink here.
+
 Two skills are private and are real directories in `site-private/skills/`:
 `1password` and `tell-chief-of-staff`. This repo is public: no credentials,
 tokens, vault or item identifiers in a skill here.
