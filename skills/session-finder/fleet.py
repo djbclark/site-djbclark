@@ -443,6 +443,10 @@ def launch_state(d):
             k, data = r.get("kind"), r.get("data") or {}
             if k == "update" and data.get("sessionUpdate") == "agent_message_chunk":
                 cur.append((data.get("content") or {}).get("text") or "")
+            elif k == "new_session" and data.get("sessionId"):
+                d["acp_session"] = data["sessionId"]
+            elif k == "initialize":
+                d["load_session"] = bool((data.get("agentCapabilities") or {}).get("loadSession"))
             elif k == "turn":
                 turns.append({**data, "text": "".join(cur)})
                 cur = []

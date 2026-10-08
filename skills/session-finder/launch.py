@@ -290,6 +290,9 @@ def start(a, brief_text, parent=None):
         return start_tui(a, d, brief_text, host)
 
     acp_cmd = [ACP_RUN, agent, "-C", cwd, "-f", d["brief"], "--timeout", str(a.timeout), "--log", d["log"]]
+    if getattr(a, "resume", None):
+        acp_cmd += ["--resume", a.resume]   # session/load: the agent replays its own history
+        d["resumed"] = a.resume
     if getattr(a, "interactive", True) and acp_interactive():
         # the pane shows the agent live and takes the next prompt from the keyboard or the inbox
         d["interactive"], d["inbox"] = True, str(ldir / "inbox")
@@ -418,11 +421,16 @@ def cmd_reply(a):
         return 0
     if status == "working":
         die(f"{a.id} is still working; wait for its result first")
-    brief = Path(old["brief"]).read_text() if Path(old.get("brief", "")).exists() else old.get("prompt_head", "")
-    text = (f"This continues an earlier turn in {old['cwd']}. The brief for that turn was:\n\n{brief}\n\n"
-            f"Your reply to it ended:\n\n{final[-3000:]}\n\nThe operator now says: {a.text}\n\n"
-            "Continue from there; re-read the files you changed before editing them again.")
+    resume = old.get("acp_session") if old.get("load_session") and acp_interactive() else None
+    if resume:
+        text = a.text        # session/load brings the whole conversation back; just the new prompt
+    else:
+        brief = Path(old["brief"]).read_text() if Path(old.get("brief", "")).exists() else old.get("prompt_head", "")
+        text = (f"This continues an earlier turn in {old['cwd']}. The brief for that turn was:\n\n{brief}\n\n"
+                f"Your reply to it ended:\n\n{final[-3000:]}\n\nThe operator now says: {a.text}\n\n"
+                "Continue from there; re-read the files you changed before editing them again.")
     ns = argparse.Namespace(agent=old["agent"], cwd=old["cwd"], model=a.model or old.get("model"), name=old.get("name"),
+                            resume=resume,
                             host=a.host, pane=(old.get("host") or {}).get("pane") if a.host == "herdr" or a.host == "auto" else None,
                             timeout=a.timeout, perm=a.perm, set=a.set, dry_run=a.dry_run, json=a.json, prompt=None,
                             prompt_file=None, baton=False, chain=None, files=old.get("files") or [], force=True)
@@ -433,7 +441,10 @@ def cmd_reply(a):
     d = start(ns, text, parent=a.id)
     if not a.dry_run:
         record({"id": a.id, "closed": True, "superseded_by": d["id"]})
-        print(f"started {d['id']} as the next turn of {a.id} (focus: herdr tab focus {(d['host'] or {}).get('tab', '?')})")
+        if resume:
+            record({"id": d["id"], "audited_turn": old.get("audited_turn")} if old.get("audited_turn") is not None else {"id": d["id"]})
+        print(f"started {d['id']} as the next turn of {a.id} ({'session/load of ' + resume[:8] if resume else 'new ACP session'}; "
+              f"focus: herdr tab focus {(d['host'] or {}).get('tab', '?')})")
     return 0
 
 
@@ -472,6 +483,7 @@ def cmd_audit(a):
         return 0
     if status == "working":
         die(f"{a.id} is still working")
+    record({"id": a.id, "audited_turn": d.get("turns", 0), "audit_sent": time.time()})
     ns = argparse.Namespace(id=a.id, text=text, model=None, host="auto", timeout=1800, perm=None, set=None,
                             dry_run=False, json=False)
     return cmd_reply(ns)
@@ -518,7 +530,8 @@ def main():
     def common(p):
         p.add_argument("--model")
         p.add_argument("--host", choices=["auto", "herdr", "orca", "none"], default="auto")
-        p.add_argument("--timeout", type=int, default=3600)
+        p.add_argument("--timeout", type=int, default=14400,
+                       help="seconds per turn (default 4 h: a 1 h limit cut a real deploy short on 2026-10-08)")
         p.add_argument("--perm")
         p.add_argument("--set", action="append")
         p.add_argument("--dry-run", action="store_true")
