@@ -39,8 +39,9 @@ capped or unresponsive:
 - **Context size**: last `cache_read_input_tokens` from orc's session
   transcript JSONL (auto-discovers the most recently modified transcript
   under `~/.claude/projects/*/*.jsonl`, or pin one with `--session-id`).
-  Default hard threshold 350,000 tokens (matches the existing
-  `context_size_nudge.py` hook's page threshold).
+  Default hard threshold 350,000 tokens (well past the
+  `context_size_nudge.py` hook, which asks the operator from +70k growth or
+  150k total and pages at +130k or 250k).
 - **Quota**: `aiuse --json`, looking for a `kind: "burn"` alert on the
   `claude` provider, or the active `cswap` account's 5-hour window dropping
   under 25% (the primary-orchestrator floor). This only logs/alerts — see

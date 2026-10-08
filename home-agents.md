@@ -148,6 +148,19 @@ status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
 (`memory/feedback_exit_status_through_pipe.md`)
 
+## Context size: prompt early, delegate by default (standing rule, 2026-10-08)
+
+**Keep each session's context small: by default send discrete, separable tasks
+through `/bigteam`** (Agent sub-agents for small lookups) so their reads never
+land here. `context_size_nudge.py` counts growth since the session's first turn:
+at +40k, delegate from then on and name the options once; at +70k (or 150k
+total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
+natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
+Unattended orc keeps delegating. Another session may be running bigteam (herdr
+tab `coord`): follow bigteam's Step 0 (claim files, no overlap, re-probe pools,
+hands off its panes). Supersedes 2026-08-23's "never suggest a fresh session".
+(`memory/feedback_context_prompts_early.md`)
+
 ## Run commands yourself — never hand djbclark a `!` command (standing rule, 2026-10-06)
 
 **Run every command yourself, including ones that need Touch ID / `sudo-ask` or

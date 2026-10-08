@@ -1,39 +1,39 @@
 #!/usr/bin/env python3
-"""context_size_nudge.py — proactive context-fullness nudge.
+"""context_size_nudge.py — early, escalating context-size prompts.
 
-Registered under UserPromptSubmit. Reads Claude Code hook JSON on stdin,
-extracts the current session's most recent cache_read_input_tokens from its
-transcript, and if it crosses a threshold that hasn't already fired for this
-session, prints a plain-text note (Claude Code surfaces UserPromptSubmit
-stdout back to the model as a system-reminder) so the agent proactively
-raises it with the user -- and past a higher threshold, also pings the user
-directly via `hermes send`, since a busy session might not otherwise pause to
-mention it.
+Registered under UserPromptSubmit. Reads Claude Code hook JSON on stdin, finds
+the session's current context size in its transcript, and when it crosses a
+tier that hasn't fired yet, prints a note (Claude Code surfaces
+UserPromptSubmit stdout to the model as a system-reminder) telling the agent
+what to do and what to recommend to the operator.
 
-Built 2026-08-03 after a real gap: a marathon session grew to 670k+ cached
-tokens (already compacted once, then grown huge again) with nothing catching
-it until the user asked directly. reference_token_self_check.md's guidance
-("glance at context fullness... at natural checkpoints") existed only as
-inert memory content with no enforcement -- this hook is the enforcement.
+History:
+- 2026-08-03: built after a session grew to 670k+ tokens unnoticed.
+- 2026-08-23: reworded to "never suggest a wrap-up" (continuous operation).
+- 2026-10-05: fail-fast tail read + 2 s internal deadline (load 223 killed it).
+- 2026-10-08 (operator ruling, supersedes 2026-08-23): prompt earlier and
+  harder, and DO recommend /compact, or /handoff then /new. The old single
+  150k nudge fired too late. Separable work goes to /bigteam by default so it
+  never lands in this context. memory/feedback_context_prompts_early.md.
 
-Reworded 2026-08-23 (operator ruling: the stop-work /handoff ritual is a
-bug): nudges now direct the AGENT to externalize heavy work and keep state
-durable while CONTINUING -- auto-compaction plus precompact_handoff.py
-bridge context windows without stopping. The hermes ping at the hard
-threshold is an FYI, not a call to action. Doctrine and rationale:
-memory/feedback_continuous_operation_over_handoff.md.
+Measure: input + cache_creation + cache_read tokens of the newest usage block,
+i.e. the real context size (cache_read alone reads 0 after a cache miss).
+Tiers count GROWTH since the session's first usage block, because the baseline
+differs a lot: a session started in ~ carries ~90k of tool listings before any
+work, a project session ~25k. An absolute backstop still asks at ASK_TOTAL.
 
-MUST always exit 0 -- never fail or delay a prompt, no matter what.
-Python 3 stdlib only, matching precompact_handoff.py's convention.
+Levels: 1 = early (delegate from now on, mention the options once);
+2+ = ask the operator (AskUserQuestion) at the next natural boundary, again
+every REPEAT_EVERY of further growth. When context shrinks (a /compact) the
+level drops with it, so the tiers fire again as it regrows.
 
-Fail-fast (2026-10-05): on 2026-10-05 ~21:00 the load average hit 223 on 8
-cores and this hook was killed at its 10 s configured timeout, delaying every
-prompt. It now (a) reads only the transcript's tail, newest line first, and
-stops at the first usage block; (b) never waits on `hermes send` (detached
-Popen); (c) arms a DEADLINE_SECONDS alarm that exits 0 with no output, so a
-starved machine costs the prompt ~2 s at most. The settings.json timeout stays
-as a backstop.
+MUST always exit 0 -- never fail or delay a prompt. Python 3 stdlib only.
+Fail-fast: reads only a head window (baseline, once per session) and a tail
+window (newest usage), never waits on the Hermes ping (detached Popen), and
+an alarm at DEADLINE_SECONDS exits 0 with no output.
 """
+# Every failure is swallowed on purpose: a hook error must never block a prompt.
+# ruff: noqa: BLE001, S110
 import json
 import os
 import signal
@@ -42,16 +42,14 @@ from pathlib import Path
 
 STATE_PATH = Path.home() / ".claude" / "state" / "context-nudges.json"
 
-# Thresholds are cache_read_input_tokens (the whole-conversation cache Claude
-# re-reads every turn) -- not a fraction of any specific model's context
-# window, which varies (200k standard, up to 1M in long-context mode, as this
-# session's own 670k+ reading demonstrates). The point isn't "about to hit a
-# hard wall" -- per reference_token_self_check.md, a big context inflates
-# burn rate well before any wall, so the nudge point is deliberately well
-# below where a hard cutoff would bite.
-SOFT_THRESHOLD = 150_000
-HARD_THRESHOLD = 350_000
-HERMES_TARGET = "telegram:838808636:22158"
+EARLY_GROWTH = 40_000   # level 1: start delegating, mention the options
+ASK_GROWTH = 70_000     # level 2: ask the operator
+ASK_TOTAL = 150_000     # level 2 regardless of baseline
+REPEAT_EVERY = 30_000   # level 3, 4, ...: ask again per this much more
+PAGE_GROWTH = 130_000   # Hermes ping (once per climb), whichever comes first
+PAGE_TOTAL = 250_000
+
+PING_BIN = Path.home() / ".local" / "bin" / "hermes-ping"
 
 # Internal deadline: past this the hook exits 0 silently (see module docstring).
 DEADLINE_SECONDS = 2
@@ -59,6 +57,7 @@ DEADLINE_SECONDS = 2
 # Tail-read windows, smallest first. Newest usage block is almost always in the
 # first window; the last one matches the original 2 MB scan.
 _TAIL_WINDOWS = (128 * 1024, 2 * 1024 * 1024)
+_HEAD_WINDOW = 512 * 1024
 
 
 def _on_deadline(signum, frame):
@@ -67,27 +66,33 @@ def _on_deadline(signum, frame):
 
 
 def _usage_from_line(line):
-    """cache_read_input_tokens from one transcript line, or None."""
+    """Context size (input + cache creation + cache read) from one transcript
+    line, or None. Sub-agent (sidechain) records are skipped."""
     if b"cache_read_input_tokens" not in line:
         return None  # cheap reject: skips json.loads for most lines
     try:
         obj = json.loads(line)
     except Exception:
         return None
-    message = obj.get("message") if isinstance(obj, dict) else None
+    if not isinstance(obj, dict) or obj.get("isSidechain"):
+        return None
+    message = obj.get("message")
     usage = message.get("usage") if isinstance(message, dict) else None
-    if isinstance(usage, dict) and isinstance(usage.get("cache_read_input_tokens"), int):
-        return usage["cache_read_input_tokens"]
-    return None
+    if not isinstance(usage, dict):
+        return None
+    parts = [usage.get(k) for k in
+             ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")]
+    if not any(isinstance(p, int) for p in parts):
+        return None
+    return sum(p for p in parts if isinstance(p, int))
 
 
-def _last_cache_read_tokens(transcript_path):
-    """Best-effort: the most recent usage block's cache_read_input_tokens.
+def _last_context_tokens(transcript_path):
+    """Best-effort: the newest usage block's context size.
 
     Reads a small window off the end of the file and scans it newest line
-    first, returning at the first hit; only widens the window (up to 2 MB, the
-    original limit) when the small one had none. A huge transcript is never
-    read or parsed forward."""
+    first, returning at the first hit; only widens the window (up to 2 MB)
+    when the small one had none. A huge transcript is never read forward."""
     try:
         with Path(transcript_path).open("rb") as f:
             size = os.fstat(f.fileno()).st_size
@@ -113,6 +118,60 @@ def _last_cache_read_tokens(transcript_path):
     return None
 
 
+def _first_context_tokens(transcript_path):
+    """The session's first usage block (its starting context), or None."""
+    try:
+        with Path(transcript_path).open("rb") as f:
+            data = f.read(_HEAD_WINDOW)
+    except Exception:
+        return None
+    for line in data.split(b"\n"):
+        value = _usage_from_line(line)
+        if value is not None:
+            return value
+    return None
+
+
+def _level(total, growth):
+    """0 = quiet, 1 = early, 2+ = ask (one more per REPEAT_EVERY)."""
+    steps = []
+    if growth >= ASK_GROWTH:
+        steps.append((growth - ASK_GROWTH) // REPEAT_EVERY)
+    if total >= ASK_TOTAL:
+        steps.append((total - ASK_TOTAL) // REPEAT_EVERY)
+    if steps:
+        return 2 + max(steps)
+    return 1 if growth >= EARLY_GROWTH else 0
+
+
+def _early_message(total, growth):
+    return (
+        f"Context check: {total:,} tokens in context (+{growth:,} since this "
+        "session started). (1) From now on, send discrete, separable work "
+        "through /bigteam (Agent sub-agents for small lookups) so its tokens "
+        "stay out of this session, and don't read large files or logs "
+        "inline. (2) End this reply with one line to the operator: context is "
+        f"at ~{total // 1000}k; at the next natural boundary, /compact to keep "
+        "going here, or /handoff then /new if the next task is a different "
+        "topic."
+    )
+
+
+def _ask_message(total, growth, repeat):
+    lead = "Context is still growing" if repeat else "Context is large"
+    return (
+        f"{lead}: {total:,} tokens (+{growth:,} this session). At the next "
+        "natural boundary (before starting the next task, never mid-edit), "
+        "ask the operator with AskUserQuestion: 1) /compact (Recommended when "
+        "continuing the same work); 2) /handoff then /new (topic change, or "
+        "the conversation itself is the only state); 3) Continue here and "
+        "send the rest to /bigteam. Until answered, start no new heavy work "
+        "inline: delegate it. Exception: an unattended orchestrator (orc) "
+        "with no operator present keeps going by delegating; orc-meta "
+        "handles its restart."
+    )
+
+
 def _load_state():
     try:
         return json.loads(STATE_PATH.read_text())
@@ -123,17 +182,20 @@ def _load_state():
 def _save_state(state):
     try:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATE_PATH.write_text(json.dumps(state))
+        tmp = STATE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state))
+        tmp.replace(STATE_PATH)
     except Exception:
         pass
 
 
-def _send_hermes(message):
-    """Fire and forget: the page must never hold the prompt."""
+def _send_ping(message, cwd):
+    """Fire and forget: the ping must never hold the prompt."""
     try:
         import subprocess
         subprocess.Popen(
-            ["hermes", "send", "-t", HERMES_TARGET, message],
+            [str(PING_BIN), message],
+            cwd=cwd if cwd and os.path.isdir(cwd) else None,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -149,54 +211,55 @@ def main():
         data = json.loads(raw) if raw.strip() else {}
     except Exception:
         return
+    if not isinstance(data, dict):
+        return
 
     session_id = data.get("session_id") or "unknown"
     transcript_path = data.get("transcript_path") or ""
     if not transcript_path:
         return
 
-    tokens = _last_cache_read_tokens(transcript_path)
-    if tokens is None:
+    total = _last_context_tokens(transcript_path)
+    if total is None:
         return
 
     state = _load_state()
-    session_state = state.get(session_id, {})
+    session_state = state.get(session_id)
+    if not isinstance(session_state, dict):
+        session_state = {}
+    baseline = session_state.get("baseline")
+    if not isinstance(baseline, int):
+        baseline = _first_context_tokens(transcript_path) or total
+        session_state["baseline"] = baseline
+    growth = max(0, total - baseline)
 
-    if tokens >= HARD_THRESHOLD and not session_state.get("hard"):
-        print(
-            f"Context is very large ({tokens:,} cached tokens). Do NOT stop "
-            "work or suggest a session restart: externalize remaining heavy "
-            "work to subagents/background tasks, keep committing state to "
-            "disk, and continue -- auto-compaction plus the PreCompact "
-            "handoff hook bridge context windows automatically. If the "
-            "operator is present, a deliberate /compact at a natural "
-            "boundary preserves more than the automatic one. Mention the "
-            "size once; do not turn it into a wrap-up ritual.",
-            flush=True,
-        )
-        session_state["soft"] = True
-        session_state["hard"] = True
-        state[session_id] = session_state
-        _save_state(state)
-        _send_hermes(
-            f"FYI: Claude Code session context is very large ({tokens:,} "
-            "cached tokens). Agent instructed to externalize and continue; "
-            "auto-compact + PreCompact handoff will bridge. No action needed."
-        )
-    elif tokens >= SOFT_THRESHOLD and not session_state.get("soft"):
-        print(
-            f"Context is getting large ({tokens:,} cached tokens). Keep "
-            "working -- do not advise a wrap-up or fresh session. Tighten "
-            "context hygiene instead: push heavy work into subagents or "
-            "background workflows (their tokens stay out of this session), "
-            "and checkpoint durable state (commits, memory, docs) as you "
-            "go. Auto-compaction + the PreCompact handoff hook handle "
-            "continuity.",
-            flush=True,
-        )
-        session_state["soft"] = True
-        state[session_id] = session_state
-        _save_state(state)
+    level = _level(total, growth)
+    fired = session_state.get("level", 0)
+    if not isinstance(fired, int):
+        fired = 0
+
+    if level > fired:
+        if level == 1:
+            print(_early_message(total, growth), flush=True)
+        else:
+            print(_ask_message(total, growth, repeat=fired >= 2), flush=True)
+    session_state["level"] = level
+
+    if growth >= PAGE_GROWTH or total >= PAGE_TOTAL:
+        if not session_state.get("paged"):
+            session_state["paged"] = True
+            repo = os.path.basename((data.get("cwd") or "").rstrip("/")) or "claude"
+            _send_ping(
+                f"{repo}: Claude Code context at ~{total // 1000}k "
+                f"(+{growth // 1000}k this session); agent will ask you to "
+                "/compact, or /handoff then /new, at its next boundary.",
+                data.get("cwd"),
+            )
+    elif level < 2:
+        session_state["paged"] = False  # compacted: page again on regrowth
+
+    state[session_id] = session_state
+    _save_state(state)
 
 
 if __name__ == "__main__":

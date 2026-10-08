@@ -7,8 +7,10 @@ description: >-
   with fresh monthly subscription windows, and integrate the results yourself.
   Use when the operator types /bigteam, says "bigteam", "parallelize this",
   "orchestrate this across agents/vendors", or "use the other agents too". Also
-  use unprompted when a task has three or more genuinely independent slices and
-  a fresh non-Claude pool exists to absorb them.
+  the default, unprompted, for any discrete, separable task whose work would
+  otherwise pull heavy context into the session (operator ruling 2026-10-08),
+  and whenever the context-size hook says to delegate. Another bigteam run may
+  be live (herdr tab `coord`): Step 0 keeps the two apart.
 ---
 
 # bigteam — multi-vendor fan-out for one prompt
@@ -27,6 +29,29 @@ Two optimisation targets, both of them explicit operator goals:
 
 This skill is the *method*. `model-routing` holds the verified headless
 invocation forms and the billing-class map; read it, don't duplicate it here.
+
+## Step 0 — another bigteam run may already be live
+
+Another session may be running its own fan-out right now (often the herdr tab
+labelled `coord`). The two share every quota pool and possibly the checkout, so
+before slicing:
+
+1. **Look.** `herdr tab list` (a `coord` tab, or any tab whose agent is
+   `working` on a fan-out) and `ls -lt ~/.local/state/bigteam/` (task dirs
+   touched in the last hour). Read each live dir's `CLAIM`.
+2. **Claim.** Use a task name no live run uses, and write
+   `~/.local/state/bigteam/<task>/CLAIM` before dispatching: session (herdr
+   pane or Claude session id), repo, owned files, start time. Append `DONE`
+   when you finish.
+3. **Never overlap files.** A file another live claim owns is not yours to
+   slice, edit, stage or format. In a shared repo, commit only your own paths,
+   by path, after `git pull --rebase`; never touch the other run's uncommitted
+   files.
+4. **Pools are shared.** Re-probe `aiuse --available` right before each batch
+   (the other run drains the same windows), leave headroom, and don't put both
+   runs on a burst-limited pool at once (agy's ~60 requests/hour is machine-wide).
+5. **Hands off its panes.** Never reuse, close or message the other run's
+   tabs, panes or agents. To coordinate, tell its session (`session-finder`).
 
 ## Step 1 — probe, never assume
 
@@ -351,5 +376,8 @@ front of the operator if it removes something they deliberately built.
 
 A single-file edit, a lookup, or anything where the coordination overhead
 exceeds the work. Fan-out has a real fixed cost: writing the slices, enforcing
-the contract, reviewing five diffs. Below roughly three independent slices, do
-it yourself.
+the contract, reviewing the diffs. Don't count slices to decide, though: a
+discrete task that would read many files, logs or long outputs into this
+session belongs in a fan-out even as one or two slices, because keeping this
+context small is itself the goal (2026-10-08). Do it yourself only when the
+work is small enough that its tokens cost less than the brief and review.
