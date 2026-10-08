@@ -58,7 +58,9 @@ listening, no IPv6 beyond link-local, no `uv`/`git`/`tailscale`/`caddy`, stock
    `open_webui.yml` skip only `site_host_status == offline_unprovisioned`. The
    host is `provisioning`, so `LITELLM_HOSTS=site_litellm just litellm-apply`,
    `--limit vps-primary` or `OPEN_WEBUI_HOSTS=all` now reaches it (defaults
-   still limit to `mac`). Fix: also skip `provisioning`, or flip the host back.
+   still limit to `mac`). **Fixed 2026-10-08:** both playbooks now also skip `provisioning`; a `--check --limit
+   vps-primary` run ends the host before any task. Operator also chose to defer the
+   reboot test (console recovery undecided) and to stop here.
 2. **litellm.** Install is by hand (`uv tool install --editable
    $HOME/src/litellm`); the role only verifies, so it fails at "Require a working
    LiteLLM install" until uv, git, a checkout and a NixOS-working Python exist.

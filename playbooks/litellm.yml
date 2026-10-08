@@ -10,9 +10,9 @@
   hosts: site_litellm
   gather_facts: false
   pre_tasks:
-    - name: Skip LiteLLM on hosts not yet provisioned (no SSH)
+    - name: Skip LiteLLM on hosts not yet provisioned (no SSH) or still being provisioned
       ansible.builtin.meta: end_host
-      when: (site_host_status | default('online')) == 'offline_unprovisioned'
+      when: (site_host_status | default('online')) in ['offline_unprovisioned', 'provisioning']
 
     - name: Gather facts for provisioned LiteLLM hosts
       ansible.builtin.setup:
