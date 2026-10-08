@@ -612,6 +612,10 @@ def ensure_agy_home() -> str:
     return str(dst)
 
 
+
+def _ignore_sigint():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 async def _kill(proc):
     if proc is None or proc.returncode is not None:
         return
@@ -1251,7 +1255,12 @@ async def run(a, log, err, log_path):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=err,
                 limit=64 * 1024 * 1024,
-                **({"process_group": 0} if a.interactive else {}),
+                # --interactive: keep the agent in the terminal's foreground process
+                # group (a background group that touches the TTY is stopped by
+                # SIGTTIN/SIGTTOU: both reused-pane sessions wedged in state T on
+                # 2026-10-08) and make it ignore SIGINT instead, so Ctrl-C reaches
+                # only acp-run (SIG_IGN survives exec into node and claude).
+                **({"preexec_fn": _ignore_sigint} if a.interactive else {}),
             )
             client = RunClient(
                 log, a.perm, root, live=a.interactive, thinking=a.show_thinking

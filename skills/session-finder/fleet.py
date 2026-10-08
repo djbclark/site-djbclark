@@ -275,6 +275,25 @@ def _from_herdr(s, a):
         s["status"] = "idle" if a["agent_status"] == "done" else a["agent_status"]
 
 
+def _acp_pane_of(pid):
+    """Walk up from PID to an acp-run process and return the HERDR_PANE_ID it inherited, if any."""
+    for _ in range(5):
+        rc, out = run("ps", "-o", "ppid=,command=", "-p", str(pid))
+        parts = out.split(None, 1)
+        if len(parts) < 2:
+            return None
+        ppid, cmd = parts[0], parts[1]
+        if "acp-run" in cmd:
+            return (_where.env_of(pid) if _where else {}).get("HERDR_PANE_ID")
+        try:
+            pid = int(ppid)
+        except ValueError:
+            return None
+        if pid <= 1:
+            return None
+    return None
+
+
 def _claude_sessions(agents_by_sid, used, anc, launch_panes=None):
     me = os.environ.get("CLAUDE_CODE_SESSION_ID")
     launch_panes = launch_panes or {}
@@ -291,18 +310,23 @@ def _claude_sessions(agents_by_sid, used, anc, launch_panes=None):
                  status=REG_STATUS.get(d.get("status"), "unknown"), self=(pid in anc or sid == me), pid=pid,
                  reach=f"SendMessage to {d.get('name') or sid[:8]}")
         a = agents_by_sid.get(sid)
-        if a and a["pane_id"] in launch_panes:
+        env = _where.env_of(pid) if (_where and not a) else {}
+        pane = a["pane_id"] if a else env.get("HERDR_PANE_ID")   # the sdk-ts entrypoint has no herdr hook: use its env
+        if not pane and not a and launch_panes:
+            pane = _acp_pane_of(pid)   # claude-agent-acp scrubs the env; the acp-run ancestor still has the pane id
+        if pane in launch_panes:
             # the Claude Code that claude-agent-acp runs inside one of our ACP launches: one session, not two
-            launch = launch_panes[a["pane_id"]]
-            launch["sid"], launch["transcript"] = sid, str(transcript(sid) or "")
+            launch = launch_panes[pane]
+            launch["sid"], launch["transcript"], launch["pid"] = sid, str(transcript(sid) or ""), pid
             launch["underlying"] = {"name": d.get("name") or "", "status": REG_STATUS.get(d.get("status"), "unknown")}
+            if launch["status"] == "working" and REG_STATUS.get(d.get("status")) == "blocked":
+                launch["status"] = "blocked"    # e.g. an AskUserQuestion inside the ACP session
             continue
         if a:
             used.add(a["pane_id"])
             _from_herdr(s, a)
         elif _where:
             w = _where.lookup(pid, d.get("procStart", "")) or {}
-            env = _where.env_of(pid)
             s.update(where=w.get("where", ""), focus=w.get("focus", ""), title=w.get("title", ""), host="terminal")
             if env.get("ORCA_TERMINAL_HANDLE"):
                 s.update(chan=("orca", env["ORCA_TERMINAL_HANDLE"]), host="orca")
@@ -726,9 +750,14 @@ def main():
         if a.cmd == "show":
             for s in ss:
                 t = s.get("tail") or {}
-                print(f"    last prompt: {clip(STRIP.sub(' ', t.get('last_prompt', '')), 300)}")
-                print(f"    last reply: {clip(t.get('last_text', ''), 400)}")
-                print(f"    work stretch: {t.get('stretch_min')} min · pending: {t.get('pending')}")
+                la = s.get("launch") or {}
+                if la:
+                    print(f"    acp: {la.get('turns', 0)} turn(s) · {'alive' if la.get('alive') else 'exited'} · brief: {la.get('brief')}")
+                    print(f"    last reply (acp log): {clip(la.get('final', ''), 500)}")
+                if t or not la:
+                    print(f"    last prompt: {clip(STRIP.sub(' ', t.get('last_prompt', '')), 300)}")
+                    print(f"    last reply: {clip(t.get('last_text', ''), 400)}")
+                    print(f"    work stretch: {t.get('stretch_min')} min · pending: {t.get('pending')}")
     return 0 if ss else 1
 
 

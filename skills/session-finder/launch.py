@@ -236,7 +236,8 @@ def runner_script(d, acp_cmd, pane=None):
     if pane:
         lines.append(f"{q(HERDR)} pane report-agent {q(pane)} --source session-finder --agent {q(d['agent'])} "
                      f"--state working --agent-session-id {q(d['id'])} >/dev/null 2>&1")
-    lines.append(" ".join(q(c) for c in acp_cmd) + f" 2> >(tee {q(d['err'])} >&2) | tee {q(d['out'])}")
+    # PYTHONUNBUFFERED: stdout is a pipe (tee), and the pane must show the agent as it streams
+    lines.append("PYTHONUNBUFFERED=1 " + " ".join(q(c) for c in acp_cmd) + f" 2> >(tee {q(d['err'])} >&2) | tee {q(d['out'])}")
     lines.append("rc=${PIPESTATUS[0]}")
     lines.append(f"printf '%s\\n' \"{{\\\"id\\\": \\\"{d['id']}\\\", \\\"exit\\\": $rc, \\\"ended\\\": $(date +%s)}}\" >> {q(fleet.LAUNCHES)}")
     if d.get("claim"):
@@ -261,9 +262,24 @@ def start(a, brief_text, parent=None):
     if c["blocking"] and not a.force:
         die("another session is working in this repo; message it instead (session-finder) or pass --force:\n"
             + fleet.render_conflicts(c))
+    own = []
+    if parent:
+        # a reply turn: files the parent launch (this chain) modified since it started are its own work
+        pd = next((x for x in fleet.launches() if x["id"] == parent), None)
+        if pd:
+            root = c["repo"]
+            for f in list(c["dirty"]):
+                try:
+                    if os.path.getmtime(os.path.join(root, f)) >= pd.get("ts", 0):
+                        own.append(f)
+                        c["dirty"].remove(f)
+                except OSError:
+                    pass
     guard = ""
+    if own:
+        guard += f"\n\nFiles your previous turn(s) left modified or staged — yours to finish: {', '.join(own)}."
     if c["dirty"] or c["claims"] or c["idle"]:
-        guard = "\n\nOther sessions share this checkout. " + (
+        guard += "\n\nOther sessions share this checkout. " + (
             f"Files already modified in the worktree belong to someone else — read them, never edit, stage or revert them: "
             f"{', '.join(c['dirty'])}. " if c["dirty"] else "") + (
             "Files owned by live bigteam claims are off limits: " + "; ".join(
