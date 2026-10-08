@@ -8,6 +8,18 @@
 #   sudo ./sip-doit-with-sudo.sh             apply (default)
 #   sudo ./sip-doit-with-sudo.sh --status    read-only: print the state, change nothing
 #   sudo ./sip-doit-with-sudo.sh --revert    undo: re-enable every daemon listed below
+#   ./sip-doit-with-sudo.sh --check          monitor: silent when healthy, prints ONLY a
+#                                            regression report (for the Hermes cron job)
+#   csrutil wrappers, run from recoveryOS Terminal (csrutil only works there):
+#   ./sip-doit-with-sudo.sh --sip-disable    disable SIP (no-op if already off)
+#   ./sip-doit-with-sudo.sh --sip-enable     enable SIP  (no-op if already on)
+#
+# Full "stop them right now" sequence when `launchctl bootout` is blocked by SIP
+# (recoveryOS has no user session, so bootout cannot run there; two recovery trips):
+#   1. Recovery Terminal: --sip-disable, reboot.
+#   2. Normal boot: sudo ./sip-doit-with-sudo.sh   (bootout now succeeds, stores emptied)
+#   3. Recovery Terminal: --sip-enable, reboot.   (Skippable: the flags alone take effect
+#      at the next login; only needed if a disabled job is still running after re-login.)
 #
 # What "disabled" means here: `launchctl disable <domain>/<label>` writes a
 # persistent flag (visible in `launchctl print-disabled <domain>`). It is
@@ -45,11 +57,31 @@ case "${1:-}" in
   "") ;;
   --status) MODE=status ;;
   --revert) MODE=revert ;;
+  --check) MODE=check ;;
+  --sip-disable) MODE=sip-disable ;;
+  --sip-enable) MODE=sip-enable ;;
   -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) echo "Unknown argument: $1 (use --status, --revert, or none)" >&2; exit 2 ;;
+  *) echo "Unknown argument: $1 (use --status, --check, --revert, --sip-disable, --sip-enable, or none)" >&2; exit 2 ;;
 esac
 
-if [ "$MODE" != status ] && [ "$EUID" -ne 0 ]; then
+sip_enabled() { csrutil status 2>/dev/null | grep -q 'status: enabled'; }
+
+case "$MODE" in
+  sip-disable|sip-enable)
+    if [ "$EUID" -ne 0 ]; then echo "Error: run as root (recoveryOS Terminal is root)." >&2; exit 1; fi
+    if ! command -v csrutil >/dev/null 2>&1; then echo "Error: csrutil not found." >&2; exit 1; fi
+    if [ "$MODE" = sip-disable ]; then
+      if sip_enabled; then csrutil disable || exit 1; echo "SIP disabled. Reboot into normal macOS, then: sudo $0"
+      else echo "SIP already disabled; nothing to do. Reboot into normal macOS, then: sudo $0"; fi
+    else
+      if sip_enabled; then echo "SIP already enabled; nothing to do."
+      else csrutil enable || exit 1; echo "SIP enabled. Reboot into normal macOS."; fi
+    fi
+    csrutil status
+    exit 0 ;;
+esac
+
+if [ "$MODE" != status ] && [ "$MODE" != check ] && [ "$EUID" -ne 0 ]; then
   echo "Error: This script must be run as root. Please run using: sudo $0 ${1:-}" >&2
   exit 1
 fi
@@ -57,6 +89,7 @@ fi
 CONSOLE_USER=$(stat -f "%Su" /dev/console)
 CONSOLE_UID=$(stat -f "%u" /dev/console)
 if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = root ] || [ -z "$CONSOLE_UID" ]; then
+  [ "$MODE" = check ] && exit 0   # login window: nothing to verify, stay silent
   echo "Error: no logged-in console user (got '${CONSOLE_USER}'); log in at the console and retry." >&2
   exit 1
 fi
@@ -168,6 +201,40 @@ report_state() {
   fi
 }
 
+if [ "$MODE" = check ]; then
+  # Regression monitor (Hermes cron --no-agent contract): empty stdout = healthy.
+  # Alerts once per distinct problem set (and again after 24 h if it persists).
+  MAX_STORE_KB=51200   # 50 MB; the cleaned stores are ~2 MB, the backlog was GBs
+  PROBLEMS=()
+  for d in "${GUI_DAEMONS[@]}"; do
+    is_disabled "$GUI_DOMAIN" "$d" || PROBLEMS+=("flag not set: $GUI_DOMAIN/$d")
+  done
+  for d in "${SYSTEM_DAEMONS[@]}"; do
+    is_disabled system "$d" || PROBLEMS+=("flag not set: system/$d")
+  done
+  for rel in "${SEMANTIC_STORES[@]}"; do
+    kb=$(du -sk "$CONSOLE_HOME/$rel" 2>/dev/null | awk '{print $1}')
+    [ "${kb:-0}" -gt "$MAX_STORE_KB" ] && PROBLEMS+=("semantic store regrew to $((kb / 1024)) MB: ~/$rel")
+  done
+  STATE_DIR="$CONSOLE_HOME/.local/state/macos-daemon-guard"
+  STATE_FILE="$STATE_DIR/last-alert"
+  if [ "${#PROBLEMS[@]}" -eq 0 ]; then
+    [ "$EUID" -ne 0 ] && rm -f "$STATE_FILE"
+    exit 0
+  fi
+  OSV="$(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+  SIG=$(printf '%s\n' "$OSV" "${PROBLEMS[@]}" | shasum | awk '{print $1}')
+  if [ -f "$STATE_FILE" ] && [ "$(head -1 "$STATE_FILE")" = "$SIG" ] \
+     && [ -z "$(find "$STATE_FILE" -mmin +1440 2>/dev/null)" ]; then
+    exit 0
+  fi
+  if [ "$EUID" -ne 0 ]; then mkdir -p "$STATE_DIR" && echo "$SIG" > "$STATE_FILE"; fi
+  echo "macOS daemon disables REGRESSED on macOS $OSV (${#PROBLEMS[@]} problem(s)):"
+  for p in "${PROBLEMS[@]}"; do echo "  x $p"; done
+  echo "Likely cause: a macOS update reset the launchd disable flags. Fix: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
+  exit 0
+fi
+
 if [ "$MODE" = status ]; then
   report_state
   echo ""
@@ -238,6 +305,16 @@ report_state
 echo ""
 echo "Top CPU consumers right now (for the record):"
 ps -Arco pcpu,time,comm | head -8
+
+if sip_enabled; then
+  echo ""
+  echo "SIP is enabled, so bootout of Apple's jobs was skipped by the system. The flags apply at"
+  echo "next login/boot. If any disabled job is still running after that, use the recovery"
+  echo "sequence in this script's header (--sip-disable, run again, --sip-enable)."
+else
+  echo ""
+  echo "SIP is DISABLED. When satisfied, boot to recoveryOS and run: $0 --sip-enable"
+fi
 
 if [ "$FAILED" -ne 0 ]; then
   echo ""
