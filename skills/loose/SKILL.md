@@ -107,6 +107,12 @@ Then act on the answer. For `/handoff`, invoke the `handoff` skill. You cannot r
 to type it. If the handoff was chosen, offer the same quit prompt again once it is
 written.
 
+## Silent mode, before a handoff
+
+The `handoff` skill runs Rule 2 by itself first (its Step 0): sweep for your
+own eyes, fix the small items, carry the rest into the handoff. No report, no
+prompts, no Rule 4 question in that case.
+
 ## What this is not
 
 - Not a handoff. Use `handoff` / `session-handoff` for persisting context so work

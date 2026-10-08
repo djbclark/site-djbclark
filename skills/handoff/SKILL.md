@@ -38,6 +38,20 @@ commit flow:
   handoff created now. If ambiguous, ask.
 - Not in plan mode.
 
+## Step 0 — Run the `loose` sweep silently first (operator rule, 2026-10-08)
+
+Before Step 1, run the `loose` skill's Rule 2 sweep **for your own eyes
+only**: no audit report, no `/steps` prompts, no handoff-or-quit question.
+Then, for each loose end found: fix it now if it is small and inside the
+session's scope (commit it), otherwise carry it into "Where We're Going"
+with enough context that the next session can act on it without this
+conversation (what it is, the command that shows it, the recommendation).
+Why: a handoff written without the sweep hands on a list from memory, and
+the sweep is what finds the gaps memory misses. (djbclark, 2026-10-08:
+"automatically run /loose before /handoff but only you should see the
+output, and then make sure the handoff has enough context to do those
+items, or if it would make more sense, deal with them before the handoff".)
+
 ## Step 1 — Gather external state (parallel Bash, never agents)
 
 `git log --oneline -15`, `git diff --stat`, `git status -s | head -30`,
