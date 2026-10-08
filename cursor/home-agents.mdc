@@ -261,7 +261,10 @@ results as work finishes or fails. A one-shot scheduled check is fine.
 ## Heavy builds and tests: run them through `bg` (standing rule, 2026-10-04)
 
 Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`, `bg pytest`;
-`taskpolicy -c utility`: efficiency-core bias, about normal speed). Never use
+`taskpolicy -c utility`: efficiency-core bias, about normal speed). Use the full path
+(bare `bg` is the shell builtin). A test command (pytest, tox, nox, `run_tests*.py`)
+must go through bg: it caps parallelism (`BG_CPUS`=3) and takes one of 2 machine-wide
+test slots. Run changed files first (`--lf -x`); the full suite only when asked. Never use
 `taskpolicy -b` for builds (25x slower under load) and never throttle another session's
 processes without asking.
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit

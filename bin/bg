@@ -33,6 +33,24 @@
 # gated inside Gradle by gradle/init.d/machine-slot.gradle (one at a time, all callers); this
 # slot just waits before a JVM starts, so a queued bg build costs no idle daemon.
 #
+# Parallelism cap (2026-10-08): the admission gate above looks at load once, at launch, and QoS
+# changes priority, not how many workers a command starts. On 2026-10-08 one Hermes full-suite
+# run (a runner sized by os.cpu_count() = 8, one pytest per file, each spawning children) took the
+# load average from 17 to 220 and starved every other session. So bg also caps parallelism for the
+# command it wraps, with env vars that only apply when the caller has not set them:
+#   BG_CPUS (default 3)  -> PYTHON_CPU_COUNT (Python 3.13+: caps os.cpu_count() and xdist `-n auto`),
+#                           PYTEST_XDIST_AUTO_NUM_WORKERS, HERMES_TEST_WORKERS
+#   thread pools -> 1:      OMP/OPENBLAS/MKL/NUMEXPR/VECLIB/NUMBA/RAYON_NUM_THREADS
+#   TOKENIZERS_PARALLELISM=false
+# Rust/C pools and Python < 3.13 ignore PYTHON_CPU_COUNT; pass the tool's own worker flag too.
+#
+# Test slots: a pytest/tox/nox/run_tests*.py command takes one of BG_TEST_SLOTS machine-wide slots
+# (default 2) for its whole run, waiting up to BG_TEST_WAIT seconds (default 1800), the same
+# shlock mechanism as the Gradle slot. --version/--help/--collect-only don't take one.
+# BG_TEST_SLOTS=0 disables it (don't advertise that in messages agents see).
+#
+# Agents must call `~/ops/site-private/bin/bg`: bare `bg` is the shell job-control builtin.
+#
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
 if [ "$#" -eq 0 ]; then
@@ -48,6 +66,16 @@ for a in "$@"; do
   esac
   case "${a##*/}" in
     gradle|gradlew) is_gradle=1 ;;
+  esac
+done
+is_test=0
+for a in "$@"; do
+  case "$a" in
+    --version|-V|--help|-h|--collect-only|--co) is_test=0; break ;;
+  esac
+  case "${a##*/}" in
+    pytest|py.test|tox|nox|run_tests*.py) is_test=1 ;;
+    *" pytest "*|*" pytest"|"pytest "*|*"run_tests"*) is_test=1 ;;
   esac
 done
 max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
@@ -69,28 +97,47 @@ if [ "$wait_s" -gt 0 ]; then
   done
 fi
 
-slots="${BG_GRADLE_SLOTS:-1}"
-if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
-  slot_dir="$HOME/.local/state/bg/gradle-slots"
-  mkdir -p "$slot_dir"
-  gwait="${BG_GRADLE_WAIT:-1800}"
-  waited=0
-  got=
+# take_slot <label> <slots> <wait_s> <dir> <hint>: wait for a free shlock slot; the lock holds
+# this shell's pid, which exec keeps, so a killed command frees its slot.
+take_slot() {
+  local label="$1" slots="$2" wait_s="$3" dir="$4" i got waited=0 held
+  mkdir -p "$dir"
   while :; do
+    got=
     for i in $(seq 1 "$slots"); do
-      if shlock -f "$slot_dir/slot.$i" -p $$ 2>/dev/null; then got=$i; break; fi
+      if shlock -f "$dir/slot.$i" -p $$ 2>/dev/null; then got=$i; break; fi
     done
-    [ -n "$got" ] && break
-    if [ "$waited" -ge "$gwait" ]; then
-      echo "bg: no Gradle slot free after ${waited}s; starting anyway" >&2
-      break
+    [ -n "$got" ] && return 0
+    if [ "$waited" -ge "$wait_s" ]; then
+      echo "bg: no $label slot free after ${waited}s; starting anyway" >&2
+      return 0
     fi
     if [ "$waited" -eq 0 ]; then
-      held=$(cat "$slot_dir"/slot.* 2>/dev/null | tr '\n' ' ')
-      echo "bg: waiting for the machine-wide Gradle slot (held by pid $held); this is normal, do not kill or retry" >&2
+      held=$(cat "$dir"/slot.* 2>/dev/null | tr '\n' ' ')
+      echo "bg: waiting for a machine-wide $label slot (held by pid $held); this is normal, do not kill or retry" >&2
     fi
     sleep 10
     waited=$((waited + 10))
   done
+}
+
+slots="${BG_GRADLE_SLOTS:-1}"
+if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
+  take_slot Gradle "$slots" "${BG_GRADLE_WAIT:-1800}" "$HOME/.local/state/bg/gradle-slots"
 fi
+
+tslots="${BG_TEST_SLOTS:-2}"
+if [ "$is_test" = 1 ] && [ "$tslots" -gt 0 ]; then
+  take_slot test "$tslots" "${BG_TEST_WAIT:-1800}" "$HOME/.local/state/bg/test-slots"
+fi
+
+cpus="${BG_CPUS:-3}"
+export PYTHON_CPU_COUNT="${PYTHON_CPU_COUNT:-$cpus}"
+export PYTEST_XDIST_AUTO_NUM_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-$cpus}"
+export HERMES_TEST_WORKERS="${HERMES_TEST_WORKERS:-$cpus}"
+for v in OMP_NUM_THREADS OPENBLAS_NUM_THREADS MKL_NUM_THREADS NUMEXPR_NUM_THREADS \
+         VECLIB_MAXIMUM_THREADS NUMBA_NUM_THREADS RAYON_NUM_THREADS; do
+  [ -n "${!v:-}" ] || export "$v=1"
+done
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 exec taskpolicy -c utility "$@"

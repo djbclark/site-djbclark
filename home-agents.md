@@ -201,6 +201,12 @@ him results as work finishes or fails. A one-shot scheduled check is fine.
 
 Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`,
 `bg pytest`, `bg gradlew …`; `taskpolicy -c utility`, waits at load/core > 1.5).
+**Always the full path: bare `bg` is the shell builtin.** **A test command
+(pytest, tox, nox, `run_tests*.py`) must go through bg**: it caps parallelism
+(`BG_CPUS`=3 → `PYTHON_CPU_COUNT`, thread pools) and takes one of 2 machine-wide
+test slots; a Claude hook denies it bare. Run changed files first (`--lf -x`), the
+full suite only when asked (a bare Hermes full run took load 17 → 220, 2026-10-08;
+`memory/feedback_tests_through_bg_caps_and_slots.md`).
 **Never `taskpolicy -b` for builds** (25x slower under load; `bgb` is for
 hours-long bulk jobs). Never throttle or SIGSTOP another session's processes.
 **Gradle: one build at a time, machine-wide** (check `pgrep -fl
