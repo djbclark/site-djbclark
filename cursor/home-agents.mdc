@@ -136,7 +136,7 @@ reversible, and prefer a quick revert over a hotfix.
 
 `site-private/memory/` and `site-djbclark/research/` are data, committed in
 place — `git pull --rebase` before writing, append (never rewrite) `MEMORY.md`,
-commit, push immediately. The consolidated Codex summaries
+commit (exact paths, never `commit -a`), push immediately. The consolidated Codex summaries
 (`memory/codex/memory_summary.md`, `raw_memories.md`) are regenerated
 whole-file by Codex's own background memory agent — don't hand-edit them;
 drop notes under `memory/codex/extensions/ad_hoc/` instead.
