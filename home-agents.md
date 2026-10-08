@@ -40,7 +40,7 @@ at once: check what reads a file first, keep commits small, prefer a quick rever
 fact per file, append to `MEMORY.md` (never rewrite it), `git pull --rebase`,
 commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
 or hand-edit the generated `memory/codex/` summaries. **If another agent has
-unstaged edits in the checkout,** never stash, add or reset their files: `git
+unstaged edits in the checkout,** never stash, add or reset their files, and never `commit -a` (stage exact paths): `git
 fetch`; if only ahead, plain `git push`; if behind, wait or ask.
 Detail: [[reference_agent_rules_ops_housekeeping]].
 
