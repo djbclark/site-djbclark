@@ -221,8 +221,8 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
    list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
    for literal replace (**always `-F`**: without it `$name` in the replacement is a capture
-   group and silently eats shell variables like `$o`, `$OPTARG`; and **`sd -F -- FIND REPL`** when either may start with `-`, or it is read as a flag), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
-   (rtk compacts them). Greps run on Android devices stay `grep`.
+   group and silently eats shell variables like `$o`; and **`sd -F -- FIND REPL`** when either may start with `-`, or it is read as a flag; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   (rtk compacts them). Android greps stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place:
    a running bash reads the new bytes and dies. (`memory/feedback_edit_running_scripts_atomically.md`)
@@ -290,14 +290,13 @@ grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*)
 Before orchestrating other agents, reach for our skills. Orchestration and session
 hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
 `~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
-reaches them via `skill-everywhere` (edit the git copy): `bigteam`, `model-routing`,
+reaches them via the `skill-everywhere` script (README beside it; edit the git copy): `bigteam`, `model-routing`,
 `herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
 `tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; decides
-message / `/baton` / resume / clean agent after `fleet.py conflicts`),
-`session-finder-all` (plus ended sessions), `helm` (answer every waiting session of
-every TUI from one window, ranked by work unlocked), `helm-all` (plus ended sessions
-with open work). New sessions start over ACP via `launch.py`. Full list:
-[[reference_agent_rules_multi_agent_toolkit]].
+message / `/baton` / resume / clean agent; `/session-finder-all` adds ended sessions),
+`helm` (answer every waiting session of every TUI from one window; `/helm-all` adds
+ended sessions with open work). New sessions start over ACP via `launch.py`. Full
+list: [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
 
@@ -336,5 +335,5 @@ pull request**; put the verdict (or an explicit "no findings") in the PR body.
 3. `reference_agent_rules_basic_memory_pools.md` — which CLIs reach it, pools.
 4. `reference_agent_rules_code_discovery_and_cli_table.md` — graft/token-savior
    traps, agent-CLI and ACP table, delegation order, yolo detail.
-5. `reference_agent_rules_multi_agent_toolkit.md` — skills inventory, slash
-   commands, sub-agent files, skill-everywhere linking.
+5. `reference_agent_rules_multi_agent_toolkit.md` — skills, commands,
+   sub-agents, linking.

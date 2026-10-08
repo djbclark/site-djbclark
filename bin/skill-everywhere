@@ -10,7 +10,8 @@
 # ~/.local/share/skill-everywhere/skills in its skills.external_dirs (done
 # 2026-10-03), and this script links into that dir.
 # A TUI whose binary is not installed is skipped. Being linked is not the same
-# as being loaded: re-verify with the per-TUI check in skills/skill-everywhere.
+# as being loaded: re-verify with the per-TUI check in skill-everywhere.md
+# (the README next to this script).
 # This script makes no model calls. When re-verifying, probe agy at most ONCE (one
 # batched prompt, --print-timeout): looped agy -p probes helped lock out its CLI on
 # 2026-10-03 (see skills/model-routing, "agy has a burst limit").
@@ -47,7 +48,11 @@ case "${1:-}" in --check) mode=check; shift ;; --remove) mode=remove; shift ;; e
 rc=0
 for name in "$@"; do
   src="$src_root/$name"
-  [[ -f $src/SKILL.md ]] || { echo "error: no $src/SKILL.md" >&2; rc=1; continue; }
+  # --remove still works once the skill dir is gone: it only unlinks links
+  # whose target is exactly $src, so retiring a skill can run in either order.
+  if [[ ! -f $src/SKILL.md && $mode != remove ]]; then
+    echo "error: no $src/SKILL.md" >&2; rc=1; continue
+  fi
   echo "== $name"
   while IFS='|' read -r bin dir; do
     [[ -z $bin ]] && continue

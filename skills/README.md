@@ -8,13 +8,14 @@ serves public and private skills alike. Same pattern as `~/CLAUDE.md`:
 content-in-git + symlink.
 
 **Orchestration and session-hygiene skills live in djbclark-ade (2026-10-08).**
-`bigteam`, `model-routing`, `effort-routing`, `helm`, `helm-all`,
-`session-finder`, `session-finder-all`, `herdr-orchestration`,
-`ralph-tui-orchestration`, `cow-workspaces`, `handoff`, `baton`, `resume`,
-`session-handoff`, `steps`, `loose` and `skill-everywhere` are absolute
-symlinks here into `~/src/djbclark-ade/skills/<name>/`
+`bigteam`, `model-routing`, `effort-routing`, `helm`, `session-finder`,
+`herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`, `handoff`,
+`baton`, `session-handoff`, `steps` and `loose` are absolute symlinks here into `~/src/djbclark-ade/skills/<name>/`
 (github.com/djbclark/djbclark-ade, whose README describes them as one
-project). Edit and commit them there; the chain `site-private/skills/<name>`
+project). On 2026-10-08 `resume` was folded into `baton`, `helm-all` into
+`helm`, `session-finder-all` into `session-finder` (their old names survive
+as command wrappers), and `skill-everywhere` became
+[`../bin/skill-everywhere.md`](../bin/skill-everywhere.md). Edit and commit them there; the chain `site-private/skills/<name>`
 → here → djbclark-ade is unchanged for every TUI. A new skill of that kind goes
 in djbclark-ade too, with the same symlink here.
 
@@ -48,7 +49,8 @@ their tool put them** and are NOT tracked here:
 3. Link it into every agent TUI (Claude Code, Codex, Copilot, Hermes, …):
    `~/ops/site-private/bin/skill-everywhere <name>`. Never copy a skill folder
    into another TUI's dir: copies go stale (11 had, until 2026-10-03). The
-   `skill-everywhere` skill says which TUIs this covers and how to verify.
+   script's README, [`../bin/skill-everywhere.md`](../bin/skill-everywhere.md),
+   says which TUIs this covers and how to verify.
 4. Commit + push both repos (direct to `master`, `git pull --rebase` first —
    see `../AGENTS.md`): the skill here, the symlink in `site-private`.
 
