@@ -19,6 +19,11 @@
 set -u
 target="${HERMES_PING_TARGET:-telegram:838808636:22158}"
 [ "$#" -gt 0 ] || { echo "usage: hermes-ping \"<repo>: <message>\"" >&2; exit 2; }
+# A lone flag is never a message: `hermes-ping --help` once reached Telegram as "--help".
+case "$1" in
+  -h | --help) echo "usage: hermes-ping \"<repo>: <message>\"" ; exit 0 ;;
+  -*) [ "$#" -eq 1 ] && { echo "hermes-ping: unknown option $1 (usage: hermes-ping \"<repo>: <message>\")" >&2; exit 2; } ;;
+esac
 msg="$*"
 t() { timeout 3 "$@" 2>/dev/null; }
 short() { case "$1" in "$HOME"*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
