@@ -45,6 +45,47 @@ The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
 executable reads; a fresh ISO boot did. Detachment cause remains unknown.
 
+## Role audit — 2026-10-08 (step 3, read-only; no role applied)
+
+Only `litellm` and `open_webui` can reach `vps-primary` (member of
+`site_litellm`; `open_webui.yml` is `hosts: all`). `basic_memory_mcp`, `watchdogd`
+and the Mac-local roles do not include it. Host probed: root, uid 0, `$HOME=/root`,
+`XDG_RUNTIME_DIR=/run/user/0`, user systemd `running`, `Linger=no`, only sshd
+listening, no IPv6 beyond link-local, no `uv`/`git`/`tailscale`/`caddy`, stock
+`nix-ld` absent (generic dynamic binaries cannot run).
+
+1. **Guard gap (act before any apply).** `playbooks/litellm.yml` and
+   `open_webui.yml` skip only `site_host_status == offline_unprovisioned`. The
+   host is `provisioning`, so `LITELLM_HOSTS=site_litellm just litellm-apply`,
+   `--limit vps-primary` or `OPEN_WEBUI_HOSTS=all` now reaches it (defaults
+   still limit to `mac`). Fix: also skip `provisioning`, or flip the host back.
+2. **litellm.** Install is by hand (`uv tool install --editable
+   $HOME/src/litellm`); the role only verifies, so it fails at "Require a working
+   LiteLLM install" until uv, git, a checkout and a NixOS-working Python exist.
+   uv-managed Python is a generic binary: needs `programs.nix-ld.enable` or a
+   Nix-packaged litellm. The unit is `systemd --user` as root with `Linger=no`,
+   so it would not start at boot; needs `users.users.root.linger` or a system
+   unit, and a non-root service user is the cleaner design. Also: the role's
+   Restart task references `_litellm_tool_install`/`_litellm_tool_repair`, which
+   no longer exist (harmless, `default(false)`); `litellm_db_enabled` renders
+   `DATABASE_URL` (Postgres/Prisma, not present); the unit template nests the
+   master key/DB lines inside the Gemini-key `if`; log filter script and
+   `litellm_logpipe.py` are Darwin-oriented. Not applicable on Linux: the xAI
+   bridge (Darwin only).
+3. **open_webui.** Not NixOS-ready: `service_darwin.yml` only, no Linux service
+   task, uv resolver candidates are Homebrew/`/usr/bin`, and it calls
+   `tailscale serve` unconditionally (no tailscale, no auth design). Do not
+   target this host.
+4. **Inherited vars.** `group_vars/all.yml` gives the host the Mac's
+   `caddy_public_hostname` (`mac.greyhound-sidemirror.ts.net`) and `site_ns`.
+5. **Registry.** `registry/ports.yml` already lists `vps-primary` 4000 as
+   `planned`; keep it until a real deployment. `paths.yml` has no entry.
+
+Conclusion: no role is NixOS-ready; Python and Ansible connectivity are. Inventory
+stays `provisioning`. Smallest useful next steps (each needs operator say-so):
+fix the guard (1); decide non-root service account + `nix-ld`/Nix-packaged
+tooling; only then a Linux-capable role.
+
 ## Historical preparation checklist
 
 Recorded before installation on 2026-10-04. **Historical preparation only; do not execute until the operator
