@@ -13,12 +13,12 @@ port = {{ watchdogd_litellm_port }}
 [probe]
 # A real completion through proxy + auth + router. The model is a config-side
 # mock deployment (roles/litellm litellm_watchdog_mock_model), so no provider
-# is called. The bearer is LITELLM_MASTER_KEY, read from the plist at run time.
+# is called. The bearer is the sk-litellm-watchdog virtual key, so the probe also
+# exercises LiteLLM's key lookup in Postgres (a wedged Prisma fails it).
 kind = "http"
 method = "POST"
 url = "http://127.0.0.1:{{ watchdogd_litellm_port }}/v1/chat/completions"
-headers = { "Content-Type" = "application/json" }
-bearer_from_plist_env = "LITELLM_MASTER_KEY"
+headers = { "Content-Type" = "application/json", "Authorization" = "Bearer {{ watchdogd_litellm_probe_key }}" }
 body = '{"model": "{{ watchdogd_litellm_probe_model }}", "max_tokens": 1, "cache": {"no-cache": true}, "messages": [{"role": "user", "content": "watchdogd probe"}]}'
 ok_status = ["200"]
 expect_body = '"OK"'

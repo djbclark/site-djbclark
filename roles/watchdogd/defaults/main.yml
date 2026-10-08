@@ -31,13 +31,15 @@ watchdogd_start_interval: 60
 watchdogd_inherit_path: false
 watchdogd_service_path: "{{ watchdogd_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# Machine stress (rule C2.2): restarts are deferred while load per CPU or swap
-# is above these. 0 disables a test. memory_pressure_level uses
-# kern.memorystatus_vm_pressure_level (1 normal, 2 warn, 4 critical).
+# Machine stress (rule C2.2): restarts are deferred while load per CPU or
+# memory pressure is at or above these. 0 disables a test. memory_pressure_level
+# uses kern.memorystatus_vm_pressure_level (1 normal, 2 warn, 4 critical).
+# Swap is off (djbclark 2026-10-08): on this Mac it sits at 77-80% at normal
+# pressure, so a swap test would defer every restart; pressure level tracks thrash.
 watchdogd_stress_load_per_cpu: 3.0
 watchdogd_stress_load_window_min: 1
-watchdogd_stress_swap_percent: 70
-watchdogd_stress_memory_pressure_level: 0
+watchdogd_stress_swap_percent: 0
+watchdogd_stress_memory_pressure_level: 2
 
 # Alerts: one line per state change, through hermes-ping (standing rule),
 # with a short timeout; undelivered alerts land in the watchdogd log.
@@ -68,6 +70,10 @@ watchdogd_litellm_log: "{{ watchdogd_home }}/Library/Logs/litellm/litellm.log"
 # client-sent "mock_response" does NOT work: this LiteLLM strips it unless the
 # key's metadata sets allow_client_mock_response (litellm_pre_call_utils.py).
 watchdogd_litellm_probe_model: watchdogd-mock
+# Virtual key for the probe (djbclark 2026-10-08): unlike the master key it goes
+# through LiteLLM's key lookup in Postgres, so a wedged Prisma/DB fails the probe.
+# Not a secret: a loopback-only label from roles/litellm litellm_client_keys.
+watchdogd_litellm_probe_key: sk-litellm-watchdog
 watchdogd_xai_bridge_label: "com.{{ site_ns }}.xai-oauth-bridge"
 watchdogd_xai_bridge_port: 14011
 watchdogd_basic_memory_label: "com.{{ site_ns }}.basic-memory-mcp"
