@@ -12,7 +12,8 @@ does the move.
     herdr_place.py decline                        # remember "leave it", no re-ask
 
 herdr has no tab-to-workspace move, so `move` moves every pane of the current
-tab: this pane into a new tab in the target (`herdr pane move --new-tab`), the
+tab: this pane into a new tab in the target (`herdr pane move --new-tab` or
+`--new-workspace`), the
 rest split into that tab. The old pane id stays valid as an alias, so the
 running session's HERDR_PANE_ID keeps working.
 
@@ -116,16 +117,23 @@ def move(workspace: str | None, new_workspace: str | None, tab_label: str) -> in
         pane = herdr("pane", "get", pane_id)["pane"]
         siblings = [p["pane_id"] for p in herdr("pane", "list", "--workspace", pane["workspace_id"])["panes"]
                     if p["tab_id"] == pane["tab_id"] and p["pane_id"] != pane["pane_id"]]
-        dest = ["--workspace", workspace] if workspace else ["--new-workspace", "--label", new_workspace or ""]
-        result = herdr("pane", "move", pane["pane_id"], "--new-tab", *dest,
-                       "--tab-label", tab_label, "--focus")["move_result"]
+        if workspace:
+            dest = ["--new-tab", "--workspace", workspace, "--label", tab_label]
+        else:
+            dest = ["--new-workspace", "--label", new_workspace or "", "--tab-label", tab_label]
+        result = herdr("pane", "move", pane["pane_id"], *dest, "--focus")["move_result"]
         new_tab = result["pane"]["tab_id"]
         for sib in siblings:
             herdr("pane", "move", sib, "--tab", new_tab, "--split", "right", "--no-focus")
     except (RuntimeError, KeyError, subprocess.TimeoutExpired) as exc:
         print(f"herdr_place: {exc}", file=sys.stderr)
         return 1
-    ws_label = (result.get("created_workspace") or {}).get("label") or workspace
+    ws_label = (result.get("created_workspace") or {}).get("label")
+    if not ws_label:
+        try:
+            ws_label = herdr("workspace", "get", str(workspace))["workspace"]["label"]
+        except (RuntimeError, KeyError, subprocess.TimeoutExpired):
+            ws_label = workspace
     remember(f"moved {new_tab}")
     print(f"moved: tab {tab_label!r} ({1 + len(siblings)} pane(s)) -> workspace {ws_label!r} as {new_tab}")
     return 0
