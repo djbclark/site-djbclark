@@ -2,14 +2,16 @@
 name: helm
 description: >-
   Run every agent session from one window. A no-model collector finds each
-  session that is waiting on the operator (herdr panes, Orca terminals, the
-  Claude Code registry), reads its pending question verbatim, and this skill
-  relays it as one prompt titled with the project and where it lives, sends
-  the answer back as key presses, and has idle sessions audit themselves with
-  /loose. Use when the operator types /helm, says "take the helm", "run the
-  fleet from here", "what needs me", "what is waiting on me", or asks to
-  answer other sessions' prompts from this window (AskUserQuestion on
-  Claude-class agents; clarify / Telegram buttons on Hermes).
+  running session of every TUI (herdr panes of any agent, Orca terminals, tmux,
+  the Claude Code registry, Hermes chats, sessions started over ACP) that is
+  waiting on the operator, reads its pending question verbatim, orders the walk
+  so each answer frees the most unattended work, and this skill relays one
+  item per prompt titled with the project and where it lives, sends the answer
+  back, and has idle sessions audit themselves with /loose. Use when the
+  operator types /helm, says "take the helm", "run the fleet from here", "what
+  needs me", "what is waiting on me", or asks to answer other sessions' prompts
+  from this window (AskUserQuestion on Claude-class agents; clarify / Telegram
+  buttons on Hermes). /helm-all adds ended sessions with open work.
 ---
 
 # helm — every waiting session, one prompt at a time
@@ -24,7 +26,8 @@ windows only when an item needs more depth than a prompt can carry.
 
 ```bash
 H="python3 -I $HOME/ops/site-private/skills/helm/helm.py"
-$H scan                      # open items (--all: every session)
+L="python3 -I $HOME/ops/site-private/skills/session-finder/launch.py"
+$H scan                      # open items, every TUI, ranked (--all: every session; --ended: helm-all; --order attention: old order)
 $H wait --auto-audit         # block until something new needs him
 $H answer <id> <n>           # pick option n; one number per question
 $H answer <id> --text "..."  # free-text answer to a single question
@@ -37,10 +40,20 @@ $H keys <id> <key>...        # raw keys for a prompt helm cannot parse
 ## 1. Start
 
 1. Run `$H scan`. Show the queue as a short numbered list (project, where,
-   kind), so he knows how long the walk is.
-2. Walk the open items (section 2), most blocking first: questions, then
-   plan/permission/blocked, then idle sessions.
+   kind, `~N min unlocked`), so he knows how long the walk is.
+2. Walk the open items (section 2) **in the order printed**. The order is the
+   estimate of unattended work each answer buys (operator, 2026-10-08: keep as
+   many sessions working as possible at every moment): plan approvals (~45 min),
+   then a session's questions weighted by its own measured work stretch (median
+   minutes between an operator prompt and its next stop) times the `/steps`
+   items still to come, then permissions (~20), finished sessions whose work
+   restarts as a /baton session (~25), ACP replies (~15), then idle audits (~8
+   warm, ~3 cold). One session's items are kept together so it gets its answers
+   in quick succession and runs on. Do not reorder by your own judgement.
 3. Then wait (section 3). `/helm` stays on until he says `stop`.
+4. Every item is from a session another window owns: relay, never act in that
+   repo yourself, and never start work there while that session is `working`
+   (`fleet.py conflicts --cwd <dir>` says so; session-finder section 4).
 
 ## 2. Relay one item per prompt
 
@@ -73,6 +86,16 @@ Hermes; never numbered prose). One item per call.
    every non-Claude agent: ask. Give a one or two sentence summary of its
    last reply, then offer Audit (name the transcript size), Skip, or Leave it
    in the queue.
+5. **`reply`** — a session started over ACP (`launch.py`) ended its turn with a
+   question. Relay the question text with options he can answer in a line;
+   send with `$L reply <id> "<his text>"` (a new ACP turn, same pane). **`done`**
+   — it finished: show its final line and exit code once, then `$L close <id>`
+   or `$L reply` for a follow-up. Both come from `~/.local/state/session-finder/`.
+6. **`finished`** — a running Claude session whose last prompt was `/handoff`
+   or `/quit`. It is not audited and not messaged. Offer: Start a /baton session
+   in its repo now (`$L --baton --cwd <dir> --agent claude --model <M> --pane
+   <its pane> -p "<next step he names>"`), Skip, or Leave it. Ended sessions
+   with open work are `helm-all`'s job (`scan --ended`).
 
 **Never choose for him.** Not the recommended option, not an obvious one.
 Helm relays; the answer is his. Never relay around a permission denial.
@@ -125,9 +148,15 @@ notification arrives, relay them (section 2) and start it again.
 1. Verified on herdr: a digit key selects and submits; "Type something" takes
    free text; a several-question prompt ends on a review tab that Enter
    submits. The Orca and tmux channels are written but not yet exercised.
-2. Non-Claude agents (Cursor, Codex, …) give state and a screen excerpt only.
+2. Non-Claude TUIs (Cursor, Codex, …) give state and a screen excerpt only;
+   Hermes chats (`remote`) are listed for context and reached through the
+   hermes MCP server (section 5), not keys. Sessions started over ACP give
+   their full final text (`reply`/`done`).
 3. A Claude session outside herdr, Orca and tmux can be listed but not
    answered: use `SendMessage`, or his `focus`.
+4. Sessions come from `session-finder/fleet.py` (2026-10-08): herdr, the Claude
+   registry, a process scan, Hermes `state.db`, `launches.jsonl`. agy is
+   history-only until it works again (todo note).
 4. Keys sent when no prompt is on screen land in the input box. `answer`
    checks the screen first; `keys` checks only that the session is blocked.
 

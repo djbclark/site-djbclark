@@ -182,9 +182,31 @@ def main() -> int:
         ix = update_index(sid, path, a.reindex) if path else {"titles": [], "prompts": [], "terms": {}}
         s, why = score(ix, kws, d.get("name", ""), d.get("cwd", "")) if kws else (0, "")
         loc = _where.lookup(int(d["pid"]), d.get("procStart", ""))
+        fin = ""
+        if path:
+            try:
+                import fleet
+                fin = fleet.parse(path)["finished"]
+            except Exception:
+                pass
         rows.append({"where": loc, "name": d.get("name"), "pid": d.get("pid"), "sessionId": sid, "status": d.get("status"),
                      "cwd": d.get("cwd"), "titles": ix["titles"], "score": s, "match": why,
-                     "live": True, "self": sid == me})
+                     "live": True, "self": sid == me, "agent": "claude", "finished": fin})
+    # every other TUI's running sessions (fleet.py): matched on title, name and cwd only; use
+    # session-history.py for their full text
+    try:
+        import fleet
+        for s in fleet.sessions():
+            if s["agent"] == "claude" or s.get("host") == "hermes-gw" and not kws:
+                continue
+            head = " ".join([s.get("title", ""), s.get("name", ""), s.get("cwd", ""), s.get("agent", "")]).lower()
+            sc = sum(50 for k in kws if k in head)
+            rows.append({"where": {"where": s["where"], "focus": s["focus"]} if s.get("where") else None, "name": s.get("name") or s["id"],
+                         "pid": s.get("pid"), "sessionId": s.get("sid") or s["id"], "status": s["status"], "cwd": s["cwd"],
+                         "titles": [s["title"]] if s.get("title") else [], "score": sc, "match": s.get("reach", ""),
+                         "live": True, "self": s.get("self", False), "agent": s["agent"], "finished": s.get("finished", "")})
+    except Exception as e:  # fleet is optional here
+        print(f"fleet unavailable: {e}", file=sys.stderr)
     if a.all:
         for f in INDEX_DIR.glob("*.json"):
             sid = f.stem
@@ -205,7 +227,9 @@ def main() -> int:
         for r in hits:
             tag = "live" if r["live"] else "ended"
             me_tag = " (this session)" if r["self"] else ""
-            print(f"[{r['score']:>4}] {r['name'] or r['sessionId'][:8]}{me_tag}  {tag}/{r['status']}  pid={r['pid']}  cwd={r['cwd']}")
+            fin = f"  FINISHED ({r['finished']}): start a /baton session, do not message it" if r.get("finished") else ""
+            agent = f"{r['agent']} " if r.get("agent") else ""
+            print(f"[{r['score']:>4}] {agent}{r['name'] or r['sessionId'][:8]}{me_tag}  {tag}/{r['status']}  pid={r['pid']}  cwd={r['cwd']}{fin}")
             if r["titles"]:
                 print(f"       title: {r['titles'][-1]}")
             if r.get("where"):

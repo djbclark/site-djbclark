@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """helm — one queue of every agent session that needs the operator. Runs no model.
 
-    helm.py scan [--all] [--json]       open items (--all: every session, working ones too)
+    helm.py scan [--all] [--ended] [--order unlock|attention] [--json]
+                                        open items (--all: every session, working ones too; --ended: helm-all,
+                                        ended sessions whose handoff or last question is still open). Default
+                                        order: the answer that unlocks the most unattended work first.
     helm.py wait [--auto-audit] [--settle S] [--timeout S] [--json]
                                         block until an item appears or changes; print only those
     helm.py show <id>                   one session in full: question, last reply, screen
@@ -23,143 +26,30 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
-import subprocess
+import re
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "session-finder"))
-try:
-    import where as _where  # noqa: E402
-except ImportError:
-    _where = None
+import fleet  # noqa: E402  (every TUI's sessions, transcripts, conflicts, launches)
 
-CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+CLAUDE = fleet.CLAUDE
 STATE_DIR = Path(os.environ.get("HELM_STATE_DIR", Path.home() / ".local/state/helm"))
 STATE = STATE_DIR / "state.json"
-HERDR = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
+HERDR = fleet.HERDR
 HOME = str(Path.home())
-TAIL = 600_000   # bytes of transcript read from the end
 COLD = 55 * 60   # idle longer than this: the prompt cache (1 h) is gone, an audit re-reads it all
 POLL = 5
-REG_STATUS = {"busy": "working", "shell": "working", "waiting": "blocked", "idle": "idle"}
-ATTENTION = ("question", "plan", "permission", "blocked", "idle")
+ATTENTION = ("question", "reply", "plan", "permission", "blocked", "finished", "done", "idle")
+# Minutes of unattended work an answer is expected to unlock (operator 2026-10-08: order the walk so
+# the fleet is busy as much of the time as possible). A question's value comes from that session's
+# own measured work stretch (fleet.parse: median minutes between an operator prompt and the next stop).
+UNLOCK = {"plan": 45, "permission": 20, "finished": 25, "reply": 15, "blocked": 5, "done": 2}
 
 
-def run(*cmd, timeout=10):
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return p.returncode, p.stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return 127, ""
-
-
-def herdr_json(*args):
-    try:
-        return json.loads(run(HERDR, *args)[1]).get("result") or {}
-    except (ValueError, AttributeError):
-        return {}
-
-
-_LABELS = {}
-
-
-def herdr_label(kind, ident):
-    if (kind, ident) not in _LABELS:
-        o = herdr_json(kind, "get", ident).get(kind) or {}
-        _LABELS[kind, ident] = f"{o.get('label') or '?'}#{o.get('number') or '?'}" if o else ident
-    return _LABELS[kind, ident]
-
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, TypeError):
-        return False
-
-
-def ancestors():
-    pids, pid = set(), os.getpid()
-    for _ in range(15):
-        try:
-            pid = int(run("ps", "-o", "ppid=", "-p", str(pid))[1].strip())
-        except ValueError:
-            break
-        if pid <= 1:
-            break
-        pids.add(pid)
-    return pids
-
-
-def short(path):
-    return "~" + path[len(HOME):] if path and path.startswith(HOME) else path or ""
-
-
-def clip(text, n):
-    text = " ".join((text or "").split())
-    return text if len(text) <= n else "…" + text[-(n - 1):]
-
-
-# ---- transcripts -----------------------------------------------------------------------
-
-_TX = {}
-
-
-def transcript(sid):
-    hits = list((CLAUDE / "projects").glob(f"*/{sid}.jsonl"))
-    return hits[0] if hits else None
-
-
-def parse(path):
-    """Tail of a Claude transcript: tool calls still waiting for a result, the last reply."""
-    st = path.stat()
-    key = (st.st_size, st.st_mtime_ns)
-    hit = _TX.get(path)
-    if hit and hit[0] == key:
-        return hit[1]
-    with open(path, "rb") as fh:
-        fh.seek(max(0, st.st_size - TAIL))
-        lines = fh.read().decode("utf-8", "replace").splitlines()
-    if st.st_size > TAIL:
-        lines = lines[1:]
-    uses, done, answers = {}, set(), {}
-    last_text = last_prompt = ""
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(r, dict) or r.get("isSidechain"):
-            continue
-        m = r.get("message") or {}
-        content, role = m.get("content"), m.get("role")
-        if isinstance(content, str):
-            if role == "user" and not r.get("isMeta"):
-                last_prompt = content
-            continue
-        for b in content if isinstance(content, list) else []:
-            if not isinstance(b, dict):
-                continue
-            t = b.get("type")
-            if t == "tool_use":
-                uses[b.get("id")] = (b.get("name"), b.get("input") or {})
-            elif t == "tool_result":
-                done.add(b.get("tool_use_id"))
-                tur = r.get("toolUseResult")
-                if isinstance(tur, dict) and "answers" in tur:
-                    answers[b.get("tool_use_id")] = tur["answers"]
-            elif t == "text" and (b.get("text") or "").strip():
-                if role == "assistant":
-                    last_text = b["text"]
-                elif role == "user" and not r.get("isMeta"):
-                    last_prompt = b["text"]
-    info = {"size": st.st_size, "mtime": st.st_mtime, "last_text": last_text, "last_prompt": last_prompt,
-            "pending": [(k, n, i) for k, (n, i) in uses.items() if k not in done], "answers": answers}
-    _TX[path] = (key, info)
-    return info
+run, herdr_json, short, clip, transcript, parse = fleet.run, fleet.herdr_json, fleet.short, fleet.clip, fleet.transcript, fleet.parse
 
 
 # ---- channels: how to reach a session's terminal ------------------------------------------
@@ -223,63 +113,34 @@ def draft(s):
 
 
 def sessions():
-    anc, mypane = ancestors(), os.environ.get("HERDR_PANE_ID")
-    agents = herdr_json("agent", "list").get("agents") or []
-    by_sid = {(a.get("agent_session") or {}).get("value"): a for a in agents}
-    out, used = [], set()
-
-    def from_herdr(s, a):
-        s.update(chan=("herdr", a["pane_id"]), focused=bool(a.get("focused")),
-                 title=a.get("terminal_title_stripped") or "", focus=f"herdr tab focus {a['tab_id']}",
-                 where=f"herdr · ws {herdr_label('workspace', a['workspace_id'])} · tab {herdr_label('tab', a['tab_id'])}")
-        if a["pane_id"] == mypane:
-            s["self"] = True
-        if a.get("agent_status") in ("idle", "working", "blocked", "done"):
-            s["status"] = "idle" if a["agent_status"] == "done" else a["agent_status"]
-
-    for f in sorted((CLAUDE / "sessions").glob("*.json")):
-        try:
-            d = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
-        pid, sid = d.get("pid"), d.get("sessionId")
-        if not sid or not alive(pid):
-            continue
-        s = {"id": sid[:8], "agent": "claude", "sid": sid, "name": d.get("name") or "", "cwd": d.get("cwd") or "",
-             "status": REG_STATUS.get(d.get("status"), "unknown"), "self": pid in anc, "chan": None,
-             "title": "", "where": "", "focus": "", "focused": False}
-        a = by_sid.get(sid)
-        if a:
-            used.add(a["pane_id"])
-            from_herdr(s, a)
-        elif _where:
-            w = _where.lookup(pid, d.get("procStart", "")) or {}
-            env = _where.env_of(pid)
-            s.update(where=w.get("where", ""), focus=w.get("focus", ""), title=w.get("title", ""))
-            if env.get("ORCA_TERMINAL_HANDLE"):
-                s["chan"] = ("orca", env["ORCA_TERMINAL_HANDLE"])
-            elif env.get("TMUX_PANE"):
-                s["chan"] = ("tmux", env["TMUX_PANE"])
-        out.append(s)
-    for a in agents:  # agents herdr sees that are not registered Claude sessions
-        if a["pane_id"] in used:
-            continue
-        s = {"id": a["pane_id"], "agent": a.get("agent") or "?", "sid": None, "name": "", "cwd": a.get("cwd") or "",
-             "status": "unknown", "self": False}
-        from_herdr(s, a)
-        out.append(s)
-    return out
+    """Every running session of every TUI (fleet.py), minus plain shell panes."""
+    return fleet.sessions()
 
 
 def classify(s, st):
     """Turn a session into a queue item. `st` is this session's saved state (mutated)."""
     it = {k: s[k] for k in ("id", "agent", "name", "title", "where", "focus", "status")}
-    it.update(project=os.path.basename(s["cwd"].rstrip("/")) or "?", cwd=short(s["cwd"]), reachable=bool(s.get("chan")))
-    path = transcript(s["sid"]) if s.get("sid") else None
+    it.update(project=os.path.basename(s["cwd"].rstrip("/")) or "?", cwd=short(s["cwd"]), reachable=bool(s.get("chan")),
+              host=s.get("host", ""), reach=s.get("reach", ""), finished=s.get("finished", ""))
+    path = transcript(s["sid"]) if s.get("sid") and s["agent"] == "claude" else None
     tx = parse(path) if path else None
     if tx:
         it["context"] = clip(tx["last_text"], 500)
-    if s["status"] == "blocked":
+        it["stretch"] = tx.get("stretch_min")
+    if s.get("host") == "acp":            # a session launch.py started over ACP: one turn per run
+        la = s.get("launch") or {}
+        if s["status"] == "blocked":
+            it.update(kind="reply", fp="reply:" + hashlib.sha1(la.get("final", "").encode()).hexdigest()[:12],
+                      detail=la.get("final", ""))
+        elif s["status"] == "idle":
+            it.update(kind="done", fp="done:" + s["id"], detail=la.get("final", ""), exit=(la.get("result") or {}).get("exit"))
+        else:
+            it.update(kind="working", fp="")
+    elif s.get("host") == "hermes-gw":    # a Hermes chat: not a terminal, nothing to relay by keys
+        it.update(kind="remote", fp="")
+    elif s.get("finished") and s["status"] != "working":
+        it.update(kind="finished", fp="finished:" + str(s.get("sid") or s["id"]))
+    elif s["status"] == "blocked":
         pend = tx["pending"] if tx else []
         asked = [p for p in pend if p[1] == "AskUserQuestion"]
         if asked:
@@ -311,7 +172,50 @@ def classify(s, st):
         it.update(kind=s["status"] if s["status"] == "working" else "unknown", fp="")
     it["open"] = (it["kind"] in ATTENTION and not s["self"] and st.get("skipped") != it["fp"]
                   and not (it["kind"] == "idle" and it["audited"]))
+    it["unlock"] = unlock(it)
     return it
+
+
+def unlock(it):
+    """Estimated minutes of unattended work that answering this item buys."""
+    k = it["kind"]
+    if k == "question":
+        base = it.get("stretch") or 10
+        qs = it.get("questions") or []
+        hdr = " ".join(q.get("header", "") for q in qs)
+        m = re.search(r"(\d+)\s*/\s*(\d+)", hdr)          # a /steps walk: "2/5" means more answers follow
+        remaining = max(1, int(m.group(2)) - int(m.group(1)) + 1) if m else 1
+        return round(base * min(remaining, 6) + 5 * (len(qs) - 1), 1)
+    if k == "idle":
+        return 3 if it.get("cold") else 8
+    return UNLOCK.get(k, 0)
+
+
+def rank(items, order="unlock"):
+    """Walk order. 'unlock': the items whose answer frees the most unattended work first, with one
+    session's items kept together so its questions are answered in quick succession."""
+    if order == "attention":
+        pos = {k: i for i, k in enumerate(ATTENTION)}
+        items.sort(key=lambda it: (not it["open"], pos.get(it["kind"], 9)))
+        return items
+    best = {}
+    for it in items:
+        best[it["id"]] = max(best.get(it["id"], 0), it.get("unlock", 0))
+    items.sort(key=lambda it: (not it["open"], -best.get(it["id"], 0), it["id"], -it.get("unlock", 0)))
+    return items
+
+
+def ended_items(days):
+    """helm-all: ended sessions that still hold open items (fleet.ended_open), as queue items."""
+    out = []
+    for e in fleet.ended_open(days):
+        it = {"id": e["id"], "agent": e["agent"], "name": "", "title": e.get("title", ""), "where": "ended", "focus": "",
+              "status": "ended", "project": os.path.basename(e["cwd"].rstrip("/")) or "?", "cwd": short(e["cwd"]),
+              "reachable": False, "kind": e["kind"], "fp": e["id"], "open": True, "detail": e.get("question", ""),
+              "steps": e.get("steps", []), "action": e["action"], "updated": e["updated"]}
+        it["unlock"] = 25 if e["kind"] == "handoff" else 10
+        out.append(it)
+    return out
 
 
 def load():
@@ -360,13 +264,31 @@ def heading(it):
     if it["title"]:
         bits.append(f'"{it["title"]}"')
     who = it["agent"] + (f" {it['name']}" if it["name"] else "")
-    return f"[{it['id']}] {it['project']} — {' · '.join(bits)}  ({who})"
+    unlock_tag = f"  ~{it['unlock']:g} min unlocked" if it.get("unlock") else ""
+    return f"[{it['id']}] {it['project']} — {' · '.join(bits)}  ({who}){unlock_tag}"
 
 
 def render(it, full=False):
     out = [heading(it)]
     k = it["kind"]
-    if k == "question":
+    if k == "reply":
+        out.append(f"  ACP SESSION ASKS: {clip(it.get('detail', ''), 600)}")
+        out.append(f"  answer: launch.py reply {it['id']} \"<text>\"   (a new ACP turn; the pane stays)")
+    elif k == "done":
+        out.append(f"  ACP SESSION DONE (exit {it.get('exit')}): {clip(it.get('detail', ''), 500)}")
+        out.append(f"  next: read it, then launch.py close {it['id']} (or reply … for a follow-up)")
+    elif k == "finished":
+        out.append(f"  FINISHED with {it['finished']}: do not continue here. Next work in this repo starts a fresh "
+                   f"session from the handoff: launch.py --baton --cwd {it['cwd']} --agent claude -p \"<instruction>\"")
+        out.append(f"  skip: helm.py skip {it['id']}")
+    elif k == "handoff":
+        out.append(f"  HANDOFF with next steps, nobody live in {it['cwd']}:")
+        out += [f"    - {s}" for s in it.get("steps", [])]
+        out.append(f"  start: {it['action']} -p \"<instruction>\"")
+    elif k == "ended-question":
+        out.append(f"  ENDED ON A QUESTION: {it.get('detail', '')}")
+        out.append(f"  next: {it['action']}")
+    elif k == "question":
         for qi, q in enumerate(it["questions"], 1):
             tag = f"QUESTION {qi}/{len(it['questions'])}" if len(it["questions"]) > 1 else "QUESTION"
             multi = " [multi-select]" if q.get("multiSelect") else ""
@@ -411,9 +333,10 @@ def emit(items, as_json, full=False):
 
 
 def can_audit(s, it, settle):
-    """Safe to send /loose unattended: Claude, idle and settled, warm cache, not being typed into."""
+    """Safe to send /loose unattended: Claude, idle and settled, warm cache, not being typed into,
+    and not a session that already handed off (its audit would re-open finished work)."""
     return (it["kind"] == "idle" and s["agent"] == "claude" and it["reachable"] and not it["audited"]
-            and not s["self"] and not s["focused"] and it["idle_for"] is not None
+            and not s["self"] and not s["focused"] and it["idle_for"] is not None and not s.get("finished")
             and settle <= it["idle_for"] <= COLD)
 
 
@@ -426,14 +349,16 @@ def audit_text(s):
 
 def cmd_scan(a, state):
     _, items = snapshot(state)
+    if a.ended:
+        items += ended_items(a.days)
     shown = items if a.all else [it for it in items if it["open"]]
-    order = {k: i for i, k in enumerate(ATTENTION)}
-    shown.sort(key=lambda it: (not it["open"], order.get(it["kind"], 9)))
+    rank(shown, a.order)
     emit(shown, a.json)
     if not a.json:
         n = lambda k: sum(1 for it in items if it["kind"] == k)  # noqa: E731
         print(f"\n{sum(it['open'] for it in items)} open · {n('working')} working · "
-              f"{sum(1 for it in items if it['kind'] == 'idle' and it['audited'])} idle+audited · {len(items)} sessions")
+              f"{sum(1 for it in items if it['kind'] == 'idle' and it.get('audited'))} idle+audited · "
+              f"{n('finished')} finished · {len(items)} sessions · order: {a.order}")
 
 
 def cmd_wait(a, state):
@@ -459,7 +384,7 @@ def cmd_wait(a, state):
         if started and not a.json:
             print(f"helm: sent /loose to {', '.join(started)}", file=sys.stderr)
         if fresh:
-            emit(fresh, a.json)
+            emit(rank(fresh, a.order), a.json)
             return 0
         if deadline and time.time() > deadline:
             return 3
@@ -583,12 +508,16 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("scan")
     p.add_argument("--all", action="store_true")
+    p.add_argument("--ended", action="store_true", help="helm-all: add ended sessions that still hold open items")
+    p.add_argument("--days", type=int, default=14)
+    p.add_argument("--order", choices=["unlock", "attention"], default="unlock")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_scan)
     p = sub.add_parser("wait")
     p.add_argument("--auto-audit", action="store_true")
     p.add_argument("--settle", type=int, default=180)
     p.add_argument("--timeout", type=int, default=0)
+    p.add_argument("--order", choices=["unlock", "attention"], default="unlock")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_wait)
     sub.add_parser("brief").set_defaults(fn=cmd_brief)
