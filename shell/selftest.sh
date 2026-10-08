@@ -27,6 +27,11 @@ note() { printf '       %s\n' "$1"; }
 
 CLEAN_LOGIN=(env -i HOME="$HOME" TERM=xterm /bin/bash -lc)
 CLEAN_BASHENV=(env -i HOME="$HOME" BASH_ENV="$HOME/.bashrc" /bin/bash -c)
+# Interactive bash also runs ~/.bashrc tier 2, where an installer append at the
+# END of the file outranks tier 1 (2026-10-08: a Maestro/Hermes
+# `export PATH="$HOME/.local/bin:$PATH"` put the real herdr and the native codex
+# launcher first in every terminal tab while the login checks stayed green).
+CLEAN_INTERACTIVE=(env -i HOME="$HOME" TERM=xterm /bin/bash -lic)
 
 printf '\nshell config self-test\n\n'
 
@@ -91,10 +96,11 @@ fi
 # Must hold in BOTH shell flavors: the wrapper blocks a self-targeted pane
 # close, and it only works if it resolves ahead of ~/.local/bin/herdr.
 if [ -x "$HOME/.herdr-wrapper/bin/herdr" ]; then
-  for flavor in login bashenv; do
+  for flavor in login bashenv interactive; do
     case $flavor in
       login)   got=$("${CLEAN_LOGIN[@]}"   'command -v herdr' 2>/dev/null) ;;
       bashenv) got=$("${CLEAN_BASHENV[@]}" 'command -v herdr' 2>/dev/null) ;;
+      interactive) got=$("${CLEAN_INTERACTIVE[@]}" 'type -P herdr' 2>/dev/null </dev/null | tail -1) ;;
     esac
     if [ "$got" = "$HOME/.herdr-wrapper/bin/herdr" ]; then
       ok "herdr resolves to the wrapper ($flavor shell)"
@@ -265,6 +271,13 @@ check_resolves grok  "$HOME/.local/bin"
 check_resolves opencode "$HOME/.opencode/bin"
 check_resolves codex "$HOME/.opencodex/bin"   # opencodex 2.78+ shim beats the native launcher
 check_resolves aiuse "$HOME/.local/bin"
+# codex is a shell function in interactive bash, so ask for the binary path.
+got=$("${CLEAN_INTERACTIVE[@]}" 'type -P codex' 2>/dev/null </dev/null | tail -1)
+case $got in
+  "$HOME/.opencodex/bin/"*) ok "codex -> $got (interactive shell)" ;;
+  *) bad "codex -> ${got:-nothing} in interactive bash (expected under ~/.opencodex/bin)"
+     note "look for an installer's 'export PATH=' appended to the END of ~/.bashrc" ;;
+esac
 
 # The Orca defect of 2026-08-21: panes inherit the daemon's PATH, where
 # /opt/homebrew/bin already outranks ~/.local/bin, and the idempotent

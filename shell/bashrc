@@ -749,6 +749,3 @@ complete -F _cow cow
 function _cowcd() { COMPREPLY=($(compgen -W "$(_cow_pasture_names)" -- "${COMP_WORDS[1]}")); }
 complete -F _cowcd cowcd
 
-# Hermes Agent - ensure ~/.local/bin is on PATH
-# Added by Maestro CLI installer
-export PATH="$HOME/.local/bin:$PATH"
