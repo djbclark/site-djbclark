@@ -412,8 +412,9 @@ def cmd_brief(a, state):
     new prompt, so a watcher can tell a new question from one it has already reported."""
     _, items = snapshot(state)
     safe = lambda t: "".join(c if c.isalnum() or c in "._-" else "_" for c in t)  # noqa: E731
+    # only items that wait on him: not idle audits, not a handed-off session (fleet-watch parses this)
     waiting = [f"{safe(it['project'])}@{safe(it['id'])}/{it['fp'][-6:]}"
-               for it in items if it["open"] and it["kind"] != "idle"]
+               for it in items if it["open"] and it["kind"] not in ("idle", "finished")]
     print(f"{len(waiting)}:{','.join(sorted(waiting))}")
 
 
