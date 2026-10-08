@@ -24,6 +24,14 @@ Inventory remains `provisioning`: Python, Ansible/NixOS role compatibility,
 non-root accounts, IPv6, Tailscale and service rollout are outside the completed
 installation. Do not reinstall this host or apply the whole stack.
 
+Re-verified read-only 2026-10-08: strict-host-key BatchMode root login works;
+hostname `vps-primary`, root on `/dev/sda1`, `sshd` and NetworkManager active,
+no failed units; effective SSH is `permitrootlogin prohibit-password`, password
+and keyboard-interactive off; host fingerprint unchanged; both files in
+`/etc/nixos/` are byte-identical to the tracked copies. Every remaining item
+above (Python/Ansible, non-root accounts, IPv6, Tailscale, services, console
+password) still waits on operator scope; nothing was changed.
+
 The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
 executable reads; a fresh ISO boot did. Detachment cause remains unknown.
