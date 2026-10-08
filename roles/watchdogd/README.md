@@ -30,7 +30,7 @@ kickstart that exited 0 counted as success.
 | `com.djbclark.basic-memory-watchdog` | MCP initialize probe, 5 slow in a row or refused → restart, 3 attempts then give up | `basic-memory-mcp.toml` (same thresholds) |
 | `ai.hermes.gateway-restart-watcher` | Carries out restart requests from the gateway-restart Hermes plugin, 600 s cooldown | `hermes-gateway.toml` `[restart_request]` (plist WatchPaths keeps it immediate) |
 | `com.djbclark.funnel-healthcheck` + Hermes cron `Funnel Health` (`f821be766a47`) | Funnel probe, quit/reopen Tailscale after 2 all-down runs, 30 min cooldown; cron relayed the log | `funnel.toml` + `bin/funnel_probe.sh` |
-| Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe + `hermes doctor`, every 12 h | `provider-health.toml` (alert only) |
+| Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
 
 ## Rules every service gets (bin/watchdogd.py `decide`)
 
