@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pane-grep: search recent terminal text of every herdr pane; print pane id, workspace, label + matching lines.
+# usage: pane-grep [-n LINES] <regex>
+set -u
+lines=400
+while getopts "n:" o; do case $o in n) lines=$OPTARG;; *) exit 2;; esac; done
+shift $((OPTIND-1)); q=${1:?usage: pane-grep [-n LINES] <regex>}
+self=$(herdr pane current 2>/dev/null | jq -r '.result.pane.pane_id // empty')
+ws=$(herdr workspace list | jq -c '[.result.workspaces[] | {(.workspace_id): .label}] | add')
+herdr pane list | jq -r '.result.panes[] | [.pane_id, .workspace_id, (.label // "")] | @tsv' |
+while IFS=$'\t' read -r pid wid label; do
+  [ "$pid" = "$self" ] && continue
+  hits=$(herdr pane read "$pid" --source recent --lines "$lines" --format text 2>/dev/null | rg -i -m 3 -- "$q" | cut -c1-160)
+  [ -z "$hits" ] && continue
+  wl=$(jq -r --arg w "$wid" '.[$w] // $w' <<<"$ws")
+  printf '%s  [%s / %s]\n' "$pid" "$wl" "$label"
+  sed 's/^/    /' <<<"$hits"
+done

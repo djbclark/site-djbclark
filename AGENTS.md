@@ -185,6 +185,13 @@ were left alone. New work uses the `site-djbclark` path.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,
    ignored. Never copy it here.
 
+## Herdr helper tools (2026-10-08)
+
+[`tools/herdr/pane-grep`](tools/herdr/pane-grep) searches the recent terminal text of
+every Herdr pane (`pane-grep [-n LINES] <regex>`; read-only, uses `herdr pane read`),
+because Herdr's Goto picker (`prefix+g`) matches names, not screen text. Its permanent
+home is undecided (todo note "Decide the permanent home for herdr pane-grep").
+
 ## Shareable tools published from this repo (2026-10-03)
 
 [`tools/book-to-kb/`](tools/book-to-kb/) is a **self-contained, MIT-licensed**
