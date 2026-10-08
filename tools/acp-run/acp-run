@@ -9,9 +9,11 @@
             [--model M] [--mode M] [--set ID=VALUE]... [--timeout SECS]
             [--log PATH] [--json] [--handshake-tries N] [--handshake-timeout S]
             [--no-fallback] [--prompt-retries N] [--max-load L] [--load-wait S]
+            [-i | --interactive [--inbox DIR] [--show-thinking]] [--resume ID]
     acp-run --list            agents and the command each one runs
     acp-run <agent> --info    initialize + session/new only; print modes,
-                              config options (models) and auth methods
+                              config options (models), auth methods and
+                              capabilities (loadSession, sessionCapabilities)
 
 The agent's final message goes to stdout. A summary line goes to stderr
 (stop reason, seconds, tool calls, permissions, tokens, cost, log path). Every
@@ -29,6 +31,8 @@ ACP event is logged as JSONL (including the prompt response) and ends with a
                      A tool call without a kind gets one inferred from its title
                      ("Edit ..." is an edit); one that cannot be inferred needs
                      in-scope paths like an edit.
+    ask              (--interactive only) print each request and wait for y/n
+                     on stdin or from the --inbox
 The answer is always an offered allow_once or reject_once option, never an
 *_always one (those can be saved beyond this run) and never "cancelled" (that
 cancels the whole turn). An allow with no allow_once offered becomes a
@@ -58,13 +62,40 @@ it waits up to S seconds for the load to drop first. Off by default.
 --handshake-timeout S (env ACP_RUN_HANDSHAKE_TIMEOUT) bounds initialize and
 session/new each; default 40 s, claude 90 s (HANDSHAKE_TIMEOUT).
 
+--interactive (-i) keeps the session open for more prompts in one process (the
+ACP connection is the session). Agent text streams to stdout as it arrives,
+each tool call is one "⚙ <title>" line, a failed tool call one "✗" line, and
+thoughts only with --show-thinking. After each turn it prints the stop reason
+and an idle line, then reads the next prompt from whichever comes first: a
+line on stdin (one line, one prompt) or a *.txt/*.md file dropped into
+--inbox DIR (polled every second, taken in name order, deleted once read; the
+whole file is one prompt). The first prompt comes from -p or -f only; without
+either it starts at the prompt. Commands: /exit (or EOF) ends the session;
+/exit typed at the terminal during a turn cancels it first, while from a pipe
+or the inbox it waits behind the prompts before it. /cancel cancels the running
+turn. Ctrl-C cancels the running turn, or exits when idle. Prompts that arrive
+during a turn queue up as the next ones. --timeout applies to each turn. Each
+turn gets the delivery checks; a failed one prints "FAILED <class>" and returns
+to the prompt. On exit: the stderr summary line (turns=N), or --json with the
+last turn's text; the exit code is the last turn's (0 when no turn ran).
+In a herdr pane (HERDR_PANE_ID set, HERDR_BIN_PATH or herdr found) it reports
+state working/idle/blocked as source acp-run with a resume command
+(acp-run <agent> -C DIR --interactive --resume ID ...; dropped on herdr before
+0.9.2, which rejects it), and releases the pane on exit, so `herdr agent prompt
+<pane> TEXT` and `herdr agent list` work. The agent process gets no
+HERDR_PANE_ID/HERDR_ENV, so its own herdr hooks do not report the pane too.
+--resume ID reopens an ACP session with session/load (history replayed to the
+log only) or session/resume, whichever the agent advertises; exit 2 if it
+advertises neither.
+
 Exit codes: 0 end_turn with some output; 1 other stop reason, agent error,
 an empty reply (no text, no tool calls; or no text under --perm deny or after
 a denied permission), or a delivery-check failure (quota/plan/auth/provider
 error or truncated reply); 2 usage error; 5 empty reply and every permission
 request was denied; 75 refused by --max-load; 124 timed out (session/cancel
 sent first, then the process is killed); 130/143 interrupted by SIGINT/SIGTERM
-(session/cancel sent, agent stopped).
+(session/cancel sent, agent stopped); with --interactive also 129 on SIGHUP,
+and Ctrl-C (SIGINT) does not exit while a turn runs.
 """
 
 import argparse
@@ -77,14 +108,17 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from acp import PROTOCOL_VERSION, Client, RequestError, connect_to_agent
 from acp.schema import (
     AgentMessageChunk,
     AllowedOutcome,
     ClientCapabilities,
+    DeniedOutcome,
     Implementation,
     RequestPermissionResponse,
     TextContentBlock,
@@ -391,15 +425,39 @@ def load_guard(max_load, wait, poll=15.0):
 
 
 class RunClient(Client):
-    def __init__(self, log, perm, root):
+    def __init__(self, log, perm, root, live=False, thinking=False):
         self.log, self.perm, self.root = log, perm, root
         self.text, self.tools, self.allowed, self.denied = [], 0, 0, 0
         self.usage = None
+        # --interactive: stream updates to stdout (live), print thoughts too
+        # (thinking); ask() answers --perm ask; replaying is set during
+        # session/load, whose history replay is logged but neither printed
+        # nor counted, except as messages.
+        self.live, self.thinking, self.ask = live, thinking, None
+        self.replaying, self.replayed, self._last_msg = False, 0, None
+        self.titles, self.bol = {}, True
+        # the last delivery-check failure of this prompt (kept when a retry
+        # dies), and an operator cancel that stops further retries
+        self.last_failure, self.cancelled, self.prompt_task = None, False, None
+        self.color = live and sys.stdout.isatty()
 
     def rec(self, kind, data):
         row = {"t": round(time.time(), 3), "kind": kind, "data": data}
         self.log.write(json.dumps(row) + "\n")
         self.log.flush()
+
+    def write(self, s, dim=False):
+        if not s:
+            return
+        if dim and self.color:
+            s = f"\x1b[2m{s}\x1b[0m"
+        sys.stdout.write(s)
+        sys.stdout.flush()
+        self.bol = s.endswith("\n")
+
+    def line(self, s, dim=False):
+        """s on a line of its own."""
+        self.write(("" if self.bol else "\n") + s + "\n", dim)
 
     def decide(self, tool_call):
         if self.perm == "all":
@@ -428,15 +486,30 @@ class RunClient(Client):
         # (Hermes saves allow_always to a permanent on-disk allowlist), and
         # "cancelled" means the whole turn was cancelled, not one action denied.
         # With no fitting option, answer with a JSON-RPC error. Same rules as
-        # multica-ai/multica#5351.
-        ok = self.decide(tool_call)
+        # multica-ai/multica#5351. --perm ask answers "cancelled" only when the
+        # operator cancels the turn while the question is open.
+        kind = infer_kind(
+            getattr(tool_call, "kind", None), getattr(tool_call, "title", None)
+        )
+        if self.perm == "ask" and self.ask:
+            ok = await self.ask(tool_call, kind)
+        else:
+            ok = self.decide(tool_call)
+        if ok is None:
+            self.rec(
+                "permission",
+                {
+                    "tool_call": dump(tool_call),
+                    "options": [dump(o) for o in options],
+                    "inferred_kind": kind,
+                    "decision": "cancelled",
+                },
+            )
+            return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
         allow = next((o for o in options if o.kind == "allow_once"), None)
         reject = next((o for o in options if o.kind == "reject_once"), None)
         granted = ok and allow is not None
         pick = allow if granted else reject
-        kind = infer_kind(
-            getattr(tool_call, "kind", None), getattr(tool_call, "title", None)
-        )
         self.rec(
             "permission",
             {
@@ -462,12 +535,35 @@ class RunClient(Client):
     async def session_update(self, session_id, update, **kw):
         self.rec("update", dump(update))
         kind = getattr(update, "session_update", "")
+        if self.replaying:
+            if kind in ("user_message_chunk", "agent_message_chunk"):
+                if kind != self._last_msg:
+                    self.replayed += 1
+                self._last_msg = kind
+            return
         if isinstance(update, AgentMessageChunk) and isinstance(
             update.content, TextContentBlock
         ):
             self.text.append(update.content.text)
+            if self.live:
+                self.write(update.content.text)
         elif kind == "tool_call":
             self.tools += 1
+            if self.live:
+                title = getattr(update, "title", None) or "tool call"
+                self.titles[getattr(update, "tool_call_id", None)] = title
+                self.line(f"\u2699 {title}", dim=True)
+        elif kind == "tool_call_update":
+            if self.live:
+                tid = getattr(update, "tool_call_id", None)
+                if getattr(update, "title", None):
+                    self.titles[tid] = update.title
+                if getattr(update, "status", None) == "failed":
+                    self.line(f"\u2717 {self.titles.get(tid, tid)} failed", dim=True)
+        elif kind == "agent_thought_chunk":
+            content = getattr(update, "content", None)
+            if self.live and self.thinking and isinstance(content, TextContentBlock):
+                self.write(content.text, dim=True)
         elif kind == "usage_update":
             self.usage = dump(update)
 
@@ -552,6 +648,556 @@ def fallback_cli(a) -> int:
     return subprocess.run(cmd, cwd=str(Path(a.dir).resolve()), check=False).returncode
 
 
+async def prompt_turn(a, conn, sess, client, text, out, wait=None):
+    """Send one prompt, with --prompt-retries. Writes stop_reason, quota and
+    usage into out; returns (finished, failure, code), code 124 on a timeout
+    and else None. A non-retryable ACP error is raised."""
+    if wait is None:
+
+        async def wait(task, secs):
+            return await asyncio.wait_for(asyncio.shield(task), secs)
+
+    finished, failure, code = False, None, None
+    client.last_failure = None
+    deadline = time.monotonic() + a.timeout
+    prompt = [TextContentBlock(type="text", text=text)]
+    for attempt in range(a.prompt_retries + 1):
+        # Retry only before any side effect (acpx: no retry once the
+        # turn touched anything), with acpx's 1 s * 2^n, max 10 s backoff.
+        can_retry = (
+            attempt < a.prompt_retries
+            and client.tools == client.allowed == client.denied == 0
+        )
+        if attempt and client.cancelled:  # cancelled during the backoff
+            out["stop_reason"], finished = "cancelled", True
+            break
+        client.text = []
+        prompt_task = client.prompt_task = asyncio.ensure_future(
+            conn.prompt(session_id=sess.session_id, prompt=prompt)
+        )
+        why = None
+        try:
+            resp = await wait(prompt_task, max(1, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            await conn.cancel(session_id=sess.session_id)
+            try:
+                resp = await asyncio.wait_for(prompt_task, 15)
+                out["stop_reason"] = resp.stop_reason
+            except (asyncio.TimeoutError, RequestError, ConnectionError):
+                out["stop_reason"] = "timeout"
+            code = 124
+            break
+        except (RequestError, ConnectionError) as e:
+            if not (can_retry and retryable_error(e)):
+                raise
+            why = error_text(e)
+        else:
+            out["stop_reason"] = resp.stop_reason
+            client.rec("prompt_response", dump(resp))
+            quota = (resp.field_meta or {}).get("quota")
+            if quota:  # e.g. codex-acp/Gemini _meta.quota: keep for --json
+                out["quota"] = quota
+            if resp.usage:
+                out["usage"] = dump(resp.usage)
+            failure = client.last_failure = reply_failure(
+                "".join(client.text), client.tools
+            )
+            if not (can_retry and failure and failure[0] == "transient"):
+                finished = True
+                break
+            why = failure[1]
+        delay = min(2.0**attempt, 10.0)
+        client.rec("retry", {"attempt": attempt + 1, "delay": delay, "why": why})
+        print(
+            f"acp-run: retry {attempt + 1}/{a.prompt_retries} in {delay:g}s: {why}",
+            file=sys.stderr,
+        )
+        await asyncio.sleep(delay)
+    return finished, failure, code
+
+
+def verdict(a, out, finished, failure, code, client):
+    """(exit code, FAILED label or None) for one turn; sets out's error,
+    warning and failure."""
+    if finished:
+        code, msg = select_exit(
+            out.get("stop_reason"),
+            "".join(client.text),
+            client.tools,
+            client.allowed,
+            client.denied,
+            a.perm,
+            failure,
+        )
+        if msg:
+            out["error"] = msg
+        if code == 0 and client.denied and not client.allowed:
+            out["warning"] = f"all {client.denied} permission request(s) were denied"
+    if failure:
+        out["failure"] = failure[0]
+    label = None
+    if failure or (finished and code != 0 and "error" in out):
+        label = out.get("failure") or (
+            "permissions" if client.denied else "empty-reply"
+        )
+    return code, label
+
+
+def can_resume(init):
+    caps = init.agent_capabilities
+    if caps is None:
+        return False
+    scaps = caps.session_capabilities
+    return bool(caps.load_session) or getattr(scaps, "resume", None) is not None
+
+
+async def open_session(a, conn, init, client, root, timeout):
+    """session/new, or with --resume session/load (history replayed to the log
+    only) or session/resume, whichever the agent advertises."""
+    if not a.resume:
+        sess = await asyncio.wait_for(
+            conn.new_session(mcp_servers=[], cwd=str(root)), timeout
+        )
+        client.rec("new_session", dump(sess))
+        return sess
+    caps = init.agent_capabilities
+    scaps = caps.session_capabilities if caps else None
+    client.replaying = True
+    try:
+        if caps and caps.load_session:
+            how = "load_session"
+            resp = await asyncio.wait_for(
+                conn.load_session(cwd=str(root), session_id=a.resume, mcp_servers=[]),
+                max(timeout, 120),  # a long history takes a while to replay
+            )
+        elif getattr(scaps, "resume", None) is not None:
+            how = "resume_session"
+            resp = await asyncio.wait_for(
+                conn.resume_session(cwd=str(root), session_id=a.resume, mcp_servers=[]),
+                timeout,
+            )
+        else:
+            print(
+                f"acp-run: {a.agent} cannot resume a session: its initialize"
+                " response advertises neither loadSession nor"
+                " sessionCapabilities.resume (see --info)",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        # Let replayed updates still being handled finish before counting.
+        tracker = getattr(conn, "_session_updates", None)
+        if tracker is not None:
+            await tracker.wait(a.resume)
+    finally:
+        client.replaying = False
+    client.rec(how, dump(resp))
+    print(
+        f"resumed session {a.resume} ({client.replayed} messages)",
+        file=sys.stdout if a.interactive else sys.stderr,
+        flush=True,
+    )
+    return SimpleNamespace(
+        session_id=a.resume, modes=resp.modes, config_options=resp.config_options
+    )
+
+
+def resume_argv(a, root, session_id):
+    """The command herdr runs to reopen this session after a restart: a plain
+    command name on PATH first, no apostrophes or control characters."""
+    if not shutil.which("acp-run"):
+        return None
+    argv = ["acp-run", a.agent, "-C", str(root), "--interactive"]
+    argv += ["--resume", session_id]
+    if a.model:
+        argv += ["--model", a.model]
+    if a.mode:
+        argv += ["--mode", a.mode]
+    for kv in a.set:
+        argv += ["--set", kv]
+    if a.perm != "all":
+        argv += ["--perm", a.perm]
+    if a.inbox:
+        argv += ["--inbox", str(Path(a.inbox).resolve())]
+    if a.show_thinking:
+        argv.append("--show-thinking")
+    if any("'" in x or any(ord(c) < 32 or ord(c) == 127 for c in x) for x in argv):
+        return None
+    if len(argv) > 64 or len("\0".join(argv)) > 8192:
+        return None
+    return argv
+
+
+class Herdr:
+    """Pane agent reports (https://herdr.dev/docs/add-herdr-support/), only
+    inside a herdr pane. Never blocks the session: reports run in the
+    background one at a time, 5 s timeout, failures ignored; --seq is a
+    millisecond clock so it also rises across restarts. herdr before 0.9.2
+    rejects the resume command after "--" (exit 2): then it is dropped."""
+
+    def __init__(self, agent):
+        self.pane = os.environ.get("HERDR_PANE_ID")
+        self.bin = os.environ.get("HERDR_BIN_PATH") or shutil.which("herdr")
+        self.on = bool(self.pane and self.bin and os.access(self.bin, os.X_OK))
+        self.agent, self.seq, self.tasks = agent, 0, set()
+        self.session_id = self.resume = None
+        self.lock = asyncio.Lock()
+
+    def _seq(self):
+        self.seq = max(self.seq + 1, time.time_ns() // 1_000_000)
+        return str(self.seq)
+
+    def _base(self, verb):
+        return [self.bin, "pane", verb, self.pane, "--source", "acp-run"]
+
+    def state(self, state, message=None):
+        if not self.on:
+            return
+        args = self._base("report-agent")
+        args += ["--agent", self.agent, "--state", state, "--seq", self._seq()]
+        if message:
+            args += ["--message", re.sub(r"[\x00-\x1f\x7f]", " ", message)[:200]]
+        if self.session_id:
+            args += ["--agent-session-id", self.session_id]
+        t = asyncio.ensure_future(self._report(args))
+        self.tasks.add(t)
+        t.add_done_callback(self.tasks.discard)
+
+    async def _report(self, args):
+        async with self.lock:
+            if self.resume and await self._call([*args, "--", *self.resume]) != 2:
+                return
+            self.resume = None
+            await self._call(args)
+
+    async def release(self):
+        if not self.on:
+            return
+        if self.tasks:  # exit promptly: at most ~1 s for pending reports
+            await asyncio.wait(set(self.tasks), timeout=1)
+        args = self._base("release-agent") + ["--agent", self.agent]
+        await self._call(args + ["--seq", self._seq()], 2)
+
+    @staticmethod
+    async def _call(args, timeout=5):
+        """herdr's exit status, or None when it failed to run or timed out."""
+        p = None
+        try:
+            p = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            return await asyncio.wait_for(p.wait(), timeout)
+        except (OSError, asyncio.TimeoutError):
+            if p is not None and p.returncode is None:
+                p.kill()
+            return None
+
+
+class Inputs:
+    """--interactive prompt sources, as ("line", text, source) and ("eof", "",
+    source) events: stdin lines, read by a daemon thread so a blocked read
+    never holds up the loop or the exit, and files dropped into --inbox."""
+
+    def __init__(self, inbox):
+        self.loop = asyncio.get_running_loop()
+        self.q = asyncio.Queue()
+        self.inbox = Path(inbox) if inbox else None
+        self.tty = sys.stdin.isatty()
+        self._get = self._poll = None
+
+    def start(self):
+        threading.Thread(target=self._read_stdin, daemon=True).start()
+        if self.inbox:
+            self.inbox.mkdir(parents=True, exist_ok=True)
+            self._poll = asyncio.ensure_future(self._poll_inbox())
+
+    def put(self, ev):
+        self.q.put_nowait(ev)
+
+    def getter(self):
+        """The pending get; it survives a turn ending first, so no event is lost."""
+        if self._get is None:
+            self._get = asyncio.ensure_future(self.q.get())
+        return self._get
+
+    def take(self):
+        ev, self._get = self._get.result(), None
+        return ev
+
+    async def next(self):
+        await asyncio.wait({self.getter()})
+        return self.take()
+
+    def close(self):
+        for t in (self._get, self._poll):
+            if t is not None:
+                t.cancel()
+
+    def _read_stdin(self):
+        # os.read, not sys.stdin: a daemon thread blocked inside a buffered
+        # reader holds its lock, and interpreter shutdown then aborts.
+        src = "tty" if self.tty else "stdin"
+        buf = b""
+        while True:
+            try:
+                chunk = os.read(0, 65536)
+            except OSError:
+                chunk = b""
+            lines = (buf + chunk).split(b"\n")
+            buf = lines.pop() if chunk else b""
+            evs = [("line", ln) for ln in lines if chunk or ln]
+            if not chunk:
+                evs.append(("eof", b""))
+            for ev, raw in evs:
+                text = raw.decode("utf-8", "replace").rstrip("\r")
+                text = text.replace("\x1b[200~", "").replace("\x1b[201~", "")
+                try:
+                    self.loop.call_soon_threadsafe(self.q.put_nowait, (ev, text, src))
+                except RuntimeError:  # the loop is closed: we are exiting
+                    return
+            if not chunk:
+                return
+
+    async def _poll_inbox(self):
+        while True:
+            try:
+                files = sorted(
+                    f
+                    for f in self.inbox.iterdir()
+                    if f.suffix in (".txt", ".md")
+                    and not f.name.startswith(".")
+                    and f.is_file()
+                )
+            except OSError:
+                files = []
+            for f in files:
+                try:
+                    if time.time() - f.stat().st_mtime < 0.5:
+                        break  # still being written; keep name order
+                    text = f.read_text(errors="replace")
+                    f.unlink()
+                except OSError:
+                    continue
+                self.put(("line", text, f"inbox:{f.name}"))
+            await asyncio.sleep(1)
+
+
+class Repl:
+    """--interactive: the prompt loop around one ACP session."""
+
+    def __init__(self, a, conn, sess, client, herdr, proc, err):
+        self.a, self.conn, self.sess, self.client = a, conn, sess, client
+        self.herdr, self.proc, self.err = herdr, proc, err
+        self.inputs = Inputs(a.inbox)
+        self.running = self.cancelled = self.exiting = False
+        self.queued, self.perm_fut, self.n, self.tasks = [], None, 0, set()
+        self.ask_lock = asyncio.Lock()
+        self.last_out, self.last_code, self.last_text = {}, 0, ""
+        self.tot = {"tools": 0, "allowed": 0, "denied": 0}
+        client.ask = self.ask
+
+    def say(self, s):
+        self.client.line(s, dim=True)
+
+    async def loop(self):
+        """Run the first prompt (if any), then prompts until /exit or EOF;
+        the exit code of the last turn (0 when none ran)."""
+        c, fatal, shown = self.client, False, False
+        self.inputs.start()
+        try:
+            first = (self.a.prompt_text or "").strip()
+            if first:
+                fatal = await self.turn(first)
+            while not (self.exiting or fatal):
+                if not shown:
+                    c.line(
+                        f"\n[{self.a.agent} idle — type a prompt,"
+                        " /exit to quit, /cancel during a turn]"
+                    )
+                    self.herdr.state("idle")
+                    shown = True
+                c.write("> ")
+                if self.queued:
+                    ev, text, src = self.queued.pop(0)
+                    c.write((text.rstrip() if ev == "line" else "") + "\n")
+                else:
+                    ev, text, src = await self.inputs.next()
+                    if src == "tty":
+                        c.bol = True  # the terminal echoed the line
+                    else:
+                        c.write((text.rstrip() if ev == "line" else "") + "\n")
+                if self.perm_fut is not None and not self.perm_fut.done():
+                    self.during_turn(ev, text, src)
+                    continue
+                if ev == "eof":
+                    break
+                t = text.strip()
+                if not t:
+                    continue
+                if t == "/exit":
+                    break
+                if t == "/cancel":
+                    self.say("(no turn is running)")
+                    continue
+                shown = False
+                fatal = await self.turn(t)
+        finally:
+            self.inputs.close()
+        return self.last_code
+
+    async def turn(self, text):
+        """One prompt; True when the agent is gone and the session cannot go on."""
+        c, a = self.client, self.a
+        self.n += 1
+        c.text, c.tools, c.allowed, c.denied = [], 0, 0, 0
+        out, t0, finished, failure, code, fatal = {}, time.time(), False, None, 1, False
+        self.running = True
+        self.cancelled = c.cancelled = False
+        self.herdr.state("working")
+        try:
+            finished, failure, tcode = await prompt_turn(
+                a, self.conn, self.sess, c, text, out, self.wait
+            )
+            if tcode:
+                code = tcode
+        except RequestError as e:
+            failure = c.last_failure  # an earlier attempt's, if a retry died
+            out["error"] = error_text(e)[:500]
+            cls = classify(out["error"])
+            if cls:
+                failure = (cls, f"{FAILURE_TEXT[cls]}: {out['error']}")
+        except ConnectionError as e:  # the agent died: its stderr may say why
+            failure = c.last_failure
+            await _kill(self.proc)
+            out["error"] = error_text(e)[:500]
+            out["error"] += f" (agent exited, code {self.proc.returncode})"
+            cls = classify(stderr_tail(self.err.name))
+            if cls:
+                failure = (cls, f"{FAILURE_TEXT[cls]}: {out['error']}")
+            fatal = True
+        finally:
+            self.running = False
+            self.drop_question()
+        code, label = verdict(a, out, finished, failure, code, c)
+        secs = round(time.time() - t0, 1)
+        stop = out.get("stop_reason", "error")
+        row = {"n": self.n, "stop_reason": stop, "seconds": secs, "exit": code}
+        row.update({k: out[k] for k in ("failure", "error", "warning") if k in out})
+        c.rec("turn", row)
+        for k in self.tot:
+            self.tot[k] += getattr(c, k)
+        c.line(f"[{stop} · {secs}s · tools {c.tools}]", dim=True)
+        if label:
+            print(f"acp-run: FAILED {label}: {out.get('error')}", file=sys.stderr)
+        if fatal:
+            c.line("[the agent exited; the session is over]")
+        self.last_out, self.last_code, self.last_text = out, code, "".join(c.text)
+        return fatal
+
+    async def wait(self, task, secs):
+        """Wait for the prompt response while handling input: /cancel,
+        /exit, permission answers, and prompts queued for later."""
+        deadline = time.monotonic() + secs
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                # prompt_turn sends session/cancel next; an open permission
+                # question must be answered "cancelled" for the turn to end
+                self.cancelled = self.client.cancelled = True
+                self.drop_question()
+                raise asyncio.TimeoutError
+            get = self.inputs.getter()
+            done, _ = await asyncio.wait(
+                {task, get}, timeout=left, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                return task.result()
+            if get in done:
+                self.during_turn(*self.inputs.take())
+
+    def during_turn(self, ev, text, src):
+        t = text.strip()
+        if src != "tty" and ev == "line" and self.perm_fut is not None:
+            self.client.write(t + "\n")
+        if self.perm_fut is not None and not self.perm_fut.done():
+            if t.lower() in ("y", "yes", "n", "no"):
+                self.perm_fut.set_result(t.lower().startswith("y"))
+            elif ev == "eof" or t in ("/exit", "/cancel"):
+                self.exiting = self.exiting or t != "/cancel"
+                self.cancel_turn(t or "EOF")
+            elif t:  # a prompt, not an answer: keep it for later
+                self.queued.append((ev, text, src))
+                self.say(f"[queued: {t[:60]}]")
+                self.client.write("allow? [y/n] ")
+            return
+        # /exit typed at the terminal with nothing queued ahead of it ends the
+        # session now; from a pipe or the inbox, and EOF, it waits its turn.
+        if t == "/exit" and src == "tty" and not self.queued:
+            self.exiting = True
+            self.cancel_turn("/exit")
+        elif t == "/cancel":
+            self.cancel_turn("/cancel")
+        elif ev == "eof" or t:
+            self.queued.append((ev, text, src))
+            if t:
+                self.say(f"[queued: {t[:60]}]")
+
+    def interrupt(self):
+        """Ctrl-C: cancel the running turn, or exit when idle."""
+        if self.running:
+            self.cancel_turn("^C")
+        else:
+            self.queued.clear()
+            self.inputs.put(("eof", "", "sigint"))
+
+    def cancel_turn(self, why):
+        if not self.running or self.cancelled:
+            return
+        self.cancelled = self.client.cancelled = True
+        self.say(f"[{why}: cancelling the turn]")
+        self.drop_question()
+        t = asyncio.ensure_future(self._cancel())
+        self.tasks.add(t)
+        t.add_done_callback(self.tasks.discard)
+
+    def drop_question(self):
+        """Answer an open --perm ask question "cancelled"."""
+        if self.perm_fut is not None and not self.perm_fut.done():
+            self.perm_fut.set_result(None)
+
+    async def _cancel(self):
+        try:
+            await asyncio.wait_for(self.conn.cancel(session_id=self.sess.session_id), 5)
+        except (asyncio.TimeoutError, RequestError, ConnectionError):
+            pass
+
+    async def ask(self, tool_call, kind):
+        """--perm ask: True/False from the operator, None if the turn was
+        cancelled meanwhile. Parallel tool calls ask one at a time."""
+        async with self.ask_lock:
+            if self.cancelled or not self.running:
+                return None
+            title = getattr(tool_call, "title", None) or "tool call"
+            locs = getattr(tool_call, "locations", None) or []
+            paths = [loc.path for loc in locs]
+            self.client.line(
+                f"[permission] {title} (kind {kind or '?'})"
+                + (f" paths: {', '.join(paths)}" if paths else "")
+            )
+            self.client.write("allow? [y/n] ")
+            self.herdr.state("blocked", f"permission: {title}")
+            self.perm_fut = asyncio.get_running_loop().create_future()
+            try:
+                return await self.perm_fut
+            finally:
+                self.perm_fut = None
+                self.client.bol = True
+                if self.running and not self.cancelled:
+                    self.herdr.state("working")
+
+
 async def run(a, log, err, log_path):
     cmd, auth = AGENTS[a.agent]
     auth = a.auth or auth
@@ -561,26 +1207,40 @@ async def run(a, log, err, log_path):
     env = dict(os.environ)
     if a.agent == "agy":
         env["GEMINI_HOME"] = ensure_agy_home()
+    if a.interactive:
+        # acp-run reports this pane to herdr itself; the agent's own herdr
+        # hooks (Claude Code's report as herdr:claude) would compete for it.
+        env.pop("HERDR_PANE_ID", None)
+        env.pop("HERDR_ENV", None)
     t0, out, code = time.time(), {"agent": a.agent, "log": str(log_path)}, 1
     handshake_timeout = a.handshake_timeout or HANDSHAKE_TIMEOUT.get(
         a.agent, HANDSHAKE_TIMEOUT_DEFAULT
     )
     tries = max(1, a.handshake_tries)
-    proc = client = conn = init = sess = None
+    proc = client = conn = init = sess = repl = herdr = None
     # SIGINT/SIGTERM: cancel the turn cooperatively (session/cancel), stop the
     # agent and exit 128+signal, as acpx does for SIGINT. Without this, SIGTERM
-    # left the agent process running.
+    # left the agent process running. --interactive: SIGINT (Ctrl-C) cancels
+    # only the running turn, or exits when idle (Repl.interrupt); the agent runs
+    # in its own process group so the terminal's SIGINT does not reach it.
     got = {}
     main_task = asyncio.current_task()
 
     def on_signal(signum):
+        if signum == signal.SIGINT and repl is not None:
+            repl.interrupt()
+            return
         got.setdefault("sig", signum)
         main_task.cancel()
 
     loop = asyncio.get_running_loop()
-    for s in (signal.SIGINT, signal.SIGTERM):
+    # --interactive: a closed pane or terminal (SIGHUP) stops the agent and
+    # releases the pane like SIGTERM; the agent's own process group misses it.
+    sigs = (signal.SIGINT, signal.SIGTERM)
+    sigs += (signal.SIGHUP,) if a.interactive else ()
+    for s in sigs:
         loop.add_signal_handler(s, on_signal, s)
-    failure, prompt_task, finished = None, None, False
+    failure, finished = None, False
     try:
         for attempt in range(1, tries + 1):
             proc = await asyncio.create_subprocess_exec(
@@ -591,8 +1251,11 @@ async def run(a, log, err, log_path):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=err,
                 limit=64 * 1024 * 1024,
+                **({"process_group": 0} if a.interactive else {}),
             )
-            client = RunClient(log, a.perm, root)
+            client = RunClient(
+                log, a.perm, root, live=a.interactive, thinking=a.show_thinking
+            )
             conn = connect_to_agent(client, proc.stdin, proc.stdout)
             try:
                 init = await asyncio.wait_for(
@@ -608,10 +1271,9 @@ async def run(a, log, err, log_path):
                 client.rec("initialize", dump(init))
                 if auth:
                     await asyncio.wait_for(conn.authenticate(method_id=auth), 300)
-                sess = await asyncio.wait_for(
-                    conn.new_session(mcp_servers=[], cwd=str(root)), handshake_timeout
+                sess = await open_session(
+                    a, conn, init, client, root, handshake_timeout
                 )
-                client.rec("new_session", dump(sess))
                 break
             except asyncio.TimeoutError:
                 client.rec(
@@ -630,19 +1292,37 @@ async def run(a, log, err, log_path):
                 f"TimeoutError: handshake after {tries} tries of"
                 f" {handshake_timeout:g}s (session/new hung)"
             )
-            if not a.no_fallback and a.agent == "claude" and not a.info:
+            if (
+                not a.no_fallback
+                and a.agent == "claude"
+                and not (a.info or a.interactive or a.resume)
+            ):
                 return fallback_cli(a)
             code = 124
         if proc is None:
             pass
         elif a.info:
+            caps = init.agent_capabilities
             info = {
                 "agent": dump(init.agent_info),
                 "auth_methods": dump(init.auth_methods),
+                "capabilities": {
+                    "loadSession": bool(caps and caps.load_session),
+                    "sessionCapabilities": dump(caps.session_capabilities)
+                    if caps
+                    else None,
+                },
                 "modes": dump(sess.modes),
                 "config_options": dump(sess.config_options),
             }
             print(json.dumps(info, indent=1))
+            print(
+                "acp-run: capabilities loadSession="
+                + json.dumps(info["capabilities"]["loadSession"])
+                + " sessionCapabilities="
+                + json.dumps(info["capabilities"]["sessionCapabilities"]),
+                file=sys.stderr,
+            )
             return 0
         else:
             if a.mode:
@@ -651,70 +1331,40 @@ async def run(a, log, err, log_path):
             if a.perm == "all" and not a.mode:
                 sets.update(YOLO_SET.get(a.agent, {}))
             sets.update(kv.split("=", 1) for kv in a.set)
+            if a.model:
+                sets.pop("model", None)
+                sets["model"] = a.model  # last: models depend on provider
+            if a.resume and not sess.config_options and sets:
+                client.rec("config_skipped", {"sets": sets})
+                print(
+                    f"acp-run: resumed session offers no config options;"
+                    f" not applied: {sets}",
+                    file=sys.stderr,
+                )
+                sets = {}
             for key, want in sets.items():  # provider before model: models depend on it
                 cid, val = pick_config(sess.config_options, want, key)
                 await conn.set_config_option(
                     config_id=cid, session_id=sess.session_id, value=val
                 )
                 client.rec("set_config", {"id": cid, "value": val})
-            if a.model:
-                cid, val = pick_config(sess.config_options, a.model, "model")
-                await conn.set_config_option(
-                    config_id=cid, session_id=sess.session_id, value=val
+            if a.interactive:
+                herdr = Herdr(a.agent)
+                herdr.session_id = sess.session_id
+                if can_resume(init):
+                    herdr.resume = resume_argv(a, root, sess.session_id)
+                client.line(
+                    f"[acp-run: {a.agent} session {sess.session_id}; log {log_path}]",
+                    dim=True,
                 )
-            deadline = time.monotonic() + a.timeout
-            prompt = [TextContentBlock(type="text", text=a.prompt_text)]
-            for attempt in range(a.prompt_retries + 1):
-                # Retry only before any side effect (acpx: no retry once the
-                # turn touched anything), with acpx's 1 s * 2^n, max 10 s backoff.
-                can_retry = (
-                    attempt < a.prompt_retries
-                    and client.tools == client.allowed == client.denied == 0
+                repl = Repl(a, conn, sess, client, herdr, proc, err)
+                code = await repl.loop()
+            else:
+                finished, failure, tcode = await prompt_turn(
+                    a, conn, sess, client, a.prompt_text, out
                 )
-                client.text = []
-                prompt_task = asyncio.ensure_future(
-                    conn.prompt(session_id=sess.session_id, prompt=prompt)
-                )
-                why = None
-                try:
-                    resp = await asyncio.wait_for(
-                        asyncio.shield(prompt_task), max(1, deadline - time.monotonic())
-                    )
-                except asyncio.TimeoutError:
-                    await conn.cancel(session_id=sess.session_id)
-                    try:
-                        resp = await asyncio.wait_for(prompt_task, 15)
-                        out["stop_reason"] = resp.stop_reason
-                    except (asyncio.TimeoutError, RequestError, ConnectionError):
-                        out["stop_reason"] = "timeout"
-                    code = 124
-                    break
-                except (RequestError, ConnectionError) as e:
-                    if not (can_retry and retryable_error(e)):
-                        raise
-                    why = error_text(e)
-                else:
-                    out["stop_reason"] = resp.stop_reason
-                    client.rec("prompt_response", dump(resp))
-                    quota = (resp.field_meta or {}).get("quota")
-                    if quota:  # e.g. codex-acp/Gemini _meta.quota: keep for --json
-                        out["quota"] = quota
-                    if resp.usage:
-                        out["usage"] = dump(resp.usage)
-                    failure = reply_failure("".join(client.text), client.tools)
-                    if not (can_retry and failure and failure[0] == "transient"):
-                        finished = True
-                        break
-                    why = failure[1]
-                delay = min(2.0**attempt, 10.0)
-                client.rec(
-                    "retry", {"attempt": attempt + 1, "delay": delay, "why": why}
-                )
-                print(
-                    f"acp-run: retry {attempt + 1}/{a.prompt_retries} in {delay:g}s: {why}",
-                    file=sys.stderr,
-                )
-                await asyncio.sleep(delay)
+                if tcode:
+                    code = tcode
     except asyncio.CancelledError:
         if "sig" not in got:
             raise
@@ -722,8 +1372,8 @@ async def run(a, log, err, log_path):
         if conn is not None and sess is not None and not a.info:
             try:
                 await asyncio.wait_for(conn.cancel(session_id=sess.session_id), 5)
-                if prompt_task is not None:
-                    await asyncio.wait_for(prompt_task, 5)
+                if client.prompt_task is not None:
+                    await asyncio.wait_for(client.prompt_task, 5)
             except (
                 asyncio.TimeoutError,
                 asyncio.CancelledError,  # a second signal: stop waiting
@@ -731,12 +1381,14 @@ async def run(a, log, err, log_path):
                 ConnectionError,
             ):
                 pass
+        failure = failure or (client.last_failure if client else None)
         out["stop_reason"] = "interrupted"
         out["error"] = f"interrupted by {signal.Signals(got['sig']).name}"
         code = 128 + got["sig"]
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001 - any agent failure becomes a summary line + exit 1
+        failure = failure or (client.last_failure if client else None)
         out["error"] = error_text(e)[:500]
         if isinstance(e, ConnectionError):  # the agent died: its stderr may say why
             await _kill(proc)
@@ -750,7 +1402,12 @@ async def run(a, log, err, log_path):
     finally:
         logging.disable(logging.CRITICAL)  # a half-written line at shutdown is noise
         await _kill(proc)
-        for s in (signal.SIGINT, signal.SIGTERM):
+        if herdr is not None:
+            try:
+                await herdr.release()
+            except Exception:  # noqa: BLE001, S110 - never let herdr fail the run
+                pass
+        for s in sigs:
             loop.remove_signal_handler(s)
     out.update(seconds=round(time.time() - t0, 1))
     if client is None:
@@ -763,47 +1420,44 @@ async def run(a, log, err, log_path):
         return code
     if client.usage:
         out["usage_update"] = client.usage
-    out.update(
-        tool_calls=client.tools,
-        permissions={"allowed": client.allowed, "denied": client.denied},
-    )
-    text = "".join(client.text)
-    if finished:
-        code, msg = select_exit(
-            out.get("stop_reason"),
-            text,
-            client.tools,
-            client.allowed,
-            client.denied,
-            a.perm,
-            failure,
-        )
-        if msg:
-            out["error"] = msg
-        if code == 0 and client.denied and not client.allowed:
-            out["warning"] = f"all {client.denied} permission request(s) were denied"
-    if failure:
-        out["failure"] = failure[0]
+    label = None
+    if repl is not None:
+        for k, v in repl.last_out.items():  # the last turn's stop reason etc.
+            out.setdefault(k, v)
+        tools, allowed, denied = (repl.tot[k] for k in ("tools", "allowed", "denied"))
+        out["turns"] = repl.n
+        text = repl.last_text
+    else:
+        tools, allowed, denied = client.tools, client.allowed, client.denied
+        text = "".join(client.text)
+        code, label = verdict(a, out, finished, failure, code, client)
+        out["turns"] = 1 if client.prompt_task is not None else 0
+        if out["turns"]:
+            row = {"n": 1, "stop_reason": out.get("stop_reason", "error")}
+            row.update(seconds=out["seconds"], exit=code)
+            client.rec("turn", row)
+    out.update(tool_calls=tools, permissions={"allowed": allowed, "denied": denied})
     out["exit"] = code
     client.rec("result", out)
-    if failure or (finished and code != 0 and "error" in out):
-        label = out.get("failure") or (
-            "permissions" if client.denied else "empty-reply"
-        )
+    if label:
         print(f"acp-run: FAILED {label}: {out.get('error')}", file=sys.stderr)
     if a.json:
         print(json.dumps({**out, "text": text}, indent=1))
     else:
-        sys.stdout.write(text + ("\n" if text and not text.endswith("\n") else ""))
+        if repl is None:  # --interactive streamed it already
+            sys.stdout.write(text + ("\n" if text and not text.endswith("\n") else ""))
+        sys.stdout.flush()
         u = out.get("usage") or {}
         cost = (client.usage or {}).get("cost", {}).get("amount")
         bits = [
             f"agent={a.agent}",
             f"stop={out.get('stop_reason', 'error')}",
             f"secs={out['seconds']}",
-            f"tools={client.tools}",
-            f"perm={client.allowed}+/{client.denied}-",
+            f"tools={tools}",
+            f"perm={allowed}+/{denied}-",
         ]
+        if repl is not None:
+            bits.append(f"turns={repl.n}")
         tok = u.get("totalTokens") or u.get("total_tokens")
         if tok:
             bits.append(f"tokens={tok}")
@@ -899,6 +1553,30 @@ def main():
         help="with --max-load, wait up to SECS for the load to drop before"
         " refusing (env ACP_RUN_LOAD_WAIT; default 0)",
     )
+    ap.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="keep the session open: stream output, then read more prompts from"
+        " stdin or --inbox (see above)",
+    )
+    ap.add_argument(
+        "--inbox",
+        metavar="DIR",
+        help="with --interactive, also take prompts (and y/n answers) from"
+        " *.txt/*.md files dropped into DIR",
+    )
+    ap.add_argument(
+        "--show-thinking",
+        action="store_true",
+        help="with --interactive, print the agent's thoughts too",
+    )
+    ap.add_argument(
+        "--resume",
+        metavar="SESSION_ID",
+        help="reopen this ACP session (session/load or session/resume) instead"
+        " of starting a new one",
+    )
     a = ap.parse_args()
     if a.list:
         for n, (c, auth) in AGENTS.items():
@@ -907,17 +1585,24 @@ def main():
         return 0
     if a.agent not in AGENTS:
         ap.error(f"agent must be one of: {', '.join(AGENTS)}")
-    if not (a.perm in ("all", "deny") or a.perm.startswith("scoped:")):
-        ap.error("--perm must be all, deny or scoped:PATH[,PATH...]")
+    if not (a.perm in ("all", "deny", "ask") or a.perm.startswith("scoped:")):
+        ap.error("--perm must be all, deny, ask or scoped:PATH[,PATH...]")
+    if a.perm == "ask" and not a.interactive:
+        ap.error("--perm ask needs --interactive")
+    if (a.inbox or a.show_thinking) and not a.interactive:
+        ap.error("--inbox and --show-thinking need --interactive")
     if a.prompt_retries < 0:
         ap.error("--prompt-retries must be 0 or more")
     if a.handshake_timeout is not None and a.handshake_timeout <= 0:
         ap.error("--handshake-timeout must be positive")
+    a.prompt_text = None
     if not a.info:
         if a.prompt_file:
             a.prompt_text = Path(a.prompt_file).read_text()
         elif a.prompt:
             a.prompt_text = a.prompt
+        elif a.interactive:
+            pass  # stdin feeds the prompt loop instead
         elif not sys.stdin.isatty():
             a.prompt_text = sys.stdin.read()
         else:
