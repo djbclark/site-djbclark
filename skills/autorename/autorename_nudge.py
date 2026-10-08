@@ -55,9 +55,12 @@ def main() -> None:
     print(
         "[autorename] This session has no title yet. As the LAST step of this turn, after "
         "the requested work, follow the autorename skill in --auto mode: pick a title, run "
-        f"`python3 {SKILL_DIR}/autorename.py --auto \"<title>\"`, then do its herdr "
-        "placement step (it asks the operator only if the tab sits in a generic workspace). "
-        "Skip the placement question if you are a dispatched worker no human is watching. "
+        f"`python3 {SKILL_DIR}/autorename.py --auto \"<title>\"`, THEN run "
+        f"`python3 {SKILL_DIR}/herdr_place.py check --auto` (prints JSON; no-op outside herdr). "
+        "If it says `\"ask\": true`, the tab sits in a generic workspace: follow the skill's "
+        "step 3 and ask the operator with one AskUserQuestion (matching existing workspace / "
+        "new workspace / leave it), then run `herdr_place.py move ...` or `herdr_place.py decline`. Skip that "
+        "question only if you are a dispatched worker no human is watching. "
         "Mention the result in one line; don't otherwise discuss this note."
     )
 
