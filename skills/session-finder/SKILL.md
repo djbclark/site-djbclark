@@ -151,17 +151,28 @@ repo (a new workspace when none fits), reported to herdr as an agent so `helm`
 and `fleet.py` list it like any other. Agents with no ACP route (zcode, crush,
 muse) get `herdr agent start --kind` plus `agent prompt` — the fragile way; say so.
 
-1. One `acp-run` is one turn. When the session ends, `helm` shows a `done` item
-   with its final text (or a `reply` item when that text asks a question);
-   `launch.py reply <id> "<text>"` starts the next turn in the same cwd and pane
-   with the brief and the last reply as context. `session/load` is not wired yet
-   (acp-run has no resume; the claude adapter supports it — a later step).
-2. Always `--model`. Default `--timeout` is an hour; `--perm scoped:<paths>` for
-   review-style gating; `--files` lists the paths the claim owns.
-3. Everything about a launch lives under `~/.local/state/session-finder/launch-<id>/`
-   (brief, acp log, out, err, runner) and `launches.jsonl`; `launch.py list` shows
-   state; `launch.py close <id>` hides a finished one.
-4. Exit 0 is not success: read the `done` text and the diff, as for any delegation.
+1. **The pane shows the agent and takes input** (`acp-run --interactive`,
+   2026-10-08): output streams into the pane as it happens; when a turn ends the
+   session stays open and waits for the next prompt from the keyboard in that
+   pane *or* from its inbox (`launch-<id>/inbox/*.txt`), which is what
+   `launch.py reply <id> "<text>"` writes — no keys, no screen scraping. `helm`
+   shows a `done` item per finished turn (or `reply` when the text asks a
+   question). `--no-interactive` keeps the old one-turn-and-exit form, and a
+   `reply` to an exited session starts a new acp-run with the brief and last
+   reply as context. acp-run reports `working`/`idle`/`blocked` to herdr with its
+   resume command, so `herdr agent prompt` and a herdr restart both work.
+2. **Finished sessions are audited, then closed** (operator, 2026-10-08):
+   `launch.py audit <id>` sends `/loose` as the next turn; `launch.py close <id>`
+   sends `/exit`, marks the launch closed and closes its herdr tab (or pane) so
+   tabs do not accumulate. `helm.py wait --auto-audit` does both without asking:
+   audit when a launch goes `done`, close once the audited result has been shown.
+3. Always `--model`. Default `--timeout` is an hour per turn; `--perm
+   scoped:<paths>` for review-style gating, `--perm ask` to answer permissions in
+   the pane; `--files` lists the paths the claim owns.
+4. Everything about a launch lives under `~/.local/state/session-finder/launch-<id>/`
+   (brief, acp log, out, err, runner, inbox) and `launches.jsonl`; `launch.py
+   list` shows state.
+5. Exit 0 is not success: read the `done` text and the diff, as for any delegation.
 
 ## 6. Reach each agent
 

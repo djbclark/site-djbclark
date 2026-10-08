@@ -88,9 +88,12 @@ Hermes; never numbered prose). One item per call.
    in the queue.
 5. **`reply`** — a session started over ACP (`launch.py`) ended its turn with a
    question. Relay the question text with options he can answer in a line;
-   send with `$L reply <id> "<his text>"` (a new ACP turn, same pane). **`done`**
-   — it finished: show its final line and exit code once, then `$L close <id>`
-   or `$L reply` for a follow-up. Both come from `~/.local/state/session-finder/`.
+   send with `$L reply <id> "<his text>"` (into the live session's inbox; a new
+   acp-run turn if it already exited). **`done`** — a turn finished: show its
+   final line once. `wait --auto-audit` then sends `/loose` as its next turn
+   (`$L audit`) and, once that audited result has been shown, closes the
+   session and its herdr tab (`$L close`) so tabs do not pile up (operator,
+   2026-10-08). Offer `$L reply` for a follow-up before the close happens.
 6. **`finished`** — a running Claude session whose last prompt was `/handoff`
    or `/quit`. It is not audited and not messaged. Offer: Start a /baton session
    in its repo now (`$L --baton --cwd <dir> --agent claude --model <M> --pane

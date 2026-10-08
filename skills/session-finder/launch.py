@@ -3,10 +3,12 @@
 
     launch.py --agent A --cwd DIR (-p TEXT | -f FILE) [--model M] [--name NAME] [--baton [--chain ID|PATH]]
               [--pane PANE] [--host auto|herdr|orca|none] [--timeout S] [--perm P] [--set K=V]... [--dry-run] [--json]
-    launch.py reply <id> "<text>"     continue a launched session: a new ACP turn with the brief, its last reply
-                                      and this text (one prompt per acp-run; session/load is not wired yet)
+    launch.py reply <id> "<text>"     next prompt: into the live session's inbox when it is interactive (acp-run
+                                      --interactive keeps the ACP session open), else a new acp-run turn with the
+                                      brief and the last reply as context
+    launch.py audit <id>              send /loose (or the loose-skill text) as the session's next turn
     launch.py list [--json]           every launch and its state
-    launch.py close <id>              mark a launch closed so fleet/helm stop listing it
+    launch.py close <id> [--keep-pane] /exit a live session, mark it closed, close its herdr tab or pane
 
 Route (djbclark 2026-10-08: "use ACP if possible … other methods have proven to be fragile"):
   1. The agent is driven over ACP by acp-run (typed permissions, exit codes, JSONL log). The call runs
@@ -48,6 +50,34 @@ HERDR = fleet.HERDR
 def die(msg, rc=1):
     print(f"launch: {msg}", file=sys.stderr)
     sys.exit(rc)
+
+
+_ACP_I = {}
+
+
+def acp_interactive():
+    """Does the installed acp-run have --interactive (added 2026-10-08)?"""
+    if "v" not in _ACP_I:
+        try:
+            _ACP_I["v"] = "--interactive" in Path(ACP_RUN).read_text(errors="replace")[:6000]
+        except OSError:
+            _ACP_I["v"] = False
+    return _ACP_I["v"]
+
+
+def inbox_send(d, text):
+    """Hand TEXT to a live interactive session as its next prompt (no keys, no new process)."""
+    inbox = Path(d.get("inbox") or "")
+    if not inbox.is_dir():
+        return False
+    tmp = inbox / f".{int(time.time() * 1000)}.tmp"
+    tmp.write_text(text if text.endswith("\n") else text + "\n")
+    tmp.rename(inbox / f"{int(time.time() * 1000)}.txt")
+    return True
+
+
+AUDIT = {"claude": "/loose", "hermes": "/loose"}
+AUDIT_OTHER = "Use the loose skill: audit this session for loose ends, then step me through them."
 
 
 def new_id(agent):
@@ -260,6 +290,11 @@ def start(a, brief_text, parent=None):
         return start_tui(a, d, brief_text, host)
 
     acp_cmd = [ACP_RUN, agent, "-C", cwd, "-f", d["brief"], "--timeout", str(a.timeout), "--log", d["log"]]
+    if getattr(a, "interactive", True) and acp_interactive():
+        # the pane shows the agent live and takes the next prompt from the keyboard or the inbox
+        d["interactive"], d["inbox"] = True, str(ldir / "inbox")
+        Path(d["inbox"]).mkdir(exist_ok=True)
+        acp_cmd += ["--interactive", "--inbox", d["inbox"]]
     if a.model:
         acp_cmd += ["--model", a.model]
     if a.perm:
@@ -375,6 +410,12 @@ def cmd_reply(a):
     if not old:
         die(f"no launch {a.id}")
     status, final, result = fleet.launch_state(old)
+    if old.get("interactive") and result is None:
+        # the session is alive: queue the prompt in its inbox (acp-run picks it up when idle)
+        if not inbox_send(old, a.text):
+            die(f"{a.id} is interactive but its inbox {old.get('inbox')} is gone")
+        print(f"queued for [{a.id}] ({'now' if status != 'working' else 'after its current turn'}): {fleet.clip(a.text, 80)}")
+        return 0
     if status == "working":
         die(f"{a.id} is still working; wait for its result first")
     brief = Path(old["brief"]).read_text() if Path(old.get("brief", "")).exists() else old.get("prompt_head", "")
@@ -413,8 +454,59 @@ def cmd_list(a):
     return 0 if rows else 1
 
 
+def cmd_audit(a):
+    """Send the loose-ends audit as the session's next turn (operator 2026-10-08: /loose on the
+    ACP window when done, then close it)."""
+    d = next((x for x in fleet.launches() if x["id"] == a.id), None)
+    if not d:
+        die(f"no launch {a.id}")
+    status, final, result = fleet.launch_state(d)
+    if d.get("closed"):
+        die(f"{a.id} is closed")
+    text = AUDIT.get(d.get("agent"), AUDIT_OTHER)
+    if d.get("interactive") and result is None:
+        if not inbox_send(d, text):
+            die("inbox gone")
+        record({"id": a.id, "audited_turn": d.get("turns", 0), "audit_sent": time.time()})
+        print(f"audit queued for [{a.id}] as turn {d.get('turns', 0) + 1}")
+        return 0
+    if status == "working":
+        die(f"{a.id} is still working")
+    ns = argparse.Namespace(id=a.id, text=text, model=None, host="auto", timeout=1800, perm=None, set=None,
+                            dry_run=False, json=False)
+    return cmd_reply(ns)
+
+
 def cmd_close(a):
+    """Mark closed and, by default, close the herdr tab that hosted it so tabs do not pile up.
+    A live interactive session is asked to /exit first; a working one is refused unless --force."""
+    d = next((x for x in fleet.launches() if x["id"] == a.id), None)
+    if not d:
+        die(f"no launch {a.id}")
+    status, final, result = fleet.launch_state(d)
+    host = d.get("host") or {}
+    if status == "working" and result is None and not a.force:
+        die(f"{a.id} is still working; wait, or --force")
+    if d.get("interactive") and result is None and d.get("exit") is None:
+        inbox_send(d, "/exit")
+        for _ in range(30):
+            time.sleep(1)
+            if any(x.get("exit") is not None for x in fleet.launches() if x["id"] == a.id):
+                break
     record({"id": a.id, "closed": True, "closed_at": time.time()})
+    if host.get("kind") in ("herdr", "herdr-tui") and host.get("pane") and not a.keep_pane:
+        if pane_exists(host["pane"]):
+            ag = fleet.herdr_json("agent", "get", host["pane"]).get("agent") or {}
+            if ag.get("agent") and ag.get("agent_status") == "working" and not a.force:
+                die(f"closed {a.id} but pane {host['pane']} still runs a working {ag['agent']}; not closing it")
+            tab = host.get("tab")
+            panes = [p for p in (fleet.herdr_json("pane", "list").get("panes") or []) if p.get("tab_id") == tab]
+            if tab and len(panes) == 1:
+                fleet.run(HERDR, "tab", "close", tab)
+            else:
+                fleet.run(HERDR, "pane", "close", host["pane"])
+            print(f"closed {a.id} and its herdr {'tab ' + tab if tab and len(panes) == 1 else 'pane ' + host['pane']}")
+            return 0
     print(f"closed {a.id}")
     return 0
 
@@ -443,6 +535,8 @@ def main():
     p.add_argument("--pane")
     p.add_argument("--files", nargs="*", help="paths this session will own (written to its bigteam claim)")
     p.add_argument("--force", action="store_true", help="start even though another session works in that repo")
+    p.add_argument("--no-interactive", dest="interactive", action="store_false",
+                   help="one turn and exit (default: keep the ACP session open; the pane shows it and takes input)")
     common(p)
     p.set_defaults(fn=cmd_start)
     p = sub.add_parser("reply")
@@ -453,8 +547,13 @@ def main():
     p = sub.add_parser("list")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_list)
+    p = sub.add_parser("audit")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_audit)
     p = sub.add_parser("close")
     p.add_argument("id")
+    p.add_argument("--keep-pane", action="store_true", help="mark closed but leave the herdr tab/pane")
+    p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_close)
     argv = sys.argv[1:]
     if argv and argv[0].startswith("-"):

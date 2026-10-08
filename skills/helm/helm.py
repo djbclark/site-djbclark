@@ -43,6 +43,7 @@ HOME = str(Path.home())
 COLD = 55 * 60   # idle longer than this: the prompt cache (1 h) is gone, an audit re-reads it all
 POLL = 5
 ATTENTION = ("question", "reply", "plan", "permission", "blocked", "finished", "done", "idle")
+LAUNCH = HERE.parent / "session-finder" / "launch.py"
 # Minutes of unattended work an answer is expected to unlock (operator 2026-10-08: order the walk so
 # the fleet is busy as much of the time as possible). A question's value comes from that session's
 # own measured work stretch (fleet.parse: median minutes between an operator prompt and the next stop).
@@ -129,11 +130,13 @@ def classify(s, st):
         it["stretch"] = tx.get("stretch_min")
     if s.get("host") == "acp":            # a session launch.py started over ACP: one turn per run
         la = s.get("launch") or {}
+        turn = la.get("turns", 0)
+        it.update(alive=la.get("alive", False), audited=bool(s.get("audited")), interactive=bool(la.get("interactive")))
         if s["status"] == "blocked":
-            it.update(kind="reply", fp="reply:" + hashlib.sha1(la.get("final", "").encode()).hexdigest()[:12],
-                      detail=la.get("final", ""))
+            it.update(kind="reply", fp=f"reply:{s['id']}:{turn}", detail=la.get("final", ""))
         elif s["status"] == "idle":
-            it.update(kind="done", fp="done:" + s["id"], detail=la.get("final", ""), exit=(la.get("result") or {}).get("exit"))
+            it.update(kind="done", fp=f"done:{s['id']}:{turn}", detail=la.get("final", ""),
+                      exit=(la.get("result") or {}).get("exit"))
         else:
             it.update(kind="working", fp="")
     elif s.get("host") == "hermes-gw":    # a Hermes chat: not a terminal, nothing to relay by keys
@@ -273,10 +276,12 @@ def render(it, full=False):
     k = it["kind"]
     if k == "reply":
         out.append(f"  ACP SESSION ASKS: {clip(it.get('detail', ''), 600)}")
-        out.append(f"  answer: launch.py reply {it['id']} \"<text>\"   (a new ACP turn; the pane stays)")
+        out.append(f"  answer: launch.py reply {it['id']} \"<text>\"   ({'into its live inbox' if it.get('alive') else 'a new ACP turn'}; the pane stays)")
     elif k == "done":
-        out.append(f"  ACP SESSION DONE (exit {it.get('exit')}): {clip(it.get('detail', ''), 500)}")
-        out.append(f"  next: read it, then launch.py close {it['id']} (or reply … for a follow-up)")
+        state = "audited" if it.get("audited") else "NOT audited"
+        live = "turn done, session open" if it.get("alive") else f"exited {it.get('exit')}"
+        out.append(f"  ACP SESSION DONE ({live} · {state}): {clip(it.get('detail', ''), 500)}")
+        out.append(f"  next: launch.py audit {it['id']} → close {it['id']} (wait --auto-audit does both) · reply … for a follow-up")
     elif k == "finished":
         out.append(f"  FINISHED with {it['finished']}: do not continue here. Next work in this repo starts a fresh "
                    f"session from the handoff: launch.py --baton --cwd {it['cwd']} --agent claude -p \"<instruction>\"")
@@ -370,6 +375,17 @@ def cmd_wait(a, state):
         fresh, started = [], []
         for s, it in zip(ss, items):
             st = state[s["id"]]
+            if a.auto_audit and s.get("host") == "acp" and it["kind"] in ("done", "reply"):
+                # operator 2026-10-08: /loose on the ACP window when done, then close it
+                la = s.get("launch") or {}
+                if it["kind"] == "done" and not it.get("audited") and not la.get("audit_sent") and not la.get("closed"):
+                    if run(sys.executable, "-I", str(LAUNCH), "audit", s["id"], timeout=60)[0] == 0:
+                        started.append(s["id"] + " (acp)")
+                        continue
+                if it.get("audited") and st.get("seen") == it["fp"] and not la.get("closed"):
+                    rc, out = run(sys.executable, "-I", str(LAUNCH), "close", s["id"], timeout=90)
+                    print(f"helm: {out.strip() or 'close failed for ' + s['id']}", file=sys.stderr)
+                    continue
             if a.auto_audit and can_audit(s, it, a.settle):
                 if not draft(s) and submit(s, audit_text(s)):
                     st["audit_sent"] = time.time()
@@ -464,6 +480,11 @@ def cmd_send(a, state):
     s, it = find(a.id, state)
     if s["self"]:
         sys.exit("helm: that is this session")
+    if s.get("host") == "acp":   # a launched ACP session: its inbox or a new turn, never keys
+        sub = ["audit"] if a.prompt is None else ["reply", a.prompt]
+        rc, out = run(sys.executable, "-I", str(LAUNCH), *sub[:1], s["id"], *sub[1:], timeout=90)
+        print(out.strip())
+        sys.exit(rc)
     if not s.get("chan"):
         sys.exit(f"helm: no channel to {it['id']} ({it['where'] or 'unknown terminal'}); use SendMessage for a Claude session")
     if it["kind"] != "idle":

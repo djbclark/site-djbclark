@@ -275,8 +275,9 @@ def _from_herdr(s, a):
         s["status"] = "idle" if a["agent_status"] == "done" else a["agent_status"]
 
 
-def _claude_sessions(agents_by_sid, used, anc):
+def _claude_sessions(agents_by_sid, used, anc, launch_panes=None):
     me = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    launch_panes = launch_panes or {}
     out = []
     for f in sorted((CLAUDE / "sessions").glob("*.json")):
         try:
@@ -290,6 +291,12 @@ def _claude_sessions(agents_by_sid, used, anc):
                  status=REG_STATUS.get(d.get("status"), "unknown"), self=(pid in anc or sid == me), pid=pid,
                  reach=f"SendMessage to {d.get('name') or sid[:8]}")
         a = agents_by_sid.get(sid)
+        if a and a["pane_id"] in launch_panes:
+            # the Claude Code that claude-agent-acp runs inside one of our ACP launches: one session, not two
+            launch = launch_panes[a["pane_id"]]
+            launch["sid"], launch["transcript"] = sid, str(transcript(sid) or "")
+            launch["underlying"] = {"name": d.get("name") or "", "status": REG_STATUS.get(d.get("status"), "unknown")}
+            continue
         if a:
             used.add(a["pane_id"])
             _from_herdr(s, a)
@@ -420,10 +427,13 @@ def launches():
 
 
 def launch_state(d):
-    """State of an ACP session launch.py started, from its acp-run log: working until the result
-    record, then idle with the final text. The text ends in a question -> blocked (needs an answer)."""
+    """State of an ACP session launch.py started, from its acp-run log. Non-interactive: working
+    until the result record, then idle (exited) with the final text. Interactive (acp-run
+    --interactive): a `turn` record ends each turn; after one the process waits for input, so
+    the session is idle-and-alive until the runner appends its exit line. Text ending in a
+    question -> blocked (needs an answer). Returns (status, last turn's text, result or None)."""
     log = Path(d.get("log") or "")
-    text, result = [], None
+    cur, turns, result = [], [], None
     if log.exists():
         for line in log.read_text(errors="replace").splitlines():
             try:
@@ -432,15 +442,22 @@ def launch_state(d):
                 continue
             k, data = r.get("kind"), r.get("data") or {}
             if k == "update" and data.get("sessionUpdate") == "agent_message_chunk":
-                text.append((data.get("content") or {}).get("text") or "")
+                cur.append((data.get("content") or {}).get("text") or "")
+            elif k == "turn":
+                turns.append({**data, "text": "".join(cur)})
+                cur = []
             elif k == "result":
                 result = data
-    final = "".join(text)
-    if result is None:
-        pid = d.get("pid")
-        status = "working" if (pid is None or alive(pid)) else "unknown"
-    else:
+    final = turns[-1]["text"] if turns and not "".join(cur).strip() else "".join(cur)
+    exited = result is not None or d.get("exit") is not None
+    if exited:
         status = "blocked" if final.rstrip().endswith("?") else "idle"
+        result = result or {"exit": d.get("exit")}
+    elif turns and not "".join(cur).strip():
+        status = "blocked" if final.rstrip().endswith("?") else "idle"   # between turns, waiting for input
+    else:
+        status = "working"
+    d["turns"] = len(turns)
     return status, final, result
 
 
@@ -451,10 +468,12 @@ def _launched(used_panes):
             continue
         status, final, result = launch_state(d)
         host = d.get("host") or {}
+        alive_interactive = d.get("interactive") and result is None
         s = _rec(id=d["id"], agent=d.get("agent", "?"), host="acp", sid=d.get("acp_session") or d["id"], name=d.get("name", ""),
                  title=d.get("name") or clip(d.get("prompt_head", ""), 60), cwd=d.get("cwd", ""), status=status,
-                 launch={**d, "final": clip(final, 600), "result": result}, pid=d.get("pid"),
-                 reach=f"launch.py reply {d['id']} \"<text>\" (new ACP turn, same cwd and brief)")
+                 launch={**d, "final": clip(final, 600), "result": result, "alive": result is None}, pid=d.get("pid"),
+                 reach=(f"launch.py reply {d['id']} \"<text>\" (next turn in the live ACP session, via its inbox)"
+                        if alive_interactive else f"launch.py reply {d['id']} \"<text>\" (new ACP turn, same cwd and brief)"))
         if host.get("kind") == "herdr" and host.get("pane"):
             s.update(chan=("herdr", host["pane"]), focus=f"herdr tab focus {host.get('tab', '')}".strip(),
                      where=f"herdr · ws {herdr_label('workspace', host.get('workspace', ''))} · tab {herdr_label('tab', host.get('tab', ''))} (acp)")
@@ -466,6 +485,8 @@ def _launched(used_panes):
             s["where"] = "acp (no terminal)"
         if result is not None and status == "idle":
             s["finished"] = "done"
+        if d.get("audited_turn") is not None and d.get("turns", 0) > d["audited_turn"]:
+            s["audited"] = True         # the /loose turn has completed
         out.append(s)
     return out
 
@@ -475,9 +496,11 @@ def sessions(include_shell=False):
     agents = herdr_json("agent", "list").get("agents") or []
     by_sid = {(a.get("agent_session") or {}).get("value"): a for a in agents if a.get("agent_session")}
     used = set()
-    out = _claude_sessions(by_sid, used, anc)
+    launched = _launched(used)
+    launch_panes = {s["chan"][1]: s for s in launched if s.get("chan") and s["chan"][0] == "herdr"}
+    out = _claude_sessions(by_sid, used, anc, launch_panes)
     out += _other_herdr(agents, used)
-    out += _launched(used)
+    out += launched
     known_pids = {s["pid"] for s in out if s.get("pid")}
     out += _proc_scan(known_pids, used | {a["pane_id"] for a in agents}, anc)
     out += _hermes_gateway()
