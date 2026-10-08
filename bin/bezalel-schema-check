@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+# Regression check for bezalel's MCP tools/list schemas (upstream fixed 2026-09-26).
+# Prints "<n> tools; <m> invalid"; m>0 means Claude Code will reject the whole tools/list.
+import json,subprocess,os
+c=json.load(open(os.path.expanduser('~/.claude.json')))
+def find(o):
+    if isinstance(o,dict):
+        if isinstance(o.get('bezalel'),dict): return o['bezalel']
+        for v in o.values():
+            r=find(v)
+            if r: return r
+s=find(c)
+def call(body,extra=[]):
+    a=['curl','-s','-i',s['url'],'-X','POST','-H','Content-Type: application/json','-H','Accept: application/json, text/event-stream','-H','MCP-Protocol-Version: 2025-06-18']+extra
+    for k,v in s['headers'].items(): a+=['-H',f'{k}: {v}']
+    return subprocess.run(a+['-d',json.dumps(body)],capture_output=True).stdout.decode()
+r=call({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}})
+sid=[l.split(':',1)[1].strip() for l in r.splitlines() if l.lower().startswith('mcp-session-id')][0]
+ex=['-H',f'Mcp-Session-Id: {sid}']
+call({"jsonrpc":"2.0","method":"notifications/initialized"},ex)
+r=call({"jsonrpc":"2.0","id":2,"method":"tools/list"},ex)
+tools=json.loads(r[r.find('{"jsonrpc"'):])['result']['tools']
+bad=[(n,t['name'],t.get('inputSchema')) for n,t in enumerate(tools) if not(isinstance(t.get('inputSchema'),dict) and t['inputSchema'].get('type')=='object')]
+print(len(tools),'tools;',len(bad),'invalid')
+for b in bad: print(b[0],b[1],json.dumps(b[2])[:300])
+print('YouTube tools:',[t['name'] for t in tools if 'youtube' in t['name'].lower() or 'youtube' in t.get('description','').lower()])
