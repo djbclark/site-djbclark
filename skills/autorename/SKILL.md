@@ -84,3 +84,9 @@ herdr_place.py decline                      # "leave it": no re-ask this session
 `move` carries every pane of the tab (this one into a new tab in the target with
 focus, the others split into it) because herdr has no tab-to-workspace move; the
 old pane id stays valid as an alias. Report its one line.
+
+To sort **another** session's tab (one the hook missed, say), title it with
+`autorename.py --session-id <sid> "<title>"` and move it with
+`HERDR_PANE_ID=<its pane> CLAUDE_CODE_SESSION_ID=<sid> herdr_place.py move ... --no-focus`
+so the operator's view doesn't jump; `herdr pane list --workspace <id>` maps
+`agent_session.value` to pane ids.

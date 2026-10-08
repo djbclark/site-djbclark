@@ -9,6 +9,8 @@ does the move.
     herdr_place.py check [--auto]                 # JSON facts for the agent
     herdr_place.py move --workspace W --tab-label L
     herdr_place.py move --new-workspace NAME --tab-label L
+    HERDR_PANE_ID=<other pane> CLAUDE_CODE_SESSION_ID=<its session> \
+        herdr_place.py move ... --no-focus        # sort another session's tab
     herdr_place.py decline                        # remember "leave it", no re-ask
 
 herdr has no tab-to-workspace move, so `move` moves every pane of the current
@@ -108,7 +110,7 @@ def remember(answer: str) -> None:
         path.write_text(answer + "\n", encoding="utf-8")
 
 
-def move(workspace: str | None, new_workspace: str | None, tab_label: str) -> int:
+def move(workspace: str | None, new_workspace: str | None, tab_label: str, focus: bool = True) -> int:
     pane_id = os.environ.get("HERDR_PANE_ID")
     if not pane_id:
         print("herdr_place: not in a herdr pane", file=sys.stderr)
@@ -121,7 +123,8 @@ def move(workspace: str | None, new_workspace: str | None, tab_label: str) -> in
             dest = ["--new-tab", "--workspace", workspace, "--label", tab_label]
         else:
             dest = ["--new-workspace", "--label", new_workspace or "", "--tab-label", tab_label]
-        result = herdr("pane", "move", pane["pane_id"], *dest, "--focus")["move_result"]
+        result = herdr("pane", "move", pane["pane_id"], *dest,
+                       "--focus" if focus else "--no-focus")["move_result"]
         new_tab = result["pane"]["tab_id"]
         for sib in siblings:
             herdr("pane", "move", sib, "--tab", new_tab, "--split", "right", "--no-focus")
@@ -149,13 +152,15 @@ def main() -> int:
     g.add_argument("--workspace", help="existing workspace id, e.g. w22")
     g.add_argument("--new-workspace", metavar="NAME")
     m.add_argument("--tab-label", required=True)
+    m.add_argument("--no-focus", action="store_true",
+                   help="don't follow the tab (moving another session's pane via HERDR_PANE_ID=...)")
     sub.add_parser("decline")
     args = ap.parse_args()
 
     if args.cmd == "check":
         return check(args.auto)
     if args.cmd == "move":
-        return move(args.workspace, args.new_workspace, args.tab_label)
+        return move(args.workspace, args.new_workspace, args.tab_label, not args.no_focus)
     remember("declined")
     print("declined: tab stays where it is")
     return 0
