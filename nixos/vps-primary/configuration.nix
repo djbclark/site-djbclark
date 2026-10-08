@@ -24,7 +24,7 @@
     };
   };
 
-  environment.systemPackages = [ pkgs.vim ];
+  environment.systemPackages = [ pkgs.vim pkgs.python3 ];
   system.copySystemConfiguration = true;
   system.stateVersion = "26.05";
 }

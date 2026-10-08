@@ -32,6 +32,15 @@ and keyboard-interactive off; host fingerprint unchanged; both files in
 above (Python/Ansible, non-root accounts, IPv6, Tailscale, services, console
 password) still waits on operator scope; nothing was changed.
 
+Integration started 2026-10-08 on operator instruction (the "Integrate into ops"
+section): `pkgs.python3` added to `environment.systemPackages` (tracked and
+installed copies byte-identical, applied with `nixos-rebuild test` then `switch`;
+pre-change copy at `/root/configuration.nix.2026-10-08.bak` on the host);
+`inventory/hosts.yml` sets `ansible_python_interpreter:
+/run/current-system/sw/bin/python3`; host-scoped `ansible ... -m ping` returned
+`pong`. Inventory stays `provisioning`. Next: the role audit (step 3), still
+read-only; no role has been applied.
+
 The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
 executable reads; a fresh ISO boot did. Detachment cause remains unknown.
