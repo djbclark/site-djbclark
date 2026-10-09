@@ -184,8 +184,9 @@ were left alone. New work uses the `site-djbclark` path.
 
 1. This repo is public. These directories describe one machine's agent setup;
    credentials, tokens and vault or item identifiers still never go in them.
-2. What stayed private: `memory/`, `web/`, `docs/books/`, `1password/`,
-   `skills/1password/`, `skills/tell-chief-of-staff/`.
+2. What stayed private (the list in `site-private/.githooks/private-paths`):
+   `memory/`, `web/`, `1password/`, `skills/1password/`,
+   `skills/tell-chief-of-staff/`, and that repo's own top-level files.
 3. `site-private` enforces this with a pre-commit hook (`.githooks/pre-commit`
    there): a regular file outside its private list is rejected.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,

@@ -2,7 +2,8 @@
 
 Reported upstream as [docling#4549](https://github.com/docling-project/docling/issues/4549).
 
-Found 2026-10-03 while extracting `docs/books/learning-cfengine.epub` for the
+Found 2026-10-03 while extracting `learning-cfengine.epub` (then tracked in
+site-private `docs/books/`; now untracked, kept at `~/kb/sources/`) for the
 book KB. docling **2.133.0**, Python 3.12.15, macOS 27.0 arm64.
 
 `<pre>` is whitespace-preserving. docling honours that when the `<pre>` contains
