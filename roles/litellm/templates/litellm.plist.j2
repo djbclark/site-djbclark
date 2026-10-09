@@ -105,9 +105,12 @@
         <string>{{ litellm_opencode_go_api_key | e }}</string>
 {% endif %}
 {% if litellm_db_enabled | bool %}
-{# Virtual-key auth + spend DB. LITELLM_MASTER_KEY is a loopback-only anti-typo
-   guard rather than a real secret (see defaults/main.yml); DATABASE_URL carries
-   no password because the :5433 cluster trusts 127.0.0.1 only. #}
+{# Virtual-key auth + spend DB. LITELLM_MASTER_KEY is a real secret (#83): the
+   /litellm/* Caddy route makes the proxy tailnet-reachable, so it comes from
+   sudo-secretspec and tasks/main.yml fails closed without it (see
+   defaults/main.yml). This file is rendered 0600 with no_log for that reason.
+   DATABASE_URL carries no password because the :5433 cluster trusts 127.0.0.1
+   only. #}
         <key>LITELLM_MASTER_KEY</key>
         <string>{{ litellm_master_key | e }}</string>
         <key>DATABASE_URL</key>
