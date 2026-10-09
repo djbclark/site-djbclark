@@ -10,23 +10,19 @@ in git here.
 **This file is size-capped.** It is loaded into every agent session and muse
 truncates a rules file over 65536 bytes. Keep it under ~20 KB: put detail,
 evidence and incident narrative in a
-`site-private/memory/reference_agent_rules_*.md` note (Basic Memory, `main`
-pool; listed at the end) and leave a rule plus a pointer here. **Agents
+`site-private/memory/reference_agent_rules_*.md` note (listed at the end) and leave a rule plus a pointer here. **Agents
 maintain this file without asking** (djbclark, 2026-10-05): add rules,
 condense, move detail out, and keep the Cursor copy
 (`cursor/home-agents.mdc`) in step.
 
-## CLAUDE.md is always a symlink to AGENTS.md (standing rule, 2026-10-04)
+## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
 **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (`ln -s AGENTS.md
 CLAUDE.md`); `AGENTS.md` is the only real file. If both are regular files,
-merge `CLAUDE.md` into `AGENTS.md` (keep what is not already there, drop empty
-generated template sections), then link. Never create a standalone `CLAUDE.md`
+merge `CLAUDE.md` into `AGENTS.md`, then link. Never create a standalone `CLAUDE.md`
 (point `/init`, `bd setup` and the like at `AGENTS.md`). The same applies to
-vendor instruction files under `~`. Exception: a vendor format that cannot be a
-symlink (Cursor `.mdc`). Why: muse and similar ignore `CLAUDE.md` when
-`AGENTS.md` exists, and two copies drift.
-(`memory/feedback_claude_md_symlink_to_agents_md.md`)
+vendor instruction files under `~`. Exception: a vendor format that cannot be a symlink (Cursor `.mdc`).
+(why: `memory/feedback_claude_md_symlink_to_agents_md.md`)
 
 ## Where work happens — plain git in `~/ops`
 
@@ -44,7 +40,7 @@ unstaged edits in the checkout,** never stash, add or reset their files, and nev
 fetch`; if only ahead, plain `git push`; if behind, wait or ask.
 Detail: [[reference_agent_rules_ops_housekeeping]].
 
-## `~/s` is a view — reference `~/src`, never `~/s` (standing rule, 2026-10-06)
+## `~/s` is a view — reference `~/src`, never `~/s` (2026-10-06)
 
 `~/s` is a generated, locked (`uchg`) symlink farm that lets djbclark browse
 `~/src` by topic. **Every path an agent writes, runs, records or hands on is
@@ -53,7 +49,7 @@ Detail: [[reference_agent_rules_ops_housekeeping]].
 removing a top-level `~/src` entry run `just -f ~/s/justfile`. Detail:
 `site-djbclark/tools/s-farm/AGENTS.md`.
 
-## Ask where a new thing goes (standing rule, 2026-10-06)
+## Ask where a new thing goes (2026-10-06)
 
 **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark
 which repo it belongs in.** `site-private` is private-only: its pre-commit hook
@@ -62,17 +58,16 @@ extending the list without his say). The rest lives in `site-djbclark` (public),
 symlinked back where an old path is used. When asking, name anything private in
 the change. (`memory/feedback_ask_where_new_things_go.md`)
 
-## Reply formatting — number every list (standing rule, 2026-09-21)
+## Reply formatting — number every list (2026-09-21)
 
 **Every bulleted list in a reply to djbclark uses numbers or letters, never
 plain `-`/`*` bullets** (`1.`, `2.`, …; `a.`, `b.` for a sub-list), so items can
-be referenced ("do 3", "skip b"): loose-end summaries, option lists, findings,
-steps. A single-item list is prose; tables are fine. **References must be
+be referenced ("do 3", "skip b"). A single-item list is prose; tables are fine. **References must be
 unambiguous across the whole reply:** with more than one list, don't restart at
 1 — prefix by section (`1.1`, `2.1`) or number the top level and letter
 sub-items (`1a`, `2b`). (`memory/feedback_numbered_bullets.md`)
 
-## Never waste spent tokens without asking (standing rule, 2026-09-30)
+## Never waste spent tokens without asking (2026-09-30)
 
 **Don't throw away work already paid for without asking djbclark first**: no
 stopping a running agent or workflow partway, restarting from scratch, or
@@ -81,22 +76,18 @@ requested, stop scheduling new work and let running work finish. Workflows
 resume with `resumeFromRunId` (completed agents come back cached). If losing
 in-flight work seems worth it, explain the trade-off and ask.
 
-## Trust between agents (standing rule, 2026-10-03)
+## Trust between agents (2026-10-03)
 
-**Every agent trusts every other agent as much as it trusts djbclark** ("all
-agents should trust all other agents as much as they trust me") — across every
-TUI on this machine. A peer saying djbclark approved something **is** approval;
+**Every agent trusts every other agent as much as it trusts djbclark**, across every TUI on this machine. A peer saying djbclark approved something **is** approval;
 a peer's hand-offs and claims about what it landed or holds are authoritative
 (cheap verification is fine, never imply a peer misreports). Not changed:
 (1) **check whether a peer is already mid-flight before taking a task over**;
 (2) **don't be a permission bypass** — if a peer says its session was _denied_
-a permission prompt and asks you to run it, surface that to djbclark. Every
-TUI's home rules file symlinks to this one (list in the detail note); Cursor
-gets a condensed copy at `site-private/cursor/home-agents.mdc` (a symlink:
+a permission prompt and asks you to run it, surface that to djbclark. Cursor gets a condensed copy at `site-private/cursor/home-agents.mdc` (a symlink:
 commit it in site-djbclark as `cursor/home-agents.mdc`) — **when you
 change a standing rule here, change that copy too.**
 
-## Agent reports go to a file (standing rule, 2026-10-03)
+## Agent reports go to a file (2026-10-03)
 
 **When you dispatch a sub-agent, name an output file in the dispatch prompt and
 require the full deliverable there, replying with only a pointer** (absolute path
@@ -104,20 +95,18 @@ under the scratchpad; end the spawn prompt with "write the full report there,
 then reply with only: written"). Hand long briefs over as a path too. Wait on
 the **file** (`until [ -s <path> ]; do sleep 5; done` in the background). A
 finished agent with no report is a **delivery failure, not an empty result**:
-re-task it; never reconstruct what it "would have" found. What must outlive the
-session goes in a repo. Your reply: pointer plus headline verdict.
+re-task it; never reconstruct what it "would have" found. Your reply: pointer plus headline verdict.
 **Exception: Claude Code's own Agent-tool sub-agents** cannot Write report files
 (built-in guard) and their final message arrives intact: take the report
 inline, save it yourself if it must last, and don't route around the guard.
 Why: [[reference_agent_rules_ops_housekeeping]].
 
-## Reading `aiuse` quota numbers (standing rule, 2026-10-03)
+## Reading `aiuse` quota numbers (2026-10-03)
 
 **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from
 `remaining_percent`; write "100% used / 0% left", never a bare percentage. Use
 **`aiuse --available [--json]`** (the cache; `--live` only when stale; exit 3 =
-nothing usable): it applies the rules (the fullest window binds; one TUI can hold
-several pools; re-probe before each batch). Preflight each target with one
+nothing usable): it applies the rules (fullest window binds; re-probe before each batch). Preflight each target with one
 `"Reply with exactly: OK"` call through the exact invocation/model. **agy: only
 via `acp-run agy`, never `agy -p`** (a ~60 requests/hour burst limit `aiuse`
 cannot see; no probe loops). Detail: [[reference_agent_rules_aiuse_quota_and_agy]].
@@ -135,33 +124,29 @@ search result is not a match** (it always returns its closest N): answer "does X
 exist?" with `find` or an exact `read_note`.
 Detail: [[reference_agent_rules_basic_memory_pools]].
 
-## Start slow commands in the background (standing rule, 2026-10-04)
+## Start slow commands in the background (2026-10-04)
 
 **Anything likely to take more than ~10-15 s** (builds, test suites, long probes,
 waits, agent dispatches) **starts with `run_in_background: true`** — don't make
 djbclark press ctrl-b. Wait on the notification, never poll; kill strays you
 started. Short commands stay foreground.
 (`memory/feedback_start_slow_commands_in_background.md`)
-**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`**: the waiting shell's own command line contains the pattern, so it matches itself and never ends (use `while kill -0 <pid>` or `until [ -s <file> ]`).
+**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`).
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
 status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
 (`memory/feedback_exit_status_through_pipe.md`)
 
-## Context size: prompt early, delegate by default (standing rule, 2026-10-08)
+## Context size: prompt early, delegate by default (2026-10-08)
 
-**Keep each session's context small: by default send discrete, separable tasks
-through `/bigteam`** (Agent sub-agents for small lookups) so their reads never
-land here. `context_size_nudge.py` counts growth since the session's first turn:
+**Keep context small: by default send discrete, separable tasks through `/bigteam`** (Agent sub-agents for small lookups) so their reads never land here. `context_size_nudge.py` counts growth since the session's first turn:
 at +40k, delegate from then on and name the options once; at +70k (or 150k
 total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
 natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
-Unattended orc keeps delegating. Another session may be running bigteam (herdr
-tab `coord`): follow bigteam's Step 0 (claim files, no overlap, re-probe pools,
-hands off its panes). Supersedes 2026-08-23's "never suggest a fresh session".
+Unattended orc keeps delegating. Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 
-## Run commands yourself — never hand djbclark a `!` command (standing rule, 2026-10-06)
+## Run commands yourself — never hand djbclark a `!` command (2026-10-06)
 
 **Run every command yourself, including ones that need Touch ID / `sudo-ask` or
 an interactive confirmation** — don't tell djbclark to type `! <command>`.
@@ -169,44 +154,38 @@ Privileged steps still go through their sanctioned path (`sudo-ask`, a
 setup recipe), never a bypass; only if a command truly cannot run from your
 shell, say why. (`memory/feedback_run_commands_yourself.md`)
 
-## Fix the cause of a tool-calling mistake (standing rule, 2026-10-06)
+## Fix the cause of a tool-calling mistake (2026-10-06)
 
-**When you make a tool-calling mistake of a kind that can recur** (lost exit
-status, wrong flag, endless wait, a filter that hid the result), **fix the
+**When you make a tool-calling mistake of a kind that can recur**, **fix the
 instructions that would have prevented it in the same turn, unasked**: the
 skill that covers it, this file, or a memory note. Say what you changed.
 (`memory/feedback_fix_instructions_after_tool_mistake.md`)
 
-## Ping djbclark on Hermes (standing rule, 2026-10-05)
+## Ping djbclark on Hermes (2026-10-05)
 
 **When a task completes or something needs djbclark's attention** (blocked, a
 decision, a failure), also send it to the Hermes Telegram Inbox:
-`~/.local/bin/hermes-ping "<repo>: <one line>"`, never bare `hermes send`: it
-adds the interface (herdr/Orca/Ghostty/…), workspace/tab/pane, session and a link
-or focus command (2026-10-06; detail in the script header).
+`~/.local/bin/hermes-ping "<repo>: <one line>"`, never bare `hermes send`: it adds the interface, workspace/tab/pane, session and a focus link.
 One line per event, never a loop; put the same content in the chat reply too.
 Operator notices from scripts go to Hermes too, not macOS notifications. (`memory/feedback_ping_telegram_and_chat.md`)
 
-## Periodic updates are a script, not a cron prompt (standing rule, 2026-10-05)
+## Periodic updates are a script, not a cron prompt (2026-10-05)
 
 **When djbclark asks for periodic updates ("report every N minutes", "keep me
-posted"), do not schedule a recurring model prompt** (CronCreate, /loop): each
-is a full turn that re-sends the conversation. Use
+posted"), do not schedule a recurring model prompt** (CronCreate, /loop). Use
 `~/ops/site-private/bin/fleet-watch` (launchd, every 5 min, Hermes notice only
 on change; `fleet-watch status`), or extend it / write a similar script. Tell
 him results as work finishes or fails. A one-shot scheduled check is fine.
 (`memory/feedback_periodic_updates_by_script.md`)
 
-## Heavy builds and tests: run them through `bg` (standing rule, 2026-10-04)
+## Heavy builds and tests: run them through `bg` (2026-10-04)
 
 Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`,
-`bg pytest`, `bg gradlew …`; `taskpolicy -c utility`, waits at load/core > 1.5).
+`bg pytest`, `bg gradlew …`).
 **Always the full path: bare `bg` is the shell builtin.** **A test command
 (pytest, tox, nox, `run_tests*.py`) must go through bg**: it caps parallelism
-(`BG_CPUS`=3 → `PYTHON_CPU_COUNT`, thread pools) and takes one of 2 machine-wide
-test slots; a Claude hook denies it bare. Run changed files first (`--lf -x`), the
-full suite only when asked (a bare Hermes full run took load 17 → 220, 2026-10-08;
-`memory/feedback_tests_through_bg_caps_and_slots.md`).
+ (`BG_CPUS`=3) and takes one of 2 machine-wide
+test slots; a Claude hook denies it bare. Run changed files first (`--lf -x`), the full suite only when asked (`memory/feedback_tests_through_bg_caps_and_slots.md`).
 **Never `taskpolicy -b` for builds** (25x slower under load; `bgb` is for
 hours-long bulk jobs). Never throttle or SIGSTOP another session's processes.
 **Gradle: one build at a time, machine-wide** (check `pgrep -fl
@@ -222,22 +201,21 @@ search is right for prose and config. **Relay graft's "tokens saved ≈ N" banne
 total. `rtk` owns Bash output compaction — **never run `ts init`**. Traps and the
 token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 
-## Tools and habits (standing rules, 2026-10-06)
+## Tools and habits (2026-10-06)
 
 1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
    list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
-   for literal replace (**always `-F`**: without it `$name` in the replacement is a capture
-   group and silently eats shell variables like `$o`; and **`sd -F -- FIND REPL`** when either may start with `-`, or it is read as a flag; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   for literal replace (**always `-F`**: else `$name` in the replacement is a capture group; **`sd -F -- FIND REPL`** when either may start with `-`; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
    (rtk compacts them). Android greps stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place:
-   a running bash reads the new bytes and dies. (`memory/feedback_edit_running_scripts_atomically.md`)
+2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place
+   (a running bash dies). (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** open pages with `open <url>` (Orion), not Chrome.
    (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
    (`memory/feedback_all_agents_includes_hermes.md`)
 
-## Research outward first (standing rule, 2026-10-05)
+## Research outward first (2026-10-05)
 
 **Whenever you are spending, or about to spend, significant tokens on something a
 web search might answer, search first** (standard mode; extended for niche or
@@ -247,15 +225,13 @@ experiments, faking another system, or rounds of local grepping. Then verify
 locally.
 (`memory/feedback_web_search_before_local_spelunking.md`)
 
-## Clipboard — never bare `pbcopy` (standing rule, 2026-10-03)
+## Clipboard — never bare `pbcopy` (2026-10-03)
 
 **When djbclark says "copy to clipboard"/"pbcopy", use
 `~/ops/site-private/bin/clip`** — never bare `pbcopy` (agent shells have
 `LC_CTYPE=C`, so `—` pastes as `‚Äî`). `pbpaste` cannot verify a `pbcopy`
 (`clip` verifies; by hand: `osascript -e 'the clipboard as «class utf8»'`).
-Human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to hand to another agent also goes to the clipboard via `clip`, unasked** (2026-10-06; `memory/feedback_prompts_go_to_clipboard.md`). Never overwrite the
-pasteboard to test: save and restore it (`LC_CTYPE=UTF-8 pbpaste >
-/tmp/clip.bak`). Detail: [[reference_pbcopy_needs_lc_ctype_utf8]].
+Human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to hand to another agent also goes to the clipboard via `clip`, unasked** (2026-10-06; `memory/feedback_prompts_go_to_clipboard.md`). Never overwrite the pasteboard to test: save and restore it. Detail: [[reference_pbcopy_needs_lc_ctype_utf8]].
 
 ## Long documents — query the book KB, never paste the book (2026-10-03)
 
@@ -273,8 +249,8 @@ No single canonical copy — read all three slices:
 ## Other agent CLIs, and delegating to them
 
 Binary names do not match `aiuse`/Orca provider ids: antigravity → `agy`
-(**only via `acp-run agy`, never `agy -p`**, see the quota rules above; an
-unavoidable CLI call takes `-p='<prompt>'` plus `--print-timeout 120s`),
+(**only via `acp-run agy`, never `agy -p`**; if unavoidable,
+`-p='<prompt>' --print-timeout 120s`),
 zai → `zcode`, opencode-go → `opencode`, cursor → `cursor-agent`,
 copilot → `copilot` (if it misbehaves run `copilot-fix-writer-lock`),
 codex/claude match; **gemini is deprecated and not installed**. **No ACP:**
@@ -286,10 +262,10 @@ ACP-capable agent: **`acp-run`** (`acp-run <agent> -C <dir> -p '<prompt>' --mode
 is not success, verify the outcome); (2) supervised work in an Orca repo: `orca
 orchestration worker-start --agent …`; (3) interactive/long-lived work the
 operator watches: a Herdr pane; (4) agents with no ACP mode: their headless recipe
-in the `model-routing` skill. cline (ClinePass, which Hermes depends on): sparingly, never bulk;
+in the `model-routing` skill. cline (ClinePass): sparingly, never bulk;
 copilot: small GitHub-shaped slices only. **The grok vendor (SuperGrok: `grok`
 TUI, `acp-run grok`, LiteLLM `grok-sub`) is excluded for now** (2026-10-06);
-grok *models* via other vendors' pools are fine (bigteam's *Current exclusions*).
+grok *models* via other vendors' pools are fine .
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
@@ -298,15 +274,12 @@ hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
 `~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
 reaches them via the `skill-everywhere` script (README beside it; edit the git copy): `bigteam`, `model-routing`,
 `herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
-`tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; decides
-message / `/baton` / resume / clean agent; `/session-finder-all` adds ended sessions),
-`helm` (answer every waiting session of every TUI from one window; `/helm-all` adds
-ended sessions with open work, closed panes and sleeping panes that are gone),
-`herdr-tidy` (close idle herdr panes safely, every TUI and Hermes; ledger + resume
-command; fails closed), `autorename`. New sessions start over ACP via `launch.py`.
+`tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; `/session-finder-all` adds ended sessions),
+`helm` (answer every waiting session from one window; `/helm-all` adds ended ones with open work),
+`herdr-tidy` (close idle herdr panes safely), `autorename`. New sessions start over ACP via `launch.py`.
 Full list: [[reference_agent_rules_multi_agent_toolkit]].
 
-## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
+## Agents run in yolo (auto-approve) mode by default (2026-10-03)
 
 **Every agent, however launched, runs in its yolo-or-equivalent mode** unless a stated
 reason gates it (review-only slices, bigteam's `--perm scoped:`). Yolo does not skip hooks,
@@ -336,12 +309,9 @@ pull request**; put the verdict (or an explicit "no findings") in the PR body.
 
 ## Detail notes (all in `~/ops/site-private/memory/`)
 
-1. `reference_agent_rules_ops_housekeeping.md` — memory-writing, codex config,
-   token-waste/trust/agent-report rationale, clipboard, book KB, LLM gateway,
-   backups, session logs, agent teams.
-2. `reference_agent_rules_aiuse_quota_and_agy.md` — quota rules, agy burst limit.
-3. `reference_agent_rules_basic_memory_pools.md` — which CLIs reach it, pools.
-4. `reference_agent_rules_code_discovery_and_cli_table.md` — graft/token-savior
-   traps, agent-CLI and ACP table, delegation order, yolo detail.
-5. `reference_agent_rules_multi_agent_toolkit.md` — skills, commands,
-   sub-agents, linking.
+1. `reference_agent_rules_ops_housekeeping.md` — rule rationale, memory writing,
+   codex config, clipboard, book KB, gateway, backups, teams.
+2. `reference_agent_rules_aiuse_quota_and_agy.md`
+3. `reference_agent_rules_basic_memory_pools.md`
+4. `reference_agent_rules_code_discovery_and_cli_table.md`
+5. `reference_agent_rules_multi_agent_toolkit.md`
