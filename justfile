@@ -153,7 +153,8 @@ litellm-status:
     else \
       echo "service: not loaded on this host"; \
     fi
-    @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
+    @curl -fsS --max-time 5 http://127.0.0.1:4000/health/readiness | jq -r '"readiness: " + .status + ", db: " + (.db // "n/a")'
+    @grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | paste -sd, - | sed 's/^/models (config): /'
 
 # Reload a LaunchAgent after editing its plist (bootout + wait + bootstrap
 # with retry; `kickstart` alone does NOT re-read the plist). Optional health URL.

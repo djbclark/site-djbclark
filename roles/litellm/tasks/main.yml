@@ -15,6 +15,20 @@
       LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
       an auth/master-key design), and Darwin or Linux.
 
+- name: Assert the LiteLLM master key is a real secret, not the old placeholder
+  ansible.builtin.assert:
+    that:
+      - litellm_master_key | length >= 32
+      - litellm_master_key != 'sk-litellm-local'
+    fail_msg: >-
+      LITELLM_MASTER_KEY is unset, short, or the old public placeholder. The
+      /litellm/ Caddy route makes this proxy tailnet-reachable, so the master
+      key must be a generated secret: run via `just litellm-apply-secrets`
+      after `sudo-secretspec set LITELLM_MASTER_KEY` (#83).
+    quiet: true
+  no_log: true
+  when: litellm_db_enabled | bool
+
 - name: Assert the log filter stops the service before launchd kills the filter
   ansible.builtin.assert:
     that:
