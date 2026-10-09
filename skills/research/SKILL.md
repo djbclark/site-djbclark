@@ -123,10 +123,23 @@ pages. On a host with `model-routing` / `effort-routing` skills, follow them.
 
 ## On this machine (skip elsewhere)
 
-1. Sub-agent prompts carry the delivery contract: paste the output of
-   `acp-dispatch footer --report <scratchpad>/<name>-report.md` and read the
-   report file, never the final message.
-2. Slow steps run in the background; the lead waits on notifications.
-3. Scientific tooling (`paper-search` CLI, arXiv MCP, `book-kb`) is listed
-   in `references/literature.md`.
-4. Lists in the reply are numbered.
+1. **Workers, refuter, writer and reviewer are `/bigteam` slices, not only
+   Claude sub-agents.** Dispatch each brief with `acp-dispatch <agent> --model M
+   --name N --task research-<slug> -C <run-folder-parent> -f <brief-file>`
+   (codex, zcode, opencode, cursor-agent, copilot, agy via `acp-run`; pick the
+   agent and model with the `model-routing` skill and the `aiuse` quota rules
+   in `~/CLAUDE.md`). Reasons: the reads stay out of the lead's context, the
+   quota spreads across vendors, and the reviewer gets a genuinely different
+   model family (an Agent-tool `ocx-gpt-6-*` sub-agent also counts). A
+   Claude Agent-tool sub-agent is the fallback for a small lookup or when no
+   other agent has quota; its prompt then carries the footer in item 2.
+2. Sub-agent prompts carry the delivery contract: `acp-dispatch` appends it
+   itself; for an Agent-tool sub-agent paste the output of
+   `acp-dispatch footer --report <scratchpad>/<name>-report.md`. Read the
+   report file, never the final message. `acp-dispatch check <dir>` before
+   the gate lists no-report and `BLOCKED:` slices.
+3. Slow steps run in the background; the lead waits on notifications.
+4. Scientific tooling (`paper-search` CLI, arXiv MCP, `book-kb`) is listed
+   in `references/literature.md`. Institutional full text: `RESEARCH_PROXY_URL`
+   (the operator's value is in site-private memory, never here).
+5. Lists in the reply are numbered.
