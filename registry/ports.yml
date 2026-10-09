@@ -157,15 +157,12 @@ hosts:
       # discharged, not bypassed — 8000 is now a claimed port like any other, and
       # any FUTURE reassignment needs its own sign-off.
       - {port: 8000,  bind: "100.113.53.87", owner: stayturgid, service: firerpa-mcp, status: active,
-         note: "stayturgid control/bin/firerpa_mcp.py --transport streamable-http. Intentionally non-loopback, same rationale class as the 4318 vector-otlp-http row: this is an MCP server for fleet devices and off-host agents, so it binds the Tailscale address (100.113.53.87) rather than 0.0.0.0 — tailnet-reachable but never LAN- or internet-exposed, which is strictly tighter than 4318's 0.0.0.0. Bearer-token auth via `sudo-secretspec get FIRERPA_MCP_TOKEN`. Operator sign-off 2026-08-07 discharged the omlx reclaim hold above. ⚠️ Observed running from a TASK WORKTREE (~/src/ops-worktrees/main/stayturgid/), not a deploy checkout — that is a process deviation this row records but does not bless; see note below."}
-      # ⚠️ Open, tracked separately from the port claim: the firerpa-mcp process
-      # observed at the 2026-08-07 reconcile (and still at 2026-08-07 follow-up,
-      # PID 4829, up since 2026-08-02) is launched by hand out of
-      # ~/src/ops-worktrees/main/stayturgid/ — a reference checkout — rather than
-      # from ${OPS_ROOT}/stayturgid under a released ops-vX.Y.Z. It therefore runs
-      # code that no release pins, and a `git checkout` in that worktree silently
-      # changes what a live tailnet service is serving. Claiming the port does not
-      # endorse that launch path; it should become a proper managed service.
+         note: "stayturgid control/bin/firerpa_mcp.py --transport streamable-http. Intentionally non-loopback, same rationale class as the 4318 vector-otlp-http row: this is an MCP server for fleet devices and off-host agents, so it binds the Tailscale address (100.113.53.87) rather than 0.0.0.0 — tailnet-reachable but never LAN- or internet-exposed, which is strictly tighter than 4318's 0.0.0.0. Bearer-token auth via `sudo-secretspec get FIRERPA_MCP_TOKEN`. Operator sign-off 2026-08-07 discharged the omlx reclaim hold above. Managed: launchd com.stayturgid.firerpa-mcp (KeepAlive), rendered by stayturgid control_node from the deploy checkout ${OPS_ROOT}/stayturgid (stayturgid#253)."}
+      # Resolved (stayturgid#253, checked 2026-10-09): the hand-started process from
+      # ~/src/ops-worktrees/main/stayturgid/ is gone; launchd com.stayturgid.firerpa-mcp
+      # (KeepAlive, plist from ansible/roles/control_node) runs
+      # ~/ops/stayturgid/control/bin/firerpa_mcp.py. ops-vX.Y.Z releases were retired
+      # 2026-08-23, so the deploy checkout is the contract.
       # ── third-party desktop apps (unmanaged; observed 2026-08-07 reconcile) ─
       - {port: 6463,  bind: "127.0.0.1", owner: unmanaged, service: discord-rpc,  status: active,
          note: "Discord desktop RPC/IPC listener"}
