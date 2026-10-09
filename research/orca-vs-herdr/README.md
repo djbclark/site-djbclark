@@ -54,9 +54,12 @@ folder-trust preset, cow pastures not resolving as worktrees (stablyai/orca
 repos (13), and preconfigures ~25 agents with launch flags and trust presets,
 plus Claude/Codex account switchers (`orca account`). herdr has `herdr worktree
 create/list/open/remove` but no registry or roster. `acp-run` has its own
-agent table of 11; about 14 agents in Orca's roster (aider, amp, kiro, crush,
-kimi, mistral-vibe, rovo, ante, trae, …) have no `acp-run` profile.
-`bin/route_agent.py` builds its agent list from Orca's `orca-data.json`.
+agent table of 11. Orca's enabled roster names 28, but the difference is
+smaller than it looks (corrected 2026-10-08, see 5.1): most of the extra names
+are Orca's stock TUI list and are not installed here, three are aliases of
+agents `acp-run` already has, and the four installed extras (aider, crush,
+muse, zcode) have no ACP mode, so `acp-run` could not drive them anyway.
+`bin/route_agent.py` builds its discovery list from Orca's `orca-data.json`.
 
 1.3. **Hibernation.** Orca sleeps idle agents of every TUI (codex, gemini,
 antigravity, pi, droid, grok, devin, …), sleeps a worktree's panes as a unit,
@@ -116,7 +119,12 @@ the repo already is today.
 
 ## 5. Migration, if the answer is go
 
-1. Add the missing agents to `acp-run`'s table; repoint `route_agent.py` at it.
+1. Give `route_agent.py` a discovery source that does not depend on Orca:
+   `acp-run`'s table plus the non-ACP headless recipes in the `model-routing`
+   skill (crush, muse, zcode). There is no set of ACP-capable agents to "add"
+   to `acp-run`: of Orca's 28 enabled roster names, only 4 extra are installed
+   and none of them speak ACP. Worth doing even if Orca stays, so routing lists
+   what can actually be dispatched rather than what Orca knows about.
 2. Move or symlink the `~/orca/projects` and `~/orca/workspaces` checkouts.
 3. Retire the Orca branches in `fleet.py`, `where.py`, `launch.py`, `helm.py`,
    `cow-pasture`; delete `orca-reorg-watch` and the `reorg-orca` skill; stop
