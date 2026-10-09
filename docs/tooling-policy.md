@@ -494,3 +494,35 @@ Removing it reclaimed ~285 MB (venv 186 MB → 33 MB, model cache 132 MB, state 
 `method: "substring"` and still works, and `semantic: true` now fails in 2.3 s with
 `semantic index unavailable: sqlite-vec not loadable` instead of hanging. To put it
 back is one command: `uv tool install --force "token-savior-recall[mcp,memory-vector]"`.
+
+## Python environments — proposed standard (site-private#66, 2026-10-09)
+
+**Status: proposal, not adopted.** Audit evidence and the open decisions are in
+[site-private#66](https://github.com/djbclark/site-private/issues/66). Nothing
+below has been applied to a live plist or environment yet.
+
+1. **Stdlib-only scripts** may use `#!/usr/bin/env python3`, which must resolve
+   to Homebrew's `python3`, never `/usr/bin/python3` (Apple's 3.9). Every
+   launchd job that relies on `env` sets `EnvironmentVariables.PATH` with
+   `/opt/homebrew/bin` before `/usr/bin`.
+2. **Any third-party import** means one of two forms, never a package
+   pip-installed into Homebrew's Python:
+   a. a PEP 723 script, `#!/usr/bin/env -S uv run --script`, or
+   b. a project with `pyproject.toml` and `uv.lock`, run as
+      `uv run --locked --project <absolute path> ...`.
+3. **No shell activation and no bare `pip`** in automation or current docs.
+   `uv add` and `uv remove` change dependencies. `uv pip --python <venv>` is
+   only for a listed exception.
+4. **CLI apps** are `uv tool install` tools under `~/.local/share/uv/tools`.
+5. **launchd jobs** start with an absolute program path (`/opt/homebrew/bin/uv`,
+   a listed venv's `bin/python`, or `/usr/bin/env` plus an explicit PATH). The
+   script path must be inside a stable checkout (`~/ops/<repo>`, `~/src/<repo>`
+   or an installed tool), never inside a git worktree, which can be deleted.
+6. **Exceptions** are listed with an owner: the Hermes agent venv (one of
+   `~/.hermes/hermes-agent/venv` or `.venv`, not both), the FireRPA venv
+   (`~/.venv-stayturgid-firerpa`, Python 3.12 for `lamda`), the superbrain
+   venv, and Termux/device-side runtimes.
+7. **Audit** with a read-only check before adding a job or script: every
+   plist's script path exists, every `env python3` script imports only the
+   standard library or its own siblings, and no plist runs Python without a
+   PATH or an absolute interpreter.
