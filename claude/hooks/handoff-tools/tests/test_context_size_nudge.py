@@ -8,6 +8,16 @@ HOOKS_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HOOKS_DIR))
 
 import context_size_nudge as nudge
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _outside_herdr_and_orca(monkeypatch):
+    # _ask_message switches to self-compact text in a herdr pane or Orca
+    # terminal; the tier tests expect the plain ask text wherever they run.
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.delenv("ORCA_TERMINAL_HANDLE", raising=False)
+
 
 BASE = 25_000
 
