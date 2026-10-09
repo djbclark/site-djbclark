@@ -4,8 +4,10 @@
 #     skill-everywhere <name>...            link (idempotent)
 #     skill-everywhere --check <name>...    report per-TUI status, change nothing
 #     skill-everywhere --remove <name>...   remove links this script would make
-# Links point at the git checkout, so editing the skill in site-private updates
-# it everywhere; never copy (copies drift, e.g. ~/.agents/skills/handoff).
+# Links point at the git checkout, so editing the skill in its git repo
+# (site-djbclark/skills, or ~/src/djbclark-ade/skills for the orchestration
+# skills; site-private only for private ones) updates it everywhere; never
+# copy (copies drift, e.g. ~/.agents/skills/handoff).
 # Hermes owns ~/.hermes/, so it is never edited here. Instead Hermes itself put
 # ~/.local/share/skill-everywhere/skills in its skills.external_dirs (done
 # 2026-10-03), and this script links into that dir.
@@ -59,6 +61,10 @@ for name in "$@"; do
     if [[ $dir == via* || $dir == x* ]]; then printf '  %-13s %s\n' "$bin" "${dir#x }"; continue; fi
     dir="${dir/#\~/$HOME}"; link="$dir/$name"
     if [[ -L $link && "$(readlink "$link")" == "$src" ]]; then state=linked
+    elif [[ -L $link && -e $src && "$(realpath "$link" 2>/dev/null)" == "$(realpath "$src")" ]]; then
+      # e.g. ~/.copilot/skills/x -> ~/.claude/skills/x -> $src: same skill,
+      # one hop longer. Works; --remove leaves it, relink by hand if wanted.
+      state="linked via $(readlink "$link")"
     elif [[ -L $link ]]; then state="other link -> $(readlink "$link")"
     elif [[ -e $link ]]; then state="real dir/file (not ours)"
     else state=missing; fi
@@ -70,7 +76,7 @@ for name in "$@"; do
       link)
         if [[ $state == missing ]]; then
           mkdir -p "$dir"; ln -s "$src" "$link"; printf '  %-13s linked\n' "$bin"
-        elif [[ $state == linked ]]; then printf '  %-13s already linked\n' "$bin"
+        elif [[ $state == linked || $state == "linked via "* ]]; then printf '  %-13s already %s\n' "$bin" "$state"
         else printf '  %-13s %s; left alone\n' "$bin" "$state"; rc=1; fi ;;
     esac
   done <<<"$targets"
