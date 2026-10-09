@@ -37,12 +37,13 @@ jobs:
       matrix:
         extension:
           # installed_version must match `collie version` on the
-          # workstation; bump it in the same change that records a
-          # `collie update` (#217, #218, #219: 1.16.2 -> 1.18.0).
+          # workstation (1.17.2 as of 2026-10-09); bump it only in the same
+          # change that records a `collie update`. 1.18.0 is pending (#219),
+          # so this monitor keeps alerting until that update is applied.
           - name: Collie
             slug: collie
             repo: AltanS/collie
-            installed_version: 1.18.0
+            installed_version: 1.17.2
           - name: herdr-break-pane
             slug: herdr-break-pane
             repo: iuhoay/herdr-break-pane
