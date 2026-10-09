@@ -159,6 +159,18 @@ def _early_message(total, growth):
 
 def _ask_message(total, growth, repeat):
     lead = "Context is still growing" if repeat else "Context is large"
+    if os.environ.get("HERDR_PANE_ID") or os.environ.get("ORCA_TERMINAL_HANDLE"):
+        # A herdr pane or Orca terminal can queue its own /compact (standing
+        # operator ruling 2026-10-09, memory/feedback_self_compact.md).
+        return (
+            f"{lead}: {total:,} tokens (+{growth:,} this session). At the next "
+            "natural boundary (a task done, never mid-edit or with a sub-agent "
+            "result unread), compact yourself without asking: save what the "
+            "next turn needs, run ~/src/djbclark-ade/bin/self-slash \"/compact "
+            "<focus>\" and end the turn. If it refuses, or the next task is a "
+            "different topic, ask the operator: /compact, or /handoff then "
+            "/new. Until then, delegate new heavy work to /bigteam."
+        )
     return (
         f"{lead}: {total:,} tokens (+{growth:,} this session). At the next "
         "natural boundary (before starting the next task, never mid-edit), "

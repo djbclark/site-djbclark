@@ -169,3 +169,12 @@ def test_deadline_exits_zero_silently(tmp_path):
     assert proc.returncode == 0
     assert out == b""
     assert time.time() - t0 < 4
+
+
+def test_ask_message_self_compacts_in_herdr_or_orca(monkeypatch):
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.delenv("ORCA_TERMINAL_HANDLE", raising=False)
+    assert "AskUserQuestion" in nudge._ask_message(180_000, 80_000, False)
+    monkeypatch.setenv("ORCA_TERMINAL_HANDLE", "term_x")
+    out = nudge._ask_message(180_000, 80_000, False)
+    assert "self-slash" in out and "without asking" in out
