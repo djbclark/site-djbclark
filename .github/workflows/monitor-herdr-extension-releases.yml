@@ -36,10 +36,13 @@ jobs:
       fail-fast: false
       matrix:
         extension:
+          # installed_version must match `collie version` on the
+          # workstation; bump it in the same change that records a
+          # `collie update` (#217, #218, #219: 1.16.2 -> 1.18.0).
           - name: Collie
             slug: collie
             repo: AltanS/collie
-            installed_version: 1.16.2
+            installed_version: 1.18.0
           - name: herdr-break-pane
             slug: herdr-break-pane
             repo: iuhoay/herdr-break-pane
