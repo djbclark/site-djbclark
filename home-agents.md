@@ -96,10 +96,14 @@ then reply with only: written"). Hand long briefs over as a path too. Wait on
 the **file** (`until [ -s <path> ]; do sleep 5; done` in the background). A
 finished agent with no report is a **delivery failure, not an empty result**:
 re-task it; never reconstruct what it "would have" found. Your reply: pointer plus headline verdict.
-**Exception: Claude Code's own Agent-tool sub-agents** cannot Write report files
-(built-in guard) and their final message arrives intact: take the report
-inline, save it yourself if it must last, and don't route around the guard.
-Why: [[reference_agent_rules_ops_housekeeping]].
+**Claude Code's own Agent-tool sub-agents are no exception** (2026-10-08): their
+final message reaches you in an idle notification capped at **4,000 characters**
+(then `[result truncated — ask the agent for the rest via SendMessage]`), so it
+must be a pointer plus a one-paragraph verdict. Their Write is refused only for a
+basename starting `report`/`summary`/`findings`/`analysis` and ending `.md`, so
+`<scratchpad>/<name>-report.md` works; anything over ~2k chars you must read
+also goes to you whole via SendMessage `to: "team-lead"`. Say all of this in the
+dispatch prompt. Evidence: [[reference_agent_rules_ops_housekeeping]].
 
 ## Reading `aiuse` quota numbers (2026-10-03)
 

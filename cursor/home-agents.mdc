@@ -52,9 +52,14 @@ Long reports are truncated and delivery lags, so a missing report is ambiguous.
 Put the path in the spawn prompt rather than a follow-up, wait on the file rather
 than the reply, and treat a finished agent with no report as a **delivery failure,
 not an empty result**: re-task it, never reconstruct what it would have said.
-**Exception: Claude Code's own Agent-tool sub-agents** cannot Write report files
-(built-in guard); take their final message inline. Why:
-`site-private/memory/reference_agent_rules_ops_housekeeping.md`.
+**Claude Code's own Agent-tool sub-agents are no exception** (2026-10-08): their
+final message arrives in an idle notification capped at **4,000 characters** (then
+`[result truncated — ask the agent for the rest via SendMessage]`), so it must be a
+pointer plus a one-paragraph verdict. Their Write is refused only for a basename
+starting `report`/`summary`/`findings`/`analysis` and ending `.md`, so
+`<scratchpad>/<name>-report.md` works; anything over ~2k chars the parent must read
+also goes to it whole via SendMessage `to: "team-lead"`. Say all of this in the
+dispatch prompt. Why: `site-private/memory/reference_agent_rules_ops_housekeeping.md`.
 
 ## Reading `aiuse` quota numbers, and knowing a delegate finished (2026-10-03)
 
