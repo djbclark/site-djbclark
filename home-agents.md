@@ -154,7 +154,9 @@ total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
 natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
 **In a herdr pane or an Orca terminal, compact yourself at that boundary
 instead of asking**: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`, then
-end the turn (2026-10-09; `memory/feedback_self_compact.md`). Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
+end the turn (2026-10-09; `memory/feedback_self_compact.md`). **It refuses while
+anything is on his input line; then ask him to type it, never send over a draft**
+(2026-10-09 19:06: a failsafe submitted his unsent question with the `/compact`). Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 
 ## Run commands yourself — never hand djbclark a `!` command (2026-10-06)
