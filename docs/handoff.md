@@ -1,5 +1,11 @@
 # stayturgid — AI Handoff Document
 
+> **Historical (banner added 2026-10-09, #137 C2.4).** A July-2026 stayturgid handoff
+> copied here; it is not the current state. It describes the retired AutoJs6 heal layer
+> and links stayturgid paths that no longer exist. Current agent context: stayturgid
+> [`AGENTS.md`](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md) and
+> [`docs/STATUS.md`](https://github.com/djbclark/stayturgid/blob/master/docs/STATUS.md).
+
 > **Purpose:** This file is a prompt for an AI agent taking over development. Read it fully before doing anything else. It describes what the project does, the current state, the environment, the tooling rules, and what's next.
 >
 > **Modular docs:** each subfolder is usable on its own. Site index: [site README](../README.md) · [human/README.md](../human/README.md). Full clean-install setup + device gotchas: [docs/hacking.md](https://github.com/djbclark/stayturgid/blob/master/docs/hacking.md). **Operator tasks (credentials, deploy approval):** [human/HANDOFF-HUMAN.md](../human/HANDOFF-HUMAN.md). **Open work menu:** [docs/options.md](https://github.com/djbclark/stayturgid/blob/master/docs/options.md) (single list — replace + push when items close). **Current execution order and junior-agent prompt:** [Outstanding Fix Priorities](https://github.com/djbclark/stayturgid/blob/master/docs/operations/plans/outstanding-fix-priorities-2026-07-13.md). **Layout reference:** [docs/architecture/core-architecture.md](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/core-architecture.md). Git history has the detailed narrative of every change; this file is the condensed durable record.
