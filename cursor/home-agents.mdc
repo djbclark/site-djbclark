@@ -191,7 +191,7 @@ copy). Ours: `bigteam` (fan-out across vendors by quota pool),
 (Herdr handoff chains), `ralph-tui-orchestration` (Ralph TUI + Beads),
 `cow-workspaces` (copy-on-write isolation), `tell-chief-of-staff`,
 `session-finder` (find the session on a topic;
-`/session-finder-all` adds ended sessions), `helm` (answer every waiting session
+`/session-finder-all` adds ended sessions), `helm` (`/helm auto`: unattended waves; answer every waiting session
 from one window; `/helm-all` adds ended ones with open work), `herdr-tidy` (close
 idle herdr panes safely), `autorename`; new sessions start over ACP via `launch.py`.
 Tool-managed, not in git: `orchestration`, `herdr`,

@@ -284,7 +284,7 @@ hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
 reaches them via the `skill-everywhere` script (README beside it; edit the git copy): `bigteam`, `model-routing`,
 `herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
 `tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; `/session-finder-all` adds ended sessions),
-`helm` (answer every waiting session from one window; `/helm-all` adds ended ones with open work),
+`helm` (answer every waiting session from one window; `/helm-all` adds ended ones with open work; `/helm auto` runs an unattended night of worker waves, see its `auto.md`),
 `herdr-tidy` (close idle herdr panes safely), `autorename`. New sessions start over ACP via `launch.py`.
 Full list: [[reference_agent_rules_multi_agent_toolkit]].
 
