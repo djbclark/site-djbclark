@@ -79,7 +79,7 @@ the command for long-lived sessions, or
 
 | Keys after `ctrl+a` | Command                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `alt+g`             | `grok`                                                      |
+| `alt+g`             | `grok` (grok vendor excluded since 2026-10-06; see home-agents.md) |
 | `alt+a`             | `agy` (gemini / antigravity alias)                          |
 | `alt+c`             | `claude`                                                    |
 | `alt+x`             | `codex`                                                     |
