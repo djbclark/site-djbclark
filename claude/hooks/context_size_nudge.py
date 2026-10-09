@@ -178,9 +178,8 @@ def _ask_message(total, growth, repeat):
         "continuing the same work); 2) /handoff then /new (topic change, or "
         "the conversation itself is the only state); 3) Continue here and "
         "send the rest to /bigteam. Until answered, start no new heavy work "
-        "inline: delegate it. Exception: an unattended orchestrator (orc) "
-        "with no operator present keeps going by delegating; orc-meta "
-        "handles its restart."
+        "inline: delegate it. Exception: an unattended session with no "
+        "operator present keeps going by delegating."
     )
 
 

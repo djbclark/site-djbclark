@@ -153,7 +153,7 @@ total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
 natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
 **In a herdr pane or an Orca terminal, compact yourself at that boundary
 instead of asking**: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`, then
-end the turn (2026-10-09; `memory/feedback_self_compact.md`). Unattended orc keeps delegating. Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
+end the turn (2026-10-09; `memory/feedback_self_compact.md`). Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 
 ## Run commands yourself — never hand djbclark a `!` command (2026-10-06)
@@ -281,10 +281,10 @@ grok *models* via other vendors' pools are fine .
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
 Before orchestrating other agents, reach for our skills. Orchestration and session
-hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
+hygiene (these skills, `acp-run`, `fleet-watch`) live in git at
 `~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
 reaches them via the `skill-everywhere` script (README beside it; edit the git copy): `bigteam`, `model-routing`,
-`herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
+`ralph-tui-orchestration`, `cow-workspaces`,
 `tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; `/session-finder-all` adds ended sessions),
 `helm` (answer every waiting session from one window; `/helm-all` adds ended ones with open work),
 `herdr-tidy` (close idle herdr panes safely), `autorename`. New sessions start over ACP via `launch.py`.

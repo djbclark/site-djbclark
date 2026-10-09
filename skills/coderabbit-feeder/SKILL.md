@@ -103,5 +103,4 @@ stale again.
 Full command docs and the crossfork queue-entry JSON shape:
 `~/src/coderabbit-feeder/README.md`. Don't duplicate that content here —
 re-read it fresh each time in case it's changed, and treat this skill as
-the behavioral/gotcha layer on top of it (same split as the
-`herdr-orchestration` skill vs. `herdr`'s own docs).
+the behavioral/gotcha layer on top of it.

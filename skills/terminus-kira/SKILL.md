@@ -9,7 +9,7 @@ Built 2026-08-21 getting KIRA's `terminus-kira` (krafton-ai/KIRA, harbor's
 Terminus2 agent extended with native tool calling) running locally on Apple
 Silicon with no Docker/Colima and no Rosetta emulation. This skill is the
 "I (Claude) can choose to pass real work to this" entry point — distinct
-from `herdr-orchestration` (peer Claude Code sessions via Herdr) and
+from `bigteam` (fan-out to peer agent sessions) and
 `ralph-tui-orchestration` (multi-repo controller loops). TerminusKira is a
 single sandboxed sub-agent you dispatch one task to, not a peer session.
 

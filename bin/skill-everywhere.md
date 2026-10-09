@@ -111,7 +111,7 @@ next restart, but typing it still works and `/commands` lists it. If you cannot
 run `skill-everywhere` (e.g. changing the plugin without a skill), ask Hermes
 to run `reload-plugins` the same way. Claude Code slash wrappers are reached
 through `site-private/claude/commands/` (symlinked into `~/.claude/commands/`);
-`orc.md`, `orc-meta.md`, `helm-all.md`, `session-finder-all.md` and `resume.md`
+`helm-all.md`, `session-finder-all.md` and `resume.md`
 there are themselves symlinks into `~/src/djbclark-ade/claude/commands/`.
 
 ## 4. When the table is wrong
