@@ -224,10 +224,10 @@ Two rules when touching it:
 1. **It must stay portable.** No reference to this machine's paths, repo names or
    private tooling. Its output names `book-kb ...`, never `just book-...`, and its
    defaults come from `KB_ROOT` / `BOOK_KB_VENV` / `BOOK_KB_BM_PROJECT`.
-2. **`bin/book-kb` and `bin/clip` are byte-identical to the `site-private`
-   copies.** Fix one, copy to the other, and verify with `cmp` — per the standing
-   "sync external-facing skill on update" rule. The two `SKILL.md` files differ on
-   purpose: the public one has no references to this machine's repos.
+2. **`bin/book-kb` and `bin/clip` exist once, here.** `site-private/bin/book-kb`
+   and `site-private/bin/clip` are symlinks to `tools/book-to-kb/bin/`, so there is
+   nothing to keep in sync. The two `SKILL.md` files differ on purpose: the public
+   one has no references to this machine's repos.
 
 ## CFEngine reference book — query it, don't guess (2026-10-03)
 
