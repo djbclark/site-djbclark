@@ -26,7 +26,9 @@ from typing import Any, Self
 REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
 # Live-data directories (operational data, not code/config) a deploy checkout
 # may carry ahead of the released tag via direct-to-master commits made in
-# place. Everything else still requires the worktree/PR/release flow.
+# place. Since 2026-08-23 every path is edited that way and releases are
+# optional; this mapping only shapes the optional release checks and
+# memory-sync (which fetches and rebases exactly these repos).
 DATA_DIRS = {
     "site-private": "memory/",
     "site-djbclark": "research/",

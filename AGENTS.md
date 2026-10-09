@@ -133,13 +133,12 @@ inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
 ### `research/` — data-directory exception (added 2026-08-17)
 
 `research/` holds research/plan document packages and is **live data, not
-code**: like `site-private/memory/`, it is exempt from the
-branch/PR/worktree/release flow. Commit changes to it directly to `master`,
-in place, in the `~/ops/site-djbclark` deploy checkout — run
-`just ops-memory-sync` first (it now guards both data dirs), make a
-research-only commit, push immediately, leave the tree clean. The exemption
-is enforced by the `DATA_DIRS` mapping in `bin/deploy_ops_release.py`; it is
-narrow — everything else in this repo still uses the release flow.
+code**, like `site-private/memory/`. Commit changes to it in place on
+`master` in `~/ops/site-djbclark`: `git pull --rebase` first, make one
+research-only commit, push at once, leave the tree clean. Since 2026-08-23 the
+rest of this repo is edited the same way ("Where work happens" in
+`home-agents.md`); the old release-flow exemption, the `DATA_DIRS` mapping in
+`bin/deploy_ops_release.py`, now matters only to the optional release tooling.
 
 **This repo is public.** Nothing containing secrets or private-only context
 may land under `research/`; that material belongs in `site-private`. Each
