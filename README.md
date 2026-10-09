@@ -31,7 +31,8 @@ in directly with ordinary git — edit, commit to `master`, push. Coordinated
 point across all three repos (`just ops-release-check`,
 `just ops-release-deploy`, `just ops-release-status`), but they are no longer
 required to deploy. `just ops-memory-sync` is now a plain fetch-and-rebase of
-the repos, not a release-gated one.
+site-private and site-djbclark (not stayturgid), not a release-gated one, and it
+refuses on a dirty tree.
 
 Full release, rollback, and verification policy:
 [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md).
