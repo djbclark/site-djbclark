@@ -37,6 +37,7 @@ Environment=GEMINI_API_KEY={{ litellm_gemini_api_key | replace('\\', '\\\\') | r
    which turns proxy auth off. #}
 {% if litellm_db_enabled | bool %}
 Environment=LITELLM_MASTER_KEY={{ litellm_master_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+Environment=LITELLM_SALT_KEY={{ litellm_salt_key | replace('\\', '\\\\') | replace('"', '\\"') }}
 Environment=DATABASE_URL={{ litellm_database_url | trim }}
 {% endif %}
 

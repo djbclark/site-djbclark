@@ -82,8 +82,9 @@ bind without auth. Preserve REVIEW-1: do not casually open OliveTin/VM.
 
 ## Apply and inspect
 
-Every apply and check needs `LITELLM_MASTER_KEY` (`sk-` prefix) from
-sudo-secretspec; the role fails closed without it (#83).
+Every apply and check needs `LITELLM_MASTER_KEY` (`sk-` prefix) and
+`LITELLM_SALT_KEY` from sudo-secretspec; the role fails closed without them
+(#83).
 
 ```bash
 # Default: m1-air only (safe; does not attempt offline mini/VPS)
@@ -197,7 +198,10 @@ door, so the public placeholder let any tailnet member use the proxy (#83).
 The master key is now a generated secret, `LITELLM_MASTER_KEY` in
 sudo-secretspec, read by `just litellm-apply-secrets` exactly like
 `litellm_clinepass_api_key`; the role fails closed when it is unset, lacks
-the `sk-` prefix LiteLLM requires, or is still the placeholder. The
+the `sk-` prefix LiteLLM requires, or is still the placeholder.
+`LITELLM_SALT_KEY` is a second, never-rotated secret: LiteLLM encrypts
+DB-stored credentials with it and falls back to the master key when it is
+unset, so keeping them apart means a master-key rotation strands nothing. The
 per-client virtual keys below are still checked-in labels and are the next
 step of #83.
 

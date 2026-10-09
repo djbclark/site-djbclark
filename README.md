@@ -48,7 +48,7 @@ no public bind without a master-key / auth design).
 | `vps-primary`                   | systemd user unit                     | planned until online              |
 
 ```bash
-just litellm-apply-secrets  # limit m1-air; under sudo-secretspec (LITELLM_MASTER_KEY, #83)
+just litellm-apply-secrets  # limit m1-air; under sudo-secretspec (LITELLM_MASTER/SALT_KEY, #83)
 just litellm-check          # --check, also under sudo-secretspec
 just litellm-status
 LITELLM_HOSTS=site_litellm just litellm-apply-secrets   # all members; skips unprovisioned

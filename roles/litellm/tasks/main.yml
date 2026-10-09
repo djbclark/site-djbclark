@@ -39,6 +39,24 @@
   when: litellm_db_enabled | bool
   tags: [always]
 
+# Not tagged `always`: only a full run renders the plist/unit that carries the
+# salt key, and `--tags litellm_client_keys` never touches it. Rationale in
+# defaults/main.yml (litellm_salt_key).
+- name: >-
+    Assert LITELLM_SALT_KEY is set, 32+ chars and differs from the master key
+    (#83 review 1.1e; run via just litellm-apply-secrets or just litellm-check)
+  ansible.builtin.assert:
+    that:
+      - litellm_salt_key | length >= 32
+      - litellm_salt_key != litellm_master_key
+    fail_msg: >-
+      LITELLM_SALT_KEY is unset, short, or equal to the master key. Create it
+      once with `sudo-secretspec add` and `set LITELLM_SALT_KEY` (see
+      defaults/main.yml) and never rotate it.
+    quiet: true
+  no_log: true
+  when: litellm_db_enabled | bool
+
 - name: Assert the log filter stops the service before launchd kills the filter
   ansible.builtin.assert:
     that:
