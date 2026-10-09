@@ -43,15 +43,16 @@ no public bind without a master-key / auth design).
 
 | Host (inventory `site_litellm`) | Runtime                               | Default                           |
 | ------------------------------- | ------------------------------------- | --------------------------------- |
-| `m1-air`                        | launchd `com.djbclark.litellm`        | **online** — `just litellm-apply` |
+| `m1-air`                        | launchd `com.djbclark.litellm`        | **online** — `just litellm-apply-secrets` |
 | `mac-mini-intel`                | launchd (Intel Homebrew `/usr/local`) | planned until online              |
 | `vps-primary`                   | systemd user unit                     | planned until online              |
 
 ```bash
-just litellm-apply          # limit m1-air
-just litellm-check
+just litellm-apply-secrets  # limit m1-air; under sudo-secretspec (LITELLM_MASTER_KEY, #83)
+just litellm-check          # --check, also under sudo-secretspec
 just litellm-status
-LITELLM_HOSTS=site_litellm just litellm-apply   # all members; skips unprovisioned
+LITELLM_HOSTS=site_litellm just litellm-apply-secrets   # all members; skips unprovisioned
+just litellm-apply-secrets --tags litellm_client_keys   # reconcile virtual keys only
 ```
 
 **API Keys – Human Step:** SecretSpec dotenv + unit injection (LaunchAgent or

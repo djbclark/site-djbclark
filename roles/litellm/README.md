@@ -69,7 +69,7 @@ Planned hosts set `site_host_status: offline_unprovisioned` so the role
 
    ```bash
    LITELLM_HOSTS=mac-mini-intel sudo-secretspec run --reason "LiteLLM mini" -- just litellm-apply
-   # or: just litellm-apply -- --limit vps-primary
+   # or: LITELLM_HOSTS=vps-primary just litellm-apply-secrets
    ```
 
 Homebrew prefix follows the stayturgid `stayturgid_homebrew_prefix` pattern
@@ -82,14 +82,20 @@ bind without auth. Preserve REVIEW-1: do not casually open OliveTin/VM.
 
 ## Apply and inspect
 
+Every apply and check needs `LITELLM_MASTER_KEY` (`sk-` prefix) from
+sudo-secretspec; the role fails closed without it (#83).
+
 ```bash
 # Default: m1-air only (safe; does not attempt offline mini/VPS)
-just litellm-apply
-just litellm-check
+just litellm-apply-secrets
+just litellm-check            # --check, also under sudo-secretspec
 just litellm-status
 
 # All inventory members (skips offline_unprovisioned; fails on bad SSH if online)
-LITELLM_HOSTS=site_litellm just litellm-apply
+LITELLM_HOSTS=site_litellm just litellm-apply-secrets
+
+# Reconcile only the per-client virtual keys (no plist render, no restart)
+just litellm-apply-secrets --tags litellm_client_keys
 
 # Secrets via sudo-secretspec (E4 pattern)
 sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
@@ -190,9 +196,10 @@ the stayturgid Caddy fragment proxies `/litellm/*` to it on the tailnet front
 door, so the public placeholder let any tailnet member use the proxy (#83).
 The master key is now a generated secret, `LITELLM_MASTER_KEY` in
 sudo-secretspec, read by `just litellm-apply-secrets` exactly like
-`litellm_clinepass_api_key`; the role fails closed when it is unset or still
-the placeholder. The per-client virtual keys below are still checked-in
-labels and are the next step of #83.
+`litellm_clinepass_api_key`; the role fails closed when it is unset, lacks
+the `sk-` prefix LiteLLM requires, or is still the placeholder. The
+per-client virtual keys below are still checked-in labels and are the next
+step of #83.
 
 ### Why a separate Postgres on :5433
 

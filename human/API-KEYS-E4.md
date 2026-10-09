@@ -100,7 +100,9 @@ sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 Equivalent without sudo-secretspec (if keys are already exported in your shell):
 
 ```bash
-# Only if OPENAI_API_KEY / ANTHROPIC_API_KEY are already in the environment
+# Only if LITELLM_MASTER_KEY (required since #83, `sk-` prefix) and
+# OPENAI_API_KEY / ANTHROPIC_API_KEY are already in the environment;
+# otherwise the role fails closed at the master-key assert.
 just litellm-apply
 ```
 

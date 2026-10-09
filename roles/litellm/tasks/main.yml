@@ -15,19 +15,29 @@
       LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
       an auth/master-key design), and Darwin or Linux.
 
-- name: Assert the LiteLLM master key is a real secret, not the old placeholder
+# Tagged `always` so a partial run (`--tags litellm_client_keys`) still fails
+# here with this message instead of a bare 401 from /key/info. LiteLLM
+# requires the master key to start with `sk-` (docs/proxy/prod.md,
+# docs/proxy/virtual_keys.md; the admin UI login and key regeneration assume it).
+# no_log hides fail_msg too, so the task name carries the fix.
+- name: >-
+    Assert LITELLM_MASTER_KEY is set, sk-prefixed, 32+ chars and not the old
+    placeholder (#83; run via just litellm-apply-secrets or just litellm-check)
   ansible.builtin.assert:
     that:
       - litellm_master_key | length >= 32
+      - litellm_master_key is match('^sk-')
       - litellm_master_key != 'sk-litellm-local'
     fail_msg: >-
-      LITELLM_MASTER_KEY is unset, short, or the old public placeholder. The
-      /litellm/ Caddy route makes this proxy tailnet-reachable, so the master
-      key must be a generated secret: run via `just litellm-apply-secrets`
+      LITELLM_MASTER_KEY is unset, short, missing the `sk-` prefix LiteLLM
+      requires, or the old public placeholder. The /litellm/ Caddy route makes
+      this proxy tailnet-reachable, so the master key must be a generated
+      secret: run via `just litellm-apply-secrets` (or `just litellm-check`)
       after `sudo-secretspec set LITELLM_MASTER_KEY` (#83).
     quiet: true
   no_log: true
   when: litellm_db_enabled | bool
+  tags: [always]
 
 - name: Assert the log filter stops the service before launchd kills the filter
   ansible.builtin.assert:
@@ -182,8 +192,9 @@
   delay: 2
   when: not ansible_check_mode
 
-# Tagged so the keys can be reconciled without the secrets a full apply needs
-# to render the plist: `just litellm-apply --tags litellm_client_keys`.
+# Tagged so the keys can be reconciled without re-rendering the plist or
+# restarting the proxy. It still needs the master key (#83), so it runs under
+# sudo-secretspec: `just litellm-apply-secrets --tags litellm_client_keys`.
 - name: Reconcile per-client LiteLLM virtual keys
   ansible.builtin.include_tasks:
     file: client_keys.yml

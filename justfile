@@ -134,14 +134,18 @@ litellm_hosts := env_var_or_default("LITELLM_HOSTS", "mac")
 litellm-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
 
-# Apply with sudo-secretspec injection (requires TELEGRAM_BOT_TOKEN resolved,
-# it's required; OPENAI/ANTHROPIC optional until set). Same limit as
+# Apply with sudo-secretspec injection (requires TELEGRAM_BOT_TOKEN and
+# LITELLM_MASTER_KEY (#83) resolved; OPENAI/ANTHROPIC optional until set).
+# Plain `litellm-apply` fails closed outside it. Same limit as
 # litellm-apply (LITELLM_HOSTS / default m1-air).
 litellm-apply-secrets *args:
     sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
 
+# Dry run (--check). It needs LITELLM_MASTER_KEY like a real apply: the #83
+# assert in roles/litellm fails closed without it, so it runs under
+# sudo-secretspec too.
 litellm-check *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
+    sudo-secretspec run --reason "check LiteLLM apply (dry run)" -- just litellm-apply --check {{ args }}
 
 # Local host status (Air). Remote: ssh + curl loopback on that host, or
 # LITELLM_HOSTS=mac-mini-intel just litellm-status after it is online.

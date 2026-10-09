@@ -235,9 +235,11 @@ litellm_cooldown_time: 300
 # the proxy. It comes from sudo-secretspec (LITELLM_MASTER_KEY) via
 # `just litellm-apply-secrets`, like litellm_clinepass_api_key, and
 # tasks/main.yml fails closed when it is unset or still the old placeholder.
-# Generate it once (never print it):
+# LiteLLM requires the `sk-` prefix (tasks/main.yml asserts it). Generate it
+# once and paste it straight into `set`; keep it out of logs and chat:
+#   python3 -c 'import secrets; print("sk-" + secrets.token_urlsafe(32))'
 #   sudo-secretspec add LITELLM_MASTER_KEY --description "LiteLLM proxy master key" --required --reason "#83"
-#   sudo-secretspec set LITELLM_MASTER_KEY --reason "#83"   # paste a secrets.token_urlsafe(32) value
+#   sudo-secretspec set LITELLM_MASTER_KEY --reason "#83"   # paste the sk-... value
 litellm_master_key: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
 
 # --- Per-client virtual keys (2026-09-30) ------------------------------------
