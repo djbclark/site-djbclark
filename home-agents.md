@@ -151,7 +151,7 @@ status is the last stage's. Write to a file, print the status, then read:
 at +40k, delegate from then on and name the options once; at +70k (or 150k
 total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
 natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
-Unattended orc keeps delegating. Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
+Unattended orc keeps delegating. **In herdr with nobody at the keyboard (or pre-approved), self-compact:** `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`, then end the turn. A bigteam run may be live (herdr tab `coord`): follow its Step 0, hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 
 ## Run commands yourself — never hand djbclark a `!` command (2026-10-06)
