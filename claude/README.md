@@ -1,9 +1,10 @@
 # Tracked mirrors of `~/.claude/` session-handoff artifacts
 
-Live copies under `~/.claude/hooks/` and `~/.claude/skills/` are
-canonical — this directory only versions them (spec:
-`docs/session-handoff-compaction-spec.md`). Update both together, same
-rule as the root CLAUDE.md distribute-and-symlink convention.
+Live copies under `~/.claude/hooks/` are canonical — this directory only
+versions them. **The `claude/skills/{handoff,resume,session-handoff}/` mirrors are
+historical (note added 2026-10-09, #137 C2.1):** the live skills now resolve to
+`~/src/djbclark-ade/skills/` (edit them there), the mirrors here have diverged
+from them, and `resume` was folded into `baton` on 2026-10-08.
 
 ## model-routing skill lives elsewhere
 
@@ -35,6 +36,7 @@ is registered and matches this mirror.
 
 ## Custom commands and subagents (2026-09-30)
 
-`claude/commands/{orc,orc-meta}.md` and `claude/agents/fable-deep.md` are the
-canonical copies; `~/.claude/commands/*.md` and `~/.claude/agents/*.md` are
-symlinks to them (same distribute-and-symlink pattern as `skills/`).
+`claude/agents/fable-deep.md` is the canonical copy; `~/.claude/agents/*.md`
+are symlinks to the files here. `claude/commands/{orc,orc-meta}.md` (and the
+other orchestration command wrappers) are themselves symlinks into
+`~/src/djbclark-ade/claude/commands/` since 2026-10-08; edit them there.
