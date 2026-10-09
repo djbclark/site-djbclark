@@ -205,7 +205,7 @@ Keep each session's context small: send discrete, separable tasks to the
 inline. Once a session has grown ~40k tokens past its start, delegate from then
 on and tell djbclark once that `/compact`, or `/handoff` then a new session, is
 available; past ~70k (or 150k total), ask him at the next natural boundary which
-of those he wants (or, in a herdr pane or Orca terminal, compact yourself there with `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`). Another session may be running bigteam (herdr tab `coord`):
+of those he wants (or, in a herdr pane or Orca terminal, compact yourself there with `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; it refuses while anything is on his input line, then ask him to type it, never send over a draft). Another session may be running bigteam (herdr tab `coord`):
 never touch its claimed files or panes (bigteam Step 0).
 
 ## Fix the cause of a tool-calling mistake (2026-10-06)
