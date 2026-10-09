@@ -211,7 +211,7 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 
 ## Tools and habits (2026-10-06)
 
-1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
+1. **Fast tools:** search with `rg` — **always with a path** (`rg PAT .`: with no path and a non-tty stdin it reads stdin and hangs; 2026-10-09) (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
    list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
    for literal replace (**always `-F`**: else `$name` in the replacement is a capture group; **`sd -F -- FIND REPL`** when either may start with `-`; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
    (rtk compacts them). Android greps stay `grep`.
