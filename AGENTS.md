@@ -47,8 +47,9 @@ absolute GitHub URL.
 hostnames for this site are expected here.
 
 **Symlinks** under `~` (`AGENTS.md`, `CLAUDE.md`, other root-level vendor agent
-files) and `~/.claude/.../memory` are documented in site-private /
-stayturgid — not duplicated here. The supported optional local selector is
+files) end at this repo's [`home-agents.md`](home-agents.md) (via
+`site-private/home-agents.md`); `~/.claude/.../memory` is documented in
+site-private. The supported optional local selector is
 `${OPS_ROOT:-~/ops}/.mysite` → this checkout; do not use `.mysite` in GitHub URLs.
 stayturgid discovery excludes `site-private`, prints the selected path/source,
 and creates a missing private-companion directory without Git or secrets.
@@ -77,6 +78,12 @@ Topology background:
 | [`roles/mac_dns/README.md`](roles/mac_dns/README.md)                                       | This Mac's tailnet DNS plumbing (/etc/resolver, search domains, accept-dns); data = `inventory/group_vars/all.yml` `tailnet_*` | When the tailnet/MagicDNS facts change  |
 | [`roles/launchd_path/README.md`](roles/launchd_path/README.md) | launchd user PATH = login-shell PATH (`launchctl config user path`, root applier, live after reboot); runs in `just deploy-mac` | When PATH handling or the applier changes |
 | [`roles/watchdogd/README.md`](roles/watchdogd/README.md) | One launchd watchdog (`com.djbclark.watchdogd`) for every site service; `watchdogd.d/<service>.toml` schema, the C2 rules, what it replaced | When a watched service or a rule changes |
+| [`home-agents.md`](home-agents.md) | The live `~/AGENTS.md` / `~/CLAUDE.md` (via `~` → `site-private/home-agents.md` → here); size-capped global agent rules | Agents maintain it; keep the Cursor copy in step |
+| [`cursor/home-agents.mdc`](cursor/home-agents.mdc) | Condensed Cursor copy of `home-agents.md` | With every standing-rule change in `home-agents.md` |
+| [`skills/`](skills/), [`claude/`](claude/) | Agent skills (some are symlinks into `~/src/djbclark-ade`), Claude Code agents, hooks and commands | As skills/hooks change |
+| [`tools/`](tools/) | Shareable tools: `book-to-kb/` (published, MIT), `s-farm/`, `herdr/` | As tools change |
+| [`research/`](research/) | Live research/plan packages (data; see below) | Per research package |
+| [`docs/tooling-policy.md`](docs/tooling-policy.md), [`docs/OPS-RELEASES.md`](docs/OPS-RELEASES.md) | Modern-CLI and code-search policy; the optional release tooling | As policy/tooling changes |
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml)     | Port/path allocation authorities — check before adding either                                                                  | As allocations change                   |
 | [`human/`](human/)                                                                         | Operator-only tasks, credentials checklists, decision records                                                                  | As needed                               |
 | `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                  | Public product — code, fleet conventions, product policy slice                                                                 | N/A (other repo)                        |
