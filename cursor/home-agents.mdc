@@ -44,22 +44,22 @@ changed:
 
 ## Sub-agent reports go to a file (2026-10-03)
 
-**When you dispatch a sub-agent, name an output file in the spawn prompt** and have
-it write the full deliverable there, replying with only a pointer. Pass long briefs
-*to* an agent the same way — as a path, not message text.
-
-Long reports are truncated and delivery lags, so a missing report is ambiguous.
-Put the path in the spawn prompt rather than a follow-up, wait on the file rather
-than the reply, and treat a finished agent with no report as a **delivery failure,
-not an empty result**: re-task it, never reconstruct what it would have said.
-**Claude Code's own Agent-tool sub-agents are no exception** (2026-10-08): their
-final message arrives in an idle notification capped at **4,000 characters** (then
-`[result truncated — ask the agent for the rest via SendMessage]`), so it must be a
-pointer plus a one-paragraph verdict. Their Write is refused only for a basename
-starting `report`/`summary`/`findings`/`analysis` and ending `.md`, so
-`<scratchpad>/<name>-report.md` works; anything over ~2k chars the parent must read
-also goes to it whole via SendMessage `to: "team-lead"`. Say all of this in the
-dispatch prompt. Why: `site-private/memory/reference_agent_rules_ops_housekeeping.md`.
+**Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`, on PATH;
+2026-10-08): `acp-dispatch <agent> --model M --name N --task T -C <dir> -f <brief>`.
+It appends the shared delivery footer (`djbclark-ade/docs/dispatch-footer.md`) to
+the brief, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its `.done`
+marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
+delivery failure, not an empty result: re-task it, never reconstruct) / 4
+**`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool sub-agents**
+cannot be scripted: paste `acp-dispatch footer --report <scratchpad>/<name>-report.md`
+into the prompt verbatim and read the file, never the final message (its idle
+notification is cut at 4,000 characters; a SendMessage to `team-lead` arrives whole).
+The footer also fixes the 2026-10-08 stall: a sub-agent that ends its turn waiting
+on a background notification, or on a question, is never woken, so it waits inside a
+bounded foreground command and writes `BLOCKED:` as the report's first line instead
+of asking. `acp-dispatch check <dir|report>...` lists no-report and BLOCKED slices;
+put them in every handoff. Why:
+`site-private/memory/reference_agent_rules_ops_housekeeping.md`.
 
 ## Reading `aiuse` quota numbers, and knowing a delegate finished (2026-10-03)
 

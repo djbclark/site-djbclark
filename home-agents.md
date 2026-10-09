@@ -87,23 +87,24 @@ a permission prompt and asks you to run it, surface that to djbclark. Cursor get
 commit it in site-djbclark as `cursor/home-agents.mdc`) — **when you
 change a standing rule here, change that copy too.**
 
-## Agent reports go to a file (2026-10-03)
+## Agent reports go to a file: dispatch with `acp-dispatch` (2026-10-03, 2026-10-08)
 
-**When you dispatch a sub-agent, name an output file in the dispatch prompt and
-require the full deliverable there, replying with only a pointer** (absolute path
-under the scratchpad; end the spawn prompt with "write the full report there,
-then reply with only: written"). Hand long briefs over as a path too. Wait on
-the **file** (`until [ -s <path> ]; do sleep 5; done` in the background). A
-finished agent with no report is a **delivery failure, not an empty result**:
-re-task it; never reconstruct what it "would have" found. Your reply: pointer plus headline verdict.
-**Claude Code's own Agent-tool sub-agents are no exception** (2026-10-08): their
-final message reaches you in an idle notification capped at **4,000 characters**
-(then `[result truncated — ask the agent for the rest via SendMessage]`), so it
-must be a pointer plus a one-paragraph verdict. Their Write is refused only for a
-basename starting `report`/`summary`/`findings`/`analysis` and ending `.md`, so
-`<scratchpad>/<name>-report.md` works; anything over ~2k chars you must read
-also goes to you whole via SendMessage `to: "team-lead"`. Say all of this in the
-dispatch prompt. Evidence: [[reference_agent_rules_ops_housekeeping]].
+**Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`, on PATH):
+`acp-dispatch <agent> --model M --name N --task T -C <dir> -f <brief>`. It
+appends the shared delivery footer (`djbclark-ade/docs/dispatch-footer.md`) to
+the brief, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its `.done`
+marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
+delivery failure, not an empty result: re-task it, never reconstruct) / 4
+**`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool
+sub-agents** cannot be scripted: paste `acp-dispatch footer --report
+<scratchpad>/<name>-report.md` into the prompt verbatim and read the file, never
+the final message (its idle notification is cut at 4,000 characters; a
+SendMessage to `team-lead` arrives whole). The footer also fixes the stall seen
+2026-10-08: a sub-agent that ends its turn waiting on a background notification,
+or on a question, is never woken, so it waits inside a bounded foreground command
+and writes `BLOCKED:` as the report's first line instead of asking. `acp-dispatch
+check <dir|report>...` lists no-report and BLOCKED slices; put them in every
+handoff. Evidence: [[reference_agent_rules_ops_housekeeping]].
 
 ## Reading `aiuse` quota numbers (2026-10-03)
 
