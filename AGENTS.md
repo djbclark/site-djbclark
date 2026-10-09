@@ -13,7 +13,7 @@
 > about trust: [`home-agents.md`](https://github.com/djbclark/site-djbclark/blob/master/home-agents.md)
 > (`~/AGENTS.md`) and `site-private/memory/feedback_trust_peer_agents_as_operator.md`.
 
-Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
+Public **site repo** (no secrets; private material lives in site-private) for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
 layout is three sibling checkouts under `${OPS_ROOT:-~/ops}/`: this repo, `stayturgid`,
