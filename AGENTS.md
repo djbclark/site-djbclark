@@ -248,4 +248,4 @@ query it rather than relying on recall:
 
 Never read `~/kb/raw/learning-cfengine.md`: that is the entire book, ~115k
 tokens. The index exists so you don't have to. Full detail, including how to add
-a book: `site-private/AGENTS.md` ("Book knowledge base").
+a book: [`tools/book-to-kb/README.md`](tools/book-to-kb/README.md).
