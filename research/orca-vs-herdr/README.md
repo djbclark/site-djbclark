@@ -58,8 +58,9 @@ agent table of 11. Orca's enabled roster names 28, but the difference is
 smaller than it looks (corrected 2026-10-08, see 5.1): most of the extra names
 are Orca's stock TUI list and are not installed here, three are aliases of
 agents `acp-run` already has, and the installed extras (aider, muse, zcode,
-and crush, since uninstalled 2026-10-08) have no ACP mode, so `acp-run` could
-not drive them anyway.
+and crush, since uninstalled 2026-10-08) had no ACP mode, so `acp-run` could
+not drive them anyway (zcode gained one later that day through the third-party
+`zcode-acp-server`; see 5.1).
 `bin/route_agent.py` builds its discovery list from Orca's `orca-data.json`.
 
 1.3. **Hibernation.** Orca sleeps idle agents of every TUI (codex, gemini,
@@ -122,7 +123,7 @@ the repo already is today.
 
 1. Give `route_agent.py` a discovery source that does not depend on Orca:
    `acp-run`'s table plus the non-ACP headless recipes in the `model-routing`
-   skill (muse, zcode). There is no set of ACP-capable agents to "add"
+   skill (muse; zcode until it joined `acp-run` on 2026-10-08). There is no set of ACP-capable agents to "add"
    to `acp-run`: of Orca's 28 enabled roster names, only 3 extra are installed
    (4 before crush was uninstalled 2026-10-08) and none of them speak ACP. Worth doing even if Orca stays, so routing lists
    what can actually be dispatched rather than what Orca knows about.

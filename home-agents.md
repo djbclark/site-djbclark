@@ -262,7 +262,8 @@ Binary names do not match `aiuse`/Orca provider ids: antigravity → `agy`
 zai → `zcode`, opencode-go → `opencode`, cursor → `cursor-agent`,
 copilot → `copilot` (if it misbehaves run `copilot-fix-writer-lock`),
 codex/claude match; **gemini is deprecated and not installed**. **No ACP:**
-zcode, muse; every other agent speaks it (`acp-run --list`).
+muse; every other agent speaks it (`acp-run --list`; zcode through
+`zcode-acp-server`, the one agent run **without** `--model`).
 
 **Pick the delegation route in this order:** (1) one-shot/headless to an
 ACP-capable agent: **`acp-run`** (`acp-run <agent> -C <dir> -p '<prompt>' --model
