@@ -1,6 +1,7 @@
 # LiteLLM role
 
-This role renders the current Auto Router v2 configuration and keeps the
+This role renders the LiteLLM proxy configuration (the former `smart-router`
+Auto Router v2 alias was removed; see below) and keeps the
 **loopback-only** proxy running as:
 
 | OS | Service | Unit path |
