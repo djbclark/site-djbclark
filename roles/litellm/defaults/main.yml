@@ -261,6 +261,8 @@ litellm_client_keys:
     key: sk-litellm-open-webui
   - alias: llm-health-watchdog
     key: sk-litellm-watchdog
+  - alias: herdr-ai
+    key: sk-lite-herdr-ai-4735b3bf050d60ce
 
 # Dedicated Postgres for LiteLLM's key/spend tables.
 #
