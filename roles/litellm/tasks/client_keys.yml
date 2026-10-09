@@ -14,6 +14,12 @@
   loop_control:
     label: "{{ item.alias }}"
   register: _litellm_client_key_info
+  # The master key is in `headers` (#83 review 1.1g). ansible-core 2.21 does not
+  # print a uri task's `invocation` even at -vvvv, but older releases and other
+  # callbacks can, so no_log keeps it out regardless. It also censors this
+  # task's errors: to debug, drop no_log locally with a throwaway key.
+  # ANSIBLE_DEBUG=1 logs the key whatever no_log says: never use it with a real one.
+  no_log: true
 
 - name: Create the missing per-client LiteLLM virtual keys
   ansible.builtin.uri:
@@ -32,3 +38,9 @@
     label: "{{ item.item.alias }}"
   when: item.status == 404
   changed_when: true
+  # The master key is in `headers` (#83 review 1.1g). ansible-core 2.21 does not
+  # print a uri task's `invocation` even at -vvvv, but older releases and other
+  # callbacks can, so no_log keeps it out regardless. It also censors this
+  # task's errors: to debug, drop no_log locally with a throwaway key.
+  # ANSIBLE_DEBUG=1 logs the key whatever no_log says: never use it with a real one.
+  no_log: true

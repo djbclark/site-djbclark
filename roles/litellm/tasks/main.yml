@@ -201,7 +201,7 @@
     status_code: 200
     # With general_settings.master_key on (litellm_db_enabled) /v1/models answers 401 to an
     # unauthenticated probe even though the proxy is up; that made a healthy apply
-    # "fail" after 60 retries (2026-09-29). Send the same anti-typo master key clients use.
+    # "fail" after 60 retries (2026-09-29). Send the master key (a secret since #83).
     headers: "{{ {'Authorization': 'Bearer ' ~ litellm_master_key} if (litellm_db_enabled | bool) else {} }}"
   register: _litellm_health
   until: _litellm_health.status == 200
@@ -209,6 +209,12 @@
   retries: 150
   delay: 2
   when: not ansible_check_mode
+  # The master key is in `headers` (#83 review 1.1g). ansible-core 2.21 does not
+  # print a uri task's `invocation` even at -vvvv, but older releases and other
+  # callbacks can, so no_log keeps it out regardless. It also censors this
+  # task's errors: to debug, drop no_log locally with a throwaway key.
+  # ANSIBLE_DEBUG=1 logs the key whatever no_log says: never use it with a real one.
+  no_log: true
 
 # Tagged so the keys can be reconciled without re-rendering the plist or
 # restarting the proxy. It still needs the master key (#83), so it runs under
