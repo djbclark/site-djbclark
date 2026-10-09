@@ -81,7 +81,12 @@ actions:
       curl -s -m 5 http://127.0.0.1:4000/health/readiness || echo "HTTP 4000 not responding"
       echo
       echo "=== models in ~/.litellm/config.yaml ==="
-      grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | head -30 || echo "config not readable"
+      # `a | b | head || echo` takes head's status, so test readability first.
+      if [ -r "$HOME/.litellm/config.yaml" ]; then
+        grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | head -30
+      else
+        echo "config not readable"
+      fi
 
   - id: user_litellm_restart
     title: "LiteLLM Proxy — restart service"
