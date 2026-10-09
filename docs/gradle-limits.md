@@ -46,7 +46,7 @@ operations per second on the SSD. Changes:
    `java <args> -version` on JDK 21 and 25 before it goes live.
 3. Daemon idle timeout of 10 min. The Kotlin daemon stops with its Gradle daemon. **Never
    set `-Dkotlin.daemon.jvm.options=autoshutdownIdleSeconds=…`** (the Kotlin docs' own
-   example): it is a list of JVM options, the Kotlin daemon JVM refuses to start, and every
+   example, reported as https://youtrack.jetbrains.com/issue/KT-90109): it is a list of JVM options, the Kotlin daemon JVM refuses to start, and every
    Kotlin compile on the machine fails. Shipped by mistake in 6bea709 and removed the same
    morning. Test a profile change with a real Kotlin compile, not just `java -version`.
 4. `GRADLE_USER_HOME` moved from the USB stick to `~/.cache/gradle`. The USB stick serves
