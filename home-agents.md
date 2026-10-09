@@ -57,7 +57,12 @@ which repo it belongs in.** `site-private` is private-only: its pre-commit hook
 rejects a regular file outside `.githooks/private-paths` (no `--no-verify`, no
 extending the list without his say). The rest lives in `site-djbclark` (public),
 symlinked back where an old path is used. When asking, name anything private in
-the change. (`memory/feedback_ask_where_new_things_go.md`)
+the change. **Exception, no question: a new agent skill always goes in
+`~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09; symlink it from
+`~/ops/site-djbclark/skills/` and `site-private/skills/`, steps in
+`djbclark-ade/docs/skills.md`); only a skill that must stay private
+(`1password`, `tell-chief-of-staff`) goes in `site-private/skills/`.
+(`memory/feedback_ask_where_new_things_go.md`)
 
 ## Reply formatting — number every list (2026-09-21)
 

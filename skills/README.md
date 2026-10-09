@@ -23,7 +23,7 @@ Two skills are private and are real directories in `site-private/skills/`:
 `1password` and `tell-chief-of-staff`. This repo is public: no credentials,
 tokens, vault or item identifiers in a skill here.
 
-Only hand-maintained local skills belong here. **Tool-managed skills stay where
+**Since 2026-10-09 every skill here is a symlink into `~/src/djbclark-ade/skills/`, and a new skill goes there, not here** (see `djbclark-ade/docs/skills.md`). Only hand-maintained local skills belong in that chain. **Tool-managed skills stay where
 their tool put them** and are NOT tracked here:
 
 - Symlinks in `~/.claude/skills/` pointing into `~/.agents/skills/`,

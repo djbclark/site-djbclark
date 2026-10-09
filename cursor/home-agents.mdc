@@ -144,7 +144,12 @@ rejects any regular file outside `.githooks/private-paths` (never `--no-verify`
 or extend that list without his say). Everything else lives in `site-djbclark`
 (public) at the same relative path, with a symlink left in `site-private` where
 an old path is still used. When asking, name anything private in the change
-(private repo names, IDs). (`memory/feedback_ask_where_new_things_go.md`)
+(private repo names, IDs). **Exception, no question: a new agent skill always goes in
+`~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09; symlink it from
+`~/ops/site-djbclark/skills/` and `site-private/skills/`, steps in
+`djbclark-ade/docs/skills.md`); only a skill that must stay private
+(`1password`, `tell-chief-of-staff`) goes in `site-private/skills/`.
+(`memory/feedback_ask_where_new_things_go.md`)
 
 ## Reply formatting — number every list
 
