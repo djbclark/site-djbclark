@@ -15,7 +15,11 @@ to identify, and how to grade.
 3. **Two indexes minimum** per concept set: OpenAlex or Semantic Scholar for
    breadth; PubMed or Europe PMC for biomedicine; arXiv for CS, physics,
    maths; Crossref for anything with a DOI. Union the hits, then dedupe by
-   DOI, then arXiv id, then normalised title.
+   DOI, then arXiv id, then normalised title. Semantic Scholar's
+   unauthenticated API returned zero hits or HTTP 429 for most queries on
+   2026-10-09: on a 429, log the query as "not searched (rate-limited)",
+   do not retry in a loop, and take the second index from OpenAlex or
+   Crossref instead.
 4. **Chase citations both ways** for the 3-5 most central papers: their
    reference lists (backward) and the papers citing them (forward, the only
    way to find work newer than the reviews). One more hop only for papers

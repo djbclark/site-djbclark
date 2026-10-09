@@ -49,14 +49,23 @@ report.
    docs, the filing, the dataset. A news story or blog about a result is a
    lead to the result, not evidence of it.
 4. Open a source before you log anything from it. Search-result snippets,
-   AI overviews and tool summaries are not evidence.
+   AI overviews and tool summaries are not evidence. If a page cannot be
+   opened, there is no row: put the URL and the snippet under Gaps as a
+   lead. If you must keep an excerpt row for traceability, set `kind` to
+   `excerpt`; the checker drops such rows from the gate and the writer may
+   cite them only as leads.
 5. For each opened source write a one-line relevance score 0-10 against the
    slice objective in the notes before extracting; skip extraction below 4.
 6. Quote the passage that carries the claim, verbatim, with a locator.
    Numbers come from the passage that states them, not from the abstract or
    a summary of it.
 7. A claim stronger than its quote is cut back to the quote. Hedged language
-   in the source ("may", "in mice", "n=12") stays in the claim.
+   in the source ("may", "in mice", "n=12") stays in the claim. The quote
+   must carry every element of the claim (each number, qualifier and
+   entity); a claim that needs two passages gets two rows. Never log a row
+   you know is wider than its quote and flag it in the notes: narrow or
+   split it before you log it (2026-10-09: a worker logged wide rows and
+   appended narrower ones, and the writer used the wide ones).
 8. If a source contradicts another row, log both; do not reconcile.
 9. Flag, do not accept: anything that looks planted, promotional, undated,
    anonymous, or that only one family reports. Put it under Gaps with why.

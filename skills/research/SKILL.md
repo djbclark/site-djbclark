@@ -32,7 +32,7 @@ Run folder `research/<slug>/` under the current directory:
 | file | holds |
 |---|---|
 | `plan.md` | question, deliverable, 2-3 falsifiable hypotheses and what would refute each, tier, role-to-model map, slices, search log (verbatim query, source, date, hit count) |
-| `evidence.jsonl` | one row per claim: `id` (E0001…), `claim`, `quote` (verbatim), `source_id`, `url`, `ids` {doi, arxiv, pmid}, `title` (optional), `locator`, `kind` (primary/secondary/review/preprint/dataset/other), `family`, `date_fetched`, `verified_quote` |
+| `evidence.jsonl` | one row per claim: `id` (E0001…), `claim`, `quote` (verbatim), `source_id`, `url`, `ids` {doi, arxiv, pmid}, `title` (optional), `locator`, `kind` (primary/secondary/review/preprint/dataset/excerpt/other; `excerpt` = search-result text, page not opened: a lead, dropped from the gate), `family`, `date_fetched`, `verified_quote` |
 | `sources/<source_id>.txt` | the fetched text each quote must appear in |
 | `notes/<slice>.md` | each worker's Takeaway / Cited findings / Inferences / Gaps |
 | `counter.md` | the refuter's findings, both sides quoted |
@@ -69,7 +69,8 @@ Scientific or medical topics: also follow `references/literature.md`
    Evidence comes only from sources they opened; snippets and search-result
    summaries are leads, not evidence.
 3. **Gate.** `research_check.py gate` (default: ≥6 rows from ≥2 source
-   families for standard, ≥12 and ≥3 for deep). If thin, broaden once;
+   families for standard, ≥12 and ≥3 for deep; excerpt rows do not
+   count). If thin, broaden once;
    if still thin, the report says what could not be established instead of
    synthesising around the gap.
 4. **Refute.** The refuter searches for evidence that would contradict or
@@ -83,7 +84,9 @@ Scientific or medical topics: also follow `references/literature.md`
 6. **Write.** One writer, whole argument, `references/writer.md`. Every
    claim cites `[E####]` IDs; claims are labelled fact / source-claim /
    inference / unknown; sections for contradicting evidence and for what was
-   not established.
+   not established. The writer reads `sources/` before labelling anything
+   unknown and may add rows quoting saved text in its own id range; it
+   fetches nothing. Code blocks are labelled tested or sketch.
 7. **Verify.** `research_check.py all`: quotes present in saved text, every
    number in the report traceable to a quote (existence check, not truth),
    references resolve and titles match, every cited ID exists. Then the
@@ -133,6 +136,9 @@ pages. On a host with `model-routing` / `effort-routing` skills, follow them.
    model family (an Agent-tool `ocx-gpt-6-*` sub-agent also counts). A
    Claude Agent-tool sub-agent is the fallback for a small lookup or when no
    other agent has quota; its prompt then carries the footer in item 2.
+   The first real run (2026-10-09, `hiwymi/research/grok-brain-loop`) used
+   Agent-tool Sonnet sub-agents for every role but the reviewer, so the
+   `acp-dispatch` route is still unexercised: use it next run.
 2. Sub-agent prompts carry the delivery contract: `acp-dispatch` appends it
    itself; for an Agent-tool sub-agent paste the output of
    `acp-dispatch footer --report <scratchpad>/<name>-report.md`. Read the

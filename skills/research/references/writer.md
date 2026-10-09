@@ -1,9 +1,11 @@
 # Writer brief (one writer, whole argument)
 
-Input: `plan.md`, `evidence.jsonl`, every `notes/*.md`, `counter.md`.
-Output: `research/<slug>/report.md`. You do not search. If the evidence does
-not support an answer, the report says so; you do not fill the gap from
-memory.
+Input: `plan.md`, `evidence.jsonl`, every `notes/*.md`, `counter.md`, and
+the saved text in `sources/*.txt`. Output: `research/<slug>/report.md` (on
+a host that refuses that basename to a sub-agent, `draft.md`; the lead
+renames it). You do not search the web or fetch anything. If the evidence
+does not support an answer, the report says so; you do not fill the gap
+from memory.
 
 ## Shape
 
@@ -63,3 +65,24 @@ only` (full text not read).
    review is as long as the evidence table needs, not longer.
 7. After the reviewer's flags come back, fix or cut each one; never defend
    a flagged sentence by adding adjectives.
+8. **Read the saved sources before writing "unknown".** The quote field is
+   only what a worker chose to carry; `sources/<source_id>.txt` is the whole
+   page. Before labelling a fact unknown, open the saved text of every
+   source in the relevant family. If the fact is there, append a row quoting
+   it (same schema, ids in the range the lead assigned you, e.g. E09xx), run
+   `research_check.py quotes` so it is verified, and cite it. Seen
+   2026-10-09: an endpoint, auth header, model id and output price were all
+   in the saved sources and the report called them unknown.
+9. **Excerpt rows are leads.** A row the checker reports as an excerpt
+   (`kind` `excerpt`, or a source header saying "search-result excerpt") is
+   cited only as "seen only as a search excerpt", never as support, and it
+   adds nothing to confidence.
+10. **Code blocks say what they are.** The first line of every code block
+    says `tested` (and the report says how it was run) or `sketch, not
+    runnable`; a sketch names every undefined helper and every assumed
+    field. A comment never claims behaviour the code does not have (a
+    `None` price commented "fails closed" raised a TypeError instead,
+    2026-10-09). Hard-coded values cite the row they come from.
+11. **Name roles for the reader.** Write "the counter-evidence pass" and
+    "the different-family review", not "the refuter" or "the reviewer";
+    the reader did not see the run.

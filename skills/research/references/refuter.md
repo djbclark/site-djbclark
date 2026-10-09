@@ -23,6 +23,12 @@ assigned ID range, same schema as `references/worker.md`.
 4. Log counter-evidence with the same discipline as supporting evidence:
    opened source, verbatim quote, locator, family. One-sided reporting of
    the counter side is as bad as one-sided reporting of the main side.
+   A search excerpt is a lead, not a row: if you cannot open the page, put
+   the URL and the excerpt under `## Leads (not opened)` in `counter.md`
+   and log no evidence row. If you keep an excerpt row for traceability,
+   set `kind` to `excerpt`; the checker drops it from the gate and the
+   writer may cite it only as a lead (2026-10-09: five of ten refuter rows
+   were excerpts and counted toward the gate).
 5. `counter.md` has one section per hypothesis or claim:
    `### [E####] <claim>` then `Verdict:` one of supported / contested /
    limited / refuted / no-counter-evidence-found, then `Both sides:` the
@@ -35,15 +41,19 @@ assigned ID range, same schema as `references/worker.md`.
 
 ## Reviewer (step 7): refute-mode read of the draft
 
-Input: `report.md`, `evidence.jsonl`, `counter.md`. Do not read `notes/`.
-Output: `research/<slug>/review.md`. You change nothing in the draft.
+Input: `report.md`, `evidence.jsonl`, `counter.md`, and the saved text in
+`sources/*.txt`. Do not read `notes/`. Output: `research/<slug>/review.md`.
+You change nothing in the draft.
 
 1. For each claim in the report, find its `[E####]` rows and decide whether
    the quote supports the claim as written. Flag: claim stronger than quote,
    claim not in any cited quote, number not in any quote, inference labelled
    as fact, single-source claims not tagged, contested claims with the
    counter side missing, stale sources presented as current, preprints not
-   labelled, a conclusion the counter-evidence section undercuts.
+   labelled, a conclusion the counter-evidence section undercuts, a fact
+   called unknown that a saved source states (then the fix is "add a row
+   quoting line N of S###", not cut), an excerpt row cited as support, and
+   a code block that claims to run or to behave in a way its text does not.
 2. For each flag write: location (section, sentence), the `[E####]` IDs, the
    quote, why it fails, and the smallest fix (cut, weaken, retag, add the
    counter quote).

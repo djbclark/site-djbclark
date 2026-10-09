@@ -3,12 +3,15 @@
 
     research_check.py fetch  <source_id> <url> <run> [--via-proxy]
                                                        save sources/<source_id>.txt; with RESEARCH_PROXY_URL set
-                                                       (EZproxy-style prefix) a paywalled page is retried via the proxy
+                                                       (EZproxy-style prefix) a paywalled page is retried via the proxy;
+                                                       prints the HTTP status and final URL of every hop
     research_check.py quotes <run> [--no-update]        every quote occurs in its saved source
     research_check.py numbers <run>                     every number in report.md occurs in some quote
     research_check.py refs   <run>                      DOI / arXiv / PMID resolve; titles match
     research_check.py gate   <run> [--min-rows N] [--min-families M]
-    research_check.py claims <run>                      every [E####] in report.md exists; ids unique
+                                                       excerpt rows (kind "excerpt", or a source whose header says
+                                                       "search-result excerpt") are leads and do not count
+    research_check.py claims <run>                      every [E####] in report.md exists; ids unique; cited excerpt rows noted
     research_check.py all    <run> [--offline]          quotes, numbers, claims, gate, refs
 
 <run> is the run folder (research/<slug>). Exit 0 when every check passes,
@@ -145,18 +148,19 @@ _COOKIES = http.cookiejar.CookieJar()
 _OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_COOKIES))
 
 
-def http_get(url: str, accept: str = "*/*", timeout: int = 60) -> tuple[bytes, str]:
+def http_get(url: str, accept: str = "*/*", timeout: int = 60) -> tuple[bytes, str, int, str]:
     """GET with a process-wide cookie jar (an institutional proxy sets a session
-    cookie on its login redirect and expects it on the next request)."""
+    cookie on its login redirect and expects it on the next request). Returns
+    body, content type, the final HTTP status and the final URL after redirects."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
     with _OPENER.open(req, timeout=timeout) as resp:  # noqa: S310 (operator-supplied URL)
         ctype = resp.headers.get("Content-Type", "")
-        return resp.read(), ctype
+        return resp.read(), ctype, int(resp.status), str(resp.geturl())
 
 
 def http_json(url: str) -> dict[str, Any] | None:
     try:
-        body, _ = http_get(url, accept="application/json", timeout=30)
+        body, _, _, _ = http_get(url, accept="application/json", timeout=30)
         return json.loads(body.decode("utf-8", "replace"))
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError, OSError):
         return None
@@ -180,12 +184,15 @@ PAYWALL_RE = re.compile(r"buy (this )?article|purchase (pdf|access)|access throu
 ACCEPT = "text/html,application/pdf,text/plain;q=0.9,*/*;q=0.5"
 
 
-def fetch_via_proxy(url: str) -> tuple[bytes, str]:
+def fetch_via_proxy(url: str) -> tuple[bytes, str, int, str]:
     """Fetch through an EZproxy-style prefix (RESEARCH_PROXY_URL). The first request
     takes the login redirect and collects the session cookie; the second one, with
-    the cookie, is redirected straight to the proxied content."""
+    the cookie, is redirected straight to the proxied content. Every hop's HTTP
+    status and final URL is printed (a worker could not tell a proxied 200 from a
+    hand-off page before 2026-10-09)."""
     prefix = os.environ["RESEARCH_PROXY_URL"]
-    body, ctype = http_get(prefix + url, accept=ACCEPT)
+    body, ctype, status, final = http_get(prefix + url, accept=ACCEPT)
+    print(f"proxy hop: HTTP {status} {final[:140]}", file=sys.stderr)
     for _ in range(2):
         if "pdf" in ctype.lower() or body[:5] == b"%PDF-" or len(body) > 20000:
             break
@@ -196,8 +203,9 @@ def fetch_via_proxy(url: str) -> tuple[bytes, str]:
              or re.search(r"""http-equiv=["']?refresh["']?[^>]*url=([^"'>]+)""", head, re.I))
         if not m:
             break
-        body, ctype = http_get(html.unescape(m.group(1)), accept=ACCEPT)
-    return body, ctype
+        body, ctype, status, final = http_get(html.unescape(m.group(1)), accept=ACCEPT)
+        print(f"proxy hop: HTTP {status} {final[:140]}", file=sys.stderr)
+    return body, ctype, status, final
 
 
 def looks_paywalled(body: bytes, ctype: str, url: str) -> bool:
@@ -218,15 +226,18 @@ def cmd_fetch(source_id: str, url: str, run: Path, via_proxy: bool = False) -> i
     proxied = False
     try:
         if via_proxy and os.environ.get("RESEARCH_PROXY_URL"):
-            body, ctype = fetch_via_proxy(url)
+            body, ctype, status, final = fetch_via_proxy(url)
             proxied = True
         else:
-            body, ctype = http_get(url, accept=ACCEPT)
+            body, ctype, status, final = http_get(url, accept=ACCEPT)
+            print(f"direct: HTTP {status} {final[:140]}", file=sys.stderr)
             if os.environ.get("RESEARCH_PROXY_URL") and looks_paywalled(body, ctype, url):
                 print("direct fetch looks paywalled or empty; retrying through RESEARCH_PROXY_URL", file=sys.stderr)
-                body, ctype = fetch_via_proxy(url)
+                body, ctype, status, final = fetch_via_proxy(url)
                 proxied = True
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+    except urllib.error.HTTPError as exc:
+        die(f"fetch failed: HTTP {exc.code} {exc.reason} for {exc.url}")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
         die(f"fetch failed: {exc}")
     is_pdf = body[:5] == b"%PDF-" or ("pdf" in ctype.lower() and b"<html" not in body[:2000].lower())
     if is_pdf:
@@ -245,10 +256,12 @@ def cmd_fetch(source_id: str, url: str, run: Path, via_proxy: bool = False) -> i
     else:
         raw = body.decode("utf-8", "replace")
         text = html_to_text(raw) if "<" in raw[:2000] and "html" in ctype.lower() or raw.lstrip().lower().startswith(("<!doctype", "<html")) else raw
-    header = f"# source_id: {source_id}\n# url: {url}\n# content_type: {ctype}\n# via_proxy: {'true' if proxied else 'false'}\n\n"
+    header = (f"# source_id: {source_id}\n# url: {url}\n# content_type: {ctype}\n# http_status: {status}\n"
+              f"# final_url: {final}\n# via_proxy: {'true' if proxied else 'false'}\n\n")
     out.write_text(header + text, encoding="utf-8")
     words = len(text.split())
-    print(f"saved {out} ({words} words, {'pdf' if is_pdf else 'text'}{', via proxy: tag the evidence row via-proxy' if proxied else ''})")
+    print(f"saved {out} (HTTP {status}, {words} words, {'pdf' if is_pdf else 'text'}"
+          f"{', via proxy: tag the evidence row via-proxy' if proxied else ''})")
     if words < 50:
         print("warning: very little text extracted; the page may need a browser or a PDF route", file=sys.stderr)
     return 0
@@ -356,7 +369,7 @@ def resolve_doi(doi: str) -> tuple[bool, str]:
 def resolve_arxiv(aid: str) -> tuple[bool, str]:
     aid = re.sub(r"^arxiv:", "", aid, flags=re.I)
     try:
-        body, _ = http_get(f"https://export.arxiv.org/api/query?id_list={urllib.parse.quote(aid)}", accept="application/atom+xml", timeout=30)
+        body, _, _, _ = http_get(f"https://export.arxiv.org/api/query?id_list={urllib.parse.quote(aid)}", accept="application/atom+xml", timeout=30)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
         return False, ""
     text = body.decode("utf-8", "replace")
@@ -416,13 +429,37 @@ def cmd_refs(run: Path) -> int:
     return 0 if failures == 0 else 1
 
 
+# ---------- excerpt rows ----------
+
+EXCERPT_RE = re.compile(r"excerpt|snippet|search[- ]result", re.I)
+
+
+def is_excerpt(run: Path, row: dict[str, Any], cache: dict[str, bool]) -> bool:
+    """A row whose source is a search-result excerpt (kind "excerpt", or a saved
+    source whose `# content_type:` header says so) is a lead, not evidence. Seen
+    2026-10-09: five refuter rows were excerpts and counted toward the gate."""
+    if str(row.get("kind", "")).strip().casefold() == "excerpt":
+        return True
+    sid = str(row.get("source_id", ""))
+    if sid not in cache:
+        path = run / "sources" / f"{sid}.txt"
+        head = path.read_text(encoding="utf-8", errors="replace")[:800] if path.is_file() else ""
+        m = re.search(r"^# content_type:(.*)$", head, re.M)
+        cache[sid] = bool(m and EXCERPT_RE.search(m.group(1)))
+    return cache[sid]
+
+
 # ---------- gate ----------
 
 def cmd_gate(run: Path, min_rows: int, min_families: int) -> int:
-    rows = load_evidence(run)
+    all_rows = load_evidence(run)
+    cache: dict[str, bool] = {}
+    excerpts = [r for r in all_rows if is_excerpt(run, r, cache)]
+    rows = [r for r in all_rows if not is_excerpt(run, r, cache)]
     families = {str(r.get("family", "")).strip().casefold() for r in rows if str(r.get("family", "")).strip()}
     verified = sum(1 for r in rows if r.get("verified_quote") is True)
     print(f"gate: {len(rows)} rows ({verified} with verified quotes), {len(families)} source families; "
+          f"{len(excerpts)} excerpt rows excluded (leads, not evidence); "
           f"need >= {min_rows} rows from >= {min_families} families")
     if len(rows) < min_rows or len(families) < min_families:
         print("gate: THIN — broaden the search or report the gap; do not synthesise around it")
@@ -453,7 +490,12 @@ def cmd_claims(run: Path) -> int:
         problems += 1
     for u in uncited:
         print(f"note: {u} in evidence.jsonl is not cited (drop it from the evidence table)")
-    print(f"claims: {len(cited)} ids cited, {len(missing)} unknown, {len(dupes)} duplicate, {len(uncited)} uncited")
+    cache: dict[str, bool] = {}
+    excerpt_cited = sorted(str(r["id"]) for r in rows if str(r["id"]) in cited and is_excerpt(run, r, cache))
+    for e in excerpt_cited:
+        print(f"note: {e} is an excerpt row (search-result text, page not opened): cite it only as a lead")
+    print(f"claims: {len(cited)} ids cited, {len(missing)} unknown, {len(dupes)} duplicate, {len(uncited)} uncited, "
+          f"{len(excerpt_cited)} excerpt rows cited")
     return 0 if problems == 0 else 1
 
 
