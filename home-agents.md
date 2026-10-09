@@ -222,8 +222,8 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 ## Tools and habits (2026-10-06)
 
 1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
-   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
-   for literal replace (**always `-F`**: else `$name` in the replacement is a capture group; **`sd -F -- FIND REPL`** when either may start with `-`; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`,
+   **literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`** (2026-10-09): FIND spans lines as typed, every occurrence, **exit 1 when nothing matched**, `--dry-run` previews. FIND starting with `-`: the Edit tool, or Python with an assert. **`sd` is retired for edits** (line-by-line without `-A`, exit 0 on no match: it lost an edit on 2026-10-09). `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
    (rtk compacts them). Android greps stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place
