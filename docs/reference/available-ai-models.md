@@ -1,5 +1,10 @@
 # Available AI Models — Complete Flat Table (July 2026)
 
+> **Historical snapshot (July 2026; banner added 2026-10-09, #137 C2.6).** Not
+> authoritative any more: current routing comes from `aiuse --available` and the
+> `model-routing` skill. It predates the 2026-10-06 grok-vendor exclusion and omits
+> agents added since (zcode, Hermes, copilot, cline, qwen, devin).
+
 > **Purpose.** Authoritative catalog of AI model options the operator can reach
 > across every tool/subscription they hold. When a relay baton (or any of my
 > answers) names a "recommended AI", the recommendation is drawn from this
