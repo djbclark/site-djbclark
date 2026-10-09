@@ -118,8 +118,8 @@ cannot see; no probe loops). Detail: [[reference_agent_rules_aiuse_quota_and_agy
 ## Basic Memory — shared pool vs private pools (2026-10-03)
 
 One shared MCP server (`http://127.0.0.1:18796/mcp`). Only Claude Code, Codex,
-Antigravity (interactive) and Hermes can call it; **zcode, opencode, Cursor and
-crush cannot** (Cursor: the `bm` CLI). Never register a per-client stdio
+Antigravity (interactive) and Hermes can call it; **zcode, opencode and Cursor
+cannot** (Cursor: the `bm` CLI). Never register a per-client stdio
 `basic-memory mcp`. **If it is down, fix it** (`todo` skill), then `/mcp` →
 reconnect. Tools take a `project`: **`main`** is the shared default
 (`~/ops/site-private/memory`, git-tracked); `<agent>-memory` is that agent's
@@ -258,7 +258,7 @@ Binary names do not match `aiuse`/Orca provider ids: antigravity → `agy`
 zai → `zcode`, opencode-go → `opencode`, cursor → `cursor-agent`,
 copilot → `copilot` (if it misbehaves run `copilot-fix-writer-lock`),
 codex/claude match; **gemini is deprecated and not installed**. **No ACP:**
-zcode, crush, muse; every other agent speaks it (`acp-run --list`).
+zcode, muse; every other agent speaks it (`acp-run --list`).
 
 **Pick the delegation route in this order:** (1) one-shot/headless to an
 ACP-capable agent: **`acp-run`** (`acp-run <agent> -C <dir> -p '<prompt>' --model

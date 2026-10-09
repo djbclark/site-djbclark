@@ -3,7 +3,7 @@
 README for [`skill-everywhere`](skill-everywhere) (this directory; reached as
 `~/ops/site-private/bin/skill-everywhere`). It makes a local skill available to
 every agent TUI on this machine (Claude Code, Codex, Copilot, Cursor, opencode,
-zcode, Grok, Qwen, crush, Devin, Cline, Muse, Antigravity and Hermes) by
+zcode, Grok, Qwen, Devin, Cline, Muse, Antigravity and Hermes) by
 symlinking it into each one's skills dir, and this page says how to prove each
 TUI actually loads it. Until 2026-10-08 this was the `skill-everywhere` skill;
 it was demoted to a README because it is needed only when adding a skill, and
@@ -50,7 +50,6 @@ after the directory is gone: it removes only links whose target is exactly
 | Copilot (`copilot`) | `~/.copilot/skills` |
 | opencode (`opencode`) | `~/.config/opencode/skills` |
 | Qwen Code (`qwen`) | `~/.qwen/skills` |
-| crush (`crush`) | `~/.config/crush/skills` |
 | Devin (`devin`) | `~/.config/devin/skills` |
 | Cline (`cline`) | `~/.cline/skills` |
 | Hermes (`hermes`) | `~/.local/share/skill-everywhere/skills`, which Hermes put in its own `skills.external_dirs` |

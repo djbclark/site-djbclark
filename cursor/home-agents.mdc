@@ -161,7 +161,7 @@ app), copilot → `copilot` (if it misbehaves, run `copilot-fix-writer-lock`).
 codex/claude binaries match their names. Native
 [Agent Client Protocol](https://agentclientprotocol.com/) mode: copilot,
 opencode, cursor, qwen, devin, cline, hermes; Claude Code and Codex via
-adapters. No working ACP route: zcode, crush, muse (grok TUI works via `grok agent stdio`; agy works via `acp-run agy`).
+adapters. No working ACP route: zcode, muse (grok TUI works via `grok agent stdio`; agy works via `acp-run agy`).
 
 Delegating to another agent CLI, in this order: (1) one-shot or headless work
 for an ACP-capable agent goes through `~/ops/site-private/bin/acp-run <agent> -C

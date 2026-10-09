@@ -516,7 +516,7 @@ PLAN_SEED: list[tuple[str, float | None, str, str]] = [
      "Individual Pro. Official clients only; third-party use violates ToS."),
     ("cursor", 20.0, "IDE composer sessions", "Cursor Pro."),
     ("grok", 30.0, "SuperGrok; non-interactive farming via grok --single", ""),
-    ("zai", 18.0, "cheap bulk via crush TUI", "GLM coding plan, Lite tier."),
+    ("zai", 18.0, "cheap bulk via zcode TUI", "GLM coding plan, Lite tier."),
     ("clinepass", 9.99, "the API pool Hermes actually runs on",
      "Open-weight bundle. Load-bearing for Hermes — see the burn alert."),
     ("devin", 0.0, "autonomous ACU-based agent",

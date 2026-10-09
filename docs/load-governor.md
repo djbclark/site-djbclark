@@ -72,7 +72,7 @@ of argv0, plus the first non-flag argument when argv0 is an interpreter such as 
 python, so `node .../codex.js exec pytest` is `node` + `codex.js`) with `fullmatch`, so a
 test file called `test_claude.py` is not denied but `claude` is. Denied by name: WindowServer,
 Finder, Dock, launchd, kernel_task, system daemons, every agent TUI (claude, codex,
-copilot, cursor-agent, opencode, hermes, crush, muse, agy, zcode, grok), Orca, Ghostty,
+copilot, cursor-agent, opencode, hermes, muse, agy, zcode, grok), Orca, Ghostty,
 CodexBar, OpenUsage, the governor itself, shells, tmux, ssh, terminals, browsers. Denied by
 command line: any `.app/Contents/MacOS/` executable (a GUI app is interactive) **except**
 framework Python, whose real binary is `Python.app/Contents/MacOS/Python` and which is how

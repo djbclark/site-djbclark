@@ -324,7 +324,7 @@ Not adopted. The SQLite Level 4 baseline it was to be measured against is built 
 **Adopted 2026-09-30** as the memory search service for agent memory, reversing this plan's original presumptive rejection (which assumed Link would hold the Markdown-memory role). Facts, from `roles/basic_memory_mcp/README.md`:
 
 - One shared `basic-memory` MCP server per machine over streamable HTTP on loopback, `http://127.0.0.1:18796/mcp`, replacing one stdio copy per agent session (13 stdio copies measured at about 2.6 GB physical footprint on 2026-09-26). Rendered and supervised by the Ansible role `roles/basic_memory_mcp` (`just basic-memory-mcp-apply` / `-check` / `-status`); log under `~/Library/Logs/basic-memory-mcp/`.
-- The `main` project is `~/ops/site-private/memory`. Clients point at the URL (`~/.claude.json` `mcpServers.basic-memory` as an `http` entry; crush via `mcp add basic-memory --type http --url …`).
+- The `main` project is `~/ops/site-private/memory`. Clients point at the URL (`~/.claude.json` `mcpServers.basic-memory` as an `http` entry).
 - Three settings in `~/.basic-memory/config.json`, which the role does not render, are load-bearing: `ensure_frontmatter_on_sync: false`, `disable_permalinks: true`, `auto_update: false`. With either of the first two at its default, indexing rewrites tracked memory files. After any Basic Memory upgrade or config change, check `git -C ~/ops/site-private status --short` shows no modified files.
 
 Under this architecture Basic Memory is an S3 projection over S2: its index is rebuildable from the Markdown and holds no exclusive copy of user data.

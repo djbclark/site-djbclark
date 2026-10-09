@@ -273,7 +273,7 @@ the ones that change how you call them:
 | 10 | Cold token-savior use needed the network | **No longer applies** — the embedding model went with `[memory-vector]`. Indexing is pure tree-sitter now, so a cold repo is offline-safe. |
 
 Corroboration for defect 2 arrived by accident: asked for `main` in stayturgid,
-token-savior answered `native_agent_config.py:135-174` from crush and
+token-savior answered `native_agent_config.py:135-174` from one TUI and
 `android_intent.py:98-147` from Claude Code — two different single answers to the
 same question about the same repo, neither flagged as one of many.
 
@@ -323,7 +323,6 @@ agy           mcp add token-savior                 /Users/djbclark/.local/bin/to
 Hand-edited, because they have no add subcommand or it is broken:
 `cursor-agent` (`~/.cursor/mcp.json`, then `cursor-agent mcp enable token-savior`),
 `zcode` (`~/.zcode/cli/setting.json`, under `mcp.servers`),
-`crush` (`~/.config/crush/crushrc`, an `mcp add …` DSL line),
 `qwen` (`~/.qwen/settings.json`, `mcpServers` — the key did not exist before),
 `copilot` (`~/.copilot/mcp-config.json`, `"type": "local"` — its own
 `mcp add` *and* `mcp list` both fail with "The shared writer lock or its directory
@@ -366,10 +365,8 @@ access** — the token-savior entry is correct and will start working when the b
 is, but do not route MCP-dependent work there, and do not assume opencode can
 reach the shared Basic Memory pool.
 
-**End-to-end proven in four non-Claude hosts.**
+**End-to-end proven in three non-Claude hosts.**
 
-- `crush run "use find_symbol with name=main"` in stayturgid returned a correct
-  `@F:…@S:main@L:135-174` line.
 - `codex exec` (2026-10-03 10:41, after its quota reset) logged
   `mcp: token-savior/find_symbol (completed)` and returned
   `@F:…/adb_shell.py @S:adb_shell @L:40-41` — byte-identical to the span graft
@@ -382,8 +379,8 @@ reach the shared Basic Memory pool.
   its `mcp list` was unblocked (below). `copilot mcp list` confirms
   `token-savior (local)` alongside `basic-memory`.
 
-So all twelve CLIs are registered and four of the non-Claude ones are proven at
-the tool-call level, with Hermes proven at the handshake level.
+So all eleven CLIs are registered and codex and copilot are proven at the
+tool-call level, with Hermes proven at the handshake level.
 
 **The copilot lock bug, and its fix.** Every `copilot mcp` subcommand was failing
 with "The shared writer lock or its directory changed", which is why copilot was
@@ -395,12 +392,6 @@ gone stale — the file said `16777232` while `stat -f '%d' ~/.copilot` reported
 immediately. It also appears to have been what broke copilot's headless `-p`
 mode, which worked on the first try afterwards — so the long-standing "prefer
 codex for headless" note in `home-agents.md` has been withdrawn.
-
-**`crushrc`, not `crush.json`, is crush's live config here** — settled by ablation:
-with the `mcp` block removed from `crush.json`, crush still advertised
-`find_dead_code`, `find_semantic_duplicates`, `find_symbol`. So the `mcp add …`
-DSL lines in `~/.config/crush/crushrc` are what crush reads, `crush.json` is left
-holding only `permissions`, and there is one source of truth rather than two.
 
 `token-savior-mcp` is a launcher in
 [`site-private/bin/`](https://github.com/djbclark/site-private/blob/master/bin/token-savior-mcp),

@@ -73,7 +73,7 @@ DEFAULT_DENY_NAMES = [
     r"kernel_task|launchd|launchservicesd|logd|WindowServer|loginwindow|Finder|Dock|SystemUIServer|ControlCenter",
     r"mds|mds_stores|mdworker.*|trustd|syspolicyd|coreaudiod|bluetoothd|powerd|notifyd|distnoted|cfprefsd|backupd",
     r"claude(-agent-acp|\.js|\.exe)?|codex(-acp|\.js|\.mjs)?|copilot(\.js)?|cursor-agent|cursor(-agent)?\.js|opencode|hermes(\.py)?",
-    r"crush|muse|agy|agy_acp_server.*|zcode.*|grok.*",
+    r"muse|agy|agy_acp_server.*|zcode.*|grok.*",
     r"Orca.*|orca(-cli)?|Ghostty|ghostty|CodexBar|OpenUsage|openusage.*",
     r"load-governor|aiuse.*",
     r"bash|zsh|sh|fish|dash|login|tmux|screen|herdr|ssh|sshd|sudo|su|Terminal|iTerm2|Safari|Google Chrome.*|Slack.*|Electron.*",

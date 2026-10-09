@@ -649,7 +649,6 @@ __agent_default_opts() {
   else command "$cmd" "${defaults[@]}" "$@"; fi
 }
 qwen()  { __agent_default_opts qwen  "--yolo -y --approval-mode"       --yolo -- "$@"; }
-crush() { __agent_default_opts crush "--yolo -y"                       --yolo -- "$@"; }
 aider() { __agent_default_opts aider "--yes-always --no-yes-always"    --yes-always -- "$@"; }
 devin() { __agent_default_opts devin "--permission-mode"               --permission-mode dangerous -- "$@"; }
 # cline: --yolo is a ONE-SHOT mode (exits after the turn), so the interactive
