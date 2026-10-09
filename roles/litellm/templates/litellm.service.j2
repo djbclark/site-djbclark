@@ -31,10 +31,13 @@ Environment=CLINEPASS_API_KEY={{ litellm_clinepass_api_key | replace('\\', '\\\\
 {% endif %}
 {% if litellm_gemini_api_key | length > 0 %}
 Environment=GEMINI_API_KEY={{ litellm_gemini_api_key | replace('\\', '\\\\') | replace('"', '\\"') }}
+{% endif %}
+{# Not nested in the Gemini block: before 2026-10-09 it was, so a host with no
+   Gemini key got no LITELLM_MASTER_KEY and master_key resolved to nothing,
+   which turns proxy auth off. #}
 {% if litellm_db_enabled | bool %}
 Environment=LITELLM_MASTER_KEY={{ litellm_master_key | replace('\\', '\\\\') | replace('"', '\\"') }}
 Environment=DATABASE_URL={{ litellm_database_url | trim }}
-{% endif %}
 {% endif %}
 
 [Install]
