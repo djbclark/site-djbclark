@@ -33,8 +33,9 @@ at once: check what reads a file first, keep commits small, prefer a quick rever
 
 **Data, committed in place:** `site-private/memory/` and `site-djbclark/research/`
 (**site-djbclark is public** — nothing private under `research/`). Memory: one
-fact per file, append to `MEMORY.md` (never rewrite it), `git pull --rebase`,
-commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
+fact per file, `git pull --rebase` *before* editing (it refuses once your edit is
+unstaged; if you already edited, commit first, then pull), append to `MEMORY.md`
+(never rewrite it), commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
 or hand-edit the generated `memory/codex/` summaries. **If another agent has
 unstaged edits in the checkout,** never stash, add or reset their files, and never `commit -a` (stage exact paths): `git
 fetch`; if only ahead, plain `git push`; if behind, wait or ask.
