@@ -212,7 +212,9 @@ copy). Ours: `bigteam` (fan-out across vendors by quota pool),
 decide message / `/baton` / resume / clean agent after a `fleet.py conflicts` check;
 `/session-finder-all` adds ended sessions and handoffs), `helm` (answer every waiting
 session of every TUI from one window, ranked by work unlocked; `/helm-all` adds ended
-sessions with open work); new sessions start over ACP via `launch.py` (2026-10-08).
+sessions with open work, closed panes, sleeping panes that are gone), `herdr-tidy`
+(close idle herdr panes safely, every TUI and Hermes, with a resume ledger; fails
+closed), `autorename`; new sessions start over ACP via `launch.py` (2026-10-08).
 Tool-managed, not in git: `orchestration`, `herdr`,
 `orca-per-workspace-env`. `/orc`, `/orc-meta`: commands in
 `site-private/claude/commands/`. Sub-agents `adversary`/`backend`/`ux`/

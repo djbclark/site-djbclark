@@ -301,8 +301,10 @@ reaches them via the `skill-everywhere` script (README beside it; edit the git c
 `tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; decides
 message / `/baton` / resume / clean agent; `/session-finder-all` adds ended sessions),
 `helm` (answer every waiting session of every TUI from one window; `/helm-all` adds
-ended sessions with open work). New sessions start over ACP via `launch.py`. Full
-list: [[reference_agent_rules_multi_agent_toolkit]].
+ended sessions with open work, closed panes and sleeping panes that are gone),
+`herdr-tidy` (close idle herdr panes safely, every TUI and Hermes; ledger + resume
+command; fails closed), `autorename`. New sessions start over ACP via `launch.py`.
+Full list: [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (standing rule, 2026-10-03)
 
