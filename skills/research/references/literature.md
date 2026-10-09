@@ -87,10 +87,12 @@ from its introduction citing another paper.
    web connector) are fine for triage; the evidence row still needs the
    opened text.
 6. **Institutional access.** If `RESEARCH_PROXY_URL` is set (an EZproxy-style
-   prefix such as `https://proxy.example.edu/login?url=`), workers may try
-   `${RESEARCH_PROXY_URL}<article-url>` after the open-access ladder
-   (Unpaywall, PMC, arXiv, publisher OA) fails, and tag the row
-   `via-proxy`. Never store credentials in the run folder; never put
+   prefix such as `https://proxy.example.edu/login?url=`), the `fetch`
+   subcommand retries a page that looks paywalled through the proxy
+   (`--via-proxy` forces it), keeping the proxy's session cookie across its
+   redirect chain, and writes `via_proxy: true` into the saved header; tag
+   the evidence row `via-proxy`. Use it only after the open-access ladder
+   (Unpaywall, PMC, arXiv, publisher OA) fails. Never store credentials in the run folder; never put
    institution-specific recipes in this public file. Two cautions: a VPN
    that egresses through a cloud gateway may not present the institution's
    address to publishers, so confirm with an "Access provided by …" banner

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Mechanical checks for a `research` run folder. Standard library only.
 
-    research_check.py fetch  <source_id> <url> <run>   save sources/<source_id>.txt
+    research_check.py fetch  <source_id> <url> <run> [--via-proxy]
+                                                       save sources/<source_id>.txt; with RESEARCH_PROXY_URL set
+                                                       (EZproxy-style prefix) a paywalled page is retried via the proxy
     research_check.py quotes <run> [--no-update]        every quote occurs in its saved source
     research_check.py numbers <run>                     every number in report.md occurs in some quote
     research_check.py refs   <run>                      DOI / arXiv / PMID resolve; titles match
@@ -16,6 +18,7 @@ check: it proves a figure was quoted somewhere, not that it is right.
 from __future__ import annotations
 
 import html
+import http.cookiejar
 import json
 import os
 import re
@@ -138,9 +141,15 @@ def html_to_text(raw: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+_COOKIES = http.cookiejar.CookieJar()
+_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_COOKIES))
+
+
 def http_get(url: str, accept: str = "*/*", timeout: int = 60) -> tuple[bytes, str]:
+    """GET with a process-wide cookie jar (an institutional proxy sets a session
+    cookie on its login redirect and expects it on the next request)."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (operator-supplied URL)
+    with _OPENER.open(req, timeout=timeout) as resp:  # noqa: S310 (operator-supplied URL)
         ctype = resp.headers.get("Content-Type", "")
         return resp.read(), ctype
 
@@ -167,17 +176,59 @@ def titles_match(a: str, b: str) -> bool:
 
 # ---------- fetch ----------
 
-def cmd_fetch(source_id: str, url: str, run: Path) -> int:
+PAYWALL_RE = re.compile(r"buy (this )?article|purchase (pdf|access)|access through your institution|get access|rent this article", re.I)
+ACCEPT = "text/html,application/pdf,text/plain;q=0.9,*/*;q=0.5"
+
+
+def fetch_via_proxy(url: str) -> tuple[bytes, str]:
+    """Fetch through an EZproxy-style prefix (RESEARCH_PROXY_URL). The first request
+    takes the login redirect and collects the session cookie; the second one, with
+    the cookie, is redirected straight to the proxied content."""
+    prefix = os.environ["RESEARCH_PROXY_URL"]
+    body, ctype = http_get(prefix + url, accept=ACCEPT)
+    for _ in range(2):
+        if "pdf" in ctype.lower() or body[:5] == b"%PDF-" or len(body) > 20000:
+            break
+        # A small HTML hand-off page: EZproxy's /connect sets the session cookie and
+        # sends the browser on with a JS `location = '<proxied url>'` or a meta refresh.
+        head = body[:4000].decode("utf-8", "replace")
+        m = (re.search(r"""location(?:\.href)?\s*=\s*["']([^"']+)["']""", head, re.I)
+             or re.search(r"""http-equiv=["']?refresh["']?[^>]*url=([^"'>]+)""", head, re.I))
+        if not m:
+            break
+        body, ctype = http_get(html.unescape(m.group(1)), accept=ACCEPT)
+    return body, ctype
+
+
+def looks_paywalled(body: bytes, ctype: str, url: str) -> bool:
+    if "pdf" in ctype.lower() or body[:5] == b"%PDF-":
+        return False
+    text = body.decode("utf-8", "replace")
+    if url.lower().endswith(".pdf"):
+        return True
+    return bool(PAYWALL_RE.search(text)) or len(html_to_text(text).split()) < 200
+
+
+def cmd_fetch(source_id: str, url: str, run: Path, via_proxy: bool = False) -> int:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", source_id):
         die("source_id must be [A-Za-z0-9_.-]+")
     out_dir = run / "sources"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{source_id}.txt"
+    proxied = False
     try:
-        body, ctype = http_get(url, accept="text/html,application/pdf,text/plain;q=0.9,*/*;q=0.5")
+        if via_proxy and os.environ.get("RESEARCH_PROXY_URL"):
+            body, ctype = fetch_via_proxy(url)
+            proxied = True
+        else:
+            body, ctype = http_get(url, accept=ACCEPT)
+            if os.environ.get("RESEARCH_PROXY_URL") and looks_paywalled(body, ctype, url):
+                print("direct fetch looks paywalled or empty; retrying through RESEARCH_PROXY_URL", file=sys.stderr)
+                body, ctype = fetch_via_proxy(url)
+                proxied = True
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
         die(f"fetch failed: {exc}")
-    is_pdf = "pdf" in ctype.lower() or body[:5] == b"%PDF-" or url.lower().endswith(".pdf")
+    is_pdf = body[:5] == b"%PDF-" or ("pdf" in ctype.lower() and b"<html" not in body[:2000].lower())
     if is_pdf:
         tool = shutil.which("pdftotext")
         if not tool:
@@ -194,10 +245,10 @@ def cmd_fetch(source_id: str, url: str, run: Path) -> int:
     else:
         raw = body.decode("utf-8", "replace")
         text = html_to_text(raw) if "<" in raw[:2000] and "html" in ctype.lower() or raw.lstrip().lower().startswith(("<!doctype", "<html")) else raw
-    header = f"# source_id: {source_id}\n# url: {url}\n# content_type: {ctype}\n\n"
+    header = f"# source_id: {source_id}\n# url: {url}\n# content_type: {ctype}\n# via_proxy: {'true' if proxied else 'false'}\n\n"
     out.write_text(header + text, encoding="utf-8")
     words = len(text.split())
-    print(f"saved {out} ({words} words, {'pdf' if is_pdf else 'text'})")
+    print(f"saved {out} ({words} words, {'pdf' if is_pdf else 'text'}{', via proxy: tag the evidence row via-proxy' if proxied else ''})")
     if words < 50:
         print("warning: very little text extracted; the page may need a browser or a PDF route", file=sys.stderr)
     return 0
@@ -425,8 +476,8 @@ def main(argv: list[str]) -> int:
 
     if sub == "fetch":
         if len(pos) != 3:
-            die("usage: fetch <source_id> <url> <run>")
-        return cmd_fetch(pos[0], pos[1], Path(pos[2]))
+            die("usage: fetch <source_id> <url> <run> [--via-proxy]")
+        return cmd_fetch(pos[0], pos[1], Path(pos[2]), via_proxy="--via-proxy" in flags)
     if len(pos) != 1:
         die(f"usage: {sub} <run>")
     run = Path(pos[0])
