@@ -74,7 +74,10 @@ takes `--print-timeout`), no probe loops, ~60 requests/hour, Opus-high sparingly
 if one client 429s, try the other. State moves within a
 session: re-probe before each batch and preflight with one trivial call. Run each
 delegated call as a foreground command in its own `run_in_background: true` Bash
-call (no trailing `&`; never wait with `pgrep -f`, it matches itself). Use
+call (no trailing `&`; never wait with `pgrep -f`, it matches itself). An
+Agent-tool sub-agent is never woken by a background task's completion notice
+(2026-10-08), so inside one the wait is a repeated bounded foreground call, never
+an ended turn. Use
 `aiuse --available [--live]` (usable pools only, one line per vendor and model
 family, from the cache; exit 3 = nothing usable). After a real 429, run `aiuse note-exhausted <provider>
 [--family F] --resets-in 4h53m` so the next agent skips that pool. Detail:

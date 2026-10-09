@@ -135,6 +135,9 @@ Detail: [[reference_agent_rules_basic_memory_pools]].
 waits, agent dispatches) **starts with `run_in_background: true`** — don't make
 djbclark press ctrl-b. Wait on the notification, never poll; kill strays you
 started. Short commands stay foreground.
+**Exception: an Agent-tool sub-agent** is never woken by that notification
+(it arrives only with the next inbound message, 2026-10-08), so it holds the
+wait in repeated bounded foreground calls instead of ending its turn.
 (`memory/feedback_start_slow_commands_in_background.md`)
 **Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`).
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
