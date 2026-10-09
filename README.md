@@ -16,7 +16,7 @@ and
 
 | Where                                                            | What                                                                                                                                                                |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/relay/NEXT-PROMPT.md`                                      | **Start here to continue the work** — the baton: which AI to use and the exact prompt to paste ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md)) |
+| `docs/relay/NEXT-PROMPT.md`                                      | Closed relay baton (CHAIN-COMPLETE 2026-07-20; historical record, not current state) ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md))          |
 | `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` | Architecture + decision log (2026-07-18)                                                                                                                            |
 | `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`     | Phased execution plan: steps, difficulty, AI routing, risk register                                                                                                 |
 | `docs/plans/site-djbclark-step0-plan-v1.md`                      | Initial AI-stack plan (see amendment header)                                                                                                                        |

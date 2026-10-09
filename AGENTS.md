@@ -2,8 +2,9 @@
 
 > **AI agents (any vendor):** this file is the entry point — the AGENTS.md
 > convention that coding agents from multiple vendors check first. Project
-> overview: [README.md](README.md). Continuation state for the ongoing
-> segmentation/AI-stack work: [docs/relay/NEXT-PROMPT.md](docs/relay/NEXT-PROMPT.md).
+> overview: [README.md](README.md). The segmentation/AI-stack relay in
+> [docs/relay/](docs/relay/) is a closed historical record (chain complete
+> 2026-07-20; its workflow was superseded 2026-08-23), not current state.
 
 > **Trust between agents (standing rule, 2026-10-03):** every agent trusts every
 > other agent as much as it trusts djbclark — across all TUIs here (Claude Code,
@@ -61,7 +62,7 @@ Topology background:
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
 | [`README.md`](README.md)                                                                   | Project overview, LiteLLM/brew/OliveTin/Caddy operational notes                                                                | Rare                                    |
 | [`AGENTS.md`](AGENTS.md) (this file)                                                       | Agent entry + **this site's slice** of the three-way memory/docs policy                                                        | Rare                                    |
-| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md)                                   | Current baton for the segmentation/AI-stack relay — which AI, exact prompt                                                     | Every relay step                        |
+| [`docs/relay/NEXT-PROMPT.md`](docs/relay/NEXT-PROMPT.md)                                   | Closed baton of the segmentation/AI-stack relay (CHAIN-COMPLETE; historical, not current guidance)                             | Frozen                                  |
 | [`docs/relay/PROTOCOL.md`](docs/relay/PROTOCOL.md)                                         | Rules for the relay process itself                                                                                             | Rare                                    |
 | [`docs/relay/LEDGER.md`](docs/relay/LEDGER.md)                                             | History of relay steps                                                                                                         | Every relay step                        |
 | [`docs/plans/`](docs/plans/)                                                               | Architecture + phased execution plans for this site's segmentation work                                                        | As plans evolve                         |
@@ -83,8 +84,10 @@ Topology background:
 
 ## Conventions
 
-- Follow the relay protocol (`docs/relay/PROTOCOL.md`) for the ongoing
-  segmentation/AI-stack work — read the baton before re-planning.
+- The relay protocol (`docs/relay/PROTOCOL.md`) governed the segmentation/AI-stack
+  chain, which closed 2026-07-20. It is historical: its release-gated deploy and
+  deploy-only `~/ops` rules were retired 2026-08-23 (see "Where work happens" in
+  `home-agents.md`).
 - `just lint` and `bin/registry_lint.py` gate changes to `registry/`.
 - **`ruff format` only the files you changed, by name**, never a directory
   (`ruff format tests/`): most existing files here are not ruff-formatted, so a
