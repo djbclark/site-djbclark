@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # site-djbclark — brew-fast-upgrade maintenance script
-# Upgrades Homebrew packages and globally-installed npm packages under
+# Upgrades Homebrew packages and globally-installed npm packages (both the
+# user ~/.local npm tree and Homebrew's own) under
 # exclusive site advisory lock (Phase F4); zcode-app-cli is always pulled
 # to @latest each run (it ships several builds a day). Retries a bounded
 # number of times
@@ -227,55 +228,90 @@ restart_stale_brew_services() {
   return "$rc"
 }
 
-# Outdated globally-installed npm package names, one per line (empty when
-# clean, or when npm/jq isn't available on this host).
+# npm binaries whose global trees this script manages, one per line,
+# deduped: the user-prefix npm (~/.local — hermes-managed, holds
+# zcode-app-cli, the ACP servers and friends) and Homebrew's own npm
+# (/opt/homebrew — cline, bailian-cli and friends). The trimmed script
+# PATH resolves bare `npm` to Homebrew's, so callers must pass one of
+# these explicitly or they silently manage only the Homebrew tree (which
+# is exactly what happened before 2026-10-10: the ~/.local agent CLIs
+# were never upgraded by this script).
+npm_global_bins() {
+  local bin seen=""
+  for bin in "$HOME/.local/bin/npm" "$(command -v npm 2>/dev/null || true)"; do
+    [ -n "$bin" ] && [ -x "$bin" ] || continue
+    [ "$bin" = "$seen" ] && continue
+    echo "$bin"
+    seen="$bin"
+  done
+}
+
+# Outdated globally-installed npm package names for the npm binary passed
+# as $1, one per line (empty when clean, or when npm/jq isn't available).
 npm_outdated_globals() {
-  command -v npm >/dev/null 2>&1 || return 0
+  local npm_bin="${1:-npm}"
+  command -v "$npm_bin" >/dev/null 2>&1 || return 0
   if ! command -v jq >/dev/null 2>&1; then
     echo "[brew-fast-upgrade] jq not found; skipping npm global upgrade check." >&2
     return 0
   fi
-  # `npm` lists itself here whenever the npm that ~/.local/bin/npm symlinks
-  # to (hermes-managed, under ~/.hermes/node) is behind latest; installing
-  # it into the ~/.local prefix then fails against the hand-managed bin
-  # symlinks (observed 2026-10-08/09 nightly logs). node+npm are hermes's
-  # to manage, so never chase npm itself.
-  npm outdated -g --json 2>/dev/null | jq -r 'keys[]? | select(. != "npm")'
+  # Never chase `npm` itself: Homebrew's tree is owned by the node formula
+  # (self-install dies against its EEXIST bin symlinks), and the user
+  # tree's npm is a hermes-managed symlink (both observed failing in the
+  # 2026-10-08/09 nightly logs).
+  "$npm_bin" outdated -g --json 2>/dev/null | jq -r 'keys[]? | select(. != "npm")'
 }
 
 run_npm_pass() {
-  local pkgs=("zcode-app-cli@latest")
-  local pkg
+  local npm_bin pkg rc=0 ran=0
+  local pkgs
 
-  command -v npm >/dev/null 2>&1 || {
+  while IFS= read -r npm_bin; do
+    ran=1
+    pkgs=()
+    # zcode-app-cli ships several builds a day; pin @latest every run in the
+    # user tree only (a fast no-op when already current). Pinning it in
+    # Homebrew's tree would fork a second install whose
+    # /opt/homebrew/bin/zcode symlink can shadow ~/.local/bin/zcode in
+    # daemon PATHs (stray created and removed 2026-10-10).
+    if [ "$npm_bin" = "$HOME/.local/bin/npm" ]; then
+      pkgs=("zcode-app-cli@latest")
+    fi
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] && [ "$pkg" != "zcode-app-cli" ] && pkgs+=("${pkg}@latest")
+    done < <(npm_outdated_globals "$npm_bin")
+
+    if [ "${#pkgs[@]}" -eq 0 ]; then
+      echo "[brew-fast-upgrade] npm globals ($npm_bin): nothing to upgrade."
+      continue
+    fi
+
+    # One batched install call per tree avoids per-package npm startup
+    # overhead. (Not bun: `bun add -g` installs into its own ~/.bun tree,
+    # ignoring npm prefixes, so it would fork both trees this manages.)
+    echo "[brew-fast-upgrade] npm globals ($npm_bin): upgrading ${pkgs[*]}"
+    if ! "$npm_bin" install -g "${pkgs[@]}"; then
+      echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
+      rc=1
+    fi
+  done < <(npm_global_bins)
+
+  if [ "$ran" -eq 0 ]; then
     echo "[brew-fast-upgrade] npm globals: npm not installed; skipping."
     return 0
-  }
-
-  # zcode-app-cli ships several builds a day; always request @latest so each
-  # run lands on the newest build even when the outdated probe raced a
-  # publish (npm treats an already-current pin as a fast no-op), then add
-  # every other outdated global.
-  while IFS= read -r pkg; do
-    [ -n "$pkg" ] && [ "$pkg" != "zcode-app-cli" ] && pkgs+=("${pkg}@latest")
-  done < <(npm_outdated_globals)
-
-  # One batched install call avoids per-package npm startup overhead. (Not
-  # bun: `bun add -g` installs into its own ~/.bun tree, ignoring npm's
-  # prefix, so it would fork the ~/.local global tree this manages.)
-  echo "[brew-fast-upgrade] npm globals: upgrading ${pkgs[*]}"
-  if ! npm install -g "${pkgs[@]}"; then
-    echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
-    return 1
   fi
+  return "$rc"
 }
 
 # A successful brew/npm invocation is not enough: confirm nothing non-pinned
 # is still outdated. Prints what remains when verification fails.
 verify_clean() {
-  local brew_remaining npm_remaining
+  local brew_remaining npm_remaining npm_bin
   brew_remaining="$(brew_remaining_outdated)"
-  npm_remaining="$(npm_outdated_globals)"
+  npm_remaining=""
+  while IFS= read -r npm_bin; do
+    npm_remaining+="$(npm_outdated_globals "$npm_bin")"
+  done < <(npm_global_bins)
 
   if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ]; then
     echo "[brew-fast-upgrade] outdated items remain:"
@@ -320,7 +356,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass restart_stale_brew_services npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass restart_stale_brew_services npm_global_bins npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
