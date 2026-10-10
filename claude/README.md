@@ -36,7 +36,9 @@ is registered and matches this mirror.
 
 ## Custom commands and subagents (2026-09-30)
 
-`claude/agents/fable-deep.md` is the canonical copy; `~/.claude/agents/*.md`
-are symlinks to the files here. `claude/commands/{orc,orc-meta}.md` (and the
-other orchestration command wrappers) are themselves symlinks into
+`claude/agents/fable-deep.md` is the canonical copy; `~/.claude/commands/*.md`
+and `~/.claude/agents/*.md` are symlinks to the files here (same
+distribute-and-symlink pattern as `skills/`). The orchestration command
+wrappers in `claude/commands/` (`helm-all`, `herdr-tidy`, `resume`,
+`session-finder-all`) are themselves symlinks into
 `~/src/djbclark-ade/claude/commands/` since 2026-10-08; edit them there.

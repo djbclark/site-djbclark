@@ -198,13 +198,13 @@ were left alone. New work uses the `site-djbclark` path.
    there): a regular file outside its private list is rejected.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,
    ignored. Never copy it here.
-5. **Moved on to djbclark-ade (2026-10-08).** The 13 orchestration and
+5. **Moved on to djbclark-ade (2026-10-08).** The orchestration and
    session-hygiene skills (`bigteam`, `model-routing`, `effort-routing`,
-   `helm`, `session-finder`, `herdr-orchestration`,
+   `helm`, `session-finder`,
    `ralph-tui-orchestration`, `cow-workspaces`, `handoff`, `baton`,
    `session-handoff`, `steps`, `loose`; later `autorename` and `herdr-tidy`),
    `tools/acp-run`, `bin/fleet-watch`
-   and `claude/commands/` (`orc`, `orc-meta` and the `helm-all`,
+   and `claude/commands/` (the `helm-all`,
    `session-finder-all`, `resume` wrappers) now live in git at
    `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade). Their paths here
    are absolute symlinks into it; edit them there. Their history up to the
@@ -212,7 +212,9 @@ were left alone. New work uses the `site-djbclark` path.
    `helm-all` into `helm` and `session-finder-all` into `session-finder`
    (the old names are now command wrappers only), and `skill-everywhere`
    became `bin/skill-everywhere.md` beside the script; their skill links
-   are gone (`skills/README.md`).
+   are gone (`skills/README.md`). On 2026-10-09 `herdr-orchestration`,
+   `/orc` and `/orc-meta` were retired; their live knowledge was ported into
+   the djbclark-ade skills.
 
 ## Herdr helper tools (2026-10-08)
 

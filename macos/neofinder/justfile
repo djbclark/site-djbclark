@@ -1,0 +1,103 @@
+# NeoFinder -> Spotlight: install and manage every piece (README.md).
+# Every recipe is idempotent: `just install` can run any number of times and
+# only changes what differs (Touch ID only when the root-owned part changed).
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+here := justfile_directory()
+repo := here / ".." / ".."
+python := "/opt/homebrew/bin/python3.12"
+exporter := here / "neofinder-stub-export.py"
+batch := here / "neofinder-spotlight-batch.sh"
+services := here / ".." / "sip-doit-with-sudo.sh"
+applier := "/usr/local/libexec/neofinder-spotlight-index"
+image := env_var_or_default("NEOFINDER_IMAGE", env_var("HOME") / "nfbatch.sparseimage")
+mount := "/Volumes/NeoFinderBatch"
+saved := env_var("HOME") / "Library/Saved Searches/NF Recents.savedSearch"
+
+default:
+    @just --list --unsorted
+
+# Everything below except services: image, root applier + sudoers, Jobber job, saved search.
+install: image setup jobber saved-search
+    @echo "install: done (just status shows the state)"
+
+# Read-only overview of every piece.
+status:
+    @{{here}}/neofinder-index-setup.sh --status
+    @echo "jobber:  $(jobber list 2>/dev/null | awk '$1 == "neofinder-nightly" { print $2, "next", $9, $10, $11 }' || true)"
+    @echo "image:   $(ls -lh '{{image}}' 2>/dev/null | awk '{ print $5, $NF }' || echo 'missing (just image)')"
+    @echo "mount:   $(mount | grep -q ' on {{mount}} ' && echo 'attached at {{mount}}' || echo 'not attached')"
+    @echo "index:   $(sudo -n {{applier}} status 2>/dev/null || echo 'unknown (just setup)')"
+    @echo "items:   $(mdfind -onlyin {{mount}} -count 'kMDItemFSName = "*"' 2>/dev/null || echo 0) indexed"
+    @echo "search:  $([ -f '{{saved}}' ] && echo 'NF Recents saved search installed' || echo 'NF Recents missing (just saved-search)')"
+    @echo "last:    $(grep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | tail -n 1 | cut -c1-160 || true)"
+    @echo "services: $({{services}} --check >/dev/null 2>&1 && echo 'Apple background daemons still disabled' || echo 'REGRESSED or unchecked (just services-status)')"
+
+# Create the batch sparse image if it is missing (4 GB APFS, grows on demand).
+image:
+    @if [ -e '{{image}}' ]; then echo "image: {{image}} exists"; else hdiutil create -size 4g -fs APFS -volname NeoFinderBatch -type SPARSE '{{image}}'; fi
+
+# Root-owned index applier, its config and the one NOPASSWD sudoers line (Touch ID if changed).
+setup:
+    {{here}}/neofinder-index-setup.sh
+
+# Remove the applier, its config and the sudoers line.
+unsetup:
+    {{here}}/neofinder-index-setup.sh --remove
+
+# Render and apply the Jobber config (the site_agents role owns the neofinder-nightly job).
+jobber:
+    cd '{{repo}}' && just site-agents-apply
+
+# Install the NF Recents saved search (last-opened aliases on the batch volume) if it differs.
+saved-search:
+    @mkdir -p "$(dirname '{{saved}}')"
+    @if cmp -s '{{here}}/nf-recents.savedSearch' '{{saved}}'; then echo "saved-search: current"; else cp '{{here}}/nf-recents.savedSearch' '{{saved}}' && echo "saved-search: installed {{saved}} (add it to the Finder sidebar once: File > Add to Sidebar)"; fi
+
+# Run tonight's job now: retag, stub dates, then index and leave attached.
+nightly *args:
+    {{python}} {{exporter}} nightly --index {{args}}
+
+# Attach the batch image (browsable, so Spotlight indexes it); no-op if attached.
+attach:
+    @mount | grep -q ' on {{mount}} ' && echo "attach: already at {{mount}}" || hdiutil attach -mountpoint {{mount}} '{{image}}'
+
+# Turn indexing off, then detach the batch image; no-op if not attached.
+detach:
+    @if mount | grep -q ' on {{mount}} '; then sudo -n {{applier}} off; hdiutil detach {{mount}}; else echo "detach: not attached"; fi
+
+# Hand the sparse image's freed space back to the disk; detaches first if attached.
+compact: detach
+    hdiutil compact -batteryallowed '{{image}}'
+
+# Turn Spotlight indexing on for the attached batch volume (everything else stays off).
+index-on:
+    sudo -n {{applier}} on
+
+# Turn Spotlight indexing off for the batch volume.
+index-off:
+    sudo -n {{applier}} off
+
+# The exporter itself (NeoFinder catalogues -> stubs and aliases), e.g. `just export --list`.
+export *args:
+    {{python}} {{exporter}} {{args}}
+
+# Install / remove the exporter's own LaunchAgent (needs [schedule] in its config, or --interval).
+agent-install *args:
+    {{python}} {{exporter}} install {{args}}
+
+agent-remove:
+    {{python}} {{exporter}} remove
+
+# Hands-on search window (Touch ID): indexes what is attached and tears down when you press Enter.
+window *args:
+    {{batch}} --sudo sudo-ask {{args}}
+
+# Disable noisy Apple background daemons, Spotlight's semantic-search ones included (Touch ID).
+services:
+    sudo-ask {{services}}
+
+# Read-only: report any of those daemons that came back (silent when healthy).
+services-status:
+    {{services}} --check

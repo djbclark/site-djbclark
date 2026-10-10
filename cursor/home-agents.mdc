@@ -51,9 +51,10 @@ It appends the shared delivery footer (`djbclark-ade/docs/dispatch-footer.md`) t
 the brief, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its `.done`
 marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
 delivery failure, not an empty result: re-task it, never reconstruct) / 4
-**`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool sub-agents**
+**`BLOCKED: <question>`** / 124 timeout. It blocks until the slice ends (often 10+ min):
+run it with `--detach --no-wait` and wait on the printed `rearm` command in the background. **Claude Code's own Agent-tool sub-agents**
 cannot be scripted: paste `acp-dispatch footer --report <scratchpad>/<name>-report.md`
-into the prompt verbatim and read the file, never the final message (its idle
+into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never the final message (its idle
 notification is cut at 4,000 characters; a SendMessage to `team-lead` arrives whole).
 The footer also fixes the 2026-10-08 stall: a sub-agent that ends its turn waiting
 on a background notification, or on a question, is never woken, so it waits inside a
@@ -145,7 +146,12 @@ rejects any regular file outside `.githooks/private-paths` (never `--no-verify`
 or extend that list without his say). Everything else lives in `site-djbclark`
 (public) at the same relative path, with a symlink left in `site-private` where
 an old path is still used. When asking, name anything private in the change
-(private repo names, IDs). (`memory/feedback_ask_where_new_things_go.md`)
+(private repo names, IDs). **Exception, no question: a new agent skill always goes in
+`~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09; symlink it from
+`~/ops/site-djbclark/skills/` and `site-private/skills/`, steps in
+`djbclark-ade/docs/skills.md`); only a skill that must stay private
+(`1password`, `tell-chief-of-staff`) goes in `site-private/skills/`.
+(`memory/feedback_ask_where_new_things_go.md`)
 
 ## Reply formatting — number every list
 
@@ -176,21 +182,20 @@ tests/diff; (2) supervised work in an Orca-managed repo/worktree uses
 `orca orchestration worker-start --agent <claude|codex|cursor|antigravity|muse|zcode|opencode|opencode2>`;
 (3) interactive work the operator watches, and Hermes's TUI, use a Herdr pane;
 (4) non-ACP CLIs keep their own headless recipe. cline (ClinePass) is a reserve pool: never bulk. The grok vendor (SuperGrok: `grok` TUI,
-`acp-run grok`, LiteLLM `grok-sub`) is excluded for now (2026-10-06); grok models via other vendors' pools are fine.
+`acp-run grok --model grok-4.7`, LiteLLM `grok-sub`) is back since 2026-10-09 (excluded 2026-10-06): small slices, GrokBot shares the window, `aiuse` cannot see it.
 copilot: small GitHub-shaped slices only.
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
 Before orchestrating other agents from any start dir, reach for these.
 Editable copies in git: orchestration and session hygiene (these skills,
-`acp-run`, `fleet-watch`, `/orc`) at `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade,
+`acp-run`, `fleet-watch`) at `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade,
 since 2026-10-08), the rest at `site-djbclark/skills/<name>/` (all reached as
 `site-private/skills/<name>`, a symlink; `1password` and `tell-chief-of-staff`
 are private and real there), symlinked into
 every TUI by the `skill-everywhere` script (README beside it in `site-djbclark/bin/`; edit the git copy, never a TUI
 copy). Ours: `bigteam` (fan-out across vendors by quota pool),
-`model-routing` (vendor/model/effort per task), `herdr-orchestration`
-(Herdr handoff chains), `ralph-tui-orchestration` (Ralph TUI + Beads),
+`model-routing` (vendor/model/effort per task), `ralph-tui-orchestration` (Ralph TUI + Beads),
 `cow-workspaces` (copy-on-write isolation), `tell-chief-of-staff`,
 `session-finder` (find the session on a topic;
 `/session-finder-all` adds ended sessions), `helm` (answer every waiting session
@@ -208,7 +213,7 @@ Keep each session's context small: send discrete, separable tasks to the
 inline. Once a session has grown ~40k tokens past its start, delegate from then
 on and tell djbclark once that `/compact`, or `/handoff` then a new session, is
 available; past ~70k (or 150k total), ask him at the next natural boundary which
-of those he wants. Another session may be running bigteam (herdr tab `coord`):
+of those he wants (or, in a herdr pane or Orca terminal, compact yourself there with `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; it refuses while anything is on his input line, then ask him to type it, never send over a draft). Another session may be running bigteam (herdr tab `coord`):
 never touch its claimed files or panes (bigteam Step 0).
 
 ## Fix the cause of a tool-calling mistake (2026-10-06)
@@ -284,12 +289,14 @@ process: its shell moves on and the harness kills the tree.
 
 Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
 `pgrep -f '<pattern>'`: the waiting shell matches its own pattern.
+Never `pkill -f '<pattern>'` either: it kills every shell whose command line
+holds the pattern, your own wrapper included (2026-10-10). Kill the saved PID.
 
 ## Tools and habits (2026-10-06)
 
 1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
-   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
-   for literal replace (**always `-F`**: else `$name` in the replacement is a capture group; **`sd -F -- FIND REPL`** when either may start with `-`; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
+   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`,
+   **literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`** (2026-10-09): FILE is relative to the cwd (an absolute `--glob` matches nothing), FIND spans lines as typed, every occurrence, **exit 1 when nothing matched**, `--dry-run` previews. FIND starting with `-`: the Edit tool, or Python with an assert. **REPL turns backslash escapes into control characters** (`\b` became a backspace, 2026-10-10): REPL containing `\` goes through Python with an assert. **`sd` is retired for edits** (line-by-line without `-A`, exit 0 on no match: it lost an edit on 2026-10-09). `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
    (rtk compacts them). Greps run on Android devices stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place
@@ -298,6 +305,15 @@ Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
    (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
    (`memory/feedback_all_agents_includes_hermes.md`)
+5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether to
+   add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (the drop-in prompt
+   that applies his toolchain to another repo; 2026-10-09).
+   (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
+6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
+   `collie update --help` ignored `--help` and started a real staged update).
+   Agents treat `collie` as read-only: `collie version`, `collie help`, docs.
+   Any `collie update`/`pair`/config change is the operator's, queued with the
+   command. (`memory/feedback_no_help_flag_on_live_service_cli.md`)
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 
@@ -343,8 +359,7 @@ trade-off and ask.
 Every agent, however launched, runs in
 its yolo-or-equivalent mode unless gating is explicit and justified (a
 review-only slice, or bigteam's `--perm scoped:` ownership check). Flags and
-mode ids: the `model-routing` skill and `herdr-orchestration`'s
-`references/yolo-mode-by-tool.md`. Yolo does not suspend hooks, file-ownership
+mode ids: the `model-routing` skill. Yolo does not suspend hooks, file-ownership
 rules, the reserve pools, or asking before hard-to-reverse actions. Details:
 `site-private/memory/feedback_yolo_default_for_all_agents.md`.
 
