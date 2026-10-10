@@ -3,7 +3,7 @@
 # Policy/rationale: see AGENTS.md "Modern CLI tool policy" section.
 stack: agent-cli-tools
 description: >-
-  Machine-wide modern CLI replacements (rg/fd/bat/sd/eza/hck/delta/jq/yq/xh)
+  Machine-wide modern CLI replacements (rg/fd/bat/srgn/sd/eza/hck/delta/jq/yq/xh)
   plus structural/semantic code search (ast-grep/semgrep) and doc spell-check
   (typos) that AI coding agents and this operator's shell should prefer over
   the classic grep/find/cat/sed/ls/awk/cut/diff/jq/curl incumbents. Not owned
@@ -18,6 +18,8 @@ formulae:
     note: cat replacement — line numbers + syntax highlighting
   - name: sd
     note: sed replacement — plain regex, no backslash-escaping hell
+  - name: srgn
+    note: literal find/replace for agent edits — matches across lines, `--fail-none` exits 1 when nothing matched (sd exits 0; retired for edits 2026-10-09)
   - name: eza
     note: ls replacement — saner columns/colors, git-aware
   - name: hck

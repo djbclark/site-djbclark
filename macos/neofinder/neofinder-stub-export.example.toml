@@ -1,0 +1,59 @@
+# neofinder-stub-export example configuration.
+#
+# Copy to ~/.config/neofinder-stub-export.toml and edit; CLI flags override
+# the file. Every key is shown; lines are commented out so installing this
+# file verbatim changes nothing (the exporter's built-in defaults apply).
+# `install` refuses a config that selects no catalogue (no enabled
+# [[catalog]] block), since every scheduled run would then exit 2.
+
+# Staging directory: must exist and be writable. The batch script
+# (macos/neofinder/neofinder-spotlight-batch.sh) mounts /Volumes/NeoFinderBatch when
+# given --image; only stubs and Finder aliases are ever written under it.
+#dest = "/Volumes/NeoFinderBatch"
+
+# Items fetched per AppleScript page. 10,000 is the measured sweet spot
+# (see the script header, fact C); larger pages are not reliably cheaper.
+#page = 10000
+
+# Seconds between log heartbeat lines while a run is healthy (warnings and
+# errors are logged immediately regardless).
+#log_interval = 300
+
+# Prefixes (POSIX, relative to the catalogue root) that are never exported.
+# The default list below covers volume-system trees; without it, 42 % of
+# mac256usb (items 4-195,370) would be Spotlight-store files. Skipped items
+# are not fetched and are flagged x in the path index. A [[catalog]] block can carry its own
+# `skip` list, which REPLACES this one for that catalogue (`skip = []`
+# exports everything). Changing a list rebuilds that catalogue's path index.
+#skip = [".Spotlight-V100", ".fseventsd", ".Trashes",
+#        ".DocumentRevisions-V100", ".TemporaryItems"]
+
+# Optional run window, local time. Absent = run whenever started. `stop`
+# may be past midnight (22:30-06:30 crosses it). Outside the window the
+# exporter exits 0 at once; inside it, it works until the stop time, then
+# finishes the current page, saves state and exits 0. `days` names the days
+# the window STARTS on (the evening part of a crossing-midnight window).
+# `install` needs this (or its --interval) to know when to schedule runs.
+#[schedule]
+#start = "22:30"
+#stop  = "06:30"
+#days  = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+# One [[catalog]] block per catalogue. `enabled = false` leaves it out of
+# default runs (an explicit --catalog NAME still runs it). `first` lists
+# directory prefixes (POSIX paths relative to the catalogue root, no volume
+# name) exported before the rest on the first run; `refresh` lists prefixes
+# re-exported on EVERY run (missing stubs recreated, mtimes and comments
+# updated; after a complete run without --limit, stubs whose path left the
+# catalogue are removed). Both need the path index pass (do not pass
+# --no-path-index); a prefix that matches nothing is warned about in the log.
+#[[catalog]]
+#name = "mac256usb"
+#first = ["Users/djbclark/Documents", "Users/djbclark/Pictures"]
+#refresh = ["Users/djbclark/Documents"]
+
+#[[catalog]]
+#name = "Macintosh HD"
+#enabled = false
+#skip = [".Spotlight-V100", ".fseventsd", ".Trashes",
+#        ".DocumentRevisions-V100", ".TemporaryItems", "private/var/vm"]

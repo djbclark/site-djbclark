@@ -62,3 +62,10 @@ on `PATH`, the wrapper still uses Python for consistent wait messaging.
    `stayturgid.yml`, or a new `*.yml` with `stack:` set).
 2. `just brew-project && just brew-diff`
 3. Commit fragments + regenerated `generated/Merged-Brewfile`.
+
+## Intentionally unmanaged
+
+- `default-folder-x` (2026-10-10): app stays in `/Applications` and updates
+  via its own built-in updater; the brew cask receipt was removed after the
+  upstream 6.3.2 cask checksum stopped matching the vendor download. Expect
+  it to appear as live-only in `just brew-diff`.
