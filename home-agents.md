@@ -202,6 +202,10 @@ results as work finishes or fails. A one-shot scheduled check is fine.
 
 ## Heavy builds and tests: run them through `bg` (2026-10-04)
 
+**Never set `BG_LOAD_WAIT=0` on a build or a Gradle command** (2026-10-10: it skipped the
+load gate at load 30 and the machine went to 50-70; `bg` now ignores it for Gradle). It is
+for a single small test file only; a busy machine means wait, not bypass.
+
 Run builds and tests through `~/ops/site-private/bin/bg` (`bg pytest`, `bg
 gradlew …`; **always the full path: bare `bg` is the shell builtin**). **Tests
 (pytest, tox, nox, `run_tests*.py`) must go through bg** (`BG_CPUS`=3, one of 2

@@ -15,7 +15,7 @@ several agents building at once everything slowed down.
    non-default profile always needs an expiry.
 3. **`bin/bg`**: starts work at utility QoS. It first waits while the 1-minute load per core
    is above `BG_MAX_LOAD_PER_CORE` (default 1.5), for at most `BG_LOAD_WAIT` seconds (default
-   900), then starts anyway. `BG_LOAD_WAIT=0` skips the wait. It also runs
+   900), then starts anyway. `BG_LOAD_WAIT=0` skips the wait for a test, but `bg` ignores it for a Gradle command. It also runs
    `gradle-limits check`.
 4. **Gradle slots in `bg`**: a `bg` command that runs `gradle`/`gradlew` (also behind
    `env VAR=… ./gradlew`) takes one of `BG_GRADLE_SLOTS` machine-wide slots (default 1) for its

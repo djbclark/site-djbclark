@@ -19,7 +19,8 @@
 # Admission gate: before starting, wait while the 1-minute load average per core is above
 # BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s for at most
 # BG_LOAD_WAIT seconds (default 900), then start anyway so nothing starves. Piling another
-# build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate.
+# build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate for a
+# test or a small command, never for a Gradle command (bg raises it back to 900; 2026-10-10).
 # Also reverts an expired Gradle profile (gradle-limits check). When testing bg itself, pass
 # BG_LOAD_WAIT=0, or a busy machine holds the test for the full 15 minutes.
 #
@@ -80,6 +81,12 @@ for a in "$@"; do
 done
 max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
 wait_s="${BG_LOAD_WAIT:-900}"
+# A Gradle build always keeps the load gate (2026-10-10: a release build started with
+# BG_LOAD_WAIT=0 at load 30 and the machine went to 50-70). BG_LOAD_WAIT=0 is for small test files.
+if [ "$is_gradle" = 1 ] && [ "$wait_s" -lt 900 ]; then
+  echo "bg: Gradle builds always wait for low load (BG_LOAD_WAIT=$wait_s ignored)" >&2
+  wait_s=900
+fi
 if [ "$wait_s" -gt 0 ]; then
   cores=$(sysctl -n hw.ncpu)
   waited=0
@@ -91,7 +98,7 @@ if [ "$wait_s" -gt 0 ]; then
       echo "bg: load $load1 still above $max_per_core per core after ${waited}s; starting anyway" >&2
       break
     fi
-    [ "$waited" -eq 0 ] && echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting (BG_LOAD_WAIT=0 to skip)" >&2
+    [ "$waited" -eq 0 ] && echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting" >&2
     sleep 15
     waited=$((waited + 15))
   done
