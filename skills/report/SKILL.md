@@ -43,6 +43,11 @@ rejected three formats in a row (see "Why", below). Apply it before the first
    (another session's terminal, 2026-10-10).
 6. **Say the file name in the delivery message** and reopen in Marked 2 after
    any rename.
+7. **Always open the finished deliverable in Marked 2** (`open -a "Marked 2"
+   <file>`) as the last act before the delivery message, every time, not only
+   for the render check (operator, 2026-10-10: "it should always open via
+   Marked 2 when done"). A `/report` run that produces several files opens the
+   main report; name the others in the message.
 
 ## 2. Tools (stdlib Python, in `scripts/`)
 
