@@ -218,7 +218,8 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 1. **Fast tools:** search with `rg` (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
    list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`,
    **literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`**
-   (2026-10-09; FIND spans lines as typed, **exit 1 when nothing matched**; a FIND
+   (2026-10-09; FILE is relative to the cwd, an absolute `--glob` matches nothing; FIND
+   spans lines as typed, **exit 1 when nothing matched**; a FIND
    starting with `-` goes through the Edit tool). **`sd` is retired for edits**
    (exit 0 on no match; it lost an edit). `dust`/`procs`/`xh` where they fit. Keep
    `cat`/`ls`/`diff`/`jq` (rtk compacts them). Android greps stay `grep`.
