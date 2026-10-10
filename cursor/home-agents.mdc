@@ -50,7 +50,8 @@ It appends the shared delivery footer (`djbclark-ade/docs/dispatch-footer.md`) t
 the brief, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its `.done`
 marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
 delivery failure, not an empty result: re-task it, never reconstruct) / 4
-**`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool sub-agents**
+**`BLOCKED: <question>`** / 124 timeout. It blocks until the slice ends (often 10+ min):
+run it with `--detach --no-wait` and wait on the printed `rearm` command in the background. **Claude Code's own Agent-tool sub-agents**
 cannot be scripted: paste `acp-dispatch footer --report <scratchpad>/<name>-report.md`
 into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never the final message (its idle
 notification is cut at 4,000 characters; a SendMessage to `team-lead` arrives whole).

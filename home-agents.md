@@ -99,6 +99,8 @@ a permission prompt and asks you to run it, surface that to djbclark.
 the delivery footer, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its
 `.done` marker and a jobs record; exit 3 = **no report** (a delivery failure:
 re-task it, never reconstruct), 4 = **`BLOCKED: <question>`**, 124 = timeout.
+**It blocks until the slice ends** (often 10+ min): run it with `--detach --no-wait`
+and start the printed `rearm` waiter with `run_in_background`, never in the foreground.
 **Agent-tool sub-agents** cannot be scripted: paste `acp-dispatch footer --report
 <scratchpad>/<name>-report.md` into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never
 the final message (cut at 4,000 characters). A sub-agent that ends its turn
