@@ -27,8 +27,10 @@ Spotlight indexes only that tree, and Finder search, saved searches and
       creation date for stubs.
 3. **Nightly upkeep.** A [Jobber](https://github.com/dshearer/jobber) job,
    `neofinder-nightly`, runs from 01:15 and stops by 05:45.
-   1. It attaches the image if it isn't attached.
-   2. It turns indexing off, then re-copies tags, sizes and last-opened
+   1. It turns indexing off and detaches the image, compacts it
+      (`hdiutil compact` hands freed space back to the disk), and
+      attaches it again.
+   2. It re-copies tags, sizes and last-opened
       dates from the real files (`retag`).
    3. It asks NeoFinder for stub creation dates (`stub-dates`).
    4. It turns Spotlight indexing back on for the batch volume and leaves

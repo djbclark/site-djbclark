@@ -67,6 +67,10 @@ attach:
 detach:
     @if mount | grep -q ' on {{mount}} '; then sudo -n {{applier}} off; hdiutil detach {{mount}}; else echo "detach: not attached"; fi
 
+# Hand the sparse image's freed space back to the disk; detaches first if attached.
+compact: detach
+    hdiutil compact -batteryallowed '{{image}}'
+
 # Turn Spotlight indexing on for the attached batch volume (everything else stays off).
 index-on:
     sudo -n {{applier}} on

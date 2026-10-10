@@ -3222,7 +3222,7 @@ def cmd_stub_dates(args):
 
 
 def cmd_nightly(args):
-    """Attach the batch image if needed, retag, stub-dates, detach (R)."""
+    """Compact and attach the batch image, retag, stub-dates, then index or detach (R)."""
     mount = Path(args.mount)
     image = Path(args.image).expanduser()
     try:
@@ -3238,11 +3238,21 @@ def cmd_nightly(args):
     attached = indexed = False
     if args.index and os.path.ismount(mount):
         _index_applier("off")
+        # Last night's run left it attached; detach so the image can be
+        # compacted. A busy volume stays attached and skips the compact.
+        r = subprocess.run(
+            ["hdiutil", "detach", str(mount)], capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout).strip()
+            eprint(f"nightly: detach before compact failed: {msg}")
+            subcmd_log(f"nightly: detach before compact failed: {msg}")
     if not os.path.ismount(mount):
         if not image.exists():
             eprint(f"nightly: no image {image}")
             subcmd_log(f"nightly: no image {image}")
             return 2
+        _compact_image(image)
         r = subprocess.run(
             ["hdiutil", "attach"]
             + ([] if args.index else ["-nobrowse"])
@@ -3276,6 +3286,26 @@ def cmd_nightly(args):
             f"indexed={int(indexed)} detach={det}"
         )
     return max(rt, sd, 1 if det else 0, 1 if args.index and not indexed else 0)
+
+
+def _compact_image(image):
+    """Return a sparse image's freed space to the disk (`hdiutil compact`).
+    A sparse image never shrinks by itself; retag churn left ~0.8 GB of a
+    2.3 GB image unused (2026-10-10). Best effort: a failure is logged and
+    the run goes on."""
+    before = image.stat().st_size
+    r = subprocess.run(
+        ["hdiutil", "compact", "-batteryallowed", str(image)],
+        capture_output=True,
+        text=True,
+    )
+    after = image.stat().st_size
+    msg = f"rc={r.returncode} {before // 2**20} MiB -> {after // 2**20} MiB"
+    if r.returncode != 0:
+        msg += f": {(r.stderr or r.stdout).strip()}"
+    print(f"nightly: compact: {msg}")
+    subcmd_log(f"nightly: compact {image}: {msg}")
+    return r.returncode
 
 
 def _index_applier(verb):
