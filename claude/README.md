@@ -42,3 +42,21 @@ distribute-and-symlink pattern as `skills/`). The orchestration command
 wrappers in `claude/commands/` (`helm-all`, `herdr-tidy`, `resume`,
 `session-finder-all`) are themselves symlinks into
 `~/src/djbclark-ade/claude/commands/` since 2026-10-08; edit them there.
+
+## Prompt-hook deadlines: nudge hooks run under `hook-deadline` (2026-10-10)
+
+`hooks/context_size_nudge.py` and `skills/autorename/autorename_nudge.py` are
+registered under `hooks.UserPromptSubmit` in `~/.claude/settings.json` (not
+tracked) as
+`"$HOME"/ops/site-private/bin/hook-deadline 4 "$HOME"/.claude/hooks/context_size_nudge.py`
+and
+`"$HOME"/ops/site-private/bin/hook-deadline 4 python3 "$HOME"/ops/site-djbclark/skills/autorename/autorename_nudge.py`,
+each with `"timeout": 20` as the backstop. Both scripts arm a 2 s
+`signal.alarm` of their own, but that only starts once the interpreter is up:
+on 2026-10-10 (load average 32-40, six Claude sessions plus a `claude -p` turn
+with a 31k-word prompt) python start-up alone exceeded the old 5 s / 10 s
+timeouts and Claude Code printed "hook timed out, output discarded" on every
+prompt. The wrapper (perl, ~10 ms start) cuts the whole process group at 4 s
+and exits 0 silently, so a starved hook costs at most 4 s and no noise; the
+nudge simply fires on the next prompt. After any settings rewrite, check the
+two entries still carry the `hook-deadline 4` prefix.
