@@ -1,13 +1,10 @@
 ---
 name: gmail-search
 description: >-
-  High-speed local Gmail search: the Hermes-built FTS5 index of the
-  operator's complete mailbox (~192k messages), queryable in ~100ms from
-  any session via a plain CLI — no API round-trip, no MCP. Use whenever a
-  task needs to find or read the operator's email: "search my email",
-  "find that message/thread from X", "when did I get...", or any lookup
-  the claude.ai Gmail connector would do slower. Read-only; a Hermes cron
-  job keeps the index fresh every 5 minutes.
+  Fast local Gmail search: a Hermes-built FTS5 index of the operator's whole
+  mailbox, queried in ~100ms by CLI, no API or MCP. Use whenever a task needs to
+  find or read the operator's email: "search my email", "find that
+  message/thread from X", "when did I get...". Read-only.
 ---
 
 # High-speed local Gmail search

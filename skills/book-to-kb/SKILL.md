@@ -2,13 +2,10 @@
 name: book-to-kb
 description: >-
   Add a book or long document (EPUB, PDF, DOCX, HTML, Markdown, TXT, RTF) to the
-  local token-efficient knowledge base at ~/kb, so it can be queried from any
-  agent session without loading it into context: docling extraction, chapter
-  split, a ~2.5k-token index, and basic-memory semantic search. Use when the
-  operator gives one or more book paths, says "add this book", "index this
-  PDF/EPUB", "put this in the KB", or asks how to query a book already in it.
-  Not for turning a book into an agent skill with frameworks and voice — that is
-  book-to-skill, which is complementary.
+  local knowledge base at ~/kb so any agent session can query it without loading
+  it into context. Use when given book paths, "add this book", "index this
+  PDF/EPUB", "put this in the KB", or asked how to query one. Not for turning a
+  book into a skill (book-to-skill).
 ---
 
 # book-to-kb

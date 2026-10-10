@@ -1,6 +1,11 @@
 ---
 name: terminus-kira
-description: Delegate a real coding/shell task to TerminusKira, a sandboxed coding agent running in a native Apple Container VM with a real host directory bind-mounted in. Use when a task is better handed to an isolated agent than run directly in this session -- exploratory/risky work you want contained to one directory and reviewable before trusting it, or a long task you'd rather delegate and check back on than block this turn on. Also covers running it against a terminal-bench dataset for benchmark evaluation instead of ad-hoc work.
+description: >-
+  Delegate a real coding/shell task to TerminusKira, a sandboxed coding agent in
+  an Apple Container VM with a host directory bind-mounted. Use when work is
+  better isolated: risky or exploratory work contained to one directory and
+  reviewable before trusting, or a long task to check back on. Also runs
+  terminal-bench datasets for benchmark evaluation.
 ---
 
 # terminus-kira — sandboxed task delegation

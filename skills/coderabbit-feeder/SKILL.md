@@ -1,6 +1,11 @@
 ---
 name: coderabbit-feeder
-description: Queue a CodeRabbit review request (attach mode for a PR on a repo djbclark owns, or crossfork mode for a PR on a repo he doesn't) instead of hand-rolling throwaway PRs or triggering CodeRabbit directly. Use when an AI orchestrator/agent needs a CodeRabbit review and CodeRabbit isn't installed on the target repo, or when told to "queue a coderabbit review", "use the feeder", or "add to coderabbit-feeder".
+description: >-
+  Queue a CodeRabbit review request (attach mode for a PR on a repo djbclark
+  owns, crossfork mode for one he doesn't) instead of hand-rolling throwaway
+  PRs. Use when an agent needs a CodeRabbit review and CodeRabbit isn't
+  installed on the target repo, or on "queue a coderabbit review", "use the
+  feeder".
 ---
 
 # coderabbit-feeder
