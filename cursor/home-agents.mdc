@@ -164,13 +164,15 @@ sessions), `herdr-tidy` (close idle panes safely), `autorename`. New sessions
 start over ACP via `launch.py`; tool-managed skills and sub-agent files are in
 the toolkit reference note.
 
-## Context size: prompt early, delegate by default (2026-10-08)
+## Context size: delegate early, compact rarely (2026-10-08, 2026-10-10)
 
 **Keep context small: by default send discrete, separable tasks to `bigteam`**
 (or a sub-agent) so their reads never land here. At ~40k tokens of growth since
-the session's start, delegate from then on and name the options once; past ~70k
-(or 150k total), **ask djbclark at the next natural boundary: `/compact`,
-`/handoff` then a new session, or continue and delegate.** In a herdr pane or an
+the session's start or last compaction, delegate from then on; past ~200k growth
+(or 400k total), **ask djbclark at the next natural boundary: `/compact`,
+`/handoff` then a new session, or continue and delegate.** Compaction is not
+free: cached context is cheap to re-read, and a compaction re-writes ~100k
+tokens, so compacting early costs more than it saves. In a herdr pane or an
 Orca terminal, compact yourself there instead:
 `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`. It refuses while anything
 is on his input line; then ask him to type it, never send over a draft. Another

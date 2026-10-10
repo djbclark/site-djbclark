@@ -151,18 +151,18 @@ saved (`$!`). **Never read a result through a pipe** (`cmd 2>&1 | tail` reports
 the last stage's status): `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
 (`memory/feedback_exit_status_through_pipe.md`)
 
-## Context size: prompt early, delegate by default (2026-10-08)
+## Context size: delegate early, compact rarely (2026-10-08, 2026-10-10)
 
 **Keep context small: send discrete, separable tasks through `/bigteam` by
 default** (Agent sub-agents for small lookups). `context_size_nudge.py` counts
-growth since the first turn: at +40k, delegate from then on and name the options
-once; at +70k (or 150k total) and every +30k after, **ask djbclark
+growth since the first turn or last compaction: at +40k, delegate (don't
+compact); at +200k (or 400k total) and every +100k after, **ask djbclark
 (AskUserQuestion) at the next natural boundary: `/compact`, `/handoff` then
-`/new`, or continue and delegate.** **In a herdr pane or Orca terminal, compact
-yourself there instead**: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`,
-then end the turn (2026-10-09; `memory/feedback_self_compact.md`; `/quit` queues
-the same way once all is pushed). **It refuses while the input line holds text;
-then ask djbclark to type it, never send over a draft.** If bigteam is running
+`/new`, or continue and delegate.** **Compaction is not free** (2026-10-10: it
+leaves ~100k; at +70k it looped every ~25 min at a net loss). **In a herdr pane
+or Orca terminal, compact yourself instead**, once: `~/src/djbclark-ade/bin/self-slash
+"/compact <focus>"`, then end the turn (`memory/feedback_self_compact.md`; `/quit`
+the same way). **It refuses on input-line text; then ask, never send over a draft.** If bigteam is running
 elsewhere (herdr tab `coord`), follow its Step 0: hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 

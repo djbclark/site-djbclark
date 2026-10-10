@@ -65,8 +65,8 @@ def test_big_baseline_alone_does_not_fire(monkeypatch, tmp_path, capsys):
 def test_early_tier_recommends_options_and_bigteam(monkeypatch, tmp_path, capsys):
     t = _write_transcript(tmp_path / "t.jsonl", BASE, BASE + nudge.EARLY_GROWTH)
     out, sent = _run_hook(monkeypatch, tmp_path, "s", t, capsys)
-    assert "/bigteam" in out and "/compact" in out and "/handoff then /new" in out
-    assert "AskUserQuestion" not in out
+    assert "/bigteam" in out and "Do not compact yet" in out
+    assert "AskUserQuestion" not in out and "self-slash" not in out
     assert sent == []
     assert _state(tmp_path, "s")["level"] == 1
 
@@ -78,7 +78,7 @@ def test_ask_tier_by_growth(monkeypatch, tmp_path, capsys):
 
 
 def test_ask_tier_by_absolute_total(monkeypatch, tmp_path, capsys):
-    t = _write_transcript(tmp_path / "t.jsonl", 100_000, nudge.ASK_TOTAL)
+    t = _write_transcript(tmp_path / "t.jsonl", nudge.ASK_TOTAL - 100_000, nudge.ASK_TOTAL)
     out, _ = _run_hook(monkeypatch, tmp_path, "s", t, capsys)
     assert "AskUserQuestion" in out
 
@@ -94,15 +94,58 @@ def test_each_tier_fires_once_then_repeats_on_growth(monkeypatch, tmp_path, caps
     assert out3.startswith("Context is still growing")
 
 
-def test_compaction_rearms_tiers(monkeypatch, tmp_path, capsys):
+FLOOR = 104_000  # measured mean context right after a /compact, 2026-10-10
+
+
+def test_compaction_rearms_tiers_from_the_new_floor(monkeypatch, tmp_path, capsys):
+    path = tmp_path / "t.jsonl"
+    _write_transcript(path, BASE, BASE + nudge.ASK_GROWTH + 100_000)
+    _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    _write_transcript(path, BASE, BASE + nudge.ASK_GROWTH + 100_000, FLOOR)
+    assert _run_hook(monkeypatch, tmp_path, "s", path, capsys)[0] == ""
+    assert _state(tmp_path, "s")["baseline"] == FLOOR
+    _write_transcript(path, BASE, FLOOR + nudge.EARLY_GROWTH)
+    out, _ = _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    assert out.startswith("Context check")
+    _write_transcript(path, BASE, FLOOR + nudge.ASK_GROWTH)
+    out, _ = _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    assert out.startswith("Context is large")
+
+
+def test_no_compaction_loop_just_above_the_floor(monkeypatch, tmp_path, capsys):
+    """2026-10-10 regression: a ~104k post-compact floor sat 46k under the old
+    150k tier, so sessions re-compacted every ~40 requests at a net loss."""
+    path = tmp_path / "t.jsonl"
+    _write_transcript(path, BASE, 250_000)
+    _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    _write_transcript(path, BASE, 250_000, FLOOR)
+    _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    for total in (150_000, 190_000, 250_000):
+        _write_transcript(path, BASE, total)
+        out, _ = _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+        assert "compact yourself" not in out and "AskUserQuestion" not in out
+
+
+def test_compact_boundary_resets_floor_until_next_request(monkeypatch, tmp_path, capsys):
     path = tmp_path / "t.jsonl"
     _write_transcript(path, BASE, BASE + nudge.ASK_GROWTH)
     _run_hook(monkeypatch, tmp_path, "s", path, capsys)
-    _write_transcript(path, BASE, BASE + nudge.ASK_GROWTH, BASE + 10_000)
+    boundary = json.dumps({"type": "system", "subtype": "compact_boundary",
+                           "isSidechain": False}) + "\n"
+    path.write_text(_line(BASE) + _line(BASE + nudge.ASK_GROWTH) + boundary)
+    out, sent = _run_hook(monkeypatch, tmp_path, "s", path, capsys)
+    assert out == "" and sent == []
+    assert _state(tmp_path, "s")["level"] == 0
+    path.write_text(_line(BASE) + boundary + _line(FLOOR))
     assert _run_hook(monkeypatch, tmp_path, "s", path, capsys)[0] == ""
-    _write_transcript(path, BASE, BASE + nudge.EARLY_GROWTH)
-    out, _ = _run_hook(monkeypatch, tmp_path, "s", path, capsys)
-    assert out.startswith("Context check")
+    assert _state(tmp_path, "s")["baseline"] == FLOOR
+
+
+def test_escaped_boundary_text_in_a_tool_result_is_not_a_boundary(tmp_path):
+    t = tmp_path / "t.jsonl"
+    tool = json.dumps({"type": "user", "content": '{"subtype":"compact_boundary"}'}) + "\n"
+    t.write_text(_line(50_000) + tool)
+    assert nudge._last_context_tokens(str(t)) == 50_000
 
 
 def test_page_fires_once_via_hermes_ping(monkeypatch, tmp_path, capsys):

@@ -15,17 +15,30 @@ History:
   harder, and DO recommend /compact, or /handoff then /new. The old single
   150k nudge fired too late. Separable work goes to /bigteam by default so it
   never lands in this context. memory/feedback_context_prompts_early.md.
+- 2026-10-10: stop the compaction loop. Measured over 85 compactions in two
+  days: a /compact took context from ~187k to ~104k (not the ~33k Claude Code
+  reports as postTokens: tool listings, project context and re-attached files
+  come back), so the old 150k / +70k tiers re-fired after ~40 requests, and
+  sessions compacted every ~25 min (one 24 times in a day). Each compaction
+  re-writes ~70k tokens at the 1-hour cache's 2x rate plus the summary, ~150-
+  180k base-input-equivalent; with cache reads at 0.025x (Fable 5.1) / 0.05x
+  (Opus/Sonnet 5.5) that pays back only after ~45-85 requests, so most were a
+  net loss. Growth now counts from the floor after the latest compaction, the
+  compact tier is +200k (or 400k total), and the early tier no longer
+  recommends /compact. memory/feedback_self_compact.md.
 
 Measure: input + cache_creation + cache_read tokens of the newest usage block,
 i.e. the real context size (cache_read alone reads 0 after a cache miss).
-Tiers count GROWTH since the session's first usage block, because the baseline
-differs a lot: a session started in ~ carries ~90k of tool listings before any
-work, a project session ~25k. An absolute backstop still asks at ASK_TOTAL.
+Tiers count GROWTH since the floor: the first usage block of the session, or of
+the conversation after its latest compaction (a compact_boundary record, or a
+drop below SHRINK_RATIO of the last size seen). Baselines differ a lot: a
+session started in ~ carries ~90k before any work, and a compacted one ~100k.
+An absolute backstop still asks at ASK_TOTAL.
 
-Levels: 1 = early (delegate from now on, mention the options once);
-2+ = ask the operator (AskUserQuestion) at the next natural boundary, again
-every REPEAT_EVERY of further growth. When context shrinks (a /compact) the
-level drops with it, so the tiers fire again as it regrows.
+Levels: 1 = early (delegate from now on; no compaction yet);
+2+ = compact (self-slash in herdr/Orca) or ask the operator at the next natural
+boundary, again every REPEAT_EVERY of further growth. A compaction resets the
+floor and the level, so the tiers fire again only after the same growth.
 
 MUST always exit 0 -- never fail or delay a prompt. Python 3 stdlib only.
 Fail-fast: reads only a head window (baseline, once per session) and a tail
@@ -36,18 +49,26 @@ an alarm at DEADLINE_SECONDS exits 0 with no output.
 # ruff: noqa: BLE001, S110
 import json
 import os
+import re
 import signal
 import sys
 from pathlib import Path
 
 STATE_PATH = Path.home() / ".claude" / "state" / "context-nudges.json"
 
-EARLY_GROWTH = 40_000   # level 1: start delegating, mention the options
-ASK_GROWTH = 70_000     # level 2: ask the operator
-ASK_TOTAL = 150_000     # level 2 regardless of baseline
-REPEAT_EVERY = 30_000   # level 3, 4, ...: ask again per this much more
-PAGE_GROWTH = 130_000   # Hermes ping (once per climb), whichever comes first
-PAGE_TOTAL = 250_000
+# Compaction is not free (see History, 2026-10-10): only compact once the
+# context has grown enough above the post-compaction floor to pay it back.
+EARLY_GROWTH = 40_000   # level 1: start delegating
+ASK_GROWTH = 200_000    # level 2: compact / ask the operator
+ASK_TOTAL = 400_000     # level 2 regardless of floor
+REPEAT_EVERY = 100_000  # level 3, 4, ...: again per this much more
+PAGE_GROWTH = 300_000   # Hermes ping (once per climb), whichever comes first
+PAGE_TOTAL = 500_000
+SHRINK_RATIO = 0.75     # a size below this share of the last one = compacted
+COMPACTED = "compacted"  # _last_context_tokens: boundary newer than any usage
+# Unescaped quotes only: the same text inside a tool result is JSON-escaped.
+_BOUNDARY = re.compile(rb'"subtype":\s*"compact_boundary"')
+_SIDECHAIN = re.compile(rb'"isSidechain":\s*true')
 
 PING_BIN = Path.home() / ".local" / "bin" / "hermes-ping"
 
@@ -108,6 +129,8 @@ def _last_context_tokens(transcript_path):
                 if chunk_size < size:
                     lines = lines[1:]  # first line may be cut mid-record
                 for line in reversed(lines):
+                    if _BOUNDARY.search(line) and not _SIDECHAIN.search(line):
+                        return COMPACTED  # no request since the compaction yet
                     value = _usage_from_line(line)
                     if value is not None:
                         return value
@@ -144,16 +167,21 @@ def _level(total, growth):
     return 1 if growth >= EARLY_GROWTH else 0
 
 
+_COST_NOTE = (
+    "A compaction is not free: it re-writes ~70k tokens at the 1-hour cache's "
+    "2x rate plus the summary and leaves ~100k behind, so it pays back only "
+    "after dozens of further requests on the same work."
+)
+
+
 def _early_message(total, growth):
     return (
         f"Context check: {total:,} tokens in context (+{growth:,} since this "
-        "session started). (1) From now on, send discrete, separable work "
-        "through /bigteam (Agent sub-agents for small lookups) so its tokens "
-        "stay out of this session, and don't read large files or logs "
-        "inline. (2) End this reply with one line to the operator: context is "
-        f"at ~{total // 1000}k; at the next natural boundary, /compact to keep "
-        "going here, or /handoff then /new if the next task is a different "
-        "topic."
+        "session started or last compacted). From now on, send discrete, "
+        "separable work through /bigteam (Agent sub-agents for small lookups) "
+        "so its tokens stay out of this session, and don't read large files or "
+        "logs inline. Do not compact yet: cached context is cheap to re-read. "
+        + _COST_NOTE
     )
 
 
@@ -163,23 +191,26 @@ def _ask_message(total, growth, repeat):
         # A herdr pane or Orca terminal can queue its own /compact (standing
         # operator ruling 2026-10-09, memory/feedback_self_compact.md).
         return (
-            f"{lead}: {total:,} tokens (+{growth:,} this session). At the next "
-            "natural boundary (a task done, never mid-edit or with a sub-agent "
-            "result unread), compact yourself without asking: save what the "
-            "next turn needs, run ~/src/djbclark-ade/bin/self-slash \"/compact "
-            "<focus>\" and end the turn. If it refuses, or the next task is a "
-            "different topic, ask the operator: /compact, or /handoff then "
-            "/new. Until then, delegate new heavy work to /bigteam."
+            f"{lead}: {total:,} tokens (+{growth:,} since the session started "
+            "or last compacted). If you are continuing the same work, then at "
+            "the next natural boundary (a task done, never mid-edit or with a "
+            "sub-agent result unread) compact yourself without asking: save "
+            "what the next turn needs, run ~/src/djbclark-ade/bin/self-slash "
+            "\"/compact <focus>\" ONCE and end the turn. If the next task is a "
+            "different topic, ask the operator for /handoff then /new instead "
+            "(nothing to summarize). If self-slash refuses, ask for /compact. "
+            + _COST_NOTE
         )
     return (
-        f"{lead}: {total:,} tokens (+{growth:,} this session). At the next "
-        "natural boundary (before starting the next task, never mid-edit), "
-        "ask the operator with AskUserQuestion: 1) /compact (Recommended when "
-        "continuing the same work); 2) /handoff then /new (topic change, or "
-        "the conversation itself is the only state); 3) Continue here and "
-        "send the rest to /bigteam. Until answered, start no new heavy work "
-        "inline: delegate it. Exception: an unattended session with no "
-        "operator present keeps going by delegating."
+        f"{lead}: {total:,} tokens (+{growth:,} since the session started or "
+        "last compacted). At the next natural boundary (before starting the "
+        "next task, never mid-edit), ask the operator with AskUserQuestion: "
+        "1) /compact (Recommended when continuing the same work); 2) /handoff "
+        "then /new (topic change, or the conversation itself is the only "
+        "state); 3) Continue here and send the rest to /bigteam. Until "
+        "answered, start no new heavy work inline: delegate it. Exception: an "
+        "unattended session with no operator present keeps going by "
+        "delegating. " + _COST_NOTE
     )
 
 
@@ -238,10 +269,26 @@ def main():
     session_state = state.get(session_id)
     if not isinstance(session_state, dict):
         session_state = {}
+
+    if total == COMPACTED:
+        # Compacted, no request since: the next measured size is the new floor.
+        session_state.update(baseline=None, level=0, paged=False, last=None)
+        state[session_id] = session_state
+        _save_state(state)
+        return
+
     baseline = session_state.get("baseline")
+    last = session_state.get("last")
+    if isinstance(last, int) and total < last * SHRINK_RATIO:
+        baseline = total  # compacted between two prompts: new floor
+        session_state["level"] = 0
     if not isinstance(baseline, int):
-        baseline = _first_context_tokens(transcript_path) or total
-        session_state["baseline"] = baseline
+        if "level" in session_state:
+            baseline = total  # first size after a compaction
+        else:
+            baseline = _first_context_tokens(transcript_path) or total
+    session_state["baseline"] = baseline
+    session_state["last"] = total
     growth = max(0, total - baseline)
 
     level = _level(total, growth)
@@ -262,7 +309,7 @@ def main():
             repo = os.path.basename((data.get("cwd") or "").rstrip("/")) or "claude"
             _send_ping(
                 f"{repo}: Claude Code context at ~{total // 1000}k "
-                f"(+{growth // 1000}k this session); agent will ask you to "
+                f"(+{growth // 1000}k since start or last compact); agent will ask you to "
                 "/compact, or /handoff then /new, at its next boundary.",
                 data.get("cwd"),
             )
