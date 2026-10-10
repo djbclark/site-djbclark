@@ -14,7 +14,10 @@ narrative go in a `site-private/memory/reference_agent_rules_*.md` note (listed
 at the end), leaving a rule plus a pointer. **Agents maintain this file without
 asking** (djbclark, 2026-10-05): add rules, condense, move detail out, and keep
 the Cursor copy (`cursor/home-agents.mdc`, symlinked from `site-private/cursor/`)
-in step whenever a standing rule changes.
+in step whenever a standing rule changes (it is a reworded subset, not a mirror).
+A condense must prove nothing was lost: `rg -o` every date, `memory/*.md`
+pointer and `[[link]]` before and after, and diff (2026-10-10: that check caught a
+dropped pointer).
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
