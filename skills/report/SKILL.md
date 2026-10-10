@@ -19,6 +19,9 @@ rejected three formats in a row (see "Why", below). Apply it before the first
    When a tool or skill expects the generic name (the `research` checker reads
    `report.md` and `evidence.jsonl`), keep a symlink at the generic name
    (`ln -s <slug>-research-report.md report.md`) and commit both.
+   Exception: a file a tool rewrites by temp-file-and-rename (the checker's
+   `evidence.jsonl`) stays the real file at the tool's name, with the descriptive
+   name as the symlink; otherwise every run replaces the symlink with a copy.
 2. **Citations are numbered superscript links, never bare ids and never
    Markdown footnotes.** Body form, one `<sup>` per run of adjacent citations,
    numbers by first appearance, space-separated, no commas:
