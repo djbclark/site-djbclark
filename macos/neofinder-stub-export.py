@@ -175,7 +175,8 @@ import sys
 if sys.version_info < (3, 11):
     print(
         f"neofinder-stub-export.py: needs Python >= 3.11 (found "
-        f"{sys.version.split()[0]}); use /opt/homebrew/bin/python3",
+        f"{sys.version.split()[0]}); use /opt/homebrew/bin/python3.12 "
+        "(or any python3 >= 3.11)",
         file=sys.stderr,
     )
     sys.exit(2)
