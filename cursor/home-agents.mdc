@@ -18,7 +18,7 @@ conflict. This is its condensed copy for `cursor-agent`, which reads
 
 > A deliberate **subset** (`alwaysApply: true`: every section costs context on
 > every Cursor turn); omitted: backups, LLM gateway, Claude Code agent teams.
-> Agents maintain both copies without asking; keep each under ~20 KB.
+> Agents maintain both copies without asking; keep home-agents.md under ~13 KB (2026-10-10) and this copy under ~20 KB.
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
