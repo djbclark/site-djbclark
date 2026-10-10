@@ -232,6 +232,10 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
    (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
    (`memory/feedback_all_agents_includes_hermes.md`)
+5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether to
+   add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (the drop-in prompt
+   that applies his toolchain to another repo; 2026-10-09).
+   (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
 
 ## Research outward first (2026-10-05)
 
