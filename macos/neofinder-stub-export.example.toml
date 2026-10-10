@@ -8,7 +8,7 @@
 
 # Staging directory: must exist and be writable. The batch script
 # (macos/neofinder-spotlight-batch.sh) mounts /Volumes/NeoFinderBatch when
-# given --image; only stubs are ever written under it.
+# given --image; only stubs and Finder aliases are ever written under it.
 #dest = "/Volumes/NeoFinderBatch"
 
 # Items fetched per AppleScript page. 10,000 is the measured sweet spot

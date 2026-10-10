@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """neofinder-stub-export.py — populate a staging volume with NeoFinder stubs.
 
-For every item in the chosen NeoFinder catalogue(s), write a STUB at
+For every item in the chosen NeoFinder catalogue(s), write an entry at
 <dest>/<catalogue name>/<original relative path>: a directory for a catalogued
-folder, an empty file for a catalogued file, mtime set to the catalogued
-modification date, and a Finder comment (com.apple.metadata:kMDItemFinderComment,
+folder; for a catalogued file, a Finder ALIAS to the real file when it exists
+on its mounted volume (opening the alias opens the real file; it carries the
+real file's creation, modification and added dates and kind, header O), else
+an empty STUB with mtime set to the catalogued modification date; and on
+every entry a Finder comment (com.apple.metadata:kMDItemFinderComment,
 which Spotlight indexes) carrying the original complete path, size and kind.
 `macos/neofinder-spotlight-batch.sh` then brings Spotlight up briefly and
 indexes only that staging volume. The goal is for Finder search to stand in
 for Spotlight's own index of the MOUNTED volumes, which stay unindexed
 (`mdutil -a -i off`), so no resident indexer ever scans the real volumes.
 Known gaps against that goal: the index exists only during the batch window,
-and a search result is the stub, not the real file.
+and a search result is an alias to the real file (a stub when the file's
+volume was not mounted at export time).
 
 NeoFinder is only ever QUERIED over AppleScript. This script contains no
 `set <property> of` on anything, and never calls delete/move/make/catalog/
@@ -46,8 +50,9 @@ Usage:
   status     installed/enabled/running/paused/schedule/per-catalogue progress
   list       catalogue table (name, volume, items, mounted/offline)
 
-Needs Python >= 3.11, stdlib only (tomllib). Nothing but stubs is ever
-written under --dest; state, the path index and run.pid live under
+Needs Python >= 3.11 (tomllib); PyObjC (pyobjc-framework-Cocoa) for aliases,
+without it every file is a stub (header O). Nothing but stubs and aliases
+is ever written under --dest; state, the path index and run.pid live under
 ~/Library/Application Support/neofinder-stub-export/, logs under
 ~/Library/Logs/neofinder-stub-export/.
 
@@ -149,6 +154,29 @@ NeoFinder 9.3.1; companion script macos/neofinder-spotlight-batch.sh):
      directory on the mounted volume of a catalogue being exported (st_dev
      compare; for the boot catalogue that includes the Data volume, so its
      stubs would not end up catalogued by NeoFinder's next rescan).
+  O. Aliases (measured on macOS 27, 2026-10-10). The real file of an item
+     is <mount point>/<rel> (rel as in E; mount point from
+     catalogue_mount_points: /Volumes/<volume name>, or / for the boot
+     catalogue, whose /Users etc. reach the Data volume via firmlinks). When
+     that lstat()s as a regular file, the item becomes a Finder alias
+     (bookmark file, NSURL writeBookmarkData) written to a temp name and
+     renamed over the target (an old stub or alias); it gets the real
+     file's creation and modification dates (setResourceValues) and Date
+     Added (setattrlist ATTR_CMN_ADDEDTIME, unprivileged), and
+     com.apple.metadata:kMDItemKind = the real file's localized type
+     description (else the catalogued kind). Spotlight finds aliases by
+     name and dates and honours that kMDItemKind xattr; it IGNORES
+     kMDItemContentType(Tree) and kMDItemLogicalSize xattrs on aliases, so
+     none are written (size lives in the Finder comment). A missing real
+     file (volume offline, moved, deleted) gets the empty stub, plus the
+     kMDItemKind xattr from the catalogued kind; an existing file there
+     is kept (never truncated). PyObjC not importable: one warning with the
+     install command, stubs for the whole run. Done ranges are not
+     revisited, so stubs written before aliases existed stay stubs until a
+     full re-export: `export --restart [--catalog NAME]` with the volume
+     mounted (it clears the dest's saved state and rewrites every item).
+     Cost: ~1.2 ms per alias against ~0.16 ms per stub (2,000 mac256usb
+     files, warm), so a 10,000-file page spends ~12 s writing, not ~1.6 s.
 
 History:
   - 2026-10-09: written (multi-agent batch slice; lead integrates, tests and
@@ -171,6 +199,10 @@ History:
     Not taken yet: prefetching the next page in a thread (1.1-1.2x more),
     rebuilding paths from the index instead of fetching them, reading the
     .neofinder7 file directly.
+  - 2026-10-10: Finder aliases instead of stubs for files whose real file
+    is on a mounted volume, with real dates and kMDItemKind (header O;
+    operator's design). Aliases and stubs are counted separately in page
+    log lines and the summary. Old stubs convert on `export --restart`.
 """
 
 import sys
@@ -194,6 +226,7 @@ import json
 import os
 import plistlib
 import signal
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -214,6 +247,12 @@ PLIST_TEMPLATE = "neofinder-stub-export.plist.template"
 RS = "\x1e"  # record separator between transport records / columns
 US = "\x1f"  # unit separator between fields / column items
 FINDER_COMMENT_XATTR = "com.apple.metadata:kMDItemFinderComment"
+KIND_XATTR = "com.apple.metadata:kMDItemKind"  # honoured on aliases (header O)
+BOOKMARK_FILE_OPT = 1 << 10  # NSURLBookmarkCreationSuitableForBookmarkFile
+ATTR_BIT_MAP_COUNT = 5
+ATTR_CMN_ADDEDTIME = 0x10000000
+FSOPT_NOFOLLOW = 0x1
+ALIAS_TMP_PREFIX = ".nfx-alias-"  # temp name beside the target, then rename
 BYTES_PER_ITEM_HEADROOM = 2048
 OSA_TIMEOUT = 900  # seconds; the slowest measured 10k page is well under 60 s
 AE_TIMEOUT = 600  # AppleEvent `with timeout` (AppleScript's default is 120 s)
@@ -1330,18 +1369,200 @@ _LIBC.setxattr.argtypes = [
 ]
 
 
-def set_finder_comment(path, text_value):
-    """Set kMDItemFinderComment to a binary plist of the string.
+_LIBC.setattrlist.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_uint32,
+]
+
+
+class _AttrList(ctypes.Structure):  # <sys/attr.h> struct attrlist
+    _fields_ = [
+        ("bitmapcount", ctypes.c_ushort),
+        ("reserved", ctypes.c_uint16),
+        ("commonattr", ctypes.c_uint32),
+        ("volattr", ctypes.c_uint32),
+        ("dirattr", ctypes.c_uint32),
+        ("fileattr", ctypes.c_uint32),
+        ("forkattr", ctypes.c_uint32),
+    ]
+
+
+class _Timespec(ctypes.Structure):
+    _fields_ = [("tv_sec", ctypes.c_long), ("tv_nsec", ctypes.c_long)]
+
+
+def _set_plist_xattr(path, name, value):
+    """Set xattr `name` to a binary plist of `value`.
 
     Python has no os.setxattr on macOS, hence the libc call.
     """
-    blob = plistlib.dumps(text_value, fmt=plistlib.FMT_BINARY)
-    rc = _LIBC.setxattr(
-        os.fsencode(path), FINDER_COMMENT_XATTR.encode(), blob, len(blob), 0, 0
+    blob = plistlib.dumps(value, fmt=plistlib.FMT_BINARY)
+    rc = _LIBC.setxattr(os.fsencode(path), name.encode(), blob, len(blob), 0, 0)
+    if rc != 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, os.strerror(errno), path)
+
+
+def set_finder_comment(path, text_value):
+    """Set kMDItemFinderComment (which Spotlight indexes) to the string."""
+    _set_plist_xattr(path, FINDER_COMMENT_XATTR, text_value)
+
+
+def set_kind(path, kind):
+    """Set kMDItemKind; Spotlight shows and queries it, alias or stub."""
+    if kind:
+        _set_plist_xattr(path, KIND_XATTR, kind)
+
+
+def set_added_time(path, epoch):
+    """Set the Finder "Date Added" (ATTR_CMN_ADDEDTIME); no root needed.
+
+    The setattrlist buffer for a single timespec attribute is just the
+    timespec (no length word), as in the reference mkalias.swift (header O).
+    """
+    al = _AttrList(bitmapcount=ATTR_BIT_MAP_COUNT, commonattr=ATTR_CMN_ADDEDTIME)
+    sec = int(epoch // 1)
+    ts = _Timespec(sec, int((epoch - sec) * 1e9))
+    rc = _LIBC.setattrlist(
+        os.fsencode(path),
+        ctypes.byref(al),
+        ctypes.byref(ts),
+        ctypes.sizeof(ts),
+        FSOPT_NOFOLLOW,
     )
     if rc != 0:
         errno = ctypes.get_errno()
         raise OSError(errno, os.strerror(errno), path)
+
+
+# --------------------------------------------------------------------------
+# Finder aliases (PyObjC Foundation; optional, header O)
+# --------------------------------------------------------------------------
+
+_F = None  # the Foundation module once loaded; False = unavailable this run
+
+
+def load_foundation(log):
+    """Import PyObjC's Foundation once; on failure warn ONCE, stubs only."""
+    global _F
+    if _F is None:
+        try:
+            import Foundation  # optional dependency (header O)
+
+            _F = Foundation
+        except ImportError as exc:
+            _F = False
+            msg = (
+                f"PyObjC Foundation not importable ({exc}); writing empty stubs "
+                f"instead of Finder aliases for this run. Install with: uv pip "
+                f"install --python {sys.executable} --break-system-packages "
+                f"pyobjc-framework-Cocoa"
+            )
+            eprint(f"warning: {msg}")
+            log.warning(msg)
+    return _F or None
+
+
+class AliasSourceError(RuntimeError):
+    """The REAL file could not be bookmarked or read: fall back to a stub."""
+
+
+def _nserror_oserror(err, path):
+    """An NSError from a write under dest -> OSError with the POSIX errno."""
+    code = errno.EIO
+    try:
+        if err.domain() == "NSPOSIXErrorDomain":
+            code = int(err.code())
+        else:
+            under = err.userInfo().get("NSUnderlyingError")
+            if under is not None and under.domain() == "NSPOSIXErrorDomain":
+                code = int(under.code())
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return OSError(code, os.strerror(code), str(path))
+
+
+def write_alias(real, target, comment, kind_fallback):
+    """Write a Finder alias to `real` at `target`, replacing what is there.
+
+    The bookmark goes to a temp name in the target's directory, gets the
+    Finder comment, kMDItemKind and the real file's creation and
+    modification dates, and is renamed over the target (a zero-byte stub
+    or an older alias); Date Added is set after the rename. Raises
+    AliasSourceError when the real file cannot be bookmarked, OSError for
+    write failures under dest.
+    """
+    F = _F
+    src = F.NSURL.fileURLWithPath_(real)
+    vals, err = src.resourceValuesForKeys_error_(
+        [
+            F.NSURLLocalizedTypeDescriptionKey,
+            F.NSURLCreationDateKey,
+            F.NSURLContentModificationDateKey,
+            F.NSURLAddedToDirectoryDateKey,
+        ],
+        None,
+    )
+    if vals is None:
+        raise AliasSourceError(f"resource values: {err}")
+    data, err = (
+        src.bookmarkDataWithOptions_includingResourceValuesForKeys_relativeToURL_error_(
+            BOOKMARK_FILE_OPT, None, None, None
+        )
+    )
+    if data is None:
+        raise AliasSourceError(f"bookmark: {err}")
+    tmp = target.parent / f"{ALIAS_TMP_PREFIX}{os.getpid()}"
+    tmp_url = F.NSURL.fileURLWithPath_(str(tmp))
+    try:
+        ok, err = F.NSURL.writeBookmarkData_toURL_options_error_(
+            data, tmp_url, BOOKMARK_FILE_OPT, None
+        )
+        if not ok:
+            raise _nserror_oserror(err, tmp)
+        set_finder_comment(tmp, comment)
+        set_kind(
+            tmp,
+            str(vals.get(F.NSURLLocalizedTypeDescriptionKey) or "") or kind_fallback,
+        )
+        dates = {
+            k: vals[k]
+            for k in (F.NSURLCreationDateKey, F.NSURLContentModificationDateKey)
+            if vals.get(k) is not None
+        }
+        if dates:
+            ok, err = tmp_url.setResourceValues_error_(dates, None)
+            if not ok:
+                raise _nserror_oserror(err, tmp)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    added = vals.get(F.NSURLAddedToDirectoryDateKey)
+    if added is not None:
+        try:
+            set_added_time(target, added.timeIntervalSince1970())
+        except OSError as exc:  # a dest filesystem without Date Added: keep it
+            if exc.errno not in (errno.ENOTSUP, errno.EINVAL):
+                raise
+
+
+def real_regular_file(alias_root, rel):
+    """The real file's path when it exists as a regular file, else None."""
+    if alias_root is None or not rel:
+        return None
+    real = os.path.join(alias_root, rel)
+    try:
+        st = os.lstat(real)
+    except (OSError, ValueError):
+        return None
+    return real if stat.S_ISREG(st.st_mode) else None
 
 
 class PageCounts:
@@ -1349,13 +1570,16 @@ class PageCounts:
         self.items = 0
         self.folders = 0
         self.files = 0
+        self.aliases = 0  # files written as Finder aliases (subset of files)
+        self.stubs = 0  # files written as empty stubs (subset of files)
         self.skipped = 0  # unparseable / unreadable (x) + write failures
         self.failed = 0  # write failures only (subset of skipped)
         self.comments = 0
         self.problems = []  # first SKIP_LIST_SHOWN "index: path (reason)"
 
     def add(self, other):
-        for k in ("items", "folders", "files", "skipped", "failed", "comments"):
+        keys = ("items", "folders", "files", "aliases", "stubs", "skipped")
+        for k in keys + ("failed", "comments"):
             setattr(self, k, getattr(self, k) + getattr(other, k))
         room = SKIP_LIST_SHOWN - len(self.problems)
         if room > 0:
@@ -1378,14 +1602,19 @@ def _fatal_write_error(exc, cat_dir):
     return False
 
 
-def write_page(records, idx_rows, cat_dir, folder_fh, lo, idx, skip, log):
-    """Write one page of stubs (items lo, lo+1, ...). Returns PageCounts.
+def write_page(
+    records, idx_rows, cat_dir, folder_fh, lo, idx, skip, log, alias_root=None
+):
+    """Write one page of items (lo, lo+1, ...). Returns PageCounts.
 
     `records` are the fetched items in order (None = unreadable over the
     transport, header H); `idx_rows` the (flag, rel) pairs from the path
     index in the same order (None when no index: the rel path is derived
     from the record's own complete path and `skip` is applied here).
-    A stub that cannot be written is skipped and logged; only the errors of
+    `alias_root` is where the catalogue's volume is mounted (None: offline,
+    or no PyObjC): a file whose <alias_root>/<rel> exists as a regular file
+    becomes a Finder alias to it, any other file an empty stub (header O).
+    An item that cannot be written is skipped and logged; only the errors of
     _fatal_write_error raise StubWriteError.
     """
     counts = PageCounts()
@@ -1421,29 +1650,43 @@ def write_page(records, idx_rows, cat_dir, folder_fh, lo, idx, skip, log):
                 continue
         is_folder = rec.kind.strip().lower() == "folder"
         target = cat_dir if rel == "" else cat_dir / rel
+        comment = f"NeoFinder: {rec.complete_path} | {rec.size} bytes | {rec.kind}"
+        real = None if is_folder else real_regular_file(alias_root, rel)
         try:
             if is_folder:
                 os.makedirs(target, exist_ok=True)
                 if folder_fh and rec.mtime is not None:
                     folder_fh.write(f"{rec.mtime}{US}{rel}\n")
+                set_finder_comment(target, comment)
             else:
                 os.makedirs(target.parent, exist_ok=True)
-                try:
-                    with open(target, "x"):
+                if real is not None:
+                    try:
+                        write_alias(real, target, comment, rec.kind)
+                    except AliasSourceError as exc:
+                        log.warning(f"alias failed, writing a stub: {real} ({exc})")
+                        real = None
+                if real is None:
+                    # Missing real file (volume offline, moved, deleted): the
+                    # empty stub. An existing file is kept, not truncated.
+                    try:
+                        with open(target, "x"):
+                            pass
+                    except FileExistsError:
                         pass
-                except FileExistsError:
-                    pass
-                if rec.mtime is not None:
-                    os.utime(target, (rec.mtime, rec.mtime))
-            comment = f"NeoFinder: {rec.complete_path} | {rec.size} bytes | {rec.kind}"
-            set_finder_comment(target, comment)
+                    if rec.mtime is not None:
+                        os.utime(target, (rec.mtime, rec.mtime))
+                    set_finder_comment(target, comment)
+                    set_kind(target, rec.kind)
         except OSError as exc:
             if _fatal_write_error(exc, cat_dir):
-                raise StubWriteError(f"cannot write stub {target}: {exc}") from None
+                what = "alias" if real is not None else "stub"
+                raise StubWriteError(f"cannot write {what} {target}: {exc}") from None
             counts.skipped += 1
             counts.failed += 1
             code = errno.errorcode.get(exc.errno, str(exc.errno))
-            log.warning(f"stub skipped: {target} ({code}: {exc.strerror})")
+            what = "alias" if real is not None else "stub"
+            log.warning(f"{what} skipped: {target} ({code}: {exc.strerror})")
             counts.note(f"item {n}: {target} ({code})")
             continue
         counts.items += 1
@@ -1452,6 +1695,10 @@ def write_page(records, idx_rows, cat_dir, folder_fh, lo, idx, skip, log):
             counts.folders += 1
         else:
             counts.files += 1
+            if real is not None:
+                counts.aliases += 1
+            else:
+                counts.stubs += 1
     return counts
 
 
@@ -1482,7 +1729,7 @@ def apply_folder_mtimes(cat, dest, cat_dir, log):
 
 
 def remove_stale_stubs(cat_dir, prefix_rel, keep_set, log):
-    """Under <cat_dir>/<prefix_rel>, delete stubs not in keep_set (refresh)."""
+    """Under <cat_dir>/<prefix_rel>, delete stubs/aliases not in keep_set."""
     root = cat_dir / prefix_rel
     if not root.exists():
         return 0
@@ -1867,7 +2114,7 @@ def export_run(args, cfg, config_path):
     if args.dry_run:
         print("dry run: nothing written")
     else:
-        print(f"Stubs are under: {dest}")
+        print(f"Aliases and stubs are under: {dest}")
     log.line(f"done, elapsed {human_secs(elapsed)}")
     log.close()
     if stop == "interrupt":
@@ -1954,7 +2201,7 @@ def export_catalogue(
                 res["stop"] = st.reason
                 res["bit"] = (
                     f"{cat}: stopped during the path index pass ({st.reason}); "
-                    f"nothing exported yet; stubs at {cat_dir}"
+                    f"nothing exported yet; output at {cat_dir}"
                 )
                 log.line(f"catalogue summary: {res['bit']}")
                 return res
@@ -1997,6 +2244,16 @@ def export_catalogue(
     check_free_space(dest, total_work - done_before, cat, log)
 
     cat_dir.mkdir(parents=True, exist_ok=True)
+    mounts = catalogue_mount_points(info)
+    alias_root = mounts[0] if mounts and load_foundation(log) else None
+    if alias_root:
+        log.info(f"{cat}: files that exist under {alias_root} become Finder aliases")
+    else:
+        log.info(
+            f"{cat}: "
+            + ("volume not mounted" if not mounts else "no PyObjC")
+            + "; every file becomes an empty stub"
+        )
     journal = folders_journal(cat, dest)
     journal.parent.mkdir(parents=True, exist_ok=True)
 
@@ -2024,7 +2281,15 @@ def export_catalogue(
                         )
                     idx_rows = idx.get(cursor, hi_done) if idx is not None else None
                     page_counts = write_page(
-                        records, idx_rows, cat_dir, folder_fh, cursor, idx, skip, log
+                        records,
+                        idx_rows,
+                        cat_dir,
+                        folder_fh,
+                        cursor,
+                        idx,
+                        skip,
+                        log,
+                        alias_root,
                     )
                     folder_fh.flush()
                     counts.add(page_counts)
@@ -2040,7 +2305,9 @@ def export_catalogue(
                     )
                     log.info(
                         f"{cat}: page {cursor}-{hi_done} done "
-                        f"({page_counts.items} written, "
+                        f"({page_counts.items} written: "
+                        f"{page_counts.aliases} aliases, {page_counts.stubs} "
+                        f"stubs, {page_counts.folders} folders; "
                         f"{page_counts.skipped} skipped)"
                     )
                     check_free_space(dest, total_work - done_now, cat, log)
@@ -2080,7 +2347,8 @@ def export_catalogue(
     bit = (
         f"{cat}: {exported_here} items processed in {human_secs(elapsed_cat)}"
         + (f" ({rate:.1f} items/s)" if rate else "")
-        + f": {counts.files} files, {counts.folders} folders written; skipped "
+        + f": {counts.files} files ({counts.aliases} aliases, {counts.stubs} "
+        f"stubs), {counts.folders} folders written; skipped "
         f"{skipped_by_list} under the skip list (not fetched), {unreadable} "
         f"unparseable/unreadable, {counts.failed} write errors; "
         f"{done_now}/{total_work} done"
@@ -2093,7 +2361,7 @@ def export_catalogue(
         + (", PAUSED" if stop in ("pause", "sigterm") else "")
         + (", stopped at schedule end" if stop == "schedule" else "")
         + (", interrupted" if stop == "interrupt" else "")
-        + f"; stubs at {cat_dir}"
+        + f"; output at {cat_dir}"
     )
     log.line(f"catalogue summary: {bit}")
     res["bit"] = bit
@@ -2629,7 +2897,10 @@ def add_export_flags(parser):
         help=f"log heartbeat seconds (default {LOG_INTERVAL_DEFAULT})",
     )
     parser.add_argument(
-        "--restart", action="store_true", help="ignore and clear saved state"
+        "--restart",
+        action="store_true",
+        help="ignore and clear saved state: a full re-export (turns stubs "
+        "written before aliases existed into aliases; volume must be mounted)",
     )
     parser.add_argument(
         "--dry-run",
