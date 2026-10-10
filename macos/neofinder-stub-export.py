@@ -199,6 +199,23 @@ NeoFinder 9.3.1; companion script macos/neofinder-spotlight-batch.sh):
      the Finder comment, offline = zero-byte stub, real tags read through
      the alias's bookmark path (when the real file is unreadable, the
      alias's existing non-nf tags are kept).
+  R. Size number, last opened, stub dates, nightly (2026-10-10,
+     alias-test4). Every entry also gets its real size as a number in a
+     custom attribute, kMDItemNFRealSize (mdfind and saved searches:
+     `kMDItemNFRealSize > 2500000000`; Finder's search panel cannot offer
+     it). An alias gets the real file's last-opened date (the raw
+     com.apple.lastuseddate#PS xattr, which Spotlight reads as
+     kMDItemLastUsedDate). Opening through an alias updates only the real
+     file, so `retag` re-copies it. Finder's Recents can never list an
+     alias (its query wants a public.content type tree); the "NF Recents"
+     saved search stands in. A stub's creation and added dates are its
+     export time: `stub-dates PATH` asks NeoFinder for each stub's Creation
+     Date (by its path-index item number, checked against the complete path
+     in the Finder comment), sets both, and marks the stub
+     (com.djbclark.nf-crtime) so it is asked once; it asks nothing while
+     NeoFinder is not running. `nightly` attaches the batch image unless it
+     is mounted, runs retag then stub-dates until --stop-by, and detaches
+     only what it attached (Jobber job neofinder-nightly, 01:15-05:45).
 
 History:
   - 2026-10-09: written (multi-agent batch slice; lead integrates, tests and
@@ -226,6 +243,8 @@ History:
     operator's design). Aliases and stubs are counted separately in page
     log lines and the summary. Old stubs convert on `export --restart`.
   - 2026-10-10 (later): kind tags and keywords (header P) and `retag`.
+  - 2026-10-10 (evening): size/offline/real tags (Q); real size number,
+    last opened, `stub-dates` and `nightly` (R).
 """
 
 import sys
@@ -275,6 +294,7 @@ KIND_XATTR = "com.apple.metadata:kMDItemKind"  # honoured on aliases (header O)
 BOOKMARK_FILE_OPT = 1 << 10  # NSURLBookmarkCreationSuitableForBookmarkFile
 ATTR_BIT_MAP_COUNT = 5
 ATTR_CMN_ADDEDTIME = 0x10000000
+ATTR_CMN_CRTIME = 0x00000200
 FSOPT_NOFOLLOW = 0x1
 ALIAS_TMP_PREFIX = ".nfx-alias-"  # temp name beside the target, then rename
 BYTES_PER_ITEM_HEADROOM = 2048
@@ -305,6 +325,13 @@ SIZE_TAGS = (
 )
 OFFLINE_TAG = "nf-offline"
 COMMENT_SIZE_RE = re.compile(r" \| (\d+) bytes \| ")
+COMMENT_PATH_RE = re.compile(r"^NeoFinder: (.*) \| \d+ bytes \| ")
+REAL_SIZE_XATTR = "com.apple.metadata:kMDItemNFRealSize"  # custom (header R)
+LASTUSED_XATTR = "com.apple.lastuseddate#PS"  # raw; kMDItemLastUsedDate
+STUB_CRTIME_XATTR = "com.djbclark.nf-crtime"  # stub dates came from NeoFinder
+NIGHTLY_IMAGE = "~/nfbatch.sparseimage"
+NIGHTLY_MOUNT = "/Volumes/NeoFinderBatch"
+STUB_DATES_CHUNK = 200  # items per Apple Event script in stub-dates
 KIND_GROUP_EXTS = {
     "image": "jpg jpeg jpe png gif bmp tif tiff webp heic heif avif svg psd psb "
     "ico icns xcf ai eps jp2 jxl tga exr hdr pict pnt cr2 cr3 crw nef nrw arw "
@@ -1548,18 +1575,27 @@ def nf_tags(group, size, offline):
 
 
 def set_nf_tags(path, group, size=0, offline=False, user_tags=()):
-    """Write Finder tags and keywords (headers P, Q).
+    """Write Finder tags, keywords and the real size (headers P, Q, R).
 
     Tags are nf_tags() plus `user_tags` (the real file's own Finder tags,
     written as given); keywords are nf_tags() plus the bare group name.
-    Overwrites: these files are ours. Nothing to write writes nothing.
+    Overwrites: these files are ours. Nothing to write writes nothing, and
+    a value already there is not rewritten (retag runs nightly).
     """
     nf = nf_tags(group, size, offline)
     tags = nf + [t for t in user_tags if isinstance(t, str) and t not in nf]
     if tags:
-        _set_plist_xattr(path, USER_TAGS_XATTR, tags)
+        _put_plist_xattr(path, USER_TAGS_XATTR, tags)
     if nf:
-        _set_plist_xattr(path, KEYWORDS_XATTR, nf + ([group] if group else []))
+        _put_plist_xattr(path, KEYWORDS_XATTR, nf + ([group] if group else []))
+    if size > 0:
+        _put_plist_xattr(path, REAL_SIZE_XATTR, int(size))
+
+
+def _put_plist_xattr(path, name, value):
+    """_set_plist_xattr unless the xattr already holds `value`."""
+    if get_plist_xattr(path, name) != value:
+        _set_plist_xattr(path, name, value)
 
 
 def real_user_tags(path):
@@ -1569,12 +1605,22 @@ def real_user_tags(path):
 
 
 def set_added_time(path, epoch):
-    """Set the Finder "Date Added" (ATTR_CMN_ADDEDTIME); no root needed.
+    """Set the Finder "Date Added" (ATTR_CMN_ADDEDTIME); no root needed."""
+    _set_attr_time(path, ATTR_CMN_ADDEDTIME, epoch)
+
+
+def set_creation_time(path, epoch):
+    """Set the creation date (ATTR_CMN_CRTIME); the owner needs no root."""
+    _set_attr_time(path, ATTR_CMN_CRTIME, epoch)
+
+
+def _set_attr_time(path, attr, epoch):
+    """setattrlist one common timespec attribute, not following links.
 
     The setattrlist buffer for a single timespec attribute is just the
     timespec (no length word), as in the reference mkalias.swift (header O).
     """
-    al = _AttrList(bitmapcount=ATTR_BIT_MAP_COUNT, commonattr=ATTR_CMN_ADDEDTIME)
+    al = _AttrList(bitmapcount=ATTR_BIT_MAP_COUNT, commonattr=attr)
     sec = int(epoch // 1)
     ts = _Timespec(sec, int((epoch - sec) * 1e9))
     rc = _LIBC.setattrlist(
@@ -1682,6 +1728,7 @@ def write_alias(real, target, comment, kind_fallback, size=0):
         set_nf_tags(
             tmp, kind_group(target.name, kind), size, False, real_user_tags(real)
         )
+        copy_last_used(real, tmp)
         dates = {
             k: vals[k]
             for k in (F.NSURLCreationDateKey, F.NSURLContentModificationDateKey)
@@ -2845,20 +2892,44 @@ _LIBC.getxattr.argtypes = [
 _LIBC.getxattr.restype = ctypes.c_ssize_t
 
 
-def get_plist_xattr(path, name):
-    """The decoded binary-plist xattr `name`, or None when absent/unreadable."""
+def get_raw_xattr(path, name):
+    """The bytes of xattr `name`, or None when absent/unreadable."""
     p, n = os.fsencode(path), name.encode()
     size = _LIBC.getxattr(p, n, None, 0, 0, 0)
     if size <= 0:
         return None
     buf = ctypes.create_string_buffer(size)
     got = _LIBC.getxattr(p, n, buf, size, 0, 0)
-    if got <= 0:
+    return buf.raw[:got] if got > 0 else None
+
+
+def get_plist_xattr(path, name):
+    """The decoded binary-plist xattr `name`, or None when absent/unreadable."""
+    blob = get_raw_xattr(path, name)
+    if blob is None:
         return None
     try:
-        return plistlib.loads(buf.raw[:got])
+        return plistlib.loads(blob)
     except Exception:
         return None
+
+
+def copy_last_used(real, alias):
+    """Copy the real file's last-opened date onto the alias (header R).
+
+    True when the real file has one; writes only when the alias differs.
+    """
+    data = get_raw_xattr(real, LASTUSED_XATTR)
+    if data is None:
+        return False
+    if get_raw_xattr(alias, LASTUSED_XATTR) != data:
+        rc = _LIBC.setxattr(
+            os.fsencode(alias), LASTUSED_XATTR.encode(), data, len(data), 0, 0
+        )
+        if rc != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err), alias)
+    return True
 
 
 def bookmark_path(path):
@@ -2897,12 +2968,17 @@ def cmd_retag(args):
     seen = errors = untagged = 0
     per_group = {}
     per_tag = {}
-    real_read = 0
+    real_read = last_used = 0
     shown = 0
+    deadline = getattr(args, "deadline", None)
+    stopped = False
     load_foundation(RunLog(enabled=False))
     for dirpath, dirnames, filenames in os.walk(root):
         if Path(dirpath) == root:
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        if deadline is not None and time.time() >= deadline:
+            stopped = True
+            break
         for fname in filenames:
             if fname.startswith((ALIAS_TMP_PREFIX, "._")):
                 continue
@@ -2924,6 +3000,11 @@ def cmd_retag(args):
                     if real is not None and os.path.exists(real):
                         user_tags = real_user_tags(real)
                         real_read += 1
+                        if args.dry_run:
+                            has_lu = get_raw_xattr(real, LASTUSED_XATTR) is not None
+                        else:
+                            has_lu = copy_last_used(real, path)
+                        last_used += has_lu
                 if user_tags is None:  # keep what an earlier run copied
                     user_tags = [
                         t for t in real_user_tags(path) if not t.startswith("nf-")
@@ -2951,7 +3032,9 @@ def cmd_retag(args):
     tagged = sum(per_group.values())
     print(
         f"retag {root}: {seen} files seen, {verb} {tagged} with a kind, "
-        f"{untagged} without, {errors} errors; real files read for tags: {real_read}"
+        f"{untagged} without, {errors} errors; real files read for tags: {real_read}, "
+        f"last opened copied: {last_used}"
+        + ("; STOPPED at the deadline" if stopped else "")
     )
     for group in sorted(per_group, key=lambda g: (-per_group[g], g)):
         print(f"  nf-{group:<10} {per_group[group]}")
@@ -2960,10 +3043,220 @@ def cmd_retag(args):
     if not args.dry_run:
         subcmd_log(
             f"retag {root}: seen={seen} kind_tagged={tagged} no_kind={untagged} "
-            f"errors={errors} real_read={real_read} "
+            f"errors={errors} real_read={real_read} last_used={last_used} "
+            f"stopped={int(stopped)} "
             + " ".join(f"{t}={n}" for t, n in sorted(per_tag.items()))
         )
-    return 1 if errors else 0
+    return 1 if errors else 3 if stopped else 0
+
+
+STUB_DATES_SCRIPT = (
+    WALLREF_HANDLER
+    + """
+on run
+	set refD to my wallRef()
+	set ns to {@NS@}
+	set cds to {}
+	set cps to {}
+	with timeout of @AET@ seconds
+		tell application "NeoFinder"
+			repeat with n in ns
+				try
+					set {cd, cp} to {Creation Date, complete path} of Catalog Item (n as integer) of Catalogue "@CAT@"
+				on error
+					set {cd, cp} to {missing value, ""}
+				end try
+				set end of cds to cd
+				set end of cps to cp
+			end repeat
+		end tell
+	end timeout
+	set US to character id 31
+	set RS to character id 30
+	set out to {}
+	repeat with i from 1 to count of cds
+		set d to item i of cds
+		if class of d is date then
+			set d2 to ((d - refD) as text)
+		else
+			set d2 to ""
+		end if
+		try
+			set p2 to (item i of cps) as text
+		on error
+			set p2 to ""
+		end try
+		set end of out to d2 & US & p2
+	end repeat
+	set {TID, AppleScript's text item delimiters} to {AppleScript's text item delimiters, RS}
+	set o to out as text
+	set AppleScript's text item delimiters to TID
+	return o
+end run
+"""
+)
+
+
+def neofinder_running():
+    return subprocess.run(["pgrep", "-xq", "NeoFinder"]).returncode == 0
+
+
+def cmd_stub_dates(args):
+    """Stubs' creation and added dates from NeoFinder's Creation Date (R)."""
+    root = Path(args.path).expanduser()
+    if not root.is_dir():
+        eprint(f"stub-dates: {root} is not a directory")
+        return 2
+    if not neofinder_running():
+        print("stub-dates: NeoFinder is not running; nothing asked")
+        return 0
+    deadline = getattr(args, "deadline", None)
+    want = {}  # catalogue -> {rel: (stub path, complete path from comment)}
+    done_before = 0
+    for cat_dir in sorted(root.iterdir()):
+        if cat_dir.name.startswith(".") or not cat_dir.is_dir():
+            continue
+        for dirpath, _dirnames, filenames in os.walk(cat_dir):
+            for fname in filenames:
+                if fname.startswith((ALIAS_TMP_PREFIX, "._")):
+                    continue
+                path = os.path.join(dirpath, fname)
+                try:
+                    st = os.lstat(path)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode) or st.st_size != 0:
+                    continue
+                if get_raw_xattr(path, STUB_CRTIME_XATTR) is not None:
+                    done_before += 1
+                    continue
+                comment = get_plist_xattr(path, FINDER_COMMENT_XATTR)
+                m = COMMENT_PATH_RE.match(comment) if isinstance(comment, str) else None
+                if m:
+                    rel = os.path.relpath(path, cat_dir)
+                    want.setdefault(cat_dir.name, {})[rel] = (path, m.group(1))
+    fixed = mismatch = no_index = no_date = failed = 0
+    stopped = False
+    for cat, rels in want.items():
+        idx = PathsIndex(Catalogue(cat, None, 0, 0, None, None))
+        if not idx.txt.exists():
+            no_index += len(rels)
+            continue
+        nums = {}
+        with open(idx.txt, encoding="utf-8") as fh:
+            for i, line in enumerate(fh, start=1):
+                flag, _, rel = line.rstrip("\n").partition(US)
+                if flag == "f" and rel in rels:
+                    nums[i] = rel
+        no_index += len(rels) - len(nums)
+        order = sorted(nums)
+        for k in range(0, len(order), STUB_DATES_CHUNK):
+            if deadline is not None and time.time() >= deadline:
+                stopped = True
+                break
+            chunk = order[k : k + STUB_DATES_CHUNK]
+            script = (
+                STUB_DATES_SCRIPT.replace("@NS@", ", ".join(map(str, chunk)))
+                .replace("@AET@", str(AE_TIMEOUT))
+                .replace("@CAT@", asa_quote(cat))
+            )
+            try:
+                out = osa(script)
+            except OsaError as exc:
+                eprint(f"stub-dates: {cat}: {exc}")
+                failed += len(chunk)
+                continue
+            recs = out.split(RS)
+            if len(recs) != len(chunk):
+                eprint(f"stub-dates: {cat}: {len(recs)} answers for {len(chunk)} items")
+                failed += len(chunk)
+                continue
+            for n, rec in zip(chunk, recs):
+                path, want_cp = rels[nums[n]]
+                d, _, cp = rec.partition(US)
+                if cp != want_cp:
+                    mismatch += 1  # the catalogue changed since the export
+                    continue
+                rel_w = parse_num(d) if d else None
+                epoch = None if rel_w is None else wall_to_epoch(rel_w + WALL_REF_EPOCH)
+                if epoch is None:
+                    no_date += 1
+                    continue
+                if not args.dry_run:
+                    try:
+                        set_creation_time(path, epoch)
+                        set_added_time(path, epoch)
+                        _set_plist_xattr(path, STUB_CRTIME_XATTR, int(epoch))
+                    except OSError as exc:
+                        eprint(f"stub-dates: {path}: {exc}")
+                        failed += 1
+                        continue
+                fixed += 1
+        if stopped:
+            break
+    todo = sum(len(r) for r in want.values())
+    verb = "would set" if args.dry_run else "set"
+    print(
+        f"stub-dates {root}: {todo} stubs to ask about ({done_before} done before); "
+        f"{verb} {fixed}, path mismatch {mismatch}, not in the path index {no_index}, "
+        f"no date {no_date}, failed {failed}"
+        + ("; STOPPED at the deadline" if stopped else "")
+    )
+    if not args.dry_run:
+        subcmd_log(
+            f"stub-dates {root}: todo={todo} done_before={done_before} set={fixed} "
+            f"mismatch={mismatch} no_index={no_index} no_date={no_date} "
+            f"failed={failed} stopped={int(stopped)}"
+        )
+    return 1 if failed else 3 if stopped else 0
+
+
+def cmd_nightly(args):
+    """Attach the batch image if needed, retag, stub-dates, detach (R)."""
+    mount = Path(args.mount)
+    image = Path(args.image).expanduser()
+    try:
+        stop_min = _parse_hhmm(args.stop_by)
+    except ValueError as exc:
+        eprint(f"nightly: {exc}")
+        return 2
+    deadline = _next_occurrence(local_now(), stop_min).timestamp()
+    # SIGTERM (Jobber's timeout backstop) unwinds through `finally`.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
+    attached = False
+    if not os.path.ismount(mount):
+        if not image.exists():
+            eprint(f"nightly: no image {image}")
+            subcmd_log(f"nightly: no image {image}")
+            return 2
+        r = subprocess.run(
+            ["hdiutil", "attach", "-nobrowse", "-mountpoint", str(mount), str(image)],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout).strip()
+            eprint(f"nightly: attach failed: {msg}")
+            subcmd_log(f"nightly: attach {image} failed: {msg}")
+            return 2
+        attached = True
+    rt = sd = det = 0
+    try:
+        common = dict(path=str(mount), dry_run=False, deadline=deadline)
+        rt = cmd_retag(argparse.Namespace(**common))
+        sd = cmd_stub_dates(argparse.Namespace(**common)) if rt != 3 else 3
+    finally:
+        if attached:
+            r = subprocess.run(
+                ["hdiutil", "detach", str(mount)], capture_output=True, text=True
+            )
+            det = r.returncode
+            if det != 0:
+                eprint(f"nightly: detach failed: {(r.stderr or r.stdout).strip()}")
+        subcmd_log(
+            f"nightly: retag={rt} stub-dates={sd} attached={int(attached)} detach={det}"
+        )
+    return max(rt, sd, 1 if det else 0)
 
 
 def pid_file():
@@ -3282,6 +3575,22 @@ def build_parser():
     rt.add_argument(
         "--dry-run", action="store_true", help="print group counts, write nothing"
     )
+
+    sd = sub.add_parser(
+        "stub-dates",
+        help="set stubs' creation and added dates from NeoFinder's Creation Date",
+    )
+    sd.add_argument("path", help="batch volume or directory to walk")
+    sd.add_argument("--dry-run", action="store_true", help="count, write nothing")
+
+    ng = sub.add_parser(
+        "nightly", help="attach the batch image if needed, retag, stub-dates, detach"
+    )
+    ng.add_argument("--image", default=NIGHTLY_IMAGE, help="sparse image to attach")
+    ng.add_argument("--mount", default=NIGHTLY_MOUNT, help="its mount point")
+    ng.add_argument(
+        "--stop-by", default="05:45", help="HH:MM local time when work stops"
+    )
     return parser
 
 
@@ -3297,6 +3606,8 @@ SUBCOMMANDS = {
     "status",
     "list",
     "retag",
+    "stub-dates",
+    "nightly",
 }
 
 
@@ -3336,6 +3647,10 @@ def main(argv):
         return cmd_status(args)
     if args.cmd == "retag":
         return cmd_retag(args)
+    if args.cmd == "stub-dates":
+        return cmd_stub_dates(args)
+    if args.cmd == "nightly":
+        return cmd_nightly(args)
     return 2
 
 
