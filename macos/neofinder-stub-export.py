@@ -7,8 +7,11 @@ folder, an empty file for a catalogued file, mtime set to the catalogued
 modification date, and a Finder comment (com.apple.metadata:kMDItemFinderComment,
 which Spotlight indexes) carrying the original complete path, size and kind.
 `macos/neofinder-spotlight-batch.sh` then brings Spotlight up briefly and
-indexes only that staging volume, so a Finder name search for a file on an
-offline volume finds the stub exactly where the real file lives.
+indexes only that staging volume. The goal is for Finder search to stand in
+for Spotlight's own index of the MOUNTED volumes, which stay unindexed
+(`mdutil -a -i off`), so no resident indexer ever scans the real volumes.
+Known gaps against that goal: the index exists only during the batch window,
+and a search result is the stub, not the real file.
 
 NeoFinder is only ever QUERIED over AppleScript. This script contains no
 `set <property> of` on anything, and never calls delete/move/make/catalog/
