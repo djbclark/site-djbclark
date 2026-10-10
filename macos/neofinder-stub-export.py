@@ -162,7 +162,9 @@ History:
     a long run). First real run: mac256usb, 265,780 stubs in 2m 58s.
     Perf slice (measured, see fact C): AppleScript date loop over
     script-object properties (1.7-1.9x end to end, identical output);
-    LaunchAgent ProcessType Standard + LowPriorityIO (5x for scheduled runs).
+    LaunchAgent ProcessType Standard + LowPriorityIO (5x for scheduled runs);
+    the per-item fallback page script got the same script-object loop
+    (2,000 items: 1.04 s -> 0.56 s, byte-identical output).
     Not taken yet: prefetching the next page in a thread (1.1-1.2x more),
     rebuilding paths from the index instead of fetching them, reading the
     .neofinder7 file directly.
@@ -492,33 +494,41 @@ on run
 	end timeout
 	set US to character id 31
 	set RS to character id 30
-	set out to {}
-	repeat with i from 1 to count of ks
+	-- Script-object properties: `item i of` a plain list is O(i), so the
+	-- bare loop was O(n^2) per page (same fix as PAGE_SCRIPT, 2026-10-09).
+	script sc
+		property kl : ks
+		property sl : szs
+		property ml : mds
+		property pl : ps
+		property out : {}
+	end script
+	repeat with i from 1 to count of sc's kl
 		try
-			set k2 to (item i of ks) as text
+			set k2 to (item i of sc's kl) as text
 		on error
 			set k2 to ""
 		end try
 		try
-			set s2 to (item i of szs) as text
+			set s2 to (item i of sc's sl) as text
 		on error
 			set s2 to ""
 		end try
-		set d to item i of mds
+		set d to item i of sc's ml
 		if class of d is date then
 			set d2 to ((d - refD) as text)
 		else
 			set d2 to ""
 		end if
 		try
-			set p2 to (item i of ps) as text
+			set p2 to (item i of sc's pl) as text
 		on error
 			set p2 to ""
 		end try
-		set end of out to k2 & US & s2 & US & d2 & US & p2
+		set end of sc's out to k2 & US & s2 & US & d2 & US & p2
 	end repeat
 	set {TID, AppleScript's text item delimiters} to {AppleScript's text item delimiters, RS}
-	set o to out as text
+	set o to (sc's out) as text
 	set AppleScript's text item delimiters to TID
 	return o
 end run
