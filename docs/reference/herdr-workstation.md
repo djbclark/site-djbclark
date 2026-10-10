@@ -166,6 +166,43 @@ Force a manifest refresh:
 herdr server update-agent-manifests
 ```
 
+## Collie (phone UI) updates
+
+Collie is the Herdr plugin `herdr.collie` that serves the phone web app. It
+updates itself, separately from Herdr:
+
+- **Watched by** `.github/workflows/monitor-herdr-extension-releases.yml`,
+  which opens a "Herdr extension update: collie X" issue for each release.
+  Its `installed_version` records what this workstation **runs**. Bump it in
+  the same change that records a `collie update`, never ahead of one, or the
+  monitor stops reporting the pending release.
+- **Apply** with `collie update` (or `herdr plugin action invoke update
+  --plugin herdr.collie`). It builds the newest release of the current major
+  beside the running one, swaps `~/.collie/current`, restarts launchd
+  `herdr.collie` and health-checks. `collie update --check` is a read-only
+  preflight; `collie update --rollback` flips back to the previous version.
+- **Never pass `--help` to a subcommand.** `collie update --help` ignores the
+  flag and starts a real update (seen 2026-10-09). Read `collie help` or
+  `collie docs <page>` instead.
+
+Check after every update:
+
+```bash
+collie version                 # the new version is the one being served
+collie doctor
+collie devices list            # since 1.18.0 every /api/* call needs a paired device
+grep COLLIE_SERVE_PORT ~/.config/herdr/plugins/config/herdr.collie/.env   # still 8788
+```
+
+`COLLIE_SERVE_PORT` must stay set: without it Collie republishes on tailnet
+:443 and collides with Caddy (see the `collie-bridge` row in
+`registry/ports.yml`).
+
+Since 1.19.0 a paired phone can run one-off commands and add its own
+launchers, both on by default. Turn them off with a `[phone]` table
+(`run = false`, `adds = false`) in `launchers.toml`, in the plugin config
+directory beside `.env`.
+
 ## Session restore and history
 
 | Setting                           | Behavior                                                                                                                                                        |

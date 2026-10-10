@@ -2,7 +2,8 @@
 
 ## Objective
 
-Collie (Herdr mobile web UI, AltanS/collie v0.20.2) is installed and running
+Collie (Herdr mobile web UI, AltanS/collie; v0.20.2 when this plan was
+written, 1.19.1 since 2026-10-10) is installed and running
 but served via standalone `tailscale serve` on `mac.greyhound-sidemirror.ts.net`,
 bypassing the site's Caddy TLS front door. This creates two paths to the
 machine (Caddy on ports 80/443, Tailscale Serve on the tailnet interface :443).
