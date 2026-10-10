@@ -214,6 +214,15 @@ long-lived watched work: a Herdr pane; (4) no ACP: `model-routing`'s headless
 recipe. **the grok vendor is back** (2026-10-09; small slices; `aiuse` cannot
 see its window). Detail: [[reference_agent_rules_multi_agent_toolkit]].
 
+## Fable reserve until 2026-10-16 06:00 (2026-10-10, temporary)
+
+**Fable 5.1's weekly cap is nearly spent (9% left at 19:50; resets Oct 16
+06:00). Until then route Claude work to Opus 5.5:** `/model claude-opus-5-5`
+(or `claude --model claude-opus-5-5`), headless `claude -p --model
+claude-opus-5-5`, sub-agents `model: "opus"`, never `fable-deep`; hiwymi's
+dialogue runner takes `DIALOGUE_FABLE_MODEL=claude-opus-5-5`. Keep the last few
+percent for a judgment call djbclark names. Delete this section after the reset.
+
 ## Session logs and agent teams
 
 At session start in a git repo, read its Tier 1 pointer (`session-handoff`
