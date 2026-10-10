@@ -1,5 +1,7 @@
-import sys
+import json
+import os
 import re
+import sys
 
 def main():
     if len(sys.argv) < 2:
@@ -32,17 +34,41 @@ def main():
     # MultiMarkdown/Marked 2 and swallow both citations; a comma keeps them apart.
     new_body = new_body.replace('][^E', '],[^E')
 
+    # A research-skill writer's table has no URL column (writer.md asks for
+    # claim, source, locator, tags); the URL then comes from evidence.jsonl
+    # beside the report (2026-10-10: a five-column table failed with every
+    # cited id "missing from table").
+    url_by_id = {}
+    ev_path = os.path.join(os.path.dirname(os.path.abspath(filepath)), "evidence.jsonl")
+    if os.path.exists(ev_path):
+        with open(ev_path, 'r', encoding='utf-8') as ef:
+            for raw in ef:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    row = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("id"):
+                    url_by_id[str(row["id"])] = str(row.get("url") or "")
+
     lines = rest.split('\n')
     new_lines = []
-    
+
     header_found = False
-    table_data = {} 
+    table_data = {}
     
     for i, line in enumerate(lines):
         if line.startswith('| ') and line.endswith(' |'):
             inner = line[2:-2]
             cells = inner.split(' | ')
-            
+
+            if len(cells) == 5 and cells[0] != 'id' and cells[0].startswith('E') \
+                    and cells[0][1:].isdigit() and url_by_id:
+                # five-column writer table: insert the url from evidence.jsonl
+                cells = cells[:4] + [url_by_id.get(cells[0], "")] + cells[4:]
+
             if len(cells) == 6:
                 if cells[0] == 'id':
                     new_lines.append('| id | claim | source (title, kind, family) | locator | tags |')
