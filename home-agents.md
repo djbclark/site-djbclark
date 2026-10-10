@@ -283,8 +283,9 @@ deprecated and not installed**. Every agent but muse speaks ACP (`acp-run
 success, verify the outcome); (2) supervised in an Orca repo: `orca orchestration
 worker-start --agent …`; (3) long-lived work he watches: a Herdr pane; (4) no
 ACP: the `model-routing` skill's headless recipe. cline sparingly, never bulk;
-copilot small GitHub-shaped slices only; **the grok vendor is excluded for now**
-(2026-10-06; grok *models* via other vendors' pools are fine). Flags and vendor
+copilot small GitHub-shaped slices only; **the grok vendor is back** (excluded
+2026-10-06, re-admitted 2026-10-09: `acp-run grok --model grok-4.7`, small
+slices, GrokBot shares the window and `aiuse` cannot see it). Flags and vendor
 forms: [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
