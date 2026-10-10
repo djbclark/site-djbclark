@@ -178,6 +178,16 @@ NeoFinder 9.3.1; companion script macos/neofinder-spotlight-batch.sh):
      Cost: ~1.2 ms per alias against ~0.16 ms per stub (2,000 mac256usb
      files, warm), so a 10,000-file page spends ~12 s writing, not ~1.6 s.
 
+  P. Kind tags (tested 2026-10-10, alias-test3). Spotlight ignores content-
+     type xattrs on aliases, so `kind:pdf` can never match one; it honours
+     _kMDItemUserTags (`tag:nf-pdf`, Finder Tags filter; plain names, no
+     colour suffix) and kMDItemKeywords (`kMDItemKeywords == "pdf"`, plain
+     words). Every alias and stub therefore gets tag nf-<group> and
+     keywords [nf-<group>, <group>] from kind_group(name, kind): the file
+     extension via KIND_GROUPS, else words in the Kind string, else no tag.
+     `retag PATH [--dry-run]` applies this to an existing batch volume
+     (name + stored kMDItemKind), without a re-export.
+
 History:
   - 2026-10-09: written (multi-agent batch slice; lead integrates, tests and
     commits). Companion files: neofinder-stub-export.example.toml,
@@ -203,6 +213,7 @@ History:
     is on a mounted volume, with real dates and kMDItemKind (header O;
     operator's design). Aliases and stubs are counted separately in page
     log lines and the summary. Old stubs convert on `export --restart`.
+  - 2026-10-10 (later): kind tags and keywords (header P) and `retag`.
 """
 
 import sys
@@ -225,6 +236,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import signal
 import stat
 import subprocess
@@ -264,6 +276,72 @@ SKIP_DEFAULT = [
     ".DocumentRevisions-V100",
     ".TemporaryItems",
 ]
+
+# Kind groups (header P): extension -> group, built from this table. Primary
+# classifier of kind_group(); the Kind string's words are the fallback.
+# A group's tag is nf-<group>. First listing wins an extension named twice
+# (checked by the table build below).
+USER_TAGS_XATTR = "com.apple.metadata:_kMDItemUserTags"
+KEYWORDS_XATTR = "com.apple.metadata:kMDItemKeywords"
+KIND_GROUP_EXTS = {
+    "image": "jpg jpeg jpe png gif bmp tif tiff webp heic heif avif svg psd psb "
+    "ico icns xcf ai eps jp2 jxl tga exr hdr pict pnt cr2 cr3 crw nef nrw arw "
+    "srf sr2 dng raf orf rw2 pef srw x3f 3fr erf kdc mrw dcr raw",
+    "movie": "mov mp4 m4v mkv avi wmv flv webm mpg mpeg m2v m2ts mts vob 3gp 3g2 "
+    "ogv rm rmvb asf divx f4v mxf braw r3d",
+    "audio": "mp3 m4a m4b aac wav aif aiff aifc flac ogg oga opus wma ape wv mka "
+    "caf amr au mid midi kar ac3 dts aax alac",
+    "pdf": "pdf ps",
+    "doc": "doc docx docm dot dotx rtf rtfd pages odt ott wpd wps abw tex",
+    "sheet": "xls xlsx xlsm xlsb xlt xltx numbers ods csv tsv",
+    "slides": "key keynote ppt pptx pptm pps ppsx pot potx odp",
+    "text": "txt text md markdown mdown rst log org asc nfo adoc textile",
+    "code": "py pyw sh bash zsh fish js mjs cjs jsx ts tsx swift c h cc cpp cxx hpp "
+    "hh m mm go rs java kt kts rb pl pm php lua el lisp clj scala hs ml cs fs vb "
+    "r jl dart zig nim ps1 bat cmd awk sed tcl vim applescript scpt "
+    "html htm xhtml css scss sass less json5 vue svelte gradle make mk cmake "
+    "asm s v sv vhd ino",
+    "data": "json xml yaml yml toml plist ini cfg conf sql sqlite sqlite3 db mdb "
+    "accdb ndjson jsonl parquet avro arrow feather hdf5 h5 npy npz pkl pickle "
+    "mat sav dta xsd dtd rdf ttl proto",
+    "archive": "zip gz tgz bz2 tbz tbz2 xz txz 7z rar tar zst tzst lz4 lz lzma z "
+    "cab arj sit sitx cpio ar xar jar war whl egg",
+    "diskimage": "dmg iso sparseimage sparsebundle img vmdk qcow qcow2 vdi vhdx "
+    "cdr toast udif dsk",
+    "app": "app pkg mpkg exe msi apk ipa xpi deb rpm appx dll",
+    "font": "ttf otf ttc otc woff woff2 eot pfb pfm dfont fon",
+    "ebook": "epub mobi azw azw3 azw4 kfx cbz cbr cb7 cbt djvu fb2 lit",
+    "email": "eml emlx mbox mbx msg olk14msg pst ost",
+}
+KIND_GROUPS = {}
+for _group, _exts in KIND_GROUP_EXTS.items():
+    for _ext in _exts.split():
+        KIND_GROUPS.setdefault(_ext, _group)
+KIND_GROUP_ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz4")
+# Fallback: case-insensitive words of the Kind string, first match wins
+# (specific before general: "Disk Image" before "Image", PDF first).
+KIND_GROUP_WORDS = (
+    ("pdf", r"pdf"),
+    ("diskimage", r"disk images?|disc images?"),
+    ("archive", r"archives?|zip|compressed"),
+    ("sheet", r"spreadsheets?|worksheets?|excel|numbers"),
+    ("slides", r"presentations?|slideshows?|keynote|powerpoint"),
+    ("font", r"fonts?|typefaces?"),
+    ("email", r"e-?mail|mailbox"),
+    ("ebook", r"e-?books?"),
+    ("app", r"applications?|installers?"),
+    ("movie", r"movies?|videos?|film"),
+    ("audio", r"audio|sound|music|songs?"),
+    ("image", r"images?|pictures?|photos?|graphics?"),
+    ("code", r"source|scripts?|code|shell"),
+    ("doc", r"word|rich text|pages"),
+    ("text", r"text|markdown"),
+    ("doc", r"documents?"),
+)
+KIND_GROUP_WORD_RES = tuple(
+    (g, re.compile(rf"\b(?:{w})\b", re.I)) for g, w in KIND_GROUP_WORDS
+)
+
 FATAL_ERRNOS = {errno.ENOSPC, errno.EROFS, errno.EDQUOT}
 SKIP_LIST_SHOWN = 20
 DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -1417,6 +1495,36 @@ def set_kind(path, kind):
         _set_plist_xattr(path, KIND_XATTR, kind)
 
 
+def kind_group(name, kind):
+    """Deterministic content group of an item, or None (header P).
+
+    The file extension decides (lower-cased last suffix, `.tar.gz`-style
+    compound suffixes are archives); an unknown or missing extension falls
+    back to the words of the Kind string; unknown stays None.
+    """
+    low = (name or "").strip().lower()
+    if low.endswith(KIND_GROUP_ARCHIVE_SUFFIXES):
+        return "archive"
+    ext = os.path.splitext(low)[1][1:]
+    group = KIND_GROUPS.get(ext)
+    if group is None and kind:
+        for g, rx in KIND_GROUP_WORD_RES:
+            if rx.search(kind):
+                return g
+    return group
+
+
+def set_kind_tags(path, group):
+    """Write the Finder tag nf-<group> and keywords for `group` (header P).
+
+    Overwrites: these files are ours. A None group writes nothing.
+    """
+    if group:
+        tag = f"nf-{group}"
+        _set_plist_xattr(path, USER_TAGS_XATTR, [tag])
+        _set_plist_xattr(path, KEYWORDS_XATTR, [tag, group])
+
+
 def set_added_time(path, epoch):
     """Set the Finder "Date Added" (ATTR_CMN_ADDEDTIME); no root needed.
 
@@ -1524,10 +1632,11 @@ def write_alias(real, target, comment, kind_fallback):
         if not ok:
             raise _nserror_oserror(err, tmp)
         set_finder_comment(tmp, comment)
-        set_kind(
-            tmp,
-            str(vals.get(F.NSURLLocalizedTypeDescriptionKey) or "") or kind_fallback,
+        kind = (
+            str(vals.get(F.NSURLLocalizedTypeDescriptionKey) or "") or kind_fallback
         )
+        set_kind(tmp, kind)
+        set_kind_tags(tmp, kind_group(target.name, kind))
         dates = {
             k: vals[k]
             for k in (F.NSURLCreationDateKey, F.NSURLContentModificationDateKey)
@@ -1678,6 +1787,7 @@ def write_page(
                         os.utime(target, (rec.mtime, rec.mtime))
                     set_finder_comment(target, comment)
                     set_kind(target, rec.kind)
+                    set_kind_tags(target, kind_group(target.name, rec.kind))
         except OSError as exc:
             if _fatal_write_error(exc, cat_dir):
                 what = "alias" if real is not None else "stub"
@@ -2677,6 +2787,86 @@ def cmd_enable_disable(args, enable):
     return rc
 
 
+_LIBC.getxattr.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_char_p,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_uint32,
+    ctypes.c_int,
+]
+_LIBC.getxattr.restype = ctypes.c_ssize_t
+
+
+def get_plist_xattr(path, name):
+    """The decoded binary-plist xattr `name`, or None when absent/unreadable."""
+    p, n = os.fsencode(path), name.encode()
+    size = _LIBC.getxattr(p, n, None, 0, 0, 0)
+    if size <= 0:
+        return None
+    buf = ctypes.create_string_buffer(size)
+    got = _LIBC.getxattr(p, n, buf, size, 0, 0)
+    if got <= 0:
+        return None
+    try:
+        return plistlib.loads(buf.raw[:got])
+    except Exception:
+        return None
+
+
+def cmd_retag(args):
+    """Apply kind tags/keywords (header P) to an existing batch volume."""
+    root = Path(args.path).expanduser()
+    try:
+        resolved = root.resolve()
+    except OSError as exc:
+        eprint(f"retag: cannot resolve {root}: {exc}")
+        return 2
+    if resolved == Path("/"):
+        eprint("retag: refusing /")
+        return 2
+    if not root.is_dir():
+        eprint(f"retag: {root} is not a directory")
+        return 2
+    seen = errors = untagged = 0
+    per_group = {}
+    shown = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        if Path(dirpath) == root:
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for fname in filenames:
+            if fname.startswith((ALIAS_TMP_PREFIX, "._")):
+                continue
+            path = os.path.join(dirpath, fname)
+            try:
+                if not stat.S_ISREG(os.lstat(path).st_mode):
+                    continue
+                seen += 1
+                kind = get_plist_xattr(path, KIND_XATTR)
+                group = kind_group(fname, kind if isinstance(kind, str) else "")
+                if group is None:
+                    untagged += 1
+                    continue
+                if not args.dry_run:
+                    set_kind_tags(path, group)
+                per_group[group] = per_group.get(group, 0) + 1
+            except OSError as exc:
+                errors += 1
+                if shown < SKIP_LIST_SHOWN:
+                    shown += 1
+                    eprint(f"retag: {path}: {exc}")
+            if seen and seen % 50000 == 0:
+                eprint(f"retag: {seen} files so far")
+    verb = "would tag" if args.dry_run else "tagged"
+    tagged = sum(per_group.values())
+    print(f"retag {root}: {seen} files seen, {verb} {tagged}, {untagged} untagged, {errors} errors")
+    for group in sorted(per_group, key=lambda g: (-per_group[g], g)):
+        print(f"  nf-{group:<10} {per_group[group]}")
+    if not args.dry_run:
+        subcmd_log(f"retag {root}: seen={seen} tagged={tagged} untagged={untagged} errors={errors}")
+    return 1 if errors else 0
+
+
 def pid_file():
     return CTRL_DIR / "run.pid"
 
@@ -2985,6 +3175,14 @@ def build_parser():
     )
 
     sub.add_parser("list", help="print the catalogue table")
+
+    rt = sub.add_parser(
+        "retag", help="(re)write kind tags and keywords on an existing batch volume"
+    )
+    rt.add_argument("path", help="batch volume or directory to walk")
+    rt.add_argument(
+        "--dry-run", action="store_true", help="print group counts, write nothing"
+    )
     return parser
 
 
@@ -2999,6 +3197,7 @@ SUBCOMMANDS = {
     "restart",
     "status",
     "list",
+    "retag",
 }
 
 
@@ -3036,6 +3235,8 @@ def main(argv):
         return cmd_resume(args)
     if args.cmd == "status":
         return cmd_status(args)
+    if args.cmd == "retag":
+        return cmd_retag(args)
     return 2
 
 
