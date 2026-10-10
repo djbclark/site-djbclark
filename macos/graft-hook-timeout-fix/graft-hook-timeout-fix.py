@@ -24,7 +24,7 @@ LOG = os.path.expanduser("~/.local/state/graft-hook-timeout-fix.log")
 MAX_SANE = 600
 # Seconds per graft hook subcommand (2026-09-21 choice; graft's ms values /1000
 # plus headroom). Unknown future subcommands get ceil(ms / 1000).
-SECONDS = {"prompt": 20, "post-edit": 15, "tool-savings": 12, "session-start": 12, "stop": 12}
+SECONDS = {"prompt": 60, "post-edit": 15, "tool-savings": 12, "session-start": 12, "stop": 12}
 
 
 def log(msg):

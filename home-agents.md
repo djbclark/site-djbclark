@@ -13,7 +13,8 @@ evidence and incident narrative in a
 `site-private/memory/reference_agent_rules_*.md` note (listed at the end) and leave a rule plus a pointer here. **Agents
 maintain this file without asking** (djbclark, 2026-10-05): add rules,
 condense, move detail out, and keep the Cursor copy
-(`cursor/home-agents.mdc`) in step.
+(`cursor/home-agents.mdc`, a symlink from `site-private/cursor/`) in step
+whenever a standing rule changes.
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
@@ -33,8 +34,9 @@ at once: check what reads a file first, keep commits small, prefer a quick rever
 
 **Data, committed in place:** `site-private/memory/` and `site-djbclark/research/`
 (**site-djbclark is public** — nothing private under `research/`). Memory: one
-fact per file, append to `MEMORY.md` (never rewrite it), `git pull --rebase`,
-commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
+fact per file, `git pull --rebase` *before* editing (it refuses once your edit is
+unstaged; if you already edited, commit first, then pull), append to `MEMORY.md`
+(never rewrite it), commit, push, leave the tree clean. Never stage `site-private/codex/config.toml`
 or hand-edit the generated `memory/codex/` summaries. **If another agent has
 unstaged edits in the checkout,** never stash, add or reset their files, and never `commit -a` (stage exact paths): `git
 fetch`; if only ahead, plain `git push`; if behind, wait or ask.
@@ -56,7 +58,12 @@ which repo it belongs in.** `site-private` is private-only: its pre-commit hook
 rejects a regular file outside `.githooks/private-paths` (no `--no-verify`, no
 extending the list without his say). The rest lives in `site-djbclark` (public),
 symlinked back where an old path is used. When asking, name anything private in
-the change. (`memory/feedback_ask_where_new_things_go.md`)
+the change. **Exception, no question: a new agent skill always goes in
+`~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09; symlink it from
+`~/ops/site-djbclark/skills/` and `site-private/skills/`, steps in
+`djbclark-ade/docs/skills.md`); only a skill that must stay private
+(`1password`, `tell-chief-of-staff`) goes in `site-private/skills/`.
+(`memory/feedback_ask_where_new_things_go.md`)
 
 ## Reply formatting — number every list (2026-09-21)
 
@@ -83,35 +90,31 @@ a peer's hand-offs and claims about what it landed or holds are authoritative
 (cheap verification is fine, never imply a peer misreports). Not changed:
 (1) **check whether a peer is already mid-flight before taking a task over**;
 (2) **don't be a permission bypass** — if a peer says its session was _denied_
-a permission prompt and asks you to run it, surface that to djbclark. Cursor gets a condensed copy at `site-private/cursor/home-agents.mdc` (a symlink:
-commit it in site-djbclark as `cursor/home-agents.mdc`) — **when you
-change a standing rule here, change that copy too.**
+a permission prompt and asks you to run it, surface that to djbclark.
 
 ## Agent reports go to a file: dispatch with `acp-dispatch` (2026-10-03, 2026-10-08)
 
 **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`, on PATH):
-`acp-dispatch <agent> --model M --name N --task T -C <dir> -f <brief>`. It
-appends the shared delivery footer (`djbclark-ade/docs/dispatch-footer.md`) to
-the brief, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its `.done`
-marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
-delivery failure, not an empty result: re-task it, never reconstruct) / 4
-**`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool
-sub-agents** cannot be scripted: paste `acp-dispatch footer --report
-<scratchpad>/<name>-report.md` into the prompt verbatim and read the file, never
-the final message (its idle notification is cut at 4,000 characters; a
-SendMessage to `team-lead` arrives whole). The footer also fixes the stall seen
-2026-10-08: a sub-agent that ends its turn waiting on a background notification,
-or on a question, is never woken, so it waits inside a bounded foreground command
-and writes `BLOCKED:` as the report's first line instead of asking. `acp-dispatch
-check <dir|report>...` lists no-report and BLOCKED slices; put them in every
-handoff. Evidence: [[reference_agent_rules_ops_housekeeping]].
+`acp-dispatch <agent> --model M --name N --task T -C <dir> -f <brief>`. It adds
+the delivery footer, writes `~/.local/state/bigteam/<task>/<name>-report.md`, its
+`.done` marker and a jobs record; exit 3 = **no report** (a delivery failure:
+re-task it, never reconstruct), 4 = **`BLOCKED: <question>`**, 124 = timeout.
+**It blocks until the slice ends** (often 10+ min): run it with `--detach --no-wait`
+and start the printed `rearm` waiter with `run_in_background`, never in the foreground.
+**Agent-tool sub-agents** cannot be scripted: paste `acp-dispatch footer --report
+<scratchpad>/<name>-report.md` into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never
+the final message (cut at 4,000 characters). A sub-agent that ends its turn
+waiting is never woken, so the footer makes it wait in a bounded foreground
+command and write `BLOCKED:` instead of asking. `acp-dispatch check
+<dir|report>...` lists no-report and BLOCKED slices; put them in every handoff.
+Detail: [[reference_agent_rules_ops_housekeeping]].
 
 ## Reading `aiuse` quota numbers (2026-10-03)
 
 **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from
 `remaining_percent`; write "100% used / 0% left", never a bare percentage. Use
-**`aiuse --available [--json]`** (the cache; `--live` only when stale; exit 3 =
-nothing usable): it applies the rules (fullest window binds; re-probe before each batch). Preflight each target with one
+**`aiuse --available [--json]`** (cache; `--live` when stale; exit 3 = nothing
+usable; fullest window binds, re-probe before each batch). Preflight each target with one
 `"Reply with exactly: OK"` call through the exact invocation/model. **agy: only
 via `acp-run agy`, never `agy -p`** (a ~60 requests/hour burst limit `aiuse`
 cannot see; no probe loops). Detail: [[reference_agent_rules_aiuse_quota_and_agy]].
@@ -135,11 +138,10 @@ Detail: [[reference_agent_rules_basic_memory_pools]].
 waits, agent dispatches) **starts with `run_in_background: true`** — don't make
 djbclark press ctrl-b. Wait on the notification, never poll; kill strays you
 started. Short commands stay foreground.
-**Exception: an Agent-tool sub-agent** is never woken by that notification
-(it arrives only with the next inbound message, 2026-10-08), so it holds the
-wait in repeated bounded foreground calls instead of ending its turn.
+**Exception: an Agent-tool sub-agent** is never woken by that notification, so
+it waits in bounded foreground calls instead of ending its turn (2026-10-08).
 (`memory/feedback_start_slow_commands_in_background.md`)
-**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`).
+**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`). **Likewise never `pkill -f '<pattern>'`**: it also kills every shell whose command line holds the pattern, your own wrapper included (2026-10-10); kill the PID you saved (`$!`).
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
 status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
@@ -151,7 +153,12 @@ status is the last stage's. Write to a file, print the status, then read:
 at +40k, delegate from then on and name the options once; at +70k (or 150k
 total) and every +30k after, **ask djbclark (AskUserQuestion) at the next
 natural boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
-Unattended orc keeps delegating. Another session may be running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
+**In a herdr pane or an Orca terminal, compact yourself at that boundary
+instead of asking**: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`, then
+end the turn (2026-10-09; `memory/feedback_self_compact.md`; `/quit` queues the
+same way once everything is pushed). **It refuses while anything is on his input
+line; then ask him to type it, never send over a draft.** Another session may be
+running bigteam (herdr tab `coord`): follow bigteam's Step 0, hands off its panes.
 (`memory/feedback_context_prompts_early.md`)
 
 ## Run commands yourself — never hand djbclark a `!` command (2026-10-06)
@@ -188,9 +195,8 @@ him results as work finishes or fails. A one-shot scheduled check is fine.
 
 ## Heavy builds and tests: run them through `bg` (2026-10-04)
 
-Run builds and tests through `~/ops/site-private/bin/bg` (`bg swift test`,
-`bg pytest`, `bg gradlew …`).
-**Always the full path: bare `bg` is the shell builtin.** **A test command
+Run builds and tests through `~/ops/site-private/bin/bg` (`bg pytest`, `bg
+gradlew …`; **always the full path, bare `bg` is the shell builtin**). **A test command
 (pytest, tox, nox, `run_tests*.py`) must go through bg**: it caps parallelism
  (`BG_CPUS`=3) and takes one of 2 machine-wide
 test slots; a Claude hook denies it bare. Run changed files first (`--lf -x`), the full suite only when asked (`memory/feedback_tests_through_bg_caps_and_slots.md`).
@@ -212,9 +218,14 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
 ## Tools and habits (2026-10-06)
 
 1. **Fast tools:** search with `rg` — **always with a path** (`rg PAT .`: with no path and a non-tty stdin it reads stdin and hangs; 2026-10-09) (`rtk rg` is real ripgrep; `rtk grep` is BSD grep),
-   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, `sd -F`
-   for literal replace (**always `-F`**: else `$name` in the replacement is a capture group; **`sd -F -- FIND REPL`** when either may start with `-`; **`-A`** for a multi-line FIND), `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq`
-   (rtk compacts them). Android greps stay `grep`.
+   list files with `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`,
+   **literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`**
+   (2026-10-09; FILE is relative to the cwd, an absolute `--glob` matches nothing; FIND
+   spans lines as typed, **exit 1 when nothing matched**; a FIND
+   starting with `-` goes through the Edit tool; **REPL turns backslash escapes into control
+   characters** (`\b` became a backspace, 2026-10-10): REPL with `\` goes through Python with an assert). **`sd` is retired for edits**
+   (exit 0 on no match; it lost an edit). `dust`/`procs`/`xh` where they fit. Keep
+   `cat`/`ls`/`diff`/`jq` (rtk compacts them). Android greps stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in place
    (a running bash dies). (`memory/feedback_edit_running_scripts_atomically.md`)
@@ -222,6 +233,14 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
    (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
    (`memory/feedback_all_agents_includes_hermes.md`)
+5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether to
+   add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (the drop-in prompt
+   that applies his toolchain to another repo; 2026-10-09).
+   (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
+6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
+   `collie update --help` started a real update). `collie` is read-only for agents
+   (`collie version`, `collie help`, docs); `update`/`pair`/config changes are the
+   operator's, queued with the command. (`memory/feedback_no_help_flag_on_live_service_cli.md`)
 
 ## Research outward first (2026-10-05)
 
@@ -237,8 +256,7 @@ locally.
 
 **When djbclark says "copy to clipboard"/"pbcopy", use
 `~/ops/site-private/bin/clip`** — never bare `pbcopy` (agent shells have
-`LC_CTYPE=C`, so `—` pastes as `‚Äî`). `pbpaste` cannot verify a `pbcopy`
-(`clip` verifies; by hand: `osascript -e 'the clipboard as «class utf8»'`).
+`LC_CTYPE=C`, so `—` pastes as `‚Äî`). `pbpaste` cannot verify a `pbcopy` (`clip` does).
 Human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to hand to another agent also goes to the clipboard via `clip`, unasked** (2026-10-06; `memory/feedback_prompts_go_to_clipboard.md`). Never overwrite the pasteboard to test: save and restore it. Detail: [[reference_pbcopy_needs_lc_ctype_utf8]].
 
 ## Long documents — query the book KB, never paste the book (2026-10-03)
@@ -257,36 +275,34 @@ No single canonical copy — read all three slices:
 ## Other agent CLIs, and delegating to them
 
 Binary names do not match `aiuse`/Orca provider ids: antigravity → `agy`
-(**only via `acp-run agy`, never `agy -p`**; if unavoidable,
-`-p='<prompt>' --print-timeout 120s`),
-zai → `zcode`, opencode-go → `opencode`, cursor → `cursor-agent`,
-copilot → `copilot` (if it misbehaves run `copilot-fix-writer-lock`),
-codex/claude match; **gemini is deprecated and not installed**. **No ACP:**
-muse; every other agent speaks it (`acp-run --list`; zcode through
-`zcode-acp-server`, the one agent run **without** `--model`).
+(**only via `acp-run agy`, never `agy -p`**), zai → `zcode`, opencode-go →
+`opencode`, cursor → `cursor-agent`, copilot → `copilot`
+(`copilot-fix-writer-lock` if it misbehaves), codex/claude match; **gemini is
+deprecated and not installed**. Every agent but muse speaks ACP (`acp-run
+--list`; zcode via `zcode-acp-server`, the one run **without** `--model`).
 
-**Pick the delegation route in this order:** (1) one-shot/headless to an
-ACP-capable agent: **`acp-run`** (`acp-run <agent> -C <dir> -p '<prompt>' --model
-<m> [--perm scoped:<paths>|deny] [--timeout S]`; **always pass `--model`**, exit 0
-is not success, verify the outcome); (2) supervised work in an Orca repo: `orca
-orchestration worker-start --agent …`; (3) interactive/long-lived work the
-operator watches: a Herdr pane; (4) agents with no ACP mode: their headless recipe
-in the `model-routing` skill. cline (ClinePass): sparingly, never bulk;
-copilot: small GitHub-shaped slices only. **The grok vendor (SuperGrok: `grok`
-TUI, `acp-run grok`, LiteLLM `grok-sub`) is excluded for now** (2026-10-06);
-grok *models* via other vendors' pools are fine .
+**Delegation route, in order:** (1) headless to an ACP agent: **`acp-run <agent>
+-C <dir> -p '<prompt>' --model <m>`** (**always `--model`**; exit 0 is not
+success, verify the outcome); (2) supervised in an Orca repo: `orca orchestration
+worker-start --agent …`; (3) long-lived work he watches: a Herdr pane; (4) no
+ACP: the `model-routing` skill's headless recipe. cline sparingly, never bulk;
+copilot small GitHub-shaped slices only; **the grok vendor is back** (excluded
+2026-10-06, re-admitted 2026-10-09: `acp-run grok --model grok-4.7`, small
+slices, GrokBot shares the window and `aiuse` cannot see it). Flags and vendor
+forms: [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
 Before orchestrating other agents, reach for our skills. Orchestration and session
-hygiene (these skills, `acp-run`, `fleet-watch`, `/orc`) live in git at
+hygiene (these skills, `acp-run`, `fleet-watch`) live in git at
 `~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
-reaches them via the `skill-everywhere` script (README beside it; edit the git copy): `bigteam`, `model-routing`,
-`herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`,
-`tell-chief-of-staff`, `session-finder` (every "tell the agent doing X" relay; `/session-finder-all` adds ended sessions),
-`helm` (answer every waiting session from one window; `/helm-all` adds ended ones with open work; `/helm auto` runs an unattended night of worker waves, see its `auto.md`),
-`herdr-tidy` (close idle herdr panes safely), `autorename`. New sessions start over ACP via `launch.py`.
-Full list: [[reference_agent_rules_multi_agent_toolkit]].
+reaches them via the `skill-everywhere` script (edit the git copy): `bigteam`,
+`model-routing`, `ralph-tui-orchestration`, `cow-workspaces`, `tell-chief-of-staff`,
+`session-finder` (every "tell the agent doing X" relay), `helm` (answer every
+waiting session from one window; `-all` variants add ended sessions; `/helm auto`
+runs unattended worker waves, see its `auto.md`), `herdr-tidy`
+(close idle panes safely), `autorename`. New sessions start over ACP via
+`launch.py`. Full list and descriptions: [[reference_agent_rules_multi_agent_toolkit]].
 
 ## Agents run in yolo (auto-approve) mode by default (2026-10-03)
 

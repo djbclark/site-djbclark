@@ -8,6 +8,16 @@ HOOKS_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HOOKS_DIR))
 
 import context_size_nudge as nudge
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _outside_herdr_and_orca(monkeypatch):
+    # _ask_message switches to self-compact text in a herdr pane or Orca
+    # terminal; the tier tests expect the plain ask text wherever they run.
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.delenv("ORCA_TERMINAL_HANDLE", raising=False)
+
 
 BASE = 25_000
 
@@ -169,3 +179,12 @@ def test_deadline_exits_zero_silently(tmp_path):
     assert proc.returncode == 0
     assert out == b""
     assert time.time() - t0 < 4
+
+
+def test_ask_message_self_compacts_in_herdr_or_orca(monkeypatch):
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.delenv("ORCA_TERMINAL_HANDLE", raising=False)
+    assert "AskUserQuestion" in nudge._ask_message(180_000, 80_000, False)
+    monkeypatch.setenv("ORCA_TERMINAL_HANDLE", "term_x")
+    out = nudge._ask_message(180_000, 80_000, False)
+    assert "self-slash" in out and "without asking" in out

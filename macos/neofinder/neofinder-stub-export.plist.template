@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- neofinder-stub-export LaunchAgent template, rendered by
+     `neofinder-stub-export.py install`. The renderer substitutes the
+     PYTHON (sys.executable), SCRIPT, CONFIG and LOGDIR paths plus the
+     TRIGGERS block (a StartCalendarInterval array from the config's
+     [schedule], or a StartInterval integer when install was given the
+     interval option). Placeholder tokens live only in the body below.
+     The program runs under /usr/bin/caffeinate -i so an idle Mac does not
+     sleep mid-run (caffeinate forwards SIGTERM to the exporter and waits
+     for it). ExitTimeOut gives the exporter 300 s after SIGTERM (bootout,
+     kickstart -k) to finish its page and save state before SIGKILL.
+     ProcessType Standard, not Background: Background clamps the job to
+     background QoS (efficiency cores, lowest CPU band), measured 5-12x
+     slower for this workload (2026-10-09); Nice 5 plus LowPriorityIO keep it
+     polite to interactive work at no measured cost. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.djbclark.neofinder-stub-export</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/caffeinate</string>
+		<string>-i</string>
+		<string>@PYTHON@</string>
+		<string>@SCRIPT@</string>
+		<string>export</string>
+		<string>--config</string>
+		<string>@CONFIG@</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Standard</string>
+	<key>Nice</key>
+	<integer>5</integer>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>ExitTimeOut</key>
+	<integer>300</integer>
+	<key>StandardOutPath</key>
+	<string>@LOGDIR@/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>@LOGDIR@/launchd.err.log</string>
+@TRIGGERS@
+</dict>
+</plist>

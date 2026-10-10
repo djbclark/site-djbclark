@@ -9,7 +9,7 @@ content-in-git + symlink.
 
 **Orchestration and session-hygiene skills live in djbclark-ade (2026-10-08).**
 `bigteam`, `model-routing`, `effort-routing`, `helm`, `session-finder`,
-`herdr-orchestration`, `ralph-tui-orchestration`, `cow-workspaces`, `handoff`,
+`ralph-tui-orchestration`, `cow-workspaces`, `handoff`,
 `baton`, `session-handoff`, `steps` and `loose` are absolute symlinks here into `~/src/djbclark-ade/skills/<name>/`
 (github.com/djbclark/djbclark-ade, whose README describes them as one
 project). On 2026-10-08 `resume` was folded into `baton`, `helm-all` into
@@ -23,7 +23,7 @@ Two skills are private and are real directories in `site-private/skills/`:
 `1password` and `tell-chief-of-staff`. This repo is public: no credentials,
 tokens, vault or item identifiers in a skill here.
 
-Only hand-maintained local skills belong here. **Tool-managed skills stay where
+**Since 2026-10-09 every skill here is a symlink into `~/src/djbclark-ade/skills/`, and a new skill goes there, not here** (see `djbclark-ade/docs/skills.md`). Only hand-maintained local skills belong in that chain. **Tool-managed skills stay where
 their tool put them** and are NOT tracked here:
 
 - Symlinks in `~/.claude/skills/` pointing into `~/.agents/skills/`,
