@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# kotlin-lsp-lite — run the Kotlin language server (JetBrains kotlin-lsp) with limits, so one
+# Claude session's .kt navigation cannot take the machine (2026-10-10: the server held ~1 GB and
+# 70 threads at normal priority on an 8-core, 16 GB Mac already at load 30-70).
+#
+# Called by the kotlin entry of claude/local-marketplace/plugins/local-lsp/.lsp.json:
+#   "command": "kotlin-lsp-lite", "args": ["--stdio"]
+#
+# - taskpolicy -c utility: the same QoS as bg (efficiency cores, near-normal share).
+# - _JAVA_OPTIONS beats the install's bin/intellij-server.vmoptions (-Xmx2048m), which a brew
+#   upgrade would overwrite; the launcher has no VM-options env var of its own (envVarBaseName
+#   is empty in product-info.json). The JVM prints "Picked up _JAVA_OPTIONS" to stderr: harmless
+#   for an LSP over stdio.
+# Override with KOTLIN_LSP_XMX (default 1024m) and KOTLIN_LSP_CPUS (default 2).
+set -euo pipefail
+bin=$(command -v intellij-server 2>/dev/null || true)
+if [ -z "$bin" ]; then
+  for d in /opt/homebrew/Caskroom/kotlin-lsp/*/kotlin-server-*/bin/intellij-server; do
+    [ -x "$d" ] && bin="$d"
+  done
+fi
+[ -n "$bin" ] || { echo "kotlin-lsp-lite: intellij-server not found (brew install JetBrains/utils/kotlin-lsp)" >&2; exit 127; }
+cpus="${KOTLIN_LSP_CPUS:-2}"
+export _JAVA_OPTIONS="-Xmx${KOTLIN_LSP_XMX:-1024m} -XX:ActiveProcessorCount=$cpus -XX:ParallelGCThreads=$cpus -XX:ConcGCThreads=1 -XX:CICompilerCount=2 -XX:G1PeriodicGCInterval=60000 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30 ${_JAVA_OPTIONS:-}"
+exec taskpolicy -c utility "$bin" "$@"
