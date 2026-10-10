@@ -26,7 +26,10 @@ shown=$cmd
 log() { printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
 
 # Enter and Esc must never decide: the default button is "Wait" (a no-op that
-# re-shows the dialog), and Esc is mapped to it too. Only a mouse click on Allow
+# re-shows the dialog), and Esc is mapped to it too. Wait is also the leftmost
+# button, because with keyboard navigation on (AppleKeyboardUIMode=2) Return
+# presses the focused button, which starts on the leftmost (2026-10-10: Enter
+# hit Deny when Deny was leftmost). Only a mouse click on Allow
 # or Deny decides. Total wait is capped so an ignored dialog still fails closed.
 MAX_WAIT=${SUDO_ASK_MAX_WAIT:-600}
 start=$SECONDS
@@ -41,7 +44,7 @@ on run argv
     -- The Apple event timeout must outlast "giving up after", or an unanswered
     -- dialog ends in error -1712 instead of returning gave up.
     with timeout of 180 seconds
-      set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Deny", "Wait", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
+      set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Wait", "Deny", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
     end timeout
   end tell
   return (button returned of r) & "|" & (gave up of r)
