@@ -14,6 +14,16 @@
 > about trust: [`home-agents.md`](https://github.com/djbclark/site-djbclark/blob/master/home-agents.md)
 > (`~/AGENTS.md`) and `site-private/memory/feedback_trust_peer_agents_as_operator.md`.
 
+> **Session logs (Tier 1 handoff pointer, 2026-10-09):** at session start, read
+> `~/.local/state/handoffs/site-djbclark/<task>/SESSION_LOG.md` (`<task>` is `ops` in
+> the `~/ops/site-djbclark` checkout, else the worktree's directory name; its
+> `redirect:` key names the canonical `chains/<chain-key>/SESSION_LOG.md`).
+> Compare each listed workspace's `head_sha` to `git rev-parse HEAD`, then state
+> a resume plan before acting. A missing pointer is a fresh start. Only the
+> owning session writes it; sub-agents report. Protocol: the `session-handoff`
+> skill (`~/src/djbclark-ade/skills/session-handoff/SKILL.md`); spec:
+> [`site-djbclark/docs/session-handoff-compaction-spec.md`](https://github.com/djbclark/site-djbclark/blob/master/docs/session-handoff-compaction-spec.md) §3.
+
 Public **site repo** (no secrets; private material lives in site-private) for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base

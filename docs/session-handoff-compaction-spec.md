@@ -362,6 +362,43 @@ handoffs" section:
 - Sub-agents report; the owner writes. Unchanged policy, now with a
   mechanism.
 
+## 7b. ralph-tui wiring (build step 3) — scoped 2026-10-09, not built
+
+Scoped for site-private#30. Not built because Ralph is dormant: the binary is
+off PATH and the four `~/src/ops-worktrees/ralph-<repo>` controller
+workspaces were deleted 2026-08-23 (`djbclark-ade/docs/coding-factory.md`).
+Build this when a controller is revived, before its first live run.
+
+- **Ownership.** A Ralph iteration agent is a sub-agent: it never writes
+  Tier 1 or Tier 2. Its report is what Ralph already produces, the bead's
+  `close_reason` plus the git state of the controller workspace. One chain
+  per controller, chain key = the controller epic id (for example
+  `ops-djbclark-6qp` for site-private).
+- **Writer.** A small deterministic wrapper around the controller run (no
+  model) writes Tier 1 after each iteration and at session end through
+  `session_log.py write`: `writer: ralph-tui`, `workspaces` = the
+  `ralph-<repo>` workspace, one history bullet per closed bead (id and
+  close reason), Next steps = `bd ready --parent <epicId>`. When an
+  orchestrator session drives the controller through Herdr, that session
+  owns the chain and the wrapper's write is turned off, so there is
+  never a second writer.
+- **Reader.** The per-iteration prompt template
+  (`~/.config/ralph-tui/templates/beads-bv.hbs`) gets a read-only block:
+  the absolute Tier 1 path for `<repo>/ralph-<repo>`, the instruction to
+  check `head_sha` against `HEAD`, and to say in the bead comment whether
+  the file was found and current. This is the §7 bootstrap packet, carried
+  by the template instead of a spawn prompt.
+- **Where it lands.** A "Session-handoff wiring" section in
+  `~/src/djbclark-ade/skills/ralph-tui-orchestration/SKILL.md` (parallel
+  to the herdr-orchestration amendment), the template change in
+  `~/.config/ralph-tui/templates/`, the wrapper in `djbclark-ade/bin/`.
+- **Acceptance.** §8's test with a controller: stop it mid-iteration, give
+  a fresh agent only the Tier 1 path, and it must name the last closed
+  bead, the next ready bead and whether the workspace moved since.
+- **Effort.** About two hours of edits once Ralph runs again, plus one
+  watched live iteration (the skill already requires that for any change
+  to how a controller is invoked).
+
 ## 8. Acceptance criteria
 
 v0.1-build is done when: kill an owning session mid-task with no
