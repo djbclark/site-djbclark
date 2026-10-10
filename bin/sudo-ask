@@ -38,7 +38,11 @@ on run argv
   set theDir to item 2 of argv
   tell application "System Events"
     activate
-    set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Deny", "Wait", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
+    -- The Apple event timeout must outlast "giving up after", or an unanswered
+    -- dialog ends in error -1712 instead of returning gave up.
+    with timeout of 180 seconds
+      set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Deny", "Wait", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
+    end timeout
   end tell
   return (button returned of r) & "|" & (gave up of r)
 end run
@@ -46,9 +50,16 @@ APPLESCRIPT
 )
   rc=$?
 
-  # Wait button, Enter, or Esc (AppleScript error -128): no-op, ask again.
-  if [ $rc -ne 0 ] && [[ "$answer" == *"-128"* ]]; then
+  # Ask again, until MAX_WAIT, on: Wait/Enter/Esc (error -128); the dialog giving
+  # up after 120 s ("|true"); an Apple event timeout (-1712); System Events not
+  # running (-600, it quits when idle), which is relaunched first.
+  if { [ $rc -ne 0 ] && [[ "$answer" == *"-128"* || "$answer" == *"-1712"* || "$answer" == *"-600"* ]]; } ||
+     { [ $rc -eq 0 ] && [[ "$answer" == *"|true" ]]; }; then
     [ $((SECONDS - start)) -ge "$MAX_WAIT" ] && { log "DENIED(timeout)"; echo "sudo-ask: timed out waiting" >&2; exit 1; }
+    if [[ "$answer" == *"-600"* ]]; then
+      /usr/bin/open -g -a "System Events" 2>/dev/null
+      sleep 2
+    fi
     continue
   fi
   if [ $rc -ne 0 ]; then
