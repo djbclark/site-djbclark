@@ -236,6 +236,11 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
    add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (the drop-in prompt
    that applies his toolchain to another repo; 2026-10-09).
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
+6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
+   `collie update --help` ignored `--help` and started a real staged update).
+   Agents treat `collie` as read-only: `collie version`, `collie help`, docs.
+   Any `collie update`/`pair`/config change is the operator's, queued with the
+   command. (`memory/feedback_no_help_flag_on_live_service_cli.md`)
 
 ## Research outward first (2026-10-05)
 
