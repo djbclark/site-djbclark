@@ -57,10 +57,11 @@ run_brew_update() {
   local update_rc
   local attempt
 
-  # Scheduled midnight runs can beat network readiness: every tap fetch
-  # fails at once, the whole brew pass is skipped, and the outer retry
-  # succeeds 10s later (14 of 46 logged runs). Retry the update in-pass so
-  # a single attempt absorbs the blip instead of burning a full pass on it.
+  # Scheduled 03:00 runs overlap the known ~03:01 nightly Wi-Fi blip (see
+  # the mac_dns note in jobber.yaml.j2): every tap fetch fails mid-update,
+  # the whole brew pass is skipped, and the outer retry succeeds 10s later
+  # (14 of 46 logged runs). Retry the update in-pass so a single attempt
+  # absorbs the blip instead of burning a full pass on it.
   update_rc=0
   for attempt in 1 2 3; do
     if update_output="$(brew update 2>&1)"; then
@@ -75,9 +76,10 @@ run_brew_update() {
   done
   [ "$update_rc" -eq 0 ] || return "$update_rc"
 
-  # cfengine-local is intentionally a remote-less local tap. Keep its
-  # expected Homebrew warning out of the nightly log, but preserve all other
-  # update output and failures.
+  # cfengine-local is a local-only tap whose origin points at itself
+  # (2026-10-10), so brew update no longer warns about it. Keep filtering
+  # its old "No remote 'origin'" warning in case the self-origin is ever
+  # removed, but preserve all other update output and failures.
   while IFS= read -r line; do
     case "$line" in
       "Warning: No remote 'origin' in "*"/Library/Taps/cfengine-local/homebrew-cfengine, skipping update!") ;;
