@@ -128,5 +128,8 @@ The Jobber job lives in `roles/site_agents/templates/jobber.yaml.j2`.
    01:15 run, or until `just attach && just index-on`.
 4. **Finder's Recents can't list aliases.** The NF Recents saved search
    stands in for it.
+   Its list view, newest-opened first, is kept in Finder's own preferences
+   (`SearchRecentsViewSettings`), not in the `.savedSearch` file. On a new
+   Mac, open it once and choose View > as List, then sort by Date Last Opened.
 5. **SIP blocks unloading Spotlight's server** (`mds`). The policy instead
    keeps every other volume's indexing off.
