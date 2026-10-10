@@ -10,8 +10,10 @@
 #
 # Usage:
 #   sudo ./neofinder-spotlight-batch.sh [--staging PATH] [--image FILE]
-#                                       [--keep-mds] [--leave-root-off]
-#                                       [--dry-run] [--verbose]
+#                                       [--export [--catalog NAME]...]
+#                                       [--python PATH] [--keep-mds]
+#                                       [--leave-root-off] [--dry-run]
+#                                       [--verbose]
 #   ./neofinder-spotlight-batch.sh --status    read-only: SIP, mds loaded?,
 #                                               mdutil -s for / and the staging
 #                                               point, importer list
@@ -22,6 +24,17 @@
 #   --image FILE       sparse disk image to attach at the staging point first,
 #                      created as a 4 GB APFS SPARSE image if missing; give it
 #                      a .sparseimage extension or hdiutil appends one
+#   --export           first populate the staging volume from NeoFinder by
+#                      running neofinder-stub-export.py (same directory) with
+#                      --dest STAGING --progress --ignore-schedule; it is
+#                      resumable, so a Ctrl-C here pauses it and the next
+#                      --export run continues. Runs UNPRIVILEGED (limit F)
+#   --catalog NAME     with --export: catalogue(s) to export (repeatable);
+#                      without it the exporter uses its TOML config and, with
+#                      no catalogue configured, prints the table and exits 2
+#   --python PATH      interpreter for the exporter (needs Python >= 3.11;
+#                      default: first python3.14/.13/.12/.11 on PATH, in
+#                      /opt/homebrew/bin, /usr/local/bin or ~/.local/bin)
 #   --keep-mds         skip the final mds bootout deliberately
 #   --leave-root-off   do not restore '/' indexing at teardown
 #   --dry-run          print every privileged command prefixed "+ ", run none,
@@ -72,6 +85,20 @@
 #      can work, and the exit status is 1. Obligations are recorded before
 #      the command that creates them and INT/TERM are ignored once teardown
 #      has begun, so a Ctrl-C cannot skip a restore.
+#   F. --export talks to NeoFinder over AppleScript, which must run as the
+#      logged-in GUI user (Automation permission is per user; root gets
+#      -1743 or a prompt nobody sees). So the export is step 0, done BEFORE
+#      the sudo re-exec: when --image is given the image is created and
+#      attached unprivileged (hdiutil mounts it at /Volumes/<volname>, which
+#      is the default staging path; a different --staging must match the
+#      image's volume name) and the root phase inherits that attachment
+#      through an internal marker so teardown still detaches it. Started as
+#      root directly (`sudo ./script --export`), the exporter runs as
+#      $SUDO_USER via `sudo -u`; the Automation permission is then attributed
+#      to the terminal app, which usually already has it. Only stubs land on
+#      the staging volume; the exporter's state and logs live under the
+#      user's ~/Library (see the exporter's header), so Spotlight indexes
+#      only our stub tree.
 #
 # History:
 #   - 2026-10-09: written; facts A-D above verified on this machine the same
@@ -82,6 +109,10 @@
 #     staging, obligations recorded before the command, teardown immune to a
 #     second Ctrl-C, unknown root state refused, --image attach failures
 #     fatal, bootout errors no longer blamed on SIP unseen (limit E).
+#   - 2026-10-09 (evening): --export / --catalog / --python: populate the
+#     staging volume from NeoFinder through neofinder-stub-export.py before
+#     indexing (limit F). `hdiutil attach` is deprecated on this macOS in
+#     favour of `diskutil image attach`; kept for the same reason as create.
 
 set -u
 
@@ -96,6 +127,10 @@ LEAVE_ROOT_OFF=0
 DRY_RUN=0
 VERBOSE=0
 STATUS_ONLY=0
+EXPORT=0
+EXPORT_DONE=0      # internal: set by --_exported in the re-exec'd root phase
+CATALOGS=()
+PYTHON=
 
 # Teardown bookkeeping: what this run actually changed (all checked by the
 # idempotent teardown, which runs on EXIT/INT/TERM).
@@ -124,12 +159,24 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --verbose) VERBOSE=1; shift ;;
     --status) STATUS_ONLY=1; shift ;;
+    --export) EXPORT=1; shift ;;
+    --catalog)
+      [ $# -ge 2 ] || { echo "Error: --catalog needs a name argument." >&2; exit 2; }
+      CATALOGS+=("$2"); shift 2 ;;
+    --python)
+      [ $# -ge 2 ] || { echo "Error: --python needs a path argument." >&2; exit 2; }
+      PYTHON=$2; shift 2 ;;
+    --_exported) EXPORT_DONE=1; shift ;;          # internal, added by the re-exec
+    --_image-attached) IMAGE_ATTACHED=1; shift ;; # internal, added by the re-exec
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Error: unknown argument: $1 (use --staging, --image, --keep-mds, --leave-root-off, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
+    *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --keep-mds, --leave-root-off, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
   esac
 done
 
 [ -n "$STAGING" ] || { echo "Error: --staging needs a non-empty path." >&2; exit 2; }
+if [ ${#CATALOGS[@]} -gt 0 ] && [ "$EXPORT" -eq 0 ]; then
+  echo "Error: --catalog only means something with --export." >&2; exit 2
+fi
 [ "$STAGING" != "/" ] && STAGING=${STAGING%/}
 
 # run CMD...: echo the command prefixed "+ ", then execute it — unless
@@ -199,6 +246,98 @@ attach_image() {
   fi
 }
 
+# find_python: honour --python, else the first interpreter >= 3.11 among the
+# usual names and places (sudo's secure_path hides /opt/homebrew/bin).
+find_python() {
+  local cand dir name ver
+  if [ -n "$PYTHON" ]; then
+    ver=$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || { echo "Error: --python $PYTHON does not run." >&2; exit 2; }
+    case "$ver" in 3.1[1-9]|3.[2-9]*) return 0 ;; esac
+    echo "Error: --python $PYTHON is Python $ver; the exporter needs >= 3.11 (tomllib)." >&2; exit 2
+  fi
+  for name in python3.14 python3.13 python3.12 python3.11 python3; do
+    for dir in "" /opt/homebrew/bin /usr/local/bin "${SUDO_USER:+/Users/$SUDO_USER/.local/bin}" "$HOME/.local/bin"; do
+      if [ -z "$dir" ]; then cand=$(command -v "$name" 2>/dev/null) || continue; else cand="$dir/$name"; fi
+      [ -x "$cand" ] || continue
+      ver=$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || continue
+      case "$ver" in 3.1[1-9]|3.[2-9]*) PYTHON=$cand; return 0 ;; esac
+    done
+  done
+  echo "Error: no Python >= 3.11 found for the exporter (brew install python@3.14, or pass --python PATH)." >&2
+  exit 2
+}
+
+# export_stubs: step 0, --export. Make sure the staging volume is mounted
+# (attaching --image unprivileged if needed, see limit F), then run
+# neofinder-stub-export.py as the GUI user. Nothing here needs root.
+export_stubs() {
+  local exporter rc as_user=()
+  exporter=$(cd "$(dirname "$0")" && pwd -P)/neofinder-stub-export.py
+  echo ""
+  echo "0/6 export NeoFinder stubs to the staging volume"
+  echo "------------------------------------------------------------------"
+  [ -f "$exporter" ] || { echo "Error: $exporter not found next to this script." >&2; exit 2; }
+  find_python
+  echo "  exporter: $exporter  (python: $PYTHON)"
+  if [ -n "$IMAGE" ] && ! is_mountpoint "$STAGING"; then
+    if [ "$EUID" -eq 0 ]; then
+      attach_image
+    else
+      if [ ! -e "$IMAGE" ]; then
+        echo "  image does not exist; creating a 4 GB APFS sparse image (grows on demand)"
+        run hdiutil create -size 4g -fs APFS -volname "${STAGING##*/}" -type SPARSE "$IMAGE" \
+          || { echo "Error: hdiutil create failed; nothing was changed." >&2; exit 1; }
+      fi
+      echo "  attaching unprivileged: hdiutil mounts it at /Volumes/<volume name>"
+      IMAGE_ATTACHED=1
+      if ! run hdiutil attach "$IMAGE"; then
+        IMAGE_ATTACHED=0
+        echo "Error: hdiutil attach failed." >&2; exit 1
+      fi
+      if [ "$DRY_RUN" -eq 0 ] && ! is_mountpoint "$STAGING"; then
+        echo "Error: the image did not mount at $STAGING (its volume name differs from the staging basename); detaching. Pass --staging /Volumes/<volume name>, or let this script create the image." >&2
+        hdiutil detach "$STAGING" >/dev/null 2>&1; IMAGE_ATTACHED=0
+        hdiutil info | grep -F "$IMAGE" >&2 || true
+        exit 2
+      fi
+    fi
+  fi
+  if [ "$DRY_RUN" -eq 0 ] && ! is_mountpoint "$STAGING"; then
+    echo "Error: $STAGING is not a mount point; --export writes only onto the staging volume." >&2
+    echo "Hint: mount a volume there first, or pass --image FILE.sparseimage." >&2
+    exit 2
+  fi
+  if [ "$EUID" -eq 0 ]; then
+    if [ -z "${SUDO_USER:-}" ] || [ "$SUDO_USER" = root ]; then
+      echo "Error: --export must run as the logged-in user (NeoFinder AppleScript, limit F); run this script without sudo and let it re-exec." >&2
+      exit 2
+    fi
+    echo "  running the exporter as $SUDO_USER (sudo -u), not root"
+    as_user=(sudo -u "$SUDO_USER" -H)
+  fi
+  run ${as_user[@]+"${as_user[@]}"} "$PYTHON" "$exporter" export --dest "$STAGING" --progress --ignore-schedule \
+    ${CATALOGS[@]+"${CATALOGS[@]/#/--catalog=}"}
+  rc=$?
+  # A `neofinder-stub-export.py pause` from another terminal makes the exporter
+  # finish its page and exit 0 with the run marked paused; do not index that.
+  if [ "$rc" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] \
+     && ${as_user[@]+"${as_user[@]}"} "$PYTHON" "$exporter" status 2>/dev/null | grep -q '^paused: *yes'; then
+    rc=130
+  fi
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 130 ]; then
+      echo "  export interrupted; its state is saved, the next --export run resumes it."
+    else
+      echo "Error: exporter exited $rc (see ~/Library/Logs/neofinder-stub-export/latest.log); not indexing a partial tree." >&2
+    fi
+    if [ "$IMAGE_ATTACHED" -eq 1 ] && [ "$EUID" -ne 0 ]; then
+      run hdiutil detach "$STAGING" || echo "  (detach failed; hdiutil detach $STAGING by hand)" >&2
+    fi
+    exit "$rc"
+  fi
+  echo "  export done; stubs under $STAGING (exporter log: ~/Library/Logs/neofinder-stub-export/latest.log)"
+}
+
 preflight() {
   echo ""
   echo "1/6 preflight"
@@ -209,7 +348,11 @@ preflight() {
     echo "  running unprivileged (--dry-run): privileged commands below are printed, not run"
   fi
   echo "  SIP: $(csrutil status 2>/dev/null | head -n 1)"
-  [ -n "$IMAGE" ] && attach_image
+  if [ -n "$IMAGE" ] && [ "$IMAGE_ATTACHED" -eq 1 ]; then
+    echo "  --image $IMAGE: attached in the export phase; teardown will detach it"
+  elif [ -n "$IMAGE" ]; then
+    attach_image
+  fi
   if [ -d "$STAGING" ]; then
     STAGING=$(cd "$STAGING" 2>/dev/null && pwd -P) || { echo "Error: cannot enter $STAGING." >&2; exit 2; }
   fi
@@ -231,7 +374,7 @@ preflight() {
   echo "  staging mount point: $STAGING — ok"
   SAMPLE_FILE=$(find "$STAGING" -type f -not -path '*/.*' 2>/dev/null | head -n 1)
   if [ -z "$SAMPLE_FILE" ]; then
-    echo "Error: no regular files under $STAGING; put the NeoFinder EXPORT data there first (raw catalogs are not Spotlight-searchable — header, known limit D)." >&2
+    echo "Error: no regular files under $STAGING; put the NeoFinder EXPORT data there first, or pass --export [--catalog NAME] to have neofinder-stub-export.py do it (raw catalogs are not Spotlight-searchable — header, known limit D)." >&2
     exit 2
   fi
   echo "  data present; sample file: $SAMPLE_FILE"
@@ -447,17 +590,27 @@ fi
 
 # Re-exec under sudo for the real flow. --help (handled above), --status
 # (handled above) and --dry-run stay unprivileged.
+if [ "$EXPORT" -eq 1 ] && [ "$EXPORT_DONE" -eq 0 ] && [ "$EUID" -ne 0 ]; then
+  export_stubs   # step 0, unprivileged (limit F); the root phase below skips it
+  EXPORT_DONE=1  # also stops --dry-run (no re-exec) from printing it twice
+fi
 if [ "$EUID" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   echo "Not root; re-execing under sudo..."
-  exec sudo "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
+  EXTRA_ARGS=()
+  [ "$EXPORT" -eq 1 ] && EXTRA_ARGS+=(--_exported)
+  [ "$IMAGE_ATTACHED" -eq 1 ] && EXTRA_ARGS+=(--_image-attached)
+  exec sudo "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 fi
 
 trap 'teardown; if [ "$TEARDOWN_FAILED" -eq 1 ]; then exit 1; fi' EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
-echo "Batch Spotlight run: staging=$STAGING image=${IMAGE:-none} keep-mds=$KEEP_MDS leave-root-off=$LEAVE_ROOT_OFF dry-run=$DRY_RUN verbose=$VERBOSE"
+echo "Batch Spotlight run: staging=$STAGING image=${IMAGE:-none} export=$EXPORT keep-mds=$KEEP_MDS leave-root-off=$LEAVE_ROOT_OFF dry-run=$DRY_RUN verbose=$VERBOSE"
 
+if [ "$EXPORT" -eq 1 ] && [ "$EXPORT_DONE" -eq 0 ]; then
+  export_stubs   # started as root directly: runs the exporter as $SUDO_USER
+fi
 preflight
 bring_mds_up
 quiet_root
