@@ -11,7 +11,7 @@
 # Usage:
 #   sudo ./neofinder-spotlight-batch.sh [--staging PATH] [--image FILE]
 #                                       [--export [--catalog NAME]...]
-#                                       [--python PATH] [--keep-mds]
+#                                       [--python PATH] [--sudo CMD] [--keep-mds]
 #                                       [--leave-root-off] [--dry-run]
 #                                       [--verbose]
 #   ./neofinder-spotlight-batch.sh --status    read-only: SIP, mds loaded?,
@@ -35,6 +35,9 @@
 #   --python PATH      interpreter for the exporter (needs Python >= 3.11;
 #                      default: first python3.14/.13/.12/.11 on PATH, in
 #                      /opt/homebrew/bin, /usr/local/bin or ~/.local/bin)
+#   --sudo CMD         command used for the privilege re-exec (default sudo);
+#                      e.g. --sudo sudo-ask to get a per-command Allow/Deny
+#                      dialog from an agent shell with no terminal
 #   --keep-mds         skip the final mds bootout deliberately
 #   --leave-root-off   do not restore '/' indexing at teardown
 #   --dry-run          print every privileged command prefixed "+ ", run none,
@@ -109,6 +112,8 @@
 #     staging, obligations recorded before the command, teardown immune to a
 #     second Ctrl-C, unknown root state refused, --image attach failures
 #     fatal, bootout errors no longer blamed on SIP unseen (limit E).
+#   - 2026-10-09 (night): --sudo CMD for the privilege re-exec (sudo-ask from
+#     an agent shell without a terminal).
 #   - 2026-10-09 (evening): --export / --catalog / --python: populate the
 #     staging volume from NeoFinder through neofinder-stub-export.py before
 #     indexing (limit F). `hdiutil attach` is deprecated on this macOS in
@@ -131,6 +136,7 @@ EXPORT=0
 EXPORT_DONE=0      # internal: set by --_exported in the re-exec'd root phase
 CATALOGS=()
 PYTHON=
+SUDO_CMD=sudo
 
 # Teardown bookkeeping: what this run actually changed (all checked by the
 # idempotent teardown, which runs on EXIT/INT/TERM).
@@ -166,10 +172,13 @@ while [ $# -gt 0 ]; do
     --python)
       [ $# -ge 2 ] || { echo "Error: --python needs a path argument." >&2; exit 2; }
       PYTHON=$2; shift 2 ;;
+    --sudo)
+      [ $# -ge 2 ] || { echo "Error: --sudo needs a command argument." >&2; exit 2; }
+      SUDO_CMD=$2; shift 2 ;;
     --_exported) EXPORT_DONE=1; shift ;;          # internal, added by the re-exec
     --_image-attached) IMAGE_ATTACHED=1; shift ;; # internal, added by the re-exec
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --keep-mds, --leave-root-off, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
+    *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --sudo, --keep-mds, --leave-root-off, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
   esac
 done
 
@@ -595,11 +604,11 @@ if [ "$EXPORT" -eq 1 ] && [ "$EXPORT_DONE" -eq 0 ] && [ "$EUID" -ne 0 ]; then
   EXPORT_DONE=1  # also stops --dry-run (no re-exec) from printing it twice
 fi
 if [ "$EUID" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
-  echo "Not root; re-execing under sudo..."
+  echo "Not root; re-execing under $SUDO_CMD..."
   EXTRA_ARGS=()
   [ "$EXPORT" -eq 1 ] && EXTRA_ARGS+=(--_exported)
   [ "$IMAGE_ATTACHED" -eq 1 ] && EXTRA_ARGS+=(--_image-attached)
-  exec sudo "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  exec "$SUDO_CMD" "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 fi
 
 trap 'teardown; if [ "$TEARDOWN_FAILED" -eq 1 ]; then exit 1; fi' EXIT
