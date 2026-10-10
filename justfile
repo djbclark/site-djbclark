@@ -120,8 +120,8 @@ ops-release-deploy version:
 ops-release-status:
     bin/deploy_ops_release.py status
 
-# Sync site-private's live memory only when all remote post-release changes
-# are confined to memory/. This replaces a raw git pull in ~/ops/site-private.
+# Fetch and rebase site-private and site-djbclark (DATA_DIRS) onto
+# origin/master; refuses on a dirty tree. No longer release-gated (2026-08-23).
 ops-memory-sync:
     bin/deploy_ops_release.py memory-sync
 

@@ -10,8 +10,8 @@ Homebrew-installed machine-wide, decided 2026-07-24 by testing candidates
 from [ComposioHQ/awesome-agent-clis](https://github.com/ComposioHQ/awesome-agent-clis)
 and [thegdsks/awesome-modern-cli](https://github.com/thegdsks/awesome-modern-cli)
 head-to-head against the incumbents. Source of truth for the package list:
-[`brew/fragments/agent-cli-tools.yml`](brew/fragments/agent-cli-tools.yml)
-(stack `agent-cli-tools` in [`generated/Merged-Brewfile`](generated/Merged-Brewfile)).
+[`brew/fragments/agent-cli-tools.yml`](../brew/fragments/agent-cli-tools.yml)
+(stack `agent-cli-tools` in [`generated/Merged-Brewfile`](../generated/Merged-Brewfile)).
 Prefer these when shelling out:
 
 | Use case               | Use                                                                                          | Not                          | Why                                                                                                                                                                                                  |

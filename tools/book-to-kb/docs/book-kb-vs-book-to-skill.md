@@ -10,7 +10,7 @@ identically to both sides. Measured 2026-10-03.
 | --- | --- | --- |
 | Agent tokens to build | **~0** (fully mechanical) | **~91k input minimum** — Steps 3, 7 and 8 require reading the whole book, then generating summaries |
 | Wall clock | 21 s | minutes of agent turns |
-| Repeatable without an agent | yes (`just book-add`) | no |
+| Repeatable without an agent | yes (`book-kb extract`) | no |
 
 `book-kb` spends no model tokens at all: docling, the splitter and the index are
 deterministic. `/book-to-skill` must read the book to distil it, so every book
@@ -20,10 +20,10 @@ costs roughly the book's own size in input tokens, plus generation.
 
 | Access path | tokens | lossless? |
 | --- | --: | --- |
-| `just book-query 'convergen' learning-cfengine` | ~2,531 | yes |
-| `just book-query 'bundlesequence' …` | ~3,955 | yes |
-| `just book-query 'edit_line' …` (a very common term) | ~5,153 | yes |
-| `just book-toc` + one median chapter | ~2,495 + ~1,243 = **~3,738** | yes |
+| `book-kb query 'convergen' learning-cfengine` | ~2,531 | yes |
+| `book-kb query 'bundlesequence' …` | ~3,955 | yes |
+| `book-kb query 'edit_line' …` (a very common term) | ~5,153 | yes |
+| `book-kb toc` + one median chapter | ~2,495 + ~1,243 = **~3,738** | yes |
 | `search_notes(project="books", …)`, 5 ranked excerpts | ~600 | yes |
 | **book-to-skill**: SKILL.md body on trigger | up to **4,000** | no — a distillation |
 | **book-to-skill**: + one chapter summary (technical) | +1,200–1,800 | no |
@@ -55,5 +55,6 @@ book-to-skill's EPUB path is plain text — docling is its PDF-only route
 (`book_to_skill/utils.py:1100`). On this book it recovered **0 code fences**
 against **420** from book-kb, which flattens the EPUB's per-token `<code>`
 markup before docling sees it. For a book that is mostly policy listings, that
-is the difference between a usable KB and an unusable one. `just book-skill-env`
-exports `PYTHON_BIN` so book-to-skill's *PDF* path gets docling too.
+is the difference between a usable KB and an unusable one. Setting `PYTHON_BIN`
+to the book-kb venv's `bin/python` (`$BOOK_KB_VENV/bin/python`) gives
+book-to-skill's *PDF* path docling too.

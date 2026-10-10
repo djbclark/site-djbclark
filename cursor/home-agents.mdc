@@ -1,5 +1,5 @@
 ---
-description: djbclark home-directory operating rules (canonical copy at ~/ops/site-private/home-agents.md)
+description: djbclark home-directory operating rules (canonical copy at ~/ops/site-djbclark/home-agents.md)
 alwaysApply: true
 ---
 
@@ -9,7 +9,8 @@ This is djbclark's home directory (`~`), not a git repo itself. The projects
 are `stayturgid`, `site-djbclark`, and `site-private` (this file lives in
 `site-djbclark`; `site-private/home-agents.md` links to it) — each with its own `AGENTS.md`.
 
-Canonical source: `~/ops/site-private/home-agents.md`. This file is a condensed
+Canonical source: `~/ops/site-djbclark/home-agents.md` (`site-private/home-agents.md`
+is a symlink to it). This file is a condensed
 copy for the Cursor CLI (`cursor-agent`), which reads `~/.cursor/rules/*.mdc`
 (frontmatter + body) rather than a plain symlinked `AGENTS.md`/`CLAUDE.md` like
 every other agent CLI here — Cursor is the ONE tool that cannot share the
@@ -170,10 +171,11 @@ app), copilot → `copilot` (if it misbehaves, run `copilot-fix-writer-lock`).
 codex/claude binaries match their names. Native
 [Agent Client Protocol](https://agentclientprotocol.com/) mode: copilot,
 opencode, cursor, qwen, devin, cline, hermes; Claude Code and Codex via
-adapters. No working ACP route: muse (zcode via `acp-run zcode` / `zcode-acp-server`, no `--model`; grok TUI works via `grok agent stdio`; agy works via `acp-run agy`).
+adapters. No ACP: muse; every other agent speaks it (zcode through `zcode-acp-server`, the
+one agent run without `--model`; agy only via `acp-run agy`).
 
 Delegating to another agent CLI, in this order: (1) one-shot or headless work
-for an ACP-capable agent goes through `~/ops/site-private/bin/acp-run <agent> -C
+for an ACP-capable agent goes through `acp-run <agent> -C
 <dir> -p '<prompt>' --model <m> [--perm scoped:<owned paths>|deny]`, not raw
 `-p`/`exec`/`run` — always pass `--model`, and exit 0 is not success, so verify
 tests/diff; (2) supervised work in an Orca-managed repo/worktree uses
@@ -367,8 +369,8 @@ At the start of a session in any git repo, read its Tier 1 pointer (under
 `~/.local/state/handoffs/`, redirecting to a per-chain log), compare its
 `head_sha` to actual `HEAD`, and state a resume plan before touching anything. A
 missing pointer means a fresh start, not an error. Only the workspace-owning
-session writes it. Spec:
-`site-private/docs/session-handoff-compaction-spec.md`.
+session writes it. Protocol: the `session-handoff` skill
+(`~/src/djbclark-ade/skills/session-handoff/SKILL.md`).
 
 ## Three-way memory/docs policy (start at each repo's AGENTS.md)
 

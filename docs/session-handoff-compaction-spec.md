@@ -1,6 +1,10 @@
 # Session Handoff & Context-Compaction Spec (v0.4)
 
 **Status:** v0.1–v0.3 built and in use; v0.4 built 2026-08-04.
+**Note (2026-10-09, #137 C2.3):** the "`~/ops` stays deploy-only, pinned to tagged
+releases" and `~/src/ops-worktrees/` assumptions below were retired 2026-08-23
+(`~/ops` is edited in place on `master`). The live protocol is the `session-handoff`
+skill in `~/src/djbclark-ade/skills/session-handoff/`.
 **Author:** Claude Code, 2026-08-03/04, at the operator's request.
 **History:** v0.1 = original two-tier synthesis of REMvisual/claude-handoff
 + davidshaevel/session-handoff. v0.2 = revision after four independent

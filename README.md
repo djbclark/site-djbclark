@@ -4,7 +4,7 @@
 > the entry point with the doc map, conventions, and **this site's slice** of
 > the three-way memory/docs policy (stayturgid / site-`<name>` / site-private).
 
-Private **site repo** for djbclark's machines (M1 MacBook Air, Intel Mac
+Public **site repo** (no secrets; private material lives in site-private) for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base
 layout is three sibling checkouts under `${OPS_ROOT:-~/ops}/`: this repo, `stayturgid`, and
@@ -16,7 +16,7 @@ and
 
 | Where                                                            | What                                                                                                                                                                |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/relay/NEXT-PROMPT.md`                                      | **Start here to continue the work** — the baton: which AI to use and the exact prompt to paste ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md)) |
+| `docs/relay/NEXT-PROMPT.md`                                      | Closed relay baton (CHAIN-COMPLETE 2026-07-20; historical record, not current state) ([protocol](docs/relay/PROTOCOL.md), [ledger](docs/relay/LEDGER.md))          |
 | `docs/plans/site-djbclark-step1-segmentation-architecture-v1.md` | Architecture + decision log (2026-07-18)                                                                                                                            |
 | `docs/plans/site-djbclark-step2-junior-execution-plan-v1.md`     | Phased execution plan: steps, difficulty, AI routing, risk register                                                                                                 |
 | `docs/plans/site-djbclark-step0-plan-v1.md`                      | Initial AI-stack plan (see amendment header)                                                                                                                        |
@@ -31,7 +31,8 @@ in directly with ordinary git — edit, commit to `master`, push. Coordinated
 point across all three repos (`just ops-release-check`,
 `just ops-release-deploy`, `just ops-release-status`), but they are no longer
 required to deploy. `just ops-memory-sync` is now a plain fetch-and-rebase of
-the repos, not a release-gated one.
+site-private and site-djbclark (not stayturgid), not a release-gated one, and it
+refuses on a dirty tree.
 
 Full release, rollback, and verification policy:
 [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md).
