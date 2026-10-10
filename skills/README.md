@@ -10,7 +10,8 @@ content-in-git + symlink.
 **Orchestration and session-hygiene skills live in djbclark-ade (2026-10-08).**
 `bigteam`, `model-routing`, `effort-routing`, `helm`, `session-finder`,
 `ralph-tui-orchestration`, `cow-workspaces`, `handoff`,
-`baton`, `session-handoff`, `steps` and `loose` are absolute symlinks here into `~/src/djbclark-ade/skills/<name>/`
+`baton`, `session-handoff`, `steps` and `loose`, plus `autorename` and
+`herdr-tidy` (moved or added there later on 2026-10-08), are absolute symlinks here into `~/src/djbclark-ade/skills/<name>/`
 (github.com/djbclark/djbclark-ade, whose README describes them as one
 project). On 2026-10-08 `resume` was folded into `baton`, `helm-all` into
 `helm`, `session-finder-all` into `session-finder` (their old names survive

@@ -192,7 +192,8 @@ were left alone. New work uses the `site-djbclark` path.
    session-hygiene skills (`bigteam`, `model-routing`, `effort-routing`,
    `helm`, `session-finder`,
    `ralph-tui-orchestration`, `cow-workspaces`, `handoff`, `baton`,
-   `session-handoff`, `steps`, `loose`), `tools/acp-run`, `bin/fleet-watch`
+   `session-handoff`, `steps`, `loose`; later `autorename` and `herdr-tidy`),
+   `tools/acp-run`, `bin/fleet-watch`
    and `claude/commands/` (the `helm-all`,
    `session-finder-all`, `resume` wrappers) now live in git at
    `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade). Their paths here

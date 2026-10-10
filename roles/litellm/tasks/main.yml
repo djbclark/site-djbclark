@@ -15,6 +15,48 @@
       LiteLLM requires site_ns, loopback bind 127.0.0.1 (no public bind without
       an auth/master-key design), and Darwin or Linux.
 
+# Tagged `always` so a partial run (`--tags litellm_client_keys`) still fails
+# here with this message instead of a bare 401 from /key/info. LiteLLM
+# requires the master key to start with `sk-` (docs/proxy/prod.md,
+# docs/proxy/virtual_keys.md; the admin UI login and key regeneration assume it).
+# no_log hides fail_msg too, so the task name carries the fix.
+- name: >-
+    Assert LITELLM_MASTER_KEY is set, sk-prefixed, 32+ chars and not the old
+    placeholder (#83; run via just litellm-apply-secrets or just litellm-check)
+  ansible.builtin.assert:
+    that:
+      - litellm_master_key | length >= 32
+      - litellm_master_key is match('^sk-')
+      - litellm_master_key != 'sk-litellm-local'
+    fail_msg: >-
+      LITELLM_MASTER_KEY is unset, short, missing the `sk-` prefix LiteLLM
+      requires, or the old public placeholder. The /litellm/ Caddy route makes
+      this proxy tailnet-reachable, so the master key must be a generated
+      secret: run via `just litellm-apply-secrets` (or `just litellm-check`)
+      after `sudo-secretspec set LITELLM_MASTER_KEY` (#83).
+    quiet: true
+  no_log: true
+  when: litellm_db_enabled | bool
+  tags: [always]
+
+# Not tagged `always`: only a full run renders the plist/unit that carries the
+# salt key, and `--tags litellm_client_keys` never touches it. Rationale in
+# defaults/main.yml (litellm_salt_key).
+- name: >-
+    Assert LITELLM_SALT_KEY is set, 32+ chars and differs from the master key
+    (#83 review 1.1e; run via just litellm-apply-secrets or just litellm-check)
+  ansible.builtin.assert:
+    that:
+      - litellm_salt_key | length >= 32
+      - litellm_salt_key != litellm_master_key
+    fail_msg: >-
+      LITELLM_SALT_KEY is unset, short, or equal to the master key. Create it
+      once with `sudo-secretspec add` and `set LITELLM_SALT_KEY` (see
+      defaults/main.yml) and never rotate it.
+    quiet: true
+  no_log: true
+  when: litellm_db_enabled | bool
+
 - name: Assert the log filter stops the service before launchd kills the filter
   ansible.builtin.assert:
     that:
@@ -159,7 +201,7 @@
     status_code: 200
     # With general_settings.master_key on (litellm_db_enabled) /v1/models answers 401 to an
     # unauthenticated probe even though the proxy is up; that made a healthy apply
-    # "fail" after 60 retries (2026-09-29). Send the same anti-typo master key clients use.
+    # "fail" after 60 retries (2026-09-29). Send the master key (a secret since #83).
     headers: "{{ {'Authorization': 'Bearer ' ~ litellm_master_key} if (litellm_db_enabled | bool) else {} }}"
   register: _litellm_health
   until: _litellm_health.status == 200
@@ -167,9 +209,16 @@
   retries: 150
   delay: 2
   when: not ansible_check_mode
+  # The master key is in `headers` (#83 review 1.1g). ansible-core 2.21 does not
+  # print a uri task's `invocation` even at -vvvv, but older releases and other
+  # callbacks can, so no_log keeps it out regardless. It also censors this
+  # task's errors: to debug, drop no_log locally with a throwaway key.
+  # ANSIBLE_DEBUG=1 logs the key whatever no_log says: never use it with a real one.
+  no_log: true
 
-# Tagged so the keys can be reconciled without the secrets a full apply needs
-# to render the plist: `just litellm-apply --tags litellm_client_keys`.
+# Tagged so the keys can be reconciled without re-rendering the plist or
+# restarting the proxy. It still needs the master key (#83), so it runs under
+# sudo-secretspec: `just litellm-apply-secrets --tags litellm_client_keys`.
 - name: Reconcile per-client LiteLLM virtual keys
   ansible.builtin.include_tasks:
     file: client_keys.yml

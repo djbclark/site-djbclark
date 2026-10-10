@@ -227,16 +227,14 @@ router_settings:
     - {{ n }}: {{ ((go_names | reject('equalto', n) | list) + (['grok-sub'] if litellm_xai_bridge_enabled | bool else []) + gemini_names + ['clinepass-minimax-m3', 'clinepass-kimi-k3', 'clinepass-deepseek']) | to_json }}
 {% endfor %}
 
-# The proxy stays loopback-only (litellm_bind). Never widen it (Tailscale or
-# public) without promoting litellm_master_key to a real generated secret from
-# the vault -- the value below is a plaintext anti-typo guard, not a credential
-# (E5 + REVIEW-1). See the rationale block in defaults/main.yml.
+# The proxy binds loopback (litellm_bind), but Caddy's /litellm/* route makes
+# it tailnet-reachable, so master_key is a generated secret from
+# sudo-secretspec (LITELLM_MASTER_KEY, #83). See defaults/main.yml.
 {% if litellm_db_enabled | bool %}
 
 general_settings:
-  # Turning master_key on makes EVERY caller authenticate. It is set to the
-  # placeholder the existing clients already send, so enabling it is a no-op
-  # for Hermes; see defaults/main.yml for the full client list.
+  # Turning master_key on makes EVERY caller authenticate. Clients use their
+  # own virtual keys (litellm_client_keys in defaults/main.yml), not this.
   master_key: os.environ/LITELLM_MASTER_KEY
   # Enables the key/spend tables that back /key/info and /key/spend/report.
   # Without this LiteLLM cannot account for spend at all.

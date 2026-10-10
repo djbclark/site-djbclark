@@ -134,14 +134,19 @@ litellm_hosts := env_var_or_default("LITELLM_HOSTS", "mac")
 litellm-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
 
-# Apply with sudo-secretspec injection (requires TELEGRAM_BOT_TOKEN resolved,
-# it's required; OPENAI/ANTHROPIC optional until set). Same limit as
+# Apply with sudo-secretspec injection (requires TELEGRAM_BOT_TOKEN,
+# LITELLM_MASTER_KEY and LITELLM_SALT_KEY (#83) resolved; OPENAI/ANTHROPIC
+# optional until set).
+# Plain `litellm-apply` fails closed outside it. Same limit as
 # litellm-apply (LITELLM_HOSTS / default m1-air).
 litellm-apply-secrets *args:
     sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply {{ args }}
 
+# Dry run (--check). It needs LITELLM_MASTER_KEY and LITELLM_SALT_KEY like a
+# real apply: the #83 asserts in roles/litellm fail closed without them, so it
+# runs under sudo-secretspec too.
 litellm-check *args:
-    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/litellm.yml --limit "{{ litellm_hosts }}" {{ args }}
+    sudo-secretspec run --reason "check LiteLLM apply (dry run)" -- just litellm-apply --check {{ args }}
 
 # Local host status (Air). Remote: ssh + curl loopback on that host, or
 # LITELLM_HOSTS=mac-mini-intel just litellm-status after it is online.
@@ -153,7 +158,8 @@ litellm-status:
     else \
       echo "service: not loaded on this host"; \
     fi
-    @curl -fsS --max-time 5 http://127.0.0.1:4000/v1/models | jq -r '"models: " + ([.data[].id] | join(", "))'
+    @curl -fsS --max-time 5 http://127.0.0.1:4000/health/readiness | jq -r '"readiness: " + .status + ", db: " + (.db // "n/a")'
+    @grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | paste -sd, - | sed 's/^/models (config): /'
 
 # Reload a LaunchAgent after editing its plist (bootout + wait + bootstrap
 # with retry; `kickstart` alone does NOT re-read the plist). Optional health URL.

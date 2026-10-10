@@ -69,7 +69,7 @@ Planned hosts set `site_host_status: offline_unprovisioned` so the role
 
    ```bash
    LITELLM_HOSTS=mac-mini-intel sudo-secretspec run --reason "LiteLLM mini" -- just litellm-apply
-   # or: just litellm-apply -- --limit vps-primary
+   # or: LITELLM_HOSTS=vps-primary just litellm-apply-secrets
    ```
 
 Homebrew prefix follows the stayturgid `stayturgid_homebrew_prefix` pattern
@@ -82,14 +82,21 @@ bind without auth. Preserve REVIEW-1: do not casually open OliveTin/VM.
 
 ## Apply and inspect
 
+Every apply and check needs `LITELLM_MASTER_KEY` (`sk-` prefix) and
+`LITELLM_SALT_KEY` from sudo-secretspec; the role fails closed without them
+(#83).
+
 ```bash
 # Default: m1-air only (safe; does not attempt offline mini/VPS)
-just litellm-apply
-just litellm-check
+just litellm-apply-secrets
+just litellm-check            # --check, also under sudo-secretspec
 just litellm-status
 
 # All inventory members (skips offline_unprovisioned; fails on bad SSH if online)
-LITELLM_HOSTS=site_litellm just litellm-apply
+LITELLM_HOSTS=site_litellm just litellm-apply-secrets
+
+# Reconcile only the per-client virtual keys (no plist render, no restart)
+just litellm-apply-secrets --tags litellm_client_keys
 
 # Secrets via sudo-secretspec (E4 pattern)
 sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
@@ -183,12 +190,20 @@ number that matters now that ClinePass is capped.
 * `general_settings.master_key` is now set, so **every caller authenticates**.
 * `general_settings.database_url` points at a Postgres **dedicated to LiteLLM**.
 
-The master key is deliberately the placeholder the clients were already
-sending, `sk-litellm-local`. It is **not a secret** — it is checked in as a
-plaintext default here, and it only guards a
-loopback-bound port. Treat it as an anti-typo guard. If `litellm_bind` is ever
-widened beyond loopback this MUST become a generated secret pulled from the
-vault, exactly like `litellm_clinepass_api_key`.
+Until 2026-10-09 the master key was the placeholder the clients were already
+sending, `sk-litellm-local`, checked in here as an "anti-typo guard" for a
+loopback-bound port. That premise was wrong: `litellm_bind` is loopback, but
+the stayturgid Caddy fragment proxies `/litellm/*` to it on the tailnet front
+door, so the public placeholder let any tailnet member use the proxy (#83).
+The master key is now a generated secret, `LITELLM_MASTER_KEY` in
+sudo-secretspec, read by `just litellm-apply-secrets` exactly like
+`litellm_clinepass_api_key`; the role fails closed when it is unset, lacks
+the `sk-` prefix LiteLLM requires, or is still the placeholder.
+`LITELLM_SALT_KEY` is a second, never-rotated secret: LiteLLM encrypts
+DB-stored credentials with it and falls back to the master key when it is
+unset, so keeping them apart means a master-key rotation strands nothing. The
+per-client virtual keys below are still checked-in labels and are the next
+step of #83.
 
 ### Why a separate Postgres on :5433
 
@@ -230,10 +245,11 @@ Skipping `prisma generate` makes the proxy **fail to start entirely**
 
 | Caller | Before | Now |
 | --- | --- | --- |
-| Hermes (`~/.hermes/config.yaml`) | `sk-litellm-local` | unchanged |
-| LLM backend health check | `sk-litellm-local` | unchanged |
-| Open WebUI (`roles/open_webui`) | `sk-dummy` | `sk-litellm-local` |
-| OliveTin diagnostics | bare `curl` | sends the bearer |
+| Hermes (`~/.hermes/config.yaml`) | `sk-litellm-local` | its virtual key (alias `hermes`, 2026-09-30) |
+| LLM backend health check | `sk-litellm-local` | virtual key alias `llm-health-watchdog` |
+| Open WebUI (`roles/open_webui`) | `sk-dummy` | virtual key alias `open-webui` |
+| OliveTin diagnostics | bare `curl` | unauthenticated `/health/readiness` (2026-10-09) |
+| `just litellm-status` | bare `curl /v1/models` | `/health/readiness` + model names from the rendered config |
 
 Anything else pointed at `:4000` that does not send the key now gets **401**.
 
@@ -245,12 +261,13 @@ budget need a real virtual key **and** a user row — CodexBar rejects key info
 that carries neither a `user_id` nor a `team_id`:
 
 ```bash
+# run inside: sudo-secretspec run --reason "litellm admin" -- bash
 curl -s -X POST http://127.0.0.1:4000/user/new \
-  -H "Authorization: Bearer sk-litellm-local" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
   -d '{"user_id":"codexbar","user_alias":"CodexBar","max_budget":50,"budget_duration":"30d","auto_create_key":false}'
 
 curl -s -X POST http://127.0.0.1:4000/key/generate \
-  -H "Authorization: Bearer sk-litellm-local" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
   -d '{"key_alias":"codexbar-usage","user_id":"codexbar"}'
 ```
 

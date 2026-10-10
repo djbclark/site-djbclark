@@ -75,11 +75,18 @@ actions:
       echo "=== launchctl print gui/$(id -u)/com.djbclark.litellm ==="
       launchctl print "gui/$(id -u)/com.djbclark.litellm" 2>&1 | head -30 || true
       echo
-      echo "=== http://127.0.0.1:4000/health ==="
-      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/health || echo "HTTP 4000 not responding"
+      # Unauthenticated probes only (#83): the master key is a secret now,
+      # and /health would also call every model upstream.
+      echo "=== http://127.0.0.1:4000/health/readiness ==="
+      curl -s -m 5 http://127.0.0.1:4000/health/readiness || echo "HTTP 4000 not responding"
       echo
-      echo "=== http://127.0.0.1:4000/v1/models ==="
-      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/v1/models | head -30 || echo "Models endpoint failed"
+      echo "=== models in ~/.litellm/config.yaml ==="
+      # `a | b | head || echo` takes head's status, so test readability first.
+      if [ -r "$HOME/.litellm/config.yaml" ]; then
+        grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | head -30
+      else
+        echo "config not readable"
+      fi
 
   - id: user_litellm_restart
     title: "LiteLLM Proxy — restart service"
@@ -89,7 +96,7 @@ actions:
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       launchctl kickstart -k "gui/$(id -u)/com.djbclark.litellm"
       sleep 2
-      curl -s -m 5 -H "Authorization: Bearer sk-litellm-local" http://127.0.0.1:4000/health || true
+      curl -s -m 5 http://127.0.0.1:4000/health/readiness || true
 
   - id: user_openwebui_status
     title: "Open WebUI — status & health"
