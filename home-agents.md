@@ -222,7 +222,8 @@ token-savior split: [[reference_agent_rules_code_discovery_and_cli_table]].
    **literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`**
    (2026-10-09; FILE is relative to the cwd, an absolute `--glob` matches nothing; FIND
    spans lines as typed, **exit 1 when nothing matched**; a FIND
-   starting with `-` goes through the Edit tool). **`sd` is retired for edits**
+   starting with `-` goes through the Edit tool; **REPL turns backslash escapes into control
+   characters** (`\b` became a backspace, 2026-10-10): REPL with `\` goes through Python with an assert). **`sd` is retired for edits**
    (exit 0 on no match; it lost an edit). `dust`/`procs`/`xh` where they fit. Keep
    `cat`/`ls`/`diff`/`jq` (rtk compacts them). Android greps stay `grep`.
    (`memory/feedback_modern_cli_tools.md`)

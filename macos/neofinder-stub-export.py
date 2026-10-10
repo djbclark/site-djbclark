@@ -188,6 +188,18 @@ NeoFinder 9.3.1; companion script macos/neofinder-spotlight-batch.sh):
      `retag PATH [--dry-run]` applies this to an existing batch volume
      (name + stored kMDItemKind), without a re-export.
 
+  Q. More tags (2026-10-10). Spotlight queries an alias's size as the
+     ~1 KB bookmark, so every non-folder entry also gets cumulative size
+     tags (nf-over1mb, nf-over10mb, nf-over100mb, nf-over1gb, nf-over10gb;
+     decimal units as Finder shows them: one tag answers "at least this
+     big"), a stub gets nf-offline (its real file was not mounted at
+     export time, so it will not open), and an alias carries the real
+     file's own Finder tags (_kMDItemUserTags, colour suffix kept). The nf
+     tags go into kMDItemKeywords too. `retag` applies all of it: size from
+     the Finder comment, offline = zero-byte stub, real tags read through
+     the alias's bookmark path (when the real file is unreadable, the
+     alias's existing non-nf tags are kept).
+
 History:
   - 2026-10-09: written (multi-agent batch slice; lead integrates, tests and
     commits). Companion files: neofinder-stub-export.example.toml,
@@ -283,6 +295,16 @@ SKIP_DEFAULT = [
 # (checked by the table build below).
 USER_TAGS_XATTR = "com.apple.metadata:_kMDItemUserTags"
 KEYWORDS_XATTR = "com.apple.metadata:kMDItemKeywords"
+# Size tags (header Q): cumulative, decimal like Finder.
+SIZE_TAGS = (
+    (1_000_000, "nf-over1mb"),
+    (10_000_000, "nf-over10mb"),
+    (100_000_000, "nf-over100mb"),
+    (1_000_000_000, "nf-over1gb"),
+    (10_000_000_000, "nf-over10gb"),
+)
+OFFLINE_TAG = "nf-offline"
+COMMENT_SIZE_RE = re.compile(r" \| (\d+) bytes \| ")
 KIND_GROUP_EXTS = {
     "image": "jpg jpeg jpe png gif bmp tif tiff webp heic heif avif svg psd psb "
     "ico icns xcf ai eps jp2 jxl tga exr hdr pict pnt cr2 cr3 crw nef nrw arw "
@@ -336,7 +358,9 @@ KIND_GROUP_WORDS = (
     ("code", r"source|scripts?|code|shell"),
     ("doc", r"word|rich text|pages"),
     ("text", r"text|markdown"),
-    ("doc", r"documents?"),
+    # Not the bare "Document": macOS names every unknown type that, and it
+    # was 15,246 of 15,322 nf-doc files on the batch volume (2026-10-10).
+    ("doc", r"(?<=\w\s)documents?"),
 )
 KIND_GROUP_WORD_RES = tuple(
     (g, re.compile(rf"\b(?:{w})\b", re.I)) for g, w in KIND_GROUP_WORDS
@@ -1514,15 +1538,34 @@ def kind_group(name, kind):
     return group
 
 
-def set_kind_tags(path, group):
-    """Write the Finder tag nf-<group> and keywords for `group` (header P).
+def nf_tags(group, size, offline):
+    """The nf-* tags for an entry: kind group (P), size and offline (Q)."""
+    tags = [f"nf-{group}"] if group else []
+    tags += [tag for floor, tag in SIZE_TAGS if size >= floor]
+    if offline:
+        tags.append(OFFLINE_TAG)
+    return tags
 
-    Overwrites: these files are ours. A None group writes nothing.
+
+def set_nf_tags(path, group, size=0, offline=False, user_tags=()):
+    """Write Finder tags and keywords (headers P, Q).
+
+    Tags are nf_tags() plus `user_tags` (the real file's own Finder tags,
+    written as given); keywords are nf_tags() plus the bare group name.
+    Overwrites: these files are ours. Nothing to write writes nothing.
     """
-    if group:
-        tag = f"nf-{group}"
-        _set_plist_xattr(path, USER_TAGS_XATTR, [tag])
-        _set_plist_xattr(path, KEYWORDS_XATTR, [tag, group])
+    nf = nf_tags(group, size, offline)
+    tags = nf + [t for t in user_tags if isinstance(t, str) and t not in nf]
+    if tags:
+        _set_plist_xattr(path, USER_TAGS_XATTR, tags)
+    if nf:
+        _set_plist_xattr(path, KEYWORDS_XATTR, nf + ([group] if group else []))
+
+
+def real_user_tags(path):
+    """The Finder tags on the file at `path` (a list), [] when none/unreadable."""
+    tags = get_plist_xattr(path, USER_TAGS_XATTR)
+    return [t for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
 
 
 def set_added_time(path, epoch):
@@ -1593,7 +1636,7 @@ def _nserror_oserror(err, path):
     return OSError(code, os.strerror(code), str(path))
 
 
-def write_alias(real, target, comment, kind_fallback):
+def write_alias(real, target, comment, kind_fallback, size=0):
     """Write a Finder alias to `real` at `target`, replacing what is there.
 
     The bookmark goes to a temp name in the target's directory, gets the
@@ -1636,7 +1679,9 @@ def write_alias(real, target, comment, kind_fallback):
             str(vals.get(F.NSURLLocalizedTypeDescriptionKey) or "") or kind_fallback
         )
         set_kind(tmp, kind)
-        set_kind_tags(tmp, kind_group(target.name, kind))
+        set_nf_tags(
+            tmp, kind_group(target.name, kind), size, False, real_user_tags(real)
+        )
         dates = {
             k: vals[k]
             for k in (F.NSURLCreationDateKey, F.NSURLContentModificationDateKey)
@@ -1771,7 +1816,7 @@ def write_page(
                 os.makedirs(target.parent, exist_ok=True)
                 if real is not None:
                     try:
-                        write_alias(real, target, comment, rec.kind)
+                        write_alias(real, target, comment, rec.kind, rec.size)
                     except AliasSourceError as exc:
                         log.warning(f"alias failed, writing a stub: {real} ({exc})")
                         real = None
@@ -1787,7 +1832,9 @@ def write_page(
                         os.utime(target, (rec.mtime, rec.mtime))
                     set_finder_comment(target, comment)
                     set_kind(target, rec.kind)
-                    set_kind_tags(target, kind_group(target.name, rec.kind))
+                    set_nf_tags(
+                        target, kind_group(target.name, rec.kind), rec.size, True
+                    )
         except OSError as exc:
             if _fatal_write_error(exc, cat_dir):
                 what = "alias" if real is not None else "stub"
@@ -2814,8 +2861,27 @@ def get_plist_xattr(path, name):
         return None
 
 
+def bookmark_path(path):
+    """The real file's path recorded in the alias file at `path`, or None.
+
+    Reads the bookmark's stored path without resolving or mounting
+    anything; None without PyObjC or for a non-alias file.
+    """
+    F = _F
+    if not F:
+        return None
+    data, _err = F.NSURL.bookmarkDataWithContentsOfURL_error_(
+        F.NSURL.fileURLWithPath_(path), None
+    )
+    if data is None:
+        return None
+    vals = F.NSURL.resourceValuesForKeys_fromBookmarkData_([F.NSURLPathKey], data)
+    real = vals.get(F.NSURLPathKey) if vals is not None else None
+    return str(real) if real else None
+
+
 def cmd_retag(args):
-    """Apply kind tags/keywords (header P) to an existing batch volume."""
+    """Apply tags/keywords (headers P, Q) to an existing batch volume."""
     root = Path(args.path).expanduser()
     try:
         resolved = root.resolve()
@@ -2830,7 +2896,10 @@ def cmd_retag(args):
         return 2
     seen = errors = untagged = 0
     per_group = {}
+    per_tag = {}
+    real_read = 0
     shown = 0
+    load_foundation(RunLog(enabled=False))
     for dirpath, dirnames, filenames in os.walk(root):
         if Path(dirpath) == root:
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
@@ -2841,15 +2910,36 @@ def cmd_retag(args):
             try:
                 if not stat.S_ISREG(os.lstat(path).st_mode):
                     continue
+                st_size = os.lstat(path).st_size
                 seen += 1
                 kind = get_plist_xattr(path, KIND_XATTR)
                 group = kind_group(fname, kind if isinstance(kind, str) else "")
-                if group is None:
+                comment = get_plist_xattr(path, FINDER_COMMENT_XATTR)
+                m = COMMENT_SIZE_RE.search(comment) if isinstance(comment, str) else None
+                size = int(m.group(1)) if m else 0
+                offline = st_size == 0  # a stub; an alias is a ~1 KB bookmark
+                user_tags = None
+                if not offline:
+                    real = bookmark_path(path)
+                    if real is not None and os.path.exists(real):
+                        user_tags = real_user_tags(real)
+                        real_read += 1
+                if user_tags is None:  # keep what an earlier run copied
+                    user_tags = [
+                        t for t in real_user_tags(path) if not t.startswith("nf-")
+                    ]
+                nf = nf_tags(group, size, offline)
+                if not nf and not user_tags:
                     untagged += 1
                     continue
                 if not args.dry_run:
-                    set_kind_tags(path, group)
-                per_group[group] = per_group.get(group, 0) + 1
+                    set_nf_tags(path, group, size, offline, user_tags)
+                if group:
+                    per_group[group] = per_group.get(group, 0) + 1
+                else:
+                    untagged += 1
+                for t in nf[1 if group else 0:] + (["(real tags)"] if user_tags else []):
+                    per_tag[t] = per_tag.get(t, 0) + 1
             except OSError as exc:
                 errors += 1
                 if shown < SKIP_LIST_SHOWN:
@@ -2859,11 +2949,20 @@ def cmd_retag(args):
                 eprint(f"retag: {seen} files so far")
     verb = "would tag" if args.dry_run else "tagged"
     tagged = sum(per_group.values())
-    print(f"retag {root}: {seen} files seen, {verb} {tagged}, {untagged} untagged, {errors} errors")
+    print(
+        f"retag {root}: {seen} files seen, {verb} {tagged} with a kind, "
+        f"{untagged} without, {errors} errors; real files read for tags: {real_read}"
+    )
     for group in sorted(per_group, key=lambda g: (-per_group[g], g)):
         print(f"  nf-{group:<10} {per_group[group]}")
+    for tag in sorted(per_tag, key=lambda t: (-per_tag[t], t)):
+        print(f"  {tag:<13} {per_tag[tag]}")
     if not args.dry_run:
-        subcmd_log(f"retag {root}: seen={seen} tagged={tagged} untagged={untagged} errors={errors}")
+        subcmd_log(
+            f"retag {root}: seen={seen} kind_tagged={tagged} no_kind={untagged} "
+            f"errors={errors} real_read={real_read} "
+            + " ".join(f"{t}={n}" for t, n in sorted(per_tag.items()))
+        )
     return 1 if errors else 0
 
 
