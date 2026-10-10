@@ -180,6 +180,10 @@ bypass; if a command truly cannot run from your shell, say why.
 would have prevented it in the same turn, unasked** (the covering skill, this
 file, or a memory note), and say what you changed.
 (`memory/feedback_fix_instructions_after_tool_mistake.md`)
+**An agent-harness failure** (acp-dispatch, acp-run, a waiter, an adapter, model
+routing) **gets a root-cause fix in `~/src/djbclark-ade`, code not just docs**;
+re-routing the slice is not the fix (2026-10-10;
+`memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
 
 ## Ping djbclark on Hermes (2026-10-05)
 
