@@ -12,7 +12,12 @@ resultSinks:
 jobs:
   brew-fast-upgrade:
     cmd: {{ site_agents_brew_fast_upgrade_script }}
-    time: 0 0 3 * * *
+    # 03:10 (was 03:00 until 2026-10-10): the first brew update was still
+    # fetching at the known ~03:01 nightly Wi-Fi blip and failed every tap
+    # in 14 of 46 logged runs. 03:10 clears the blip and still finishes
+    # before mac-dns-apply at 03:30 (typical run ~12 min). Jobber cron is
+    # seconds-first: 0 10 3 = 03:10:00.
+    time: 0 10 3 * * *
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
@@ -43,7 +48,8 @@ jobs:
 
   # Daily re-apply of this Mac's tailnet DNS plumbing (roles/mac_dns): keeps
   # /etc/resolver/<tailnet>, Wi-Fi search domains and accept-dns in sync with
-  # group_vars/all.yml. 03:30 = after brew-fast-upgrade and after the nightly
+  # group_vars/all.yml. 03:30 = after brew-fast-upgrade (03:10 since
+  # 2026-10-10) and after the nightly
   # ~03:01 Wi-Fi blip the role exists to survive. Privileged step is sudo -n
   # to the root-owned applier installed by `just mac-dns-setup`.
   mac-dns-apply:

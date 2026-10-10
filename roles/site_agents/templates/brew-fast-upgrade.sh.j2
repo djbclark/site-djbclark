@@ -57,11 +57,11 @@ run_brew_update() {
   local update_rc
   local attempt
 
-  # Scheduled 03:00 runs overlap the known ~03:01 nightly Wi-Fi blip (see
-  # the mac_dns note in jobber.yaml.j2): every tap fetch fails mid-update,
-  # the whole brew pass is skipped, and the outer retry succeeds 10s later
-  # (14 of 46 logged runs). Retry the update in-pass so a single attempt
-  # absorbs the blip instead of burning a full pass on it.
+  # Runs were scheduled at 03:00 until 2026-10-10, so the first brew update
+  # was still fetching at the known ~03:01 nightly Wi-Fi blip (see the
+  # mac_dns note in jobber.yaml.j2) and failed every tap in 14 of 46 logged
+  # runs; the schedule is now 03:10. Keep retrying the update in-pass as
+  # belt-and-suspenders in case the blip drifts.
   update_rc=0
   for attempt in 1 2 3; do
     if update_output="$(brew update 2>&1)"; then
