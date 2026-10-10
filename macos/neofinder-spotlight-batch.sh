@@ -12,7 +12,7 @@
 #   sudo ./neofinder-spotlight-batch.sh [--staging PATH] [--image FILE]
 #                                       [--export [--catalog NAME]...]
 #                                       [--python PATH] [--sudo CMD] [--keep-mds]
-#                                       [--leave-root-off] [--dry-run]
+#                                       [--restore-root] [--dry-run]
 #                                       [--verbose]
 #   ./neofinder-spotlight-batch.sh --status    read-only: SIP, mds loaded?,
 #                                               mdutil -s for / and the staging
@@ -39,7 +39,9 @@
 #                      e.g. --sudo sudo-ask to get a per-command Allow/Deny
 #                      dialog from an agent shell with no terminal
 #   --keep-mds         skip the final mds bootout deliberately
-#   --leave-root-off   do not restore '/' indexing at teardown
+#   --restore-root     at teardown re-enable indexing on the volumes that had
+#                      it before this run (default: leave every volume off;
+#                      --leave-root-off is accepted as a no-op alias of that)
 #   --dry-run          print every privileged command prefixed "+ ", run none,
 #                      skip the interactive pause; works unprivileged
 #   --verbose          mdimport -t -d1 over the whole staging volume instead
@@ -58,13 +60,18 @@
 #      --keep-mds skips the attempt. If mds is already loaded when the script
 #      starts, the bootstrap is skipped and recorded as "this script did not
 #      start mds".
-#   B. Indexing on '/' was ENABLED here before the run. The prior state is
-#      recorded before anything is touched and restored at teardown only if
-#      it was enabled; re-enabling may make Spotlight reindex '/' (one-line
-#      warning at restore time). --leave-root-off skips the restore. When
-#      the prior state cannot be read (e.g. "Spotlight server is disabled",
-#      which `mdutil -s` also says from inside an app sandbox) the run
-#      refuses to touch '/' rather than guess.
+#   B. Policy (operator, 2026-10-09): Spotlight must hold NO index it built
+#      on its own; it only ingests the NeoFinder batches. `mdutil -i off /`
+#      alone is not enough on this macOS: '/' is the sealed system volume and
+#      /System/Volumes/Data (the user data), Preboot and every mounted disk
+#      are separate volumes that stayed "Indexing enabled" during the first
+#      real run (the real mac256usb disk even carried a 1.7 GB store). So
+#      step 3 is `mdutil -a -i off` (every volume), step 4 turns staging on,
+#      and teardown leaves everything off. The volumes that were on before
+#      the run are listed; --restore-root re-enables exactly those at
+#      teardown (re-enabling makes Spotlight rebuild their indexes). The
+#      stores Spotlight had already built were removed once by hand
+#      (`mdutil -X` on Data, Preboot and mac256usb, 2026-10-09).
 #   C. `mdimport -d1` alone is only a TEST import on this macOS (man
 #      mdimport: -d "requires -t"; -t "attributes will not be stored in the
 #      Spotlight index"). The stored import is `mdimport -i` — the implied
@@ -112,12 +119,23 @@
 #     staging, obligations recorded before the command, teardown immune to a
 #     second Ctrl-C, unknown root state refused, --image attach failures
 #     fatal, bootout errors no longer blamed on SIP unseen (limit E).
-#   - 2026-10-09 (night): --sudo CMD for the privilege re-exec (sudo-ask from
-#     an agent shell without a terminal).
 #   - 2026-10-09 (evening): --export / --catalog / --python: populate the
 #     staging volume from NeoFinder through neofinder-stub-export.py before
 #     indexing (limit F). `hdiutil attach` is deprecated on this macOS in
 #     favour of `diskutil image attach`; kept for the same reason as create.
+#   - 2026-10-09 (night): --sudo CMD for the privilege re-exec (sudo-ask from
+#     an agent shell without a terminal). First real run (mac256usb, 265,780
+#     stubs in 2m 58s): the search window read /dev/tty, which fails with no
+#     controlling terminal, so the window closed at once; it now holds on
+#     stdin in that case. The machine-side check also prints the indexed-item
+#     count and the sample file's name, because the catalogue may well have no
+#     item named "Computers" (mac256usb has none). Finder search for
+#     banks.jsonl.gz on the staging volume: success (operator). Policy change,
+#     limit B: quiet EVERY volume (mdutil -a -i off) and never re-enable
+#     unless --restore-root. Second real run, same catalogue: mds ingested
+#     261,081 of the 265,780 stubs in ~40 min (50-250 items/s, faster as it
+#     went), then the count went flat; the window was closed by a watcher
+#     and teardown ran clean (rc 0).
 
 set -u
 
@@ -128,7 +146,8 @@ STAGING_DEFAULT=/Volumes/NeoFinderBatch
 STAGING=$STAGING_DEFAULT
 IMAGE=
 KEEP_MDS=0
-LEAVE_ROOT_OFF=0
+RESTORE_ROOT=0
+VOLS_WERE_ON=""   # newline-separated mount points that had indexing on before step 3
 DRY_RUN=0
 VERBOSE=0
 STATUS_ONLY=0
@@ -142,12 +161,10 @@ SUDO_CMD=sudo
 # idempotent teardown, which runs on EXIT/INT/TERM).
 WE_STARTED_MDS=0
 ROOT_TOUCHED=0
-ROOT_WAS_ON=0
 STAGING_ON=0
 IMAGE_ATTACHED=0
 TEARDOWN_RAN=0
 TEARDOWN_FAILED=0
-ROOT_STATE_OUT=
 SAMPLE_FILE=
 
 ORIG_ARGS=("$@")
@@ -161,7 +178,8 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "Error: --image needs a file argument." >&2; exit 2; }
       IMAGE=$2; shift 2 ;;
     --keep-mds) KEEP_MDS=1; shift ;;
-    --leave-root-off) LEAVE_ROOT_OFF=1; shift ;;
+    --restore-root) RESTORE_ROOT=1; shift ;;
+    --leave-root-off) shift ;;   # the default since 2026-10-09; kept as a no-op alias
     --dry-run) DRY_RUN=1; shift ;;
     --verbose) VERBOSE=1; shift ;;
     --status) STATUS_ONLY=1; shift ;;
@@ -178,7 +196,7 @@ while [ $# -gt 0 ]; do
     --_exported) EXPORT_DONE=1; shift ;;          # internal, added by the re-exec
     --_image-attached) IMAGE_ATTACHED=1; shift ;; # internal, added by the re-exec
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --sudo, --keep-mds, --leave-root-off, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
+    *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --sudo, --keep-mds, --restore-root, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
   esac
 done
 
@@ -213,12 +231,12 @@ is_mountpoint() {
   [ "$(stat -f %d "$1")" != "$(stat -f %d "$1/..")" ]
 }
 
-# root_index_state: 0 = '/' indexing enabled, 1 = disabled, 2 = unknown.
-root_index_state() {
-  ROOT_STATE_OUT=$(mdutil -s / 2>&1 | tr -d '\t' | tr '\n' ' ')
-  echo "$ROOT_STATE_OUT" | grep -qi 'indexing enabled' && return 0
-  echo "$ROOT_STATE_OUT" | grep -qi 'indexing disabled' && return 1
-  return 2
+# volumes_indexing_on: print the mount points `mdutil -s -a` reports as
+# "Indexing enabled", one per line, staging excluded (read-only).
+volumes_indexing_on() {
+  mdutil -s -a 2>/dev/null | awk -v skip="$STAGING" '
+    /:$/ { v = $0; sub(/:$/, "", v); next }
+    /Indexing enabled/ { if (v != skip) print v }'
 }
 
 # is_system_volume PATH: 0 when PATH is '/', the Data volume, or on the same
@@ -412,17 +430,22 @@ bring_mds_up() {
 
 quiet_root() {
   echo ""
-  echo "3/6 quiet the system volume"
+  echo "3/6 quiet every volume (policy: Spotlight indexes only our batches)"
   echo "------------------------------------------------------------------"
-  root_index_state
-  case $? in
-    0) ROOT_WAS_ON=1; echo "  '/' indexing is enabled; recorded — teardown will restore it" ;;
-    1) ROOT_WAS_ON=0; echo "  '/' indexing is already off; nothing to restore later" ;;
-    *) echo "Error: cannot read the '/' indexing state (mdutil -s / said: ${ROOT_STATE_OUT:-nothing}); refusing to change it. Is the Spotlight server reachable (mds up, not sandboxed)?" >&2
-       exit 1 ;;
-  esac
+  if ! mdutil -s -a >/dev/null 2>&1; then
+    echo "Error: mdutil -s -a failed; is the Spotlight server reachable (mds up, not sandboxed)? Refusing to change indexing state blind." >&2
+    exit 1
+  fi
+  VOLS_WERE_ON=$(volumes_indexing_on)
+  if [ -n "$VOLS_WERE_ON" ]; then
+    echo "  volumes with indexing on before this run (left OFF at teardown; --restore-root re-enables them):"
+    while IFS= read -r v; do [ -n "$v" ] && echo "    $v"; done <<< "$VOLS_WERE_ON"
+  else
+    echo "  no volume besides staging has indexing on"
+  fi
   ROOT_TOUCHED=1   # obligation recorded before the command
-  run mdutil -i off / || { echo "Error: mdutil -i off / failed; aborting (teardown restores what was recorded)." >&2; exit 1; }
+  run mdutil -a -i off || { echo "Error: mdutil -a -i off failed; aborting." >&2; exit 1; }
+  echo "  '/' and /System/Volumes/Data are separate volumes on this macOS; -a covers both"
 }
 
 index_staging() {
@@ -448,10 +471,16 @@ search_window() {
   echo "  staging index status:"
   run mdutil -s "$STAGING"
   if [ "$DRY_RUN" -eq 1 ]; then
+    echo "+ mdfind -onlyin $STAGING -count 'kMDItemFSName != \"\"'"
     echo "+ mdfind -onlyin $STAGING -name Computers | wc -l"
   else
+    # Indexing continues in the background after mdimport returns, so the
+    # count is a snapshot; it is re-shown at teardown for comparison.
+    INDEXED=$(mdfind -onlyin "$STAGING" -count 'kMDItemFSName != ""' 2>/dev/null | tr -d ' ')
+    echo "  machine-side check: mdfind -onlyin $STAGING -count -> ${INDEXED:-?} item(s) indexed so far"
     MATCHES=$(mdfind -onlyin "$STAGING" -name Computers 2>/dev/null | wc -l | tr -d ' ')
     echo "  machine-side check: mdfind -onlyin $STAGING -name Computers -> $MATCHES match(es)"
+    echo "  (a name that exists here for a Finder search: ${SAMPLE_FILE##*/})"
   fi
   echo ""
   echo "  Validation: search in Finder for a file named \"Computers\" (scoped to"
@@ -461,10 +490,17 @@ search_window() {
     echo "  (dry-run: skipping the interactive pause)"
     return 0
   fi
-  if [ -r /dev/tty ]; then
+  # [ -r /dev/tty ] is true even with no controlling terminal (the node is
+  # readable); only opening it tells. Without one, hold on stdin instead (a
+  # pipe or FIFO an agent shell feeds: a line or EOF ends the window), and
+  # only when stdin is closed too skip the pause.
+  if { : < /dev/tty; } 2>/dev/null; then
     read -r -p "  Press Enter to tear down (Ctrl-C tears down too): " < /dev/tty
+  elif { : < /dev/stdin; } 2>/dev/null; then
+    echo "  (no controlling tty; holding until a line or EOF arrives on stdin)"
+    read -r || true
   else
-    echo "  (no controlling tty; skipping the pause and tearing down)"
+    echo "  (no controlling tty and no stdin; skipping the pause and tearing down)"
   fi
 }
 
@@ -502,7 +538,7 @@ bootout_mds() {
         echo "  (not the SIP refusal; read the message above)" ;;
     esac
     echo "  Staging indexing is off and '/' was handled above (restored, or left off"
-    echo "  with --leave-root-off). Still running:"
+    echo "  left off by policy). Still running:"
     pgrep -l 'mds|mds_stores|mdworker' | sed 's/^/    /'
   fi
 }
@@ -526,14 +562,15 @@ teardown() {
     echo "  staging: indexing was not turned on by this run; leaving it alone"
   fi
   if [ "$ROOT_TOUCHED" -eq 1 ]; then
-    if [ "$LEAVE_ROOT_OFF" -eq 1 ]; then
-      echo "  --leave-root-off: '/' indexing stays off"
-    elif [ "$ROOT_WAS_ON" -eq 1 ]; then
-      echo "  restoring '/' indexing — note: re-enabling may make Spotlight reindex '/'"
-      run mdutil -i on / || failed="$failed
-    mdutil -i on /"
+    if [ "$RESTORE_ROOT" -eq 1 ] && [ -n "$VOLS_WERE_ON" ]; then
+      echo "  --restore-root: re-enabling indexing where it was on — Spotlight will rebuild those indexes"
+      while IFS= read -r v; do
+        [ -n "$v" ] || continue
+        run mdutil -i on "$v" || failed="$failed
+    mdutil -i on $v"
+      done <<< "$VOLS_WERE_ON"
     else
-      echo "  '/' was already off before this run; leaving it off"
+      echo "  every volume's indexing stays off (policy); --restore-root would re-enable: ${VOLS_WERE_ON:-none}"
     fi
   fi
   if [ "$IMAGE_ATTACHED" -eq 1 ]; then
@@ -615,7 +652,7 @@ trap 'teardown; if [ "$TEARDOWN_FAILED" -eq 1 ]; then exit 1; fi' EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
-echo "Batch Spotlight run: staging=$STAGING image=${IMAGE:-none} export=$EXPORT keep-mds=$KEEP_MDS leave-root-off=$LEAVE_ROOT_OFF dry-run=$DRY_RUN verbose=$VERBOSE"
+echo "Batch Spotlight run: staging=$STAGING image=${IMAGE:-none} export=$EXPORT keep-mds=$KEEP_MDS restore-root=$RESTORE_ROOT dry-run=$DRY_RUN verbose=$VERBOSE"
 
 if [ "$EXPORT" -eq 1 ] && [ "$EXPORT_DONE" -eq 0 ]; then
   export_stubs   # started as root directly: runs the exporter as $SUDO_USER

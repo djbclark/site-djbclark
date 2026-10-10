@@ -23,7 +23,7 @@ Usage:
   neofinder-stub-export.py install [--config FILE] [--interval S] [--dry-run]
   neofinder-stub-export.py remove | enable | disable [--dry-run]
   neofinder-stub-export.py pause
-  neofinder-stub-export.py resume | restart [--config FILE]
+  neofinder-stub-export.py resume | restart [--config FILE] [--now]
   neofinder-stub-export.py status [--config FILE]
   neofinder-stub-export.py list
 
@@ -37,8 +37,9 @@ Usage:
              the current page, saves state and exits 0 "paused"); while
              control=pause every later export, the nightly agent's too, is
              held at once until `resume`
-  resume/restart  control=run, then kickstart the agent (or a foreground
-             export when not installed)
+  resume/restart  control=run, then kickstart the agent; with no agent
+             installed it only clears the pause flag and says how to continue,
+             unless --now, which starts a foreground export (Ctrl-C pauses it)
   status     installed/enabled/running/paused/schedule/per-catalogue progress
   list       catalogue table (name, volume, items, mounted/offline)
 
@@ -62,10 +63,15 @@ NeoFinder 9.3.1; companion script macos/neofinder-spotlight-batch.sh):
   C. Page costs: one Apple Event per page, each property list joined into
      ONE text column (text item delimiters 0x1F, columns joined with 0x1E);
      the per-record AppleScript concat loop costs 50-75 s more per page and
-     is only the fallback. Warm NeoFinder, logged 2026-10-09: 6-8 s per
-     10,000-item {kind, size, Modification Date, complete path} page,
-     ~1,300-1,450 items/s end to end including writing. A cold 50,000-item
-     page once took 458 s, so the default page stays 10,000.
+     is only the fallback. Warm NeoFinder, measured 2026-10-09: ~2.5-3 s per
+     10,000-item {kind, size, Modification Date, complete path} page
+     (6-8 s before the date loop moved to script-object properties, which
+     made the loop O(1) per item), ~2,500 items/s end to end including
+     writing in the foreground. Of a page, NeoFinder's own answer is ~1.5-2.3 s
+     and the stub writes ~1.4 s. A cold 50,000-item page once took 458 s, and
+     page size no longer matters after the loop fix, so the default stays
+     10,000. The LaunchAgent runs ProcessType Standard: Background clamps the
+     job to background QoS, measured 5-12x slower (perf slice, 2026-10-09).
   D. Dates: AppleScript dates are zone-less WALL-CLOCK values (`b - a`
      across the 2026-03-08 spring-forward hour gives 7200 for one real
      hour). So each date d is returned as wall seconds w = (d - refD) +
@@ -150,6 +156,16 @@ History:
     transport bisection, clipped progress ranges, dest-keyed state, skip
     list, caffeinate + ExitTimeOut + stable python in the LaunchAgent,
     AppleEvent timeouts, pid checks, logged error exits, CLI fixes.
+  - 2026-10-09 (night): `resume`/`restart` with no agent installed only
+    clears the pause flag and prints how to continue; `--now` opts into the
+    foreground export (operator's choice: a one-word command should not start
+    a long run). First real run: mac256usb, 265,780 stubs in 2m 58s.
+    Perf slice (measured, see fact C): AppleScript date loop over
+    script-object properties (1.7-1.9x end to end, identical output);
+    LaunchAgent ProcessType Standard + LowPriorityIO (5x for scheduled runs).
+    Not taken yet: prefetching the next page in a thread (1.1-1.2x more),
+    rebuilding paths from the index instead of fetching them, reading the
+    .neofinder7 file directly.
 """
 
 import sys
@@ -437,19 +453,24 @@ on run
 	end timeout
 	set US to character id 31
 	set RS to character id 30
-	set dl to {}
-	repeat with i from 1 to count of mds
-		set d to item i of mds
+	-- Script-object properties make `item i of` and `set end of` O(1);
+	-- on plain local lists this loop cost ~3 s per 10,000 items.
+	script o
+		property ml : mds
+		property dl : {}
+	end script
+	repeat with i from 1 to count of o's ml
+		set d to item i of o's ml
 		if class of d is date then
-			set end of dl to (d - refD)
+			set end of o's dl to (d - refD)
 		else
-			set end of dl to ""
+			set end of o's dl to ""
 		end if
 	end repeat
 	set {TID, AppleScript's text item delimiters} to {AppleScript's text item delimiters, US}
 	set c0 to ks as text
 	set c1 to szs as text
-	set c2 to dl as text
+	set c2 to (o's dl) as text
 	set c3 to ps as text
 	set AppleScript's text item delimiters to TID
 	return c0 & RS & c1 & RS & c2 & RS & c3
@@ -2446,11 +2467,23 @@ def cmd_resume(args):
         )
         subcmd_log(f"resume: kickstart rc={rc}")
         return rc
+    if not getattr(args, "now", False):
+        cfg_arg = f" --config {args.config}" if args.config != CONFIG_DEFAULT else ""
+        print(
+            "control=run (unpaused); no agent is installed, so nothing was "
+            "started. Continue with one of:\n"
+            f"  {prog_name()} export{cfg_arg}      foreground run\n"
+            f"  {prog_name()} resume --now{cfg_arg}  the same, from here\n"
+            f"  {prog_name()} install{cfg_arg}     the LaunchAgent, then "
+            f"launchctl kickstart -k gui/$UID/{LABEL}"
+        )
+        subcmd_log("resume: flag cleared, no agent, no --now")
+        return 0
     print(
         "agent not installed; starting a foreground export (Ctrl-C pauses it)",
         flush=True,
     )
-    subcmd_log("resume: foreground export")
+    subcmd_log("resume: foreground export (--now)")
     proc = subprocess.run(
         [
             sys.executable,
@@ -2645,7 +2678,13 @@ def build_parser():
 
     sub.add_parser("pause", help="pause the running export")
     for name in ("resume", "restart"):
-        sp = sub.add_parser(name, help="unpause (kickstart or foreground)")
+        sp = sub.add_parser(name, help="unpause (kickstart the agent)")
+        sp.add_argument(
+            "--now",
+            action="store_true",
+            help="with no agent installed, also start a foreground export "
+            "(default: only clear the pause flag and say how to continue)",
+        )
         sp.add_argument(
             "--config",
             default=CONFIG_DEFAULT,

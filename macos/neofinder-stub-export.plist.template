@@ -9,7 +9,11 @@
      The program runs under /usr/bin/caffeinate -i so an idle Mac does not
      sleep mid-run (caffeinate forwards SIGTERM to the exporter and waits
      for it). ExitTimeOut gives the exporter 300 s after SIGTERM (bootout,
-     kickstart -k) to finish its page and save state before SIGKILL. -->
+     kickstart -k) to finish its page and save state before SIGKILL.
+     ProcessType Standard, not Background: Background clamps the job to
+     background QoS (efficiency cores, lowest CPU band), measured 5-12x
+     slower for this workload (2026-10-09); Nice 5 plus LowPriorityIO keep it
+     polite to interactive work at no measured cost. -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
@@ -27,9 +31,11 @@
 	<key>RunAtLoad</key>
 	<false/>
 	<key>ProcessType</key>
-	<string>Background</string>
+	<string>Standard</string>
 	<key>Nice</key>
 	<integer>5</integer>
+	<key>LowPriorityIO</key>
+	<true/>
 	<key>ExitTimeOut</key>
 	<integer>300</integer>
 	<key>StandardOutPath</key>
