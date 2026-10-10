@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# hourly-updates — run one "hourly update" app per file in a .d directory; notify on change.
+#
+# A launchd job (com.djbclark.hourly-updates, every hour) runs this generic
+# skeleton. To add another hourly self-updating app, drop one executable file
+# into the .d directory beside this script. No model, no cron prompt.
+#
+#   hourly-updates [DIR]
+#
+# DIR defaults to `hourly-updates.d/` next to this script. Each executable file
+# in DIR is one app. Contract for an app script:
+#   * check for a newer version of its thing; if none, exit 0 silently.
+#   * if it performs an update, print one line `UPDATED <text>` to stdout.
+#   * a non-zero exit is logged as an error and does not stop the other apps.
+#
+# The runner runs each app in sorted order, appends each app's output to its own
+# log, and — only when at least one app printed `UPDATED` — sends one Hermes
+# notice. It always exits 0: the runner is just the loop, the apps report
+# themselves.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+dir="${1:-$here/hourly-updates.d}"
+state="${HOURLY_UPDATES_STATE_DIR:-$HOME/.local/state/hourly-updates}"
+mkdir -p "$state"
+
+PING="${HOURLY_UPDATES_PING:-$HOME/ops/site-djbclark/bin/hermes-ping}"
+TIMEOUT="${HOURLY_UPDATES_TIMEOUT:-300}"
+
+[ -d "$dir" ] || { echo "hourly-updates: no such dir $dir" >&2; exit 2; }
+
+run_app() { # $1 app path, $2 output file — returns the app's exit status
+  if command -v timeout >/dev/null 2>&1; then
+    timeout -k 5 "$TIMEOUT" "$1" >"$2" 2>&1
+  else
+    "$1" >"$2" 2>&1
+  fi
+}
+
+updates=""
+for app in "$dir"/*; do
+  [[ -e "$app" || -L "$app" ]] || continue # an empty glob stays literal
+  [[ -f "$app" || -L "$app" ]] || continue
+  [[ -x "$app" ]] || continue
+  name="$(basename "$app")"
+  case "$name" in .*|*~|*.bak|*.disabled) continue ;; esac
+
+  out="$(mktemp "$state/.$name.XXXXXX")"
+  if run_app "$app" "$out"; then rc=0; else rc=$?; fi
+  {
+    printf '\n=== %s %s (exit %s) ===\n' "$name" "$(date '+%F %T')" "$rc"
+    cat "$out"
+  } >>"$state/$name.log"
+
+  while IFS= read -r line; do
+    case "$line" in
+      UPDATED*) updates+="${updates:+; }${name}: ${line#UPDATED }" ;;
+    esac
+  done <"$out"
+  rm -f "$out"
+done
+
+if [[ -n "$updates" ]]; then
+  "$PING" "hourly-updates: $updates" >/dev/null 2>&1 || true
+fi
+exit 0

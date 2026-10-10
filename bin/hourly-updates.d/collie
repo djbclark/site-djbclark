@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# collie — hourly check for a newer same-major Collie release; update if available.
+#
+# Uses Collie's own read-only preflight (`collie update --check --local --json`)
+# and acts only when the upstream check reports a release "an update would take".
+# Never crosses a major (Collie refuses that itself, and this matches it). A
+# failed check is treated as "no update": fail closed, log nothing, retry next
+# hour.
+set -euo pipefail
+
+json="$(collie update --check --local --json 2>/dev/null || true)"
+
+# The upstream check's reason carries the update state (cli/update-check.ts):
+#   green  "already current — vX.Y.Z is the newest release of major N"   -> nothing
+#   green  "vX.Y.Z resolves on github.com/… — an update would take it"   -> UPDATE
+#   amber  "already current on major N … but Collie H is out — a NEW MAJOR" -> never auto
+reason="$(printf '%s' "$json" | jq -r '.checks[]? | select(.id == "upstream") | .reason // empty' 2>/dev/null || true)"
+
+case "$reason" in
+  *"an update would take it"*)
+    target="$(printf '%s' "$reason" | sed -n 's/^v\([0-9][0-9.]*\) resolves on .*/\1/p')"
+    before="$(collie version 2>/dev/null || true)"
+    collie update --plain
+    echo "UPDATED from ${before:-unknown} to v${target:-unknown}"
+    ;;
+  *) ;; # already current, a new major (never auto-crossed), or the check failed
+esac
