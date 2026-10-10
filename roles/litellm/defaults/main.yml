@@ -228,12 +228,33 @@ litellm_cooldown_time: 300
 # only the client that sent a DIFFERENT placeholder had to change (Open WebUI
 # sent "sk-dummy").
 #
-# This value is NOT a secret and must not be treated as one: it is already
-# checked in as a plaintext default here, and it only
-# grants access to a loopback-bound port. It is an anti-typo guard, not a
-# credential. If litellm_bind is ever widened, this MUST become a real
-# generated secret sourced from the vault like litellm_clinepass_api_key.
-litellm_master_key: "sk-litellm-local"
+# 2026-10-09 (#83): the master key is a real secret now. litellm_bind is
+# still loopback, but the stayturgid Caddy fragment proxies /litellm/* to it
+# on the tailnet front door, so the old checked-in placeholder
+# ("sk-litellm-local") let any tailnet member use every provider key behind
+# the proxy. It comes from sudo-secretspec (LITELLM_MASTER_KEY) via
+# `just litellm-apply-secrets`, like litellm_clinepass_api_key, and
+# tasks/main.yml fails closed when it is unset or still the old placeholder.
+# LiteLLM requires the `sk-` prefix (tasks/main.yml asserts it). Generate it
+# once and paste it straight into `set`; keep it out of logs and chat:
+#   python3 -c 'import secrets; print("sk-" + secrets.token_urlsafe(32))'
+#   sudo-secretspec add LITELLM_MASTER_KEY --description "LiteLLM proxy master key" --required --reason "#83"
+#   sudo-secretspec set LITELLM_MASTER_KEY --reason "#83"   # paste the sk-... value
+litellm_master_key: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
+
+# LITELLM_SALT_KEY (2026-10-09, #83 review 1.1e). LiteLLM encrypts what it
+# stores in the DB (credentials, DB-stored models, MCP servers, config) with
+# this key, and falls back to the MASTER key when it is unset
+# (litellm/proxy/common_utils/encrypt_decrypt_utils.py:_get_salt_key). Without
+# it, the next master-key rotation would make every such row undecryptable.
+# Those tables were empty when this was added, so nothing needs migrating.
+# Set it once and NEVER change it afterwards (LiteLLM docs/proxy/prod.md);
+# rotating it strands every encrypted row. It must differ from the master
+# key; tasks/main.yml asserts both. Same route as the master key:
+#   python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+#   sudo-secretspec add LITELLM_SALT_KEY --description "LiteLLM DB encryption salt (never rotate)" --required --reason "#83"
+#   sudo-secretspec set LITELLM_SALT_KEY --reason "#83"   # paste the value
+litellm_salt_key: "{{ lookup('env', 'LITELLM_SALT_KEY') | default('', true) }}"
 
 # --- Per-client virtual keys (2026-09-30) ------------------------------------
 #

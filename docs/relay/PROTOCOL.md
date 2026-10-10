@@ -1,5 +1,12 @@
 # Relay protocol — self-promulgating session chain
 
+> **Closed relay; partly superseded (banner added 2026-10-09, #137 C1.5).** The chain
+> this protocol ran is CHAIN-COMPLETE. Rule A.4's release-gated deploy ("never pull
+> arbitrary `master` commits into `~/ops`") was retired 2026-08-23: `~/ops` is now
+> edited in place on `master` ("Where work happens" in `home-agents.md`). "Recommending
+> an AI" is superseded by `aiuse --available` and the `model-routing` skill. Copy to
+> the clipboard with `~/ops/site-private/bin/clip`, never bare `pbcopy`.
+
 Each work session is one link in a chain. The chain survives context loss
 because the **baton** is a committed file, not a conversation.
 
@@ -53,7 +60,8 @@ A session may end only in one of two states:
    [`docs/OPS-RELEASES.md`](../OPS-RELEASES.md).
 5. Print the new NEXT-PROMPT.md contents in chat, so the human can hand it
    straight to the next AI, **and copy the baton to the clipboard**:
-   `pbcopy < docs/relay/NEXT-PROMPT.md`.
+   `~/ops/site-private/bin/clip < docs/relay/NEXT-PROMPT.md` (never bare `pbcopy`:
+   agent shells run with `LC_CTYPE=C` and mangle non-ASCII text).
 
 **B. Blocked / escalating.** Rewrite `NEXT-PROMPT.md` for the **same step**,
 addressed to the escalation model, with a findings section (what was tried,

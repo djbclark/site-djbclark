@@ -1,5 +1,10 @@
 # CHAIN-COMPLETE — stayturgid ↔ site-djbclark segmentation + FUND-B chain
 
+> **Historical (banner added 2026-10-09, #137 C1.4).** This relay is closed and its
+> workflow is superseded: since 2026-08-23 the `~/ops` checkouts are edited in place
+> on `master` ("Where work happens" in `home-agents.md`). The "deploy-only `~/ops`" and
+> `~/src/ops-worktrees/` instructions below are no longer current.
+
 **Status: the AI relay chain is closed.** There is no queued implementation
 step. This file is kept as the standing baton per `docs/relay/PROTOCOL.md`
 so a human opening it finds the current state rather than a stale prompt —

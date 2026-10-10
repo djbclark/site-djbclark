@@ -1,6 +1,7 @@
 # book-kb vs /book-to-skill — measured token cost
 
-All numbers from the same source: `docs/books/learning-cfengine.epub`
+All numbers from the same source: `learning-cfengine.epub` (then tracked in
+site-private `docs/books/`; now untracked, kept at `~/kb/sources/`)
 (Learning CFEngine, 2nd ed., 70,140 words). Token counts are bytes/4, applied
 identically to both sides. Measured 2026-10-03.
 

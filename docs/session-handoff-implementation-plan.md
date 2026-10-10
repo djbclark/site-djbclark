@@ -1,6 +1,9 @@
 # Session Handoff v0.1-build — Implementation & Test Plan
 
-**Status:** approved for implementation. Executes spec v0.3 (both §10
+**Status (2026-10-09, #137 C2.2):** historical. Built in August 2026; its
+`~/src/ops-worktrees/` assumptions were retired 2026-08-23, and the live
+protocol is the `session-handoff` skill in `~/src/djbclark-ade`.
+**Original status:** approved for implementation. Executes spec v0.3 (both §10
 questions ratified by operator 2026-08-03: Tier 2 direct-to-master under
 the memory exception; PreCompact hook global with path guard).
 **Audience:** implementing agents of any capability. Zero design latitude
