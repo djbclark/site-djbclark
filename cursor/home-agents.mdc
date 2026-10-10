@@ -52,7 +52,7 @@ marker and a jobs record, and exits 0 done / 1 unfinished / 3 **no report** (a
 delivery failure, not an empty result: re-task it, never reconstruct) / 4
 **`BLOCKED: <question>`** / 124 timeout. **Claude Code's own Agent-tool sub-agents**
 cannot be scripted: paste `acp-dispatch footer --report <scratchpad>/<name>-report.md`
-into the prompt verbatim and read the file, never the final message (its idle
+into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never the final message (its idle
 notification is cut at 4,000 characters; a SendMessage to `team-lead` arrives whole).
 The footer also fixes the 2026-10-08 stall: a sub-agent that ends its turn waiting
 on a background notification, or on a question, is never woken, so it waits inside a

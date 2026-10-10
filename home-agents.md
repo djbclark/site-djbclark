@@ -100,7 +100,7 @@ the delivery footer, writes `~/.local/state/bigteam/<task>/<name>-report.md`, it
 `.done` marker and a jobs record; exit 3 = **no report** (a delivery failure:
 re-task it, never reconstruct), 4 = **`BLOCKED: <question>`**, 124 = timeout.
 **Agent-tool sub-agents** cannot be scripted: paste `acp-dispatch footer --report
-<scratchpad>/<name>-report.md` into the prompt verbatim and read the file, never
+<scratchpad>/<name>-report.md` into the prompt verbatim (its output text, never `$(…)`: an Agent prompt is not shell-expanded) and read the file, never
 the final message (cut at 4,000 characters). A sub-agent that ends its turn
 waiting is never woken, so the footer makes it wait in a bounded foreground
 command and write `BLOCKED:` instead of asking. `acp-dispatch check
