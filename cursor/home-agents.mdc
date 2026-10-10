@@ -287,6 +287,8 @@ process: its shell moves on and the harness kills the tree.
 
 Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
 `pgrep -f '<pattern>'`: the waiting shell matches its own pattern.
+Never `pkill -f '<pattern>'` either: it kills every shell whose command line
+holds the pattern, your own wrapper included (2026-10-10). Kill the saved PID.
 
 ## Tools and habits (2026-10-06)
 

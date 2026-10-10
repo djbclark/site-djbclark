@@ -141,7 +141,7 @@ started. Short commands stay foreground.
 **Exception: an Agent-tool sub-agent** is never woken by that notification, so
 it waits in bounded foreground calls instead of ending its turn (2026-10-08).
 (`memory/feedback_start_slow_commands_in_background.md`)
-**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`).
+**Wait on a file or a PID, never `until ! pgrep -f '<pattern>'`** (it matches its own shell and never ends; use `while kill -0 <pid>` or `until [ -s <file> ]`). **Likewise never `pkill -f '<pattern>'`**: it also kills every shell whose command line holds the pattern, your own wrapper included (2026-10-10); kill the PID you saved (`$!`).
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
 status is the last stage's. Write to a file, print the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
