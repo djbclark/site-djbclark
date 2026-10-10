@@ -24,13 +24,18 @@ import sys
 MARK = re.compile(r"\[\^(E\d{4,})\]")
 RUN = re.compile(r"\[\^E\d{4,}\](?:\s*,?\s*\[\^E\d{4,}\])*")
 DEF = re.compile(r"^\[\^(E\d{4,})\]: (.*)$")
-TABLE = "## Evidence table\n"
+TABLE_RE = re.compile(r"^## (?:\d+\.\s*)?Evidence table\n", re.M)  # optional section number
 FOOT = "## Citation footnotes\n"
 
 
 def main() -> int:
     path = sys.argv[1]
     text = open(path, encoding="utf-8").read()
+    hm = TABLE_RE.search(text)
+    if not hm:
+        print("ERROR: no '## [N.] Evidence table' heading")
+        return 1
+    TABLE = hm.group(0)
     body, rest = text.split(TABLE, 1)
     if not MARK.search(body):
         print("no [^E####] markers in body; nothing to do")

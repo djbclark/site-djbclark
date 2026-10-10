@@ -12,13 +12,15 @@ def main():
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    ev_table_heading = "## Evidence table\n"
+    # The table heading may carry a section number ("## 12. Evidence table").
+    hm = re.search(r'^## (?:\d+\.\s*)?Evidence table\n', content, re.M)
     if "## Citation footnotes" in content:
         print("Already reformatted (## Citation footnotes present); nothing to do")
         sys.exit(0)
-    if ev_table_heading not in content:
-        print("Could not find evidence table heading")
+    if not hm:
+        print("Could not find evidence table heading (## [N.] Evidence table)")
         sys.exit(1)
+    ev_table_heading = hm.group(0)
 
     body, rest = content.split(ev_table_heading, 1)
 
