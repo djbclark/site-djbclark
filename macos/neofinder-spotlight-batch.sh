@@ -1,0 +1,1 @@
+neofinder/neofinder-spotlight-batch.sh

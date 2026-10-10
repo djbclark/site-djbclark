@@ -1,0 +1,67 @@
+#!/bin/sh
+# neofinder-spotlight-index — the ONLY privileged step of the nightly
+# NeoFinder -> Spotlight index (README.md in this directory).
+#
+# Installed root-owned at /usr/local/libexec/neofinder-spotlight-index by
+# `just setup` (this directory's justfile) and allowed NOPASSWD for the
+# operator via /etc/sudoers.d/neofinder-spotlight-index, so the 01:15 Jobber
+# job (`neofinder-stub-export.py nightly --index`) can index the batch volume
+# without Touch ID. It takes no paths and reads no environment: it acts only
+# on /Volumes/NeoFinderBatch, and only when that mount point is the disk image
+# named in the root-owned /etc/neofinder-spotlight-index.conf (`image=<path>`).
+#
+# Usage: neofinder-spotlight-index on|off|status
+#   on      policy first (mdutil -a -i off: Spotlight indexes nothing else),
+#           then mdutil -i on + mdimport -i on the batch volume
+#   off     mdutil -i off on the batch volume ("not-mounted" if it is not)
+#   status  mdutil -s on the batch volume ("not-mounted" if it is not)
+#
+# Exit 2 = bad usage, or the mount point is not the configured image;
+# 1 = an mdutil/mdimport step failed.
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+MOUNT=/Volumes/NeoFinderBatch
+CONF=/etc/neofinder-spotlight-index.conf
+
+die() { printf 'neofinder-spotlight-index: %s\n' "$1" >&2; exit "${2:-1}"; }
+usage() { die "usage: neofinder-spotlight-index on|off|status" 2; }
+
+[ $# -eq 1 ] || usage
+verb=$1
+case "$verb" in on|off|status) ;; *) usage ;; esac
+
+# A mount point sits on a different device than /Volumes itself.
+if [ ! -d "$MOUNT" ] || [ "$(stat -f %d "$MOUNT")" = "$(stat -f %d /Volumes)" ]; then
+  [ "$verb" = on ] && die "$MOUNT is not mounted" 2
+  echo "not-mounted"
+  exit 0
+fi
+
+if [ "$verb" = status ]; then
+  mdutil -s "$MOUNT" 2>&1 | tail -n 1 | tr -d '\t'
+  exit 0
+fi
+
+image=$(sed -n 's/^image=//p' "$CONF" 2>/dev/null | head -n 1)
+[ -n "$image" ] || die "no image= line in $CONF" 2
+backing=$(hdiutil info | awk -v m="$MOUNT" '
+  /^image-path/ { sub(/^image-path[ \t]*:[ \t]*/, ""); p = $0 }
+  $NF == m { print p; exit }')
+[ "$backing" = "$image" ] || die "$MOUNT is backed by '${backing:-nothing}', not $image" 2
+
+step() {
+  out=$("$@" 2>&1) || die "$* failed: $out"
+}
+case "$verb" in
+  on)
+    step mdutil -a -i off
+    step mdutil -i on "$MOUNT"
+    step mdimport -i "$MOUNT"
+    echo "indexing on: $MOUNT (every other volume off)"
+    ;;
+  off)
+    step mdutil -i off "$MOUNT"
+    echo "indexing off: $MOUNT"
+    ;;
+esac

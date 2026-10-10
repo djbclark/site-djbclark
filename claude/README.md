@@ -35,6 +35,6 @@ is registered and matches this mirror.
 
 ## Custom commands and subagents (2026-09-30)
 
-`claude/commands/{orc,orc-meta}.md` and `claude/agents/fable-deep.md` are the
-canonical copies; `~/.claude/commands/*.md` and `~/.claude/agents/*.md` are
+`claude/agents/fable-deep.md` is the
+canonical copy; `~/.claude/commands/*.md` and `~/.claude/agents/*.md` are
 symlinks to them (same distribute-and-symlink pattern as `skills/`).

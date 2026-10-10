@@ -2,8 +2,11 @@
 set -euo pipefail
 
 # site-djbclark — brew-fast-upgrade maintenance script
-# Upgrades Homebrew packages and globally-installed npm packages under
-# exclusive site advisory lock (Phase F4). Retries a bounded number of times
+# Upgrades Homebrew packages and globally-installed npm packages (both the
+# user ~/.local npm tree and Homebrew's own) under
+# exclusive site advisory lock (Phase F4); zcode-app-cli is always pulled
+# to @latest each run (it ships several builds a day). Retries a bounded
+# number of times
 # until every non-pinned package verifies as up to date, or gives up loudly
 # for manual intervention. Automatically restarts Google Chrome cleanly if it
 # was running and got upgraded, and restarts any `brew services` daemon left
@@ -52,15 +55,31 @@ export MAX_ATTEMPTS RETRY_DELAY_SECS
 run_brew_update() {
   local update_output
   local update_rc
+  local attempt
 
-  # cfengine-local is intentionally a remote-less local tap. Keep its
-  # expected Homebrew warning out of the nightly log, but preserve all other
-  # update output and failures.
-  update_output="$(brew update 2>&1)" || {
+  # Runs were scheduled at 03:00 until 2026-10-10, so the first brew update
+  # was still fetching at the known ~03:01 nightly Wi-Fi blip (see the
+  # mac_dns note in jobber.yaml.j2) and failed every tap in 14 of 46 logged
+  # runs; the schedule is now 03:10. Keep retrying the update in-pass as
+  # belt-and-suspenders in case the blip drifts.
+  update_rc=0
+  for attempt in 1 2 3; do
+    if update_output="$(brew update 2>&1)"; then
+      break
+    fi
     update_rc=$?
     echo "$update_output"
-    return "$update_rc"
-  }
+    if [ "$attempt" -lt 3 ]; then
+      echo "[brew-fast-upgrade] brew update failed (attempt $attempt/3); retrying in 15s..."
+      sleep 15
+    fi
+  done
+  [ "$update_rc" -eq 0 ] || return "$update_rc"
+
+  # cfengine-local is a local-only tap whose origin points at itself
+  # (2026-10-10), so brew update no longer warns about it. Keep filtering
+  # its old "No remote 'origin'" warning in case the self-origin is ever
+  # removed, but preserve all other update output and failures.
   while IFS= read -r line; do
     case "$line" in
       "Warning: No remote 'origin' in "*"/Library/Taps/cfengine-local/homebrew-cfengine, skipping update!") ;;
@@ -211,44 +230,90 @@ restart_stale_brew_services() {
   return "$rc"
 }
 
-# Outdated globally-installed npm package names, one per line (empty when
-# clean, or when npm/jq isn't available on this host).
+# npm binaries whose global trees this script manages, one per line,
+# deduped: the user-prefix npm (~/.local — hermes-managed, holds
+# zcode-app-cli, the ACP servers and friends) and Homebrew's own npm
+# (/opt/homebrew — cline, bailian-cli and friends). The trimmed script
+# PATH resolves bare `npm` to Homebrew's, so callers must pass one of
+# these explicitly or they silently manage only the Homebrew tree (which
+# is exactly what happened before 2026-10-10: the ~/.local agent CLIs
+# were never upgraded by this script).
+npm_global_bins() {
+  local bin seen=""
+  for bin in "$HOME/.local/bin/npm" "$(command -v npm 2>/dev/null || true)"; do
+    [ -n "$bin" ] && [ -x "$bin" ] || continue
+    [ "$bin" = "$seen" ] && continue
+    echo "$bin"
+    seen="$bin"
+  done
+}
+
+# Outdated globally-installed npm package names for the npm binary passed
+# as $1, one per line (empty when clean, or when npm/jq isn't available).
 npm_outdated_globals() {
-  command -v npm >/dev/null 2>&1 || return 0
+  local npm_bin="${1:-npm}"
+  command -v "$npm_bin" >/dev/null 2>&1 || return 0
   if ! command -v jq >/dev/null 2>&1; then
     echo "[brew-fast-upgrade] jq not found; skipping npm global upgrade check." >&2
     return 0
   fi
-  npm outdated -g --json 2>/dev/null | jq -r 'keys[]?'
+  # Never chase `npm` itself: Homebrew's tree is owned by the node formula
+  # (self-install dies against its EEXIST bin symlinks), and the user
+  # tree's npm is a hermes-managed symlink (both observed failing in the
+  # 2026-10-08/09 nightly logs).
+  "$npm_bin" outdated -g --json 2>/dev/null | jq -r 'keys[]? | select(. != "npm")'
 }
 
 run_npm_pass() {
-  local pkgs=()
-  local pkg
+  local npm_bin pkg rc=0 ran=0
+  local pkgs
 
-  while IFS= read -r pkg; do
-    [ -n "$pkg" ] && pkgs+=("${pkg}@latest")
-  done < <(npm_outdated_globals)
+  while IFS= read -r npm_bin; do
+    ran=1
+    pkgs=()
+    # zcode-app-cli ships several builds a day; pin @latest every run in the
+    # user tree only (a fast no-op when already current). Pinning it in
+    # Homebrew's tree would fork a second install whose
+    # /opt/homebrew/bin/zcode symlink can shadow ~/.local/bin/zcode in
+    # daemon PATHs (stray created and removed 2026-10-10).
+    if [ "$npm_bin" = "$HOME/.local/bin/npm" ]; then
+      pkgs=("zcode-app-cli@latest")
+    fi
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] && [ "$pkg" != "zcode-app-cli" ] && pkgs+=("${pkg}@latest")
+    done < <(npm_outdated_globals "$npm_bin")
 
-  if [ "${#pkgs[@]}" -eq 0 ]; then
-    echo "[brew-fast-upgrade] npm globals: nothing outdated."
+    if [ "${#pkgs[@]}" -eq 0 ]; then
+      echo "[brew-fast-upgrade] npm globals ($npm_bin): nothing to upgrade."
+      continue
+    fi
+
+    # One batched install call per tree avoids per-package npm startup
+    # overhead. (Not bun: `bun add -g` installs into its own ~/.bun tree,
+    # ignoring npm prefixes, so it would fork both trees this manages.)
+    echo "[brew-fast-upgrade] npm globals ($npm_bin): upgrading ${pkgs[*]}"
+    if ! "$npm_bin" install -g "${pkgs[@]}"; then
+      echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
+      rc=1
+    fi
+  done < <(npm_global_bins)
+
+  if [ "$ran" -eq 0 ]; then
+    echo "[brew-fast-upgrade] npm globals: npm not installed; skipping."
     return 0
   fi
-
-  # One batched install call avoids per-package npm startup overhead.
-  echo "[brew-fast-upgrade] npm globals: upgrading ${pkgs[*]}"
-  if ! npm install -g "${pkgs[@]}"; then
-    echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
-    return 1
-  fi
+  return "$rc"
 }
 
 # A successful brew/npm invocation is not enough: confirm nothing non-pinned
 # is still outdated. Prints what remains when verification fails.
 verify_clean() {
-  local brew_remaining npm_remaining
+  local brew_remaining npm_remaining npm_bin
   brew_remaining="$(brew_remaining_outdated)"
-  npm_remaining="$(npm_outdated_globals)"
+  npm_remaining=""
+  while IFS= read -r npm_bin; do
+    npm_remaining+="$(npm_outdated_globals "$npm_bin")"
+  done < <(npm_global_bins)
 
   if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ]; then
     echo "[brew-fast-upgrade] outdated items remain:"
@@ -293,7 +358,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass restart_stale_brew_services npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update brew_remaining_outdated unquarantine_casks run_brew_pass restart_stale_brew_services npm_global_bins npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
