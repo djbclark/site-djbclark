@@ -365,8 +365,12 @@ def cleanup_script(problems, include_stale, include_apps):
     every value is shell-quoted (client strings are attacker-influenced: a path can contain
     $(...), backticks, quotes, newlines); the DELETE names the full primary key plus the row's
     audited auth_value/csreq/last_modified, so a grant re-created since the audit survives; all
-    deletes for a database run in ONE transaction (-bail => all or nothing); the backup uses
-    SQLite's backup API (a plain cp of a live db can miss the WAL) into a unique file."""
+    deletes for a database run in ONE transaction, fed on STDIN so -bail stops at the first
+    failing statement and the uncommitted transaction rolls back (a command-line-argument
+    batch does NOT stop on a trigger RAISE(ABORT): SQLite 3.53/3.54 shells print the error,
+    keep going and run the trailing COMMIT — measured 2026-10-10, which is how the rollback
+    test caught this); the backup uses SQLite's backup API (a plain cp of a live db can miss
+    the WAL) into a unique file."""
     def wanted(p):
         if p["kind"] == "orphan":
             return p["client_type"] == 1 or include_apps
@@ -415,8 +419,15 @@ def cleanup_script(problems, include_stale, include_apps):
                 f'AND csreq IS {blob(p["csreq"])};'
             )
         stmts += ["SELECT total_changes();", "COMMIT;"]
+        # Heredoc => the SQL arrives on stdin: -bail then stops the batch at the
+        # first failing statement and the never-committed transaction rolls back
+        # (see the docstring). The quoted delimiter keeps the shell out of the
+        # SQL; the db path stays an argument, never text in the heredoc.
         lines += [
-            'CHANGED=$(sqlite3 -bail "$DB" ' + shlex.quote("\n".join(stmts)) + ")",
+            "CHANGED=$(sqlite3 -bail \"$DB\" <<'TCC_SQL'",
+            "\n".join(stmts),
+            "TCC_SQL",
+            ")",
             f'echo "deleted $CHANGED of {len(rows)} rows from $DB (rows changed since the audit are skipped)"',
         ]
         if db in live:  # tccd caches; it is relaunched by launchd. Not for copies of a db.
