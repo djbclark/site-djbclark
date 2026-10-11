@@ -203,9 +203,11 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 Binary names differ from provider ids
 ([[reference_agent_rules_code_discovery_and_cli_table]]). **agy only via
 `acp-run agy`; gemini is deprecated and not installed;** all but muse speak ACP
-(`acp-run --list`). Before orchestrating, reach for our skills (`bigteam`,
-`helm`, `session-finder` and more; 2026-10-05, git copy in
-`~/src/djbclark-ade`).
+(`acp-run --list`). **`~/src/djbclark-ade` is the agent toolchain: use it
+before hand-rolling, fix it there** (2026-10-11): skills (`bigteam`, `helm`,
+`session-finder` and more; 2026-10-05), `acp-dispatch`/`acp-run`/
+`route_agent.py`, `docs/orchestration-practices.md`
+([[reference_djbclark_ade]]).
 
 **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>'
 --model <m>`** (**always `--model`**, bar zcode; exit 0 is not success: verify);

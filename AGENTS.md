@@ -24,6 +24,12 @@
 > skill (`~/src/djbclark-ade/skills/session-handoff/SKILL.md`); spec:
 > [`site-djbclark/docs/session-handoff-compaction-spec.md`](https://github.com/djbclark/site-djbclark/blob/master/docs/session-handoff-compaction-spec.md) §3.
 
+> **Agent toolchain (2026-10-11):** orchestration, delegation and routing tools
+> live in [`~/src/djbclark-ade`](https://github.com/djbclark/djbclark-ade): the
+> shared skills, `acp-dispatch`/`acp-run`, `route_agent.py`, and
+> `docs/orchestration-practices.md`. Use them before hand-rolling anything; a
+> harness failure gets its fix there.
+
 Public **site repo** (no secrets; private material lives in site-private) for djbclark's machines (M1 MacBook Air, Intel Mac
 mini, Linux VPSs) — the identity/allocation authority paired with the public
 product repo [stayturgid](https://github.com/djbclark/stayturgid). Base

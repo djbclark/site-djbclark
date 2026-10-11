@@ -153,6 +153,11 @@ shares the window, `aiuse` cannot see it).
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
+**`~/src/djbclark-ade` (github.com/djbclark/djbclark-ade) is the agent
+toolchain: use it before hand-rolling anything, and fix it there**
+(2026-10-11): skills, `acp-dispatch`/`acp-run`/`route_agent.py`, and the
+orchestration rules in `docs/orchestration-practices.md`.
+
 Before orchestrating other agents, reach for our skills. Orchestration and
 session hygiene (these skills, `acp-run`, `fleet-watch`) live in git at
 `~/src/djbclark-ade` (2026-10-08), the rest in `site-djbclark/skills/`; every TUI
