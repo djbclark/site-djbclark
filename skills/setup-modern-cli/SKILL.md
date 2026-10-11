@@ -41,10 +41,74 @@ is nothing to keep in sync.
    work is invisible even after a rebuild, and it writes `ayg_index/` inside the
    repo. `xg`, `sift` and `ag` earn no place ahead of `rg`; measurements below.
 
+## Search ladder: try these in order
+
+Adapted from the public agent skills for ripgrep and ast-grep (`ast-grep/agent-skill`,
+866★; `oimiragieo/agent-studio`'s `ripgrep` skill, which carries the same
+"ranked-first, raw-sweep-second" split). The point is to pick the *cheapest tool
+that can actually answer*, not to always reach for `rg`.
+
+1. **You already know the file** → Read it (or `bat -n --line-range`). Do not
+   search to re-find something you have the path for.
+2. **The repo has a code graph** (a `graft/` directory, or the harness's own
+   index) → ask it first; `graft ask` / `graft grep` return ranked `file:line`
+   spans without a filesystem sweep.
+3. **Exact literal, few expected hits, index current** → `ig search -l '<lit>' .`
+   (see the policy above).
+4. **Default: `rg`.** One command for the whole `find | grep` shape, exhaustive:
+   `rg -n -g '*.py' '<pat>' <path>`. Add `-F` when the literal contains regex
+   metacharacters (`.is_file()`, `a[0]`), `-w` for whole words, `-C3` for
+   context, `-t py` instead of `-g '*.py'` for known languages.
+5. **A shape question, not a text question** ("every call site of X with two
+   args", "async fns with no await") → `ast-grep`, not `rg`. Text search will
+   either miss it or drown you. See below.
+6. **Not in the working tree** → history, not a bigger sweep:
+   `git log -S'<literal>' --oneline` (who introduced/removed it),
+   `git grep '<pat>' <rev>`, `git log -L` for one symbol's history.
+7. **Broaden only deliberately.** `rg` skips hidden, ignored and binary files by
+   design; `-u` removes ignore rules, `-uu` adds hidden, `-uuu` adds binary. If
+   a search "found nothing" and you expected a hit, run it again with `--debug`
+   (it prints the ignore rule that excluded the file) before reaching for `-uuu`.
+
+## Token discipline (agents read the output too)
+
+1. **Locate, then read.** `rg -l '<pat>' <path>` gives file names; read only
+   those. Dumping every matching line of a thousand hits is the common way an
+   agent burns its context.
+2. **Cap the output** at the command, not after: `--max-count N` (per file),
+   `--max-columns 200` (truncate long lines), `-c` for counts, `--stats` for a
+   summary, `-l` for names.
+3. **`rg` exit code 1 means "no matches"** — it is not an error, and not a
+   reason to re-run with different flags. Exit 2 is a real error. `ig` behaves
+   the same way.
+4. **Never search the whole machine** (`rg … ~` or `rg … /`) for a code
+   question, and never search `.git/` — use `git grep` / `git log` for objects
+   and history. `--max-filesize 10M` keeps generated files and logs out of a
+   legitimately broad sweep.
+
+## Structural search with ast-grep
+
+When the question is about code *shape*, `sg` (ast-grep) is the right tool, and
+its official agent skill is worth loading rather than reinventing:
+`https://github.com/ast-grep/agent-skill` (marketplace:
+`/plugin marketplace add ast-grep/agent-skill`). Its three-step workflow, which
+this skill endorses:
+
+1. Write a small snippet of the pattern you want to match (a temp file is fine).
+2. Turn it into a rule or `-p '<pattern>'`, starting simple; for relational
+   rules (`inside`, `has`) **always set `stopBy: end`**, or the search stops
+   early and returns wrong results.
+3. Test the rule against the snippet before trusting it on the repo.
+
+Use `sg -p '<pattern>' -l <lang>` for a one-liner over a single language, and a
+rule file (`sg scan -r rule.yml`) when the query needs several sub-rules
+(`all`/`any`/`not`). Reach for `rg` again once you know the literal text you are
+after — `sg` is slower and only worth it for shape.
+
 ## Install (Homebrew)
 
 ```bash
-HOMEBREW_NO_AUTO_UPDATE=1 brew install \
+brew install \
   ripgrep fd bat srgn eza hck git-delta jq yq xh ast-grep dust gdu
 ```
 
@@ -52,28 +116,97 @@ That is the agent-facing core. `docs/apply-toolchain-prompt.md` §1.2 has the
 full quality toolchain (ruff, pre-commit, gitleaks, shellcheck, semgrep, …);
 Python CLIs go through `uv tool install`, repo JS through `bun`/`bunx`.
 
-## The replacement table
+## The replacement table — every classic, not just `grep`/`find`
 
-| Instead of | Use | Command pattern |
-|---|---|---|
-| `grep -r` | ripgrep `rg` | `rg -n '<pat>' <path>` — **always pass a path** |
-| `grep -r` + `--include` | `rg` glob/type | `rg -n -g '*.py' '<pat>' <path>`, `rg -t py '<pat>' <path>` |
-| `find . -name '*.py'` | `fd` | `fd -e py`, `fd -g '*.ts'`, `fd -e py --changed-within 1d` |
-| `find … \| xargs grep …` | `rg` (one command) | `rg -n -g '*.py' '<pat>' <path>`; files only: `rg -l '<pat>' <path>`; counts: `rg -c` |
-| `cat` | `bat` | `bat -n FILE`, slice: `bat -n --line-range 40:80 FILE` |
-| `sed -i s/a/b/` | `srgn` | `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` |
-| `ls` / `tree` | `eza` | `eza -la --git`, `eza --tree --level=2 --icons` |
-| `cut` / `awk` (columns) | `hck` | `hck -d, -f2-4` |
-| `diff` / raw `git diff` | `delta` | set as git pager once, or pipe through `delta` |
-| hand-parsing JSON | `jq` | `jq -r '.accounts[].provider'` |
-| hand-parsing YAML/TOML | `yq` | `yq '.services[].image'` |
-| `curl` for JSON APIs | `xh` | `xh POST url k:=v` |
-| text search for code shape | `ast-grep` (`sg`) | `sg -p '<pattern>' -l <lang>`, `sg -p '$X.unwrap()'` |
-| `du` / `find` over caches | `dust`, `gdu` | `dust -d 2 ~/.cache` (never `du`/`find` over `~/.cache` — it times out) |
-| noisy command output | `rtk` | `rtk git status`, `rtk test`, `rtk grep '<pat>'`, `rtk read FILE` |
+The web's "modern unix" lists (`ibraheemdev/modern-unix`,
+`thegdsks/awesome-modern-cli`, `johnalanwoods/maintained-modern-unix`,
+`onmyway133/awesome-cli`) mix two kinds of tool. Splitting them is the useful
+part: **only group A can be called from an agent's Bash loop.** Group B needs a
+TTY, a daemon or a fuzzy prompt, so an agent call either hangs or returns
+nothing.
 
-`rtk` is normally applied automatically: its Claude Code / OpenCode hook rewrites
-Bash calls to the `rtk` equivalent. Its subcommands are the manual form.
+The "Here" column is what is installed on djbclark's machine, 2026-10-11
+(`✅` installed, `—` not installed). Use it to see what a `brew install` would
+add; it is not a policy.
+
+### A. Agent-safe: non-interactive, deterministic — what Bash calls should use
+
+| Instead of | Use | Command pattern | Here |
+|---|---|---|---|
+| `grep -r` | ripgrep `rg` | `rg -n '<pat>' <path>` — **always pass a path** | ✅ |
+| `grep -r --include` | `rg` glob/type | `rg -n -g '*.py' '<pat>' <path>`, `rg -t py '<pat>' <path>` | ✅ |
+| `find . -name '*.py'` | `fd` | `fd -e py`, `fd -g '*.ts'`, `fd -e py --changed-within 1d` | ✅ |
+| `find … \| xargs grep …` | `rg` (one command) | `rg -n -g '*.py' '<pat>' <path>`; `rg -l` files, `rg -c` counts | ✅ |
+| `grep` inside PDFs/Office/zips | `rga` (ripgrep-all) | `rga -n '<pat>' <path>` | — |
+| `cat` | `bat` | `bat -n FILE`, slice `bat -n --line-range 40:80 FILE` | ✅ |
+| `less` / `more` (non-interactive) | `bat` | `bat --paging=never -n FILE` (interactive pager `ov` if you want one) | ✅ |
+| `xxd` / `hexdump` | `hexyl` | `hexyl FILE` | — |
+| `sed -i s/a/b/` | `srgn` | `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` | ✅ |
+| `cut` / `awk` (columns) | `hck` (or `choose`) | `hck -d, -f2-4` | ✅ |
+| `xargs` + `awk` | `rargs` / GNU `parallel` | `rargs '…{}…'` | — |
+| `sort -u` on unsorted input | `runiq` | `runiq` | — |
+| `du` (and `find` over caches) | `dust`, `gdu` (`dua`) | `dust -d 2 ~/.cache` — never `du`/`find` over `~/.cache`, it times out | ✅ |
+| `df` | `duf` | `duf` | ✅ |
+| `ps` (scripted) | `procs` | `procs --json` | ✅ |
+| `diff` | `delta`, or `difft` for structural | `delta < a.diff`, `difft a.py b.py` | ✅ |
+| raw `git diff` / `git log -p` | `delta` as the pager | set once in git config (ask first) | ✅ |
+| `time cmd` for real numbers | `hyperfine` | `hyperfine --warmup 3 'cmd'` | ✅ |
+| `man` (to recall flags) | `tldr` | `tldr rg` | ✅ |
+| hand-parsing JSON | `jq` (`jaq` is a faster clone; `gron` flattens for grep) | `jq -r '.accounts[].provider'` | ✅ |
+| hand-parsing YAML/TOML/XML | `yq` (`dasel` does all formats) | `yq '.services[].image'` | ✅ |
+| `cat x.csv` + eyeballing | `qsv` / `csvlens` | `qsv stats x.csv` | — |
+| `tail -f` a log while working | `rtk log`, `tailspin`, `lnav` | `rtk log < file` | ✅ |
+| `curl` for JSON APIs | `xh` | `xh POST url k:=v` | ✅ |
+| `wget` | `rtk wget`, `aria2c` | `rtk wget <url>` | ✅ |
+| `dig` | `doggo` | `doggo example.com MX` | — |
+| `tar`/`unzip`/`7z` | `ouch` | `ouch decompress x.tar.gz`, `ouch compress dir out.zip` | — |
+| `tree` | `eza --tree` | `eza --tree --level=2 --icons` | ✅ |
+| `grep` for code **shape** | ast-grep (`sg`) | `sg -p '<pattern>' -l <lang>` | ✅ |
+| noisy command output | `rtk` | `rtk git status`, `rtk test`, `rtk grep '<pat>'`, `rtk read FILE` | ✅ |
+| markdown to read | `glow` / `mdcat` | `glow README.md` | — |
+
+`rtk` is normally applied automatically — its Claude Code / OpenCode hook
+rewrites Bash calls to the `rtk` equivalent; that is why it appears as a
+"replacement" for several rows. Its subcommands are the manual form.
+
+### B. Human-interactive: install for yourself, never call from an agent
+
+These need a TTY or a background daemon. An agent's Bash call to one of them
+either hangs waiting on stdin or returns nothing useful.
+
+1. **Files and navigation:** `broot` (navigate + fuzzy), `yazi`/`lf`/`nnn`/
+   `joshuto`/`superfile` (file managers), `zoxide` ✅ (smart `cd`), `tere`.
+2. **History, prompt, shell:** `atuin`/`mcfly` (history), `starship` (prompt),
+   `nushell`/`fish` (structured shells), `fzf` ✅/`skim`/`television` (fuzzy
+   finders — the human's Ctrl-R/T, not a search primitive).
+3. **Monitoring and processes:** `btop` ✅/`bottom`/`glances`/`macmon` (system),
+   `procs` ✅ (scripted `ps` is group A), `pik`, `pueue`, `mprocs`.
+4. **Disk, in a TUI:** `ncdu`/`dua`/`diskonaut` (`dust` ✅/`gdu` ✅ are group A
+   because they print and exit).
+5. **Git:** `lazygit`/`gitui`/`tig`/`serie` (TUIs), `gita` (many repos),
+   `git-cliff` (changelogs), `jj`/`sapling` (alternate VCS).
+6. **Logs, APIs, markdown:** `lnav` (log TUI), `posting`/`ATAC` (API clients),
+   `blog`/`ov` (pagers).
+7. **Network and transfer:** `trippy`/`gping`/`bandwhich`/`sniffnet`/`termshark`
+   (diagnostics), `croc`/`portal`/`rclone`/`termscp` (transfers), `miniserve`
+   (`caddy` is already installed for this).
+8. **Editing and bulk file work:** `helix`/`micro`/`fresh` (editors), `f2`/
+   `nomino` (batch rename), `fclones` (duplicates), `kondo` (build artifacts).
+
+Optional installs from group A and B worth adding here:
+
+```bash
+brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav
+```
+
+**Do not prefix installs with `HOMEBREW_NO_AUTO_UPDATE=1`** (an earlier version
+of this file did). Tools should update. On this machine `~/.bashrc:176`
+(`site-djbclark/shell/bashrc`) already exports that variable machine-wide, and
+the scheduled job `brew-fast-upgrade` (site-djbclark, Jobber, daily 03:10) runs
+`brew update && brew upgrade` for brew and npm globals — so nothing here goes
+stale. Set the variable on a single command only when a long *automated* setup
+must not trigger a mid-run `brew update`, which is slow and can fail on the
+nightly Wi-Fi blip.
 
 ## Footguns
 
