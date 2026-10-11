@@ -22,6 +22,25 @@ Canonical source: `skills/setup-modern-cli/SKILL.md` in `~/src/djbclark-ade`.
 Every other TUI reaches it through the skill-everywhere symlink chain, so there
 is nothing to keep in sync.
 
+## Search policy: `rg` by default, `ig` as an opt-in first line
+
+1. **Default to `rg`.** It is exhaustive and always correct, and it already does
+   the `find … | grep …` pipeline in one command (`rg -n -g '*.py' PAT PATH`;
+   `-l` for files, `-c` for counts). Always pass a path.
+2. **First line, when justified: `ig`** (instant-grep, `~/.cargo/bin/ig`, index
+   in `~/.cache/ig`). Use it for one thing you already know — an exact literal
+   symbol or string you expect in a handful of files — in a repo whose index is
+   current. Measured ~13x faster than `rg`.
+3. **Fall back to `rg`** the moment any of these holds: the search must be
+   exhaustive; the pattern is a regex, multiline or PCRE2; you need filters
+   beyond `ig -g`/`ig -t`; `ig` returns nothing (it missed 6 of `rg`'s files in
+   the same test, `vendor/` among them); or the tree changed since the last
+   index — `ig` returns nothing *silently* until `ig index` is re-run, which is
+   the normal case mid-edit.
+4. **Never `ayg`** (aygrep): it indexes only git-tracked files, so untracked
+   work is invisible even after a rebuild, and it writes `ayg_index/` inside the
+   repo. `xg`, `sift` and `ag` earn no place ahead of `rg`; measurements below.
+
 ## Install (Homebrew)
 
 ```bash
