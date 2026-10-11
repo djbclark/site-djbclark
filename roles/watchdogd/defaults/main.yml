@@ -26,8 +26,13 @@ watchdogd_start_interval: 60
 # launchd user PATH is stored but only live after the next reboot, and a plist
 # without its own PATH gets /usr/bin:/bin until then, where `env python3` is
 # Apple's 3.9 (no tomllib). So for now the plist sets an explicit PATH with
-# Homebrew first. After that reboot (and `just launchd-path-status` in sync),
-# set this true: the PATH key is dropped and the job inherits launchd's.
+# Homebrew first. 2026-10-10: Homebrew no longer ships an unversioned
+# python3, and the python@3.14 install removed the old link — the watchdog
+# then errored "nothing checked" for a day. The carrier of the contract is
+# now ~/.local/bin/python3 -> /opt/homebrew/bin/python3.14 (first on this
+# PATH, outside brew's reach); the preflight task below guards it. After
+# that reboot (and `just launchd-path-status` in sync), set this true: the
+# PATH key is dropped and the job inherits launchd's.
 watchdogd_inherit_path: false
 watchdogd_service_path: "{{ watchdogd_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -58,6 +63,7 @@ watchdogd_services:
   - hermes-gateway
   - funnel
   - provider-health
+  - apple-daemons
 
 # Labels and ports of the watched services (owned by other roles; repeated here
 # because a role's defaults are not visible to another role).

@@ -38,10 +38,14 @@
 #     1. Recovery Terminal: --sip-disable, reboot.
 #     2. Normal boot: sudo ./sip-doit-with-sudo.sh   (bootout now succeeds)
 #     3. Recovery Terminal: --sip-enable, reboot.    (quiet ends at next login)
-#   Remaining levers with SIP on: apply-mode kills, the --check monitor, and
-#   demand-side switches (System Settings → Siri & Spotlight → uncheck
-#   "Spotlight Suggestions" and "Siri Suggestions"; Siri itself is already
-#   off, Assistant Enabled = 0).
+#   Remaining levers with SIP on: the watchdogd "apple-daemons" rule
+#   (roles/watchdogd) TERMs every live instance on each 60 s pass — the
+#   actual enforcement; apply-mode kills; the --check monitor. Demand-side is
+#   already dark on macOS 27 (checked 2026-10-10): the old "Spotlight/Siri
+#   Suggestions" checkboxes are gone, their successors ("Show Related
+#   Content", per-app results, "Help Apple Improve Search", Siri itself) are
+#   all off — and suggestd is still summoned by ProactiveHarvesting XPC
+#   events anyway.
 #
 # History / decisions:
 #   - 2026-10-04 (zcode review): the AMFI bypass line of the downloaded original

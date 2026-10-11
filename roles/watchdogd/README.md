@@ -31,6 +31,34 @@ kickstart that exited 0 counted as success.
 | `ai.hermes.gateway-restart-watcher` | Carries out restart requests from the gateway-restart Hermes plugin, 600 s cooldown | `hermes-gateway.toml` `[restart_request]` (plist WatchPaths keeps it immediate) |
 | `com.djbclark.funnel-healthcheck` + Hermes cron `Funnel Health` (`f821be766a47`) | Funnel probe, quit/reopen Tailscale after 2 all-down runs, 30 min cooldown; cron relayed the log | `funnel.toml` + `bin/funnel_probe.sh` |
 | Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
+| nothing (new, 2026-10-10) | kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) TERMs them every pass | `apple-daemons.toml` |
+
+## `apple-daemons`: kill-on-sight with a root helper
+
+The probe IS the enforcement (exit 0 healthy, 1 = the root half is broken,
+75 = no console user); kills are logged to
+`~/Library/Logs/watchdogd/apple-daemon-ban.log`, and *reporting* stays with
+the sip script's `--check`. The system-domain half (cloudd, triald.system,
+spindump, tailspind run as root) needs root; watchdogd itself stays a user
+LaunchAgent, so it calls a fixed root-owned helper through exactly one
+sudoers line. One-time manual install (the role stays become-free):
+
+```bash
+sudo mkdir -p /usr/local/libexec/djbclark
+sudo install -o root -g wheel -m 0755 \
+  ~/ops/site-djbclark/roles/watchdogd/files/apple_daemon_ban_root.sh \
+  /usr/local/libexec/djbclark/apple_daemon_ban_root.sh
+sudo install -o root -g wheel -m 0440 \
+  ~/ops/site-djbclark/roles/watchdogd/files/sudoers.apple-daemon-ban \
+  /etc/sudoers.d/apple-daemon-ban
+sudo visudo -cf /etc/sudoers.d/apple-daemon-ban
+```
+
+The helper must stay root-owned (a user-writable copy at that path would
+make the sudoers grant a root shell), and re-run both `install` lines after
+editing `files/apple_daemon_ban_root.sh`. Label lists live in three places
+that must stay in step: `macos/sip-doit-with-sudo.sh` (the flags),
+`bin/apple_daemon_ban.sh` (gui half) and the root helper (system half).
 
 ## Rules every service gets (bin/watchdogd.py `decide`)
 

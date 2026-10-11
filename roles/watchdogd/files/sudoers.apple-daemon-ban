@@ -1,0 +1,6 @@
+# Root half of the watchdogd "apple-daemons" rule:
+# /usr/local/libexec/djbclark/apple_daemon_ban_root.sh (source:
+# roles/watchdogd/files/apple_daemon_ban_root.sh). Exactly this path, no
+# arguments, no environment. Install root:wheel 0440 as
+# /etc/sudoers.d/apple-daemon-ban (roles/watchdogd/README.md).
+djbclark ALL=(root) NOPASSWD: /usr/local/libexec/djbclark/apple_daemon_ban_root.sh
