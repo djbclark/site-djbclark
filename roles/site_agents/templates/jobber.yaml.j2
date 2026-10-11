@@ -75,3 +75,15 @@ jobs:
     onError: Backoff
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
+
+  # Chrome profile caches (Service Worker/CacheStorage + ScriptCache, Code
+  # Cache, GPU/shader caches) the DiskCacheSize/MediaCacheSize policy does not
+  # cover — the HTTP/media disk cache itself is policy-capped and untouched.
+  # The script skips any pass with Chrome running, so it is scheduled a few
+  # times a day to catch a window with the browser quit. Silent on success.
+  chrome-cache-trim:
+    cmd: {{ site_agents_chrome_cache_trim_script }}
+    time: 0 45 0,6,12,18 * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]

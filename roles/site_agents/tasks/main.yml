@@ -170,6 +170,12 @@
     dest: "{{ site_agents_landing_health_script }}"
     mode: "0755"
 
+- name: Install chrome-cache-trim script
+  ansible.builtin.template:
+    src: chrome-cache-trim.sh.j2
+    dest: "{{ site_agents_chrome_cache_trim_script }}"
+    mode: "0755"
+
 - name: Deploy Jobber configuration
   ansible.builtin.template:
     src: jobber.yaml.j2

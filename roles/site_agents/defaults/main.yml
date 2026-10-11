@@ -81,6 +81,7 @@ site_agents_brew_fast_upgrade_script: "{{ site_agents_bin_dir }}/brew-fast-upgra
 # it only when it is genuinely mounted. Set to "" on a host without one.
 site_agents_brew_cache_volume: /Volumes/mac256usb
 site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
+site_agents_chrome_cache_trim_script: "{{ site_agents_bin_dir }}/chrome-cache-trim"
 site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobber.plist"
 site_agents_jobber_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.log"
 site_agents_jobber_error_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.error.log"

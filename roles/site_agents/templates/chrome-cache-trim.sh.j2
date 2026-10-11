@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Jobber chrome-cache-trim: clear Chrome's *profile* caches that the
+# enterprise DiskCacheSize/MediaCacheSize policy does NOT cover.
+#
+# The HTTP/media disk cache (~/Library/Caches/Google/Chrome) is bounded by the
+# policy set via `defaults write com.google.Chrome DiskCacheSize ...`, so it is
+# deliberately left alone here. What still grows without bound lives inside
+# each profile under ~/Library/Application Support/Google/Chrome/<profile>/:
+# the Service Worker caches, V8 code cache and GPU/shader caches.
+#
+# Only runs when Chrome is fully quit. A closed browser rebuilds all of these
+# on demand; clearing them under a running browser risks transient errors and
+# fights the live cache, so a pass with Chrome up is skipped (exit 0) and the
+# next pass retries. Every path is a fixed child of the Chrome profile dir; a
+# missing dir is a no-op.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+chrome_dir="$HOME/Library/Application Support/Google/Chrome"
+if [ ! -d "$chrome_dir" ]; then
+  echo "chrome-cache-trim: no Chrome profile dir; nothing to do"
+  exit 0
+fi
+
+# pgrep -f matches the full argv of every Chrome process (main + helpers). The
+# pattern names the app bundle path, which this script's own argv never
+# contains, so it cannot match itself.
+if pgrep -f 'Google Chrome.app/Contents/MacOS/' >/dev/null 2>&1; then
+  echo "chrome-cache-trim: Chrome is running; skipping this pass"
+  exit 0
+fi
+
+# Regeneratable profile caches only. (Kept as a list of fixed paths; never a
+# wildcard at the profile level, so user data such as History/Local Storage is
+# untouched.)
+cache_subdirs=(
+  "Service Worker/CacheStorage"
+  "Service Worker/ScriptCache"
+  "Code Cache"
+  "GPUCache"
+  "GrShaderCache"
+  "ShaderCache"
+  "DawnCache"
+  "DawnGraphiteCache"
+  "DawnWebGPUCache"
+)
+
+cleared=0
+for profile in "$chrome_dir"/*/; do
+  [ -d "$profile" ] || continue
+  for rel in "${cache_subdirs[@]}"; do
+    d="${profile}${rel}"
+    [ -d "$d" ] || continue
+    before="$(du -sk "$d" 2>/dev/null | awk '{print $1}' || echo 0)"
+    find "$d" -mindepth 1 -delete 2>/dev/null || true
+    if [ "${before:-0}" -gt 0 ]; then
+      cleared=$((cleared + before))
+    fi
+  done
+done
+
+mib=$((cleared / 1024))
+printf 'chrome-cache-trim: cleared %s MiB of Chrome profile caches\n' "$mib"
+exit 0
