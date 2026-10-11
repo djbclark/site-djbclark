@@ -268,7 +268,9 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
 
 1. **Fast tools:** search with `rg`, **always with a path** (`rg PAT .`;
    2026-10-09; `rtk rg` is real ripgrep, `rtk grep` is BSD grep), list files with
-   `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`, **literal
+   `rg --files`/`fd`, code structure with `ast-grep`, `uv` not `pip`,
+   **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11: `du`/`find` over
+   `~/.cache` timed out; `dust` sizes it in seconds), **literal
    replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`**
    (2026-10-09; FILE is relative to the cwd, an absolute `--glob` matches
    nothing; FIND spans lines as typed, **exit 1 when nothing matched**,

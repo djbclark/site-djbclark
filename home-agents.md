@@ -22,7 +22,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 `ts init`** ([[reference_agent_rules_code_discovery_and_cli_table]]).
 
 1. **Fast tools:** `rg` **always with a path** (2026-10-09), `fd`, `ast-grep`,
-   `uv` not `pip`. **Literal replace: `srgn -L --fail-none --stdin-detection
+   `uv` not `pip`, **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11:
+   `du`/`find` over `~/.cache` timed out; `dust` sizes it in seconds). **Literal
+   replace: `srgn -L --fail-none --stdin-detection
    force-unreadable --glob FILE 'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when
    nothing matched**; FIND starting with `-`: the Edit tool; **REPL with `\`
    goes through Python with an assert**, 2026-10-10); **`sd` is retired for
