@@ -135,3 +135,9 @@ The Jobber job lives in `roles/site_agents/templates/jobber.yaml.j2`.
    Mac, open it once and choose View > as List, then sort by Date Last Opened.
 5. **SIP blocks unloading Spotlight's server** (`mds`). The policy instead
    keeps every other volume's indexing off.
+6. **Some names never become searchable.** Spotlight skips any path with
+   a dot-name component (`.git`, `.cache`, and everything under them);
+   search those in NeoFinder itself. It also skipped every `.sql` stub
+   here (macOS 27; macOS 26+ user reports describe a similar `.sql`
+   regression), so the exporter names those entries `<name>.sql.nf`,
+   which Spotlight indexes. A name search for `x.sql` still finds them.

@@ -224,6 +224,15 @@ NeoFinder 9.3.1; companion script macos/neofinder/neofinder-spotlight-batch.sh):
      is attached without -nobrowse in this mode (Spotlight may skip
      nobrowse mounts). If the applier is missing or fails, it detaches what
      it attached, as without --index.
+  S. Names Spotlight never indexes (measured on macOS 27.0.1, 2026-10-11).
+     Beyond dot-names (L), Spotlight skips every file whose name ends in
+     `.sql` (any case): a copy of a `.sql` alias renamed to `.sql.txt`,
+     `.sqll`, `_sql` or `.sql_` was indexed within seconds, the `.sql` and
+     `.SQL` copies never (macOS 26+ user reports describe the same). So an
+     entry whose real name ends in one of SPOTLIGHT_SKIP_EXTS gets
+     ENTRY_SUFFIX (`.nf`) appended, in every path component (entry_rel);
+     the comment, alias target, skip list and path index keep the real
+     name, and kind_group() drops the suffix before reading the extension.
 
 History:
   - 2026-10-09: written (multi-agent batch slice; lead integrates, tests and
@@ -253,6 +262,8 @@ History:
   - 2026-10-10 (later): kind tags and keywords (header P) and `retag`.
   - 2026-10-10 (evening): size/offline/real tags (Q); real size number,
     last opened, `stub-dates` and `nightly` (R).
+  - 2026-10-11: `.sql` entries are named `<name>.sql.nf` so Spotlight
+    indexes them (S).
 """
 
 import sys
@@ -451,6 +462,22 @@ def hfs_to_rel(complete_path):
     if any(p == "" for p in parts):
         return None
     return "/".join(parts)
+
+
+# Header S: file-name endings Spotlight never indexes, and the suffix that
+# makes such an entry indexable.
+SPOTLIGHT_SKIP_EXTS = (".sql",)
+ENTRY_SUFFIX = ".nf"
+
+
+def entry_rel(rel):
+    """Real relative path -> the entry's relative path (header S)."""
+    if not rel:
+        return rel
+    return "/".join(
+        p + ENTRY_SUFFIX if p.lower().endswith(SPOTLIGHT_SKIP_EXTS) else p
+        for p in rel.split("/")
+    )
 
 
 def rel_to_display(rel):
@@ -1564,6 +1591,9 @@ def kind_group(name, kind):
     back to the words of the Kind string; unknown stays None.
     """
     low = (name or "").strip().lower()
+    base = low.removesuffix(ENTRY_SUFFIX)
+    if base != low and base.endswith(SPOTLIGHT_SKIP_EXTS):
+        low = base  # header S: the real name's extension decides
     if low.endswith(KIND_GROUP_ARCHIVE_SUFFIXES):
         return "archive"
     ext = os.path.splitext(low)[1][1:]
@@ -1860,7 +1890,7 @@ def write_page(
                 counts.skipped += 1
                 continue
         is_folder = rec.kind.strip().lower() == "folder"
-        target = cat_dir if rel == "" else cat_dir / rel
+        target = cat_dir if rel == "" else cat_dir / entry_rel(rel)
         comment = f"NeoFinder: {rec.complete_path} | {rec.size} bytes | {rec.kind}"
         real = None if is_folder else real_regular_file(alias_root, rel)
         try:
@@ -1931,7 +1961,7 @@ def apply_folder_mtimes(cat, dest, cat_dir, log):
             mtime = parse_num(mtime_s)
             if mtime is None:
                 continue
-            target = cat_dir if rel == "" else cat_dir / rel
+            target = cat_dir if rel == "" else cat_dir / entry_rel(rel)
             try:
                 os.utime(target, (mtime, mtime))
                 applied += 1
@@ -1943,8 +1973,13 @@ def apply_folder_mtimes(cat, dest, cat_dir, log):
 
 
 def remove_stale_stubs(cat_dir, prefix_rel, keep_set, log):
-    """Under <cat_dir>/<prefix_rel>, delete stubs/aliases not in keep_set."""
-    root = cat_dir / prefix_rel
+    """Under <cat_dir>/<prefix_rel>, delete stubs/aliases not in keep_set.
+
+    prefix_rel and keep_set are real relative paths; entries are compared
+    by their entry names (header S).
+    """
+    keep_set = {entry_rel(r) for r in keep_set}
+    root = cat_dir / entry_rel(prefix_rel)
     if not root.exists():
         return 0
     root_real = str(root.resolve())
@@ -3156,6 +3191,7 @@ def cmd_stub_dates(args):
         with open(idx.txt, encoding="utf-8") as fh:
             for i, line in enumerate(fh, start=1):
                 flag, _, rel = line.rstrip("\n").partition(US)
+                rel = entry_rel(rel)  # header S: rels holds entry paths
                 if flag == "f" and rel in rels:
                     nums[i] = rel
         no_index += len(rels) - len(nums)
