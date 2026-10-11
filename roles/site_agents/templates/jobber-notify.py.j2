@@ -12,7 +12,7 @@ import os
 import socket
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 
 def parse_jobber_input():
@@ -36,7 +36,7 @@ def parse_jobber_input():
     start_time = (
         data.get("startTime")
         or os.environ.get("JOB_START_TIME")
-        or datetime.now(UTC).astimezone().isoformat()
+        or datetime.now(timezone.utc).astimezone().isoformat()
     )
 
     stdout = data.get("stdout", "")
@@ -95,7 +95,7 @@ def log_notification(info):
     log_file = os.path.join(state_dir, "notifications.log")
 
     record = {
-        "timestamp": datetime.now(UTC).astimezone().isoformat(),
+        "timestamp": datetime.now(timezone.utc).astimezone().isoformat(),
         "hostname": socket.gethostname(),
         "job": info["job_name"],
         "status": info["status"],
