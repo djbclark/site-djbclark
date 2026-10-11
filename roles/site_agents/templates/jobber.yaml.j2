@@ -22,6 +22,21 @@ jobs:
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
 
+  # Keep the two tool-managed OpenCode plugins at the v2 module shape that
+  # OpenCode 2 requires. `openusage integrations upgrade opencode` and
+  # `rtk init -g --opencode` rewrite those files from still-v1 embedded
+  # templates and silently break the plugins; this restores them only when the
+  # v2 shape is missing, and retires itself once both tools ship v2 upstream.
+  # 03:45 = after brew-fast-upgrade (03:10, typically ~12 min) and
+  # mac-dns-apply (03:30). Source: djbclark-ade/bin/opencode-plugin-guard,
+  # notes in djbclark-ade/docs/opencode-plugin-v2.md.
+  opencode-plugin-guard:
+    cmd: {{ site_agents_home }}/src/djbclark-ade/bin/opencode-plugin-guard
+    time: 0 45 3 * * *
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]
+
   # NeoFinder batch volume upkeep (macos/neofinder/neofinder-stub-export.py nightly,
   # header R): attach ~/nfbatch.sparseimage unless it is mounted, re-copy
   # sizes, tags and last-opened dates from the real files onto the aliases,
