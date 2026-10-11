@@ -221,7 +221,9 @@ were left alone. New work uses the `site-djbclark` path.
    move stays here. Later that day `resume` was folded into `baton`,
    `helm-all` into `helm` and `session-finder-all` into `session-finder`
    (the old names are now command wrappers only), and `skill-everywhere`
-   became `bin/skill-everywhere.md` beside the script; their skill links
+   moved to `~/src/djbclark-ade/bin/skill-everywhere` with the README in
+   `~/src/djbclark-ade/docs/skill-everywhere.md`; the old paths are
+   compatibility symlinks. Their skill links
    are gone (`skills/README.md`). On 2026-10-09 `herdr-orchestration`,
    `/orc` and `/orc-meta` were retired; their live knowledge was ported into
    the djbclark-ade skills.

@@ -15,8 +15,9 @@ content-in-git + symlink.
 (github.com/djbclark/djbclark-ade, whose README describes them as one
 project). On 2026-10-08 `resume` was folded into `baton`, `helm-all` into
 `helm`, `session-finder-all` into `session-finder` (their old names survive
-as command wrappers), and `skill-everywhere` became
-[`../bin/skill-everywhere.md`](../bin/skill-everywhere.md). Edit and commit them there; the chain `site-private/skills/<name>`
+as command wrappers), and `skill-everywhere` moved to
+`~/src/djbclark-ade/bin/skill-everywhere` with its README in
+`~/src/djbclark-ade/docs/skill-everywhere.md`. Edit and commit it there; the chain `site-private/skills/<name>`
 → here → djbclark-ade is unchanged for every TUI. A new skill of that kind goes
 in djbclark-ade too, with the same symlink here.
 
@@ -48,9 +49,9 @@ their tool put them** and are NOT tracked here:
    `~/ops/site-private/.githooks/private-paths`; the pre-commit hook there
    rejects it otherwise.
 3. Link it into every agent TUI (Claude Code, Codex, Copilot, Hermes, …):
-   `~/ops/site-private/bin/skill-everywhere <name>`. Never copy a skill folder
+   `~/src/djbclark-ade/bin/skill-everywhere <name>`. Never copy a skill folder
    into another TUI's dir: copies go stale (11 had, until 2026-10-03). The
-   script's README, [`../bin/skill-everywhere.md`](../bin/skill-everywhere.md),
+   script's README, [`djbclark-ade/docs/skill-everywhere.md`](https://github.com/djbclark/djbclark-ade/blob/main/docs/skill-everywhere.md),
    says which TUIs this covers and how to verify.
 4. Commit + push both repos (direct to `master`, `git pull --rebase` first —
    see `../AGENTS.md`): the skill here, the symlink in `site-private`.
