@@ -24,9 +24,10 @@
 #   launchd had still launched suggestd 22x, triald 148x, photoanalysisd 104x,
 #   helpd 72x, spotlightknowledged 24x (+ .updater 31x) and cloudd 7x (the
 #   then-unflagged system cloudd 187x). The flags are the durable, verifiable
-#   half of the intent; killing running instances and the --check monitor
-#   (which also reports "running despite flag") are what actually keeps CPU
-#   time and semantic-store growth down. Flags may not survive a macOS
+#   half of the intent; the watchdogd "apple-daemons" freeze/kill enforcement
+#   and the --check monitor (which reports a daemon that has run UNFROZEN for
+#   more than 2 minutes) are what actually keeps CPU time and semantic-store
+#   growth down. Flags may not survive a macOS
 #   update: just run this script again.
 #   `launchctl bootout` ("stop it now") is refused while SIP is on: rc 150
 #   "Operation not permitted" by label, rc 5 "Input/output error" by plist
@@ -176,13 +177,27 @@ job_pid() {
   launchctl print "$1/$2" 2>/dev/null | awk '/^\tpid =/{print $3; exit}'
 }
 
-# is_running <domain> <label>: 0 only for a plausible positive pid (a stray
-# non-numeric value must never reach `kill` — kill -1 as root would broadcast).
-is_running() {
-  case "$(job_pid "$1" "$2")" in
-    ''|*[!0-9]*|0) return 1 ;;
-    *) return 0 ;;
+# is_frozen <pid>: 0 if the process is SIGSTOPped (stat T). The watchdogd
+# "apple-daemons" rule freezes the gui-domain daemons on sight; a frozen
+# instance is the intended end state — desired here, not a problem.
+is_frozen() {
+  case "$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" in T*) return 0 ;; *) return 1 ;; esac
+}
+
+# age_s <pid>: seconds since process start, from ps etime ([[dd-]hh:]mm:ss).
+# Prints nothing and fails if the pid is gone.
+age_s() {
+  local t parts d=0 h=0 m=0 s=0
+  t=$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')
+  [ -n "$t" ] || return 1
+  case "$t" in *-*) d=${t%%-*}; t=${t##*-} ;; esac
+  read -r -a parts <<<"${t//:/ }"
+  case ${#parts[@]} in
+    1) s=${parts[0]} ;;
+    2) m=${parts[0]}; s=${parts[1]} ;;
+    3) h=${parts[0]}; m=${parts[1]}; s=${parts[2]} ;;
   esac
+  echo $(( d*86400 + h*3600 + m*60 + s ))
 }
 
 converge_disabled() {
@@ -199,14 +214,17 @@ converge_disabled() {
       FAILED=1
     fi
   fi
-  # Stop it now if launchd still has it running. bootout is refused by SIP for
-  # Apple's own jobs (rc 150 by label, rc 5 by plist path), and the flags do
-  # not stop XPC re-activation, so a respawn later is possible and expected.
+  # Stop it now if launchd still has it running and it is NOT frozen: the
+  # apple-daemons watchdog SIGSTOPs the gui-domain daemons, and a TERM would
+  # never be delivered to a stopped process anyway. bootout is refused by SIP
+  # for Apple's own jobs (rc 150 by label, rc 5 by plist path), and the flags
+  # do not stop XPC re-activation, so a respawn later is possible and expected.
   if is_loaded "$domain" "$label"; then
     launchctl bootout "$domain/$label" >/dev/null 2>&1
   fi
-  if is_running "$domain" "$label"; then
-    kill "$(job_pid "$domain" "$label")" 2>/dev/null
+  pid=$(job_pid "$domain" "$label")
+  if [ -n "$pid" ] && ! is_frozen "$pid"; then
+    kill "$pid" 2>/dev/null
   fi
 }
 
@@ -224,22 +242,27 @@ converge_enabled() {
 report_state() {
   echo ""
   echo "State of the targeted daemons:"
-  local d pid flag any_running=0
+  local d pid flag any_unfrozen=0
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" && flag=disabled || flag=enabled
     pid=$(job_pid "$GUI_DOMAIN" "$d")
-    [ -n "$pid" ] && any_running=1
-    echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)}"
+    if [ -n "$pid" ] && is_frozen "$pid"; then
+      echo "  $GUI_DOMAIN/$d: flag=$flag, frozen (pid $pid)"
+    else
+      [ -n "$pid" ] && any_unfrozen=1
+      echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)}"
+    fi
   done
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" && flag=disabled || flag=enabled
     pid=$(job_pid system "$d")
-    [ -n "$pid" ] && any_running=1
+    [ -n "$pid" ] && any_unfrozen=1
     echo "  system/$d: flag=$flag${pid:+, running (pid $pid)}"
   done
-  if [ "$MODE" = apply ] && [ "$any_running" -eq 1 ]; then
-    echo "  note: some disabled jobs are still/again running. The disable flag does NOT stop"
-    echo "        launchd re-activating them on XPC events (2026-10-10); --check reports them."
+  if [ "$MODE" = apply ] && [ "$any_unfrozen" -eq 1 ]; then
+    echo "  note: some disabled jobs are running unfrozen (a window between watchdog passes;"
+    echo "        the apple-daemons rule freezes/TERMs them within 60 s). --check alerts only"
+    echo "        if one stays unfrozen longer than 2 minutes."
   fi
 }
 
@@ -251,13 +274,26 @@ if [ "$MODE" = check ]; then
   MAX_STORE_KB=51200   # 50 MB; DocumentProcessing was 42 MB and regrowing on
                        # 2026-10-10 while the updater kept running despite its flag
   PROBLEMS=()
+  # A daemon seen alive is a problem only when it has run UNFROZEN for more
+  # than 2 minutes: the watchdogd apple-daemons rule freezes/TERMs on 60 s
+  # passes, so younger sightings are enforcement windows, not failures, and
+  # a frozen (SIGSTOP) instance is the intended steady state.
+  SURVIVED_UNFROZEN_S=120
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" || PROBLEMS+=("flag not set: $GUI_DOMAIN/$d")
-    is_running "$GUI_DOMAIN" "$d" && PROBLEMS+=("running despite flag: $GUI_DOMAIN/$d")
+    pid=$(job_pid "$GUI_DOMAIN" "$d")
+    if [ -n "$pid" ] && ! is_frozen "$pid" \
+       && [ "$(age_s "$pid" 2>/dev/null || echo 999999)" -gt "$SURVIVED_UNFROZEN_S" ]; then
+      PROBLEMS+=("running despite flag, unfrozen ${SURVIVED_UNFROZEN_S}s+: $GUI_DOMAIN/$d")
+    fi
   done
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" || PROBLEMS+=("flag not set: system/$d")
-    is_running system "$d" && PROBLEMS+=("running despite flag: system/$d")
+    pid=$(job_pid system "$d")
+    if [ -n "$pid" ] \
+       && [ "$(age_s "$pid" 2>/dev/null || echo 999999)" -gt "$SURVIVED_UNFROZEN_S" ]; then
+      PROBLEMS+=("running despite flag, unfrozen ${SURVIVED_UNFROZEN_S}s+: system/$d")
+    fi
   done
   for rel in "${SEMANTIC_STORES[@]}"; do
     kb=$(du -sk "$CONSOLE_HOME/$rel" 2>/dev/null | awk '{print $1}')
@@ -279,8 +315,9 @@ if [ "$MODE" = check ]; then
   echo "macOS daemon-disable report on macOS $OSV (${#PROBLEMS[@]} problem(s)):"
   for p in "${PROBLEMS[@]}"; do echo "  x $p"; done
   echo "Likely cause: 'flag not set' = a macOS update reset the launchd disable flags;"
-  echo "'running despite flag' = launchd re-activated a disabled job (known on this build; it"
-  echo "is killed by the next apply run). Fix: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
+  echo "'running despite flag' = the watchdogd apple-daemons freeze/TERM enforcement is not"
+  echo "keeping up (check ~/Library/Logs/watchdogd/watchdogd.log and apple-daemon-ban.log)."
+  echo "Fix flags: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
   exit 0
 fi
 
