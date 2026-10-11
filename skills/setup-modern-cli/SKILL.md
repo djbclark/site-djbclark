@@ -169,6 +169,58 @@ add; it is not a policy.
 rewrites Bash calls to the `rtk` equivalent; that is why it appears as a
 "replacement" for several rows. Its subcommands are the manual form.
 
+### A2. Structured and stream data: `awk`, `sed`, `sort`, `join`, `tr`, `wc`
+
+These are the classics our earlier version of this file did not cover. Prior art
+worth knowing: **Miller** (`mlr`) bills itself as "like awk, sed, cut, join and
+sort for name-indexed data", which is exactly the gap; the `sd` issue tracker
+(`chmln/sd#297`) is the best write-up of why a literal-replace tool cannot do
+scripted `sed` ranges/loops — so for real stream programs the answer is a
+different tool, not a fancier `sd`.
+
+| Instead of | Use | Command pattern | Here |
+|---|---|---|---|
+| `awk '{print $2}'` | `hck` / `choose` | `hck -d, -f2`, `choose 1` | ✅ |
+| `awk`/`sed`/`cut`/`join`/`sort` over CSV, TSV, JSON | `mlr` (Miller) | `mlr --csv sort -f county f.csv`; `mlr --csv put '$d=$a-$b' then cut -f d f.csv`; `mlr join -j id -f a.csv b.csv` | — |
+| `sort`, `sort -h`, `sort -k` | GNU `gsort`, or `mlr sort` | `gsort -h`, `gsort -k2,2` | ✅ |
+| `join` on a key | `mlr join`, `qsv join` | see above | — |
+| `tr` | GNU `gtr` | `gtr -d '\n'`, `gtr 'a-z' 'A-Z'` | ✅ |
+| `wc` | GNU `gwc`, or `rtk wc` for agent-sized output | `gwc -l` | ✅ |
+| `split` / `csplit` | GNU `gsplit` | `gsplit -l 1000 -d big.txt part-` | ✅ |
+| `head -c` / `tail -c` (GNU semantics) | `ghead` / `gtail` | `ghead -c 200` | ✅ |
+| `sed` doing ranges/loops/multi-line scripts | `srgn` for edits, `mlr` for records, `perl -pe`/`-ne` when it is genuinely a stream program, GNU `gsed` for GNU sed syntax | `perl -pe 's/x/y/g'`, `gsed -E '2,4d'` | ✅/— |
+| `uniq` on unsorted input | `runiq` | `runiq` | — |
+| `xargs -I{}` + `awk` | `rargs` | `rargs 'mv {} {}.bak'` | — |
+| `date -d '2 days ago'` | GNU `gdate` | `gdate -d '2 days ago' +%F` | ✅ |
+| `base64`, checksums | `b3sum` (fast), `sha256sum` (macOS ships it now) | `b3sum FILE`, `sha256sum FILE` | —/✅ |
+| `locate` | `plocate` | `plocate '*.pdf'` | ✅ |
+| `watch cmd` | `watchexec`, `entr` | `watchexec -e py 'pytest -q'` | — |
+| `awk` over logs (aggregate/slice) | `angle-grinder` (`agrind`) | `agrind '* | where status >= 500 | count by path'` | — |
+| `csvlook` / CSV eyeballing | `qsv`, `csvlens` | `qsv stats f.csv` | — |
+
+### A3. The whole toolset, portably: GNU (g-prefixed) or uutils
+
+On macOS the real problem is **BSD vs GNU flags**, not old vs new: `sort -h`,
+`sed -i` (takes an argument on BSD), `date -d`, `readlink -f`, `grep -P`,
+`xargs -r`, `stat -c` vs `-f`. Two prior-art answers, both installable:
+
+1. **GNU tools with a `g` prefix** — `brew install coreutils gnu-sed gawk`
+   gives `gsort`, `gtr`, `ghead`, `gdate`, `gsed`, `gawk` (coreutils is already
+   installed here; `gsed`/`gawk` are separate formulae). Call them by the
+   prefixed name in scripts so a macOS update cannot change what the script
+   means. Prepending brew's `gnubin` to `PATH` makes bare names GNU, but then
+   everything in the shell changes behaviour, not just the script.
+2. **uutils** — `brew install uutils-coreutils` installs `uu-sort`, `uu-cut`, …
+   (put its `uubin` on `PATH` for bare names). It is a Rust drop-in for GNU
+   coreutils, 24k★, now shipping by default in Ubuntu 25.10, and it has sibling
+   `findutils`/`diffutils`/`grep` (beta) and `sed`/`awk`/`procps` **in
+   progress** — so it does not yet cover `sed`/`awk`.
+
+Rule: prefer the single-purpose tool (`rg`, `fd`, `bat`, `srgn`, `mlr`, `jq`)
+for the job in front of you; reach for `g`-prefixed GNU or `uu-` when a script
+needs portability or a flag BSD lacks. Never write a GNU-only flag without the
+prefix, and never assume the BSD form either — check `command -v gsort` first.
+
 ### B. Human-interactive: install for yourself, never call from an agent
 
 These need a TTY or a background daemon. An agent's Bash call to one of them
@@ -193,11 +245,15 @@ either hangs waiting on stdin or returns nothing useful.
 8. **Editing and bulk file work:** `helix`/`micro`/`fresh` (editors), `f2`/
    `nomino` (batch rename), `fclones` (duplicates), `kondo` (build artifacts).
 
-Optional installs from group A and B worth adding here:
+Optional installs from group A, A2 and B worth adding here:
 
 ```bash
-HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav
+HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav \
+  miller gnu-sed gawk uutils-coreutils dasel qsv watchexec b3sum
 ```
+
+(The last line covers the A2/A3 gaps: `mlr` for awk/sed/sort/join, `gsed`/`gawk`
+and `uu-*` for GNU/portable semantics, plus the structured-data and watch tools.)
 
 **About `HOMEBREW_NO_AUTO_UPDATE=1`: it is a performance knob, not an update
 switch.** It suppresses the `brew update` that brew otherwise runs in front of
@@ -224,6 +280,14 @@ npm globals. Keep it on automated install lines; there is nothing wrong with it.
 6. **Prefer the host's own tools** when they exist (Claude Code Read/Grep/Glob/
    Edit; this list is for *shell* work). The two rules from site-djbclark
    `docs/tooling-policy.md` still apply.
+7. **BSD vs GNU flags are the trap, not age.** `sort -h`, `sed -i`, `date -d`,
+   `readlink -f`, `grep -P`, `xargs -r` and `stat -c` differ or do not exist in
+   macOS's BSD userland. Use the `g`-prefixed GNU tool (`gsort`, `gsed`,
+   `gdate`) or `uu-*`, and check it exists before relying on it — a script that
+   works locally with GNU flags breaks on stock macOS, and vice versa.
+8. **Do not reach for `sed`/`awk` to transform structured data.** Named-field
+   work (CSV/TSV/JSON) is `mlr`, `jq`, `yq`/`dasel` or `qsv`; positional
+   `awk`-style slicing is how off-by-one field bugs get written.
 
 ## How an agent should use this
 
