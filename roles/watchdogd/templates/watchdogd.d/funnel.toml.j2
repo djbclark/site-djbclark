@@ -8,6 +8,8 @@ interval_s = 300
 
 [probe]
 # Exit 0 any endpoint answered, 1 all failed, 75 this Mac is offline (skip).
+# The three :8443 MCP paths only; beeper-10000 has its own check
+# (funnel-beeper.toml), so Beeper being off never triggers this heal.
 kind = "command"
 command = ["{{ watchdogd_repo_bin }}/funnel_probe.sh"]
 skip_exit_codes = [75]

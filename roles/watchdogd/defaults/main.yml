@@ -62,6 +62,7 @@ watchdogd_services:
   - basic-memory-mcp
   - hermes-gateway
   - funnel
+  - funnel-beeper
   - provider-health
   - apple-daemons
 

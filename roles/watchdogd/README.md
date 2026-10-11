@@ -30,6 +30,7 @@ kickstart that exited 0 counted as success.
 | `com.djbclark.basic-memory-watchdog` | MCP initialize probe, 5 slow in a row or refused → restart, 3 attempts then give up | `basic-memory-mcp.toml` (same thresholds) |
 | `ai.hermes.gateway-restart-watcher` | Carries out restart requests from the gateway-restart Hermes plugin, 600 s cooldown | `hermes-gateway.toml` `[restart_request]` (plist WatchPaths keeps it immediate) |
 | `com.djbclark.funnel-healthcheck` + Hermes cron `Funnel Health` (`f821be766a47`) | Funnel probe, quit/reopen Tailscale after 2 all-down runs, 30 min cooldown; cron relayed the log | `funnel.toml` + `bin/funnel_probe.sh` |
+| nothing (new, 2026-10-11) | beeper-10000 used to count as up in the funnel probe even at 502 (Beeper's local API off); djbclark: report it on its own, keep Beeper off | `funnel-beeper.toml` (`funnel_probe.sh beeper-10000`, strict: 5xx = down; alert only) |
 | Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
 | nothing (new, 2026-10-10) | freeze/kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) SIGSTOPs the gui-domain jobs and TERMs the rest every pass | `apple-daemons.toml` |
 

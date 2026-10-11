@@ -1,0 +1,26 @@
+# Beeper over the public Tailscale Funnel (:10000 -> 127.0.0.1:23373, Beeper
+# Desktop's local API). Rendered by roles/watchdogd; edit the role.
+# djbclark 2026-10-11: Beeper stays off for now, but the endpoint gets its own
+# check so its 502 is reported as down instead of counting as "up" in the
+# funnel check (which accepted any HTTP reply). Alert only: the Tailscale heal
+# in funnel.toml cannot fix a stopped backend, and starting Beeper is
+# djbclark's call.
+name = "funnel-beeper"
+interval_s = 300
+
+[probe]
+# Exit 0 Beeper answered (302 when up), 1 down (5xx included), 75 this Mac is
+# offline (skip).
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/funnel_probe.sh", "beeper-10000"]
+skip_exit_codes = [75]
+timeout_s = 120
+
+[policy]
+slow_before_action = 2
+down_before_action = 2
+action = "alert"
+
+[notify]
+down = "{name} DOWN: Beeper over Funnel :10000 is not answering ({detail}){tail}"
+recovered = "{name} RECOVERED: Beeper over Funnel :10000 answers again ({detail})"
