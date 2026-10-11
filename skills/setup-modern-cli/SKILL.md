@@ -84,13 +84,46 @@ Bash calls to the `rtk` equivalent. Its subcommands are the manual form.
 4. Report which tool ran when a search is slow, so a missing install is visible
    (`command -v rg fd ast-grep`).
 
-## Experimental: one indexed tool for find+grep
+## Experimental: indexed one-command find+grep (measured 2026-10-11)
 
-Since 2026-10-11 a crop of indexed, agent-oriented search tools claims large
-speedups over `rg` by building a trigram/n-gram index and answering repeat
-queries in milliseconds (`ig`/instant-grep, `ayg`/aygrep, `xg`/xgrep,
-`ffs`/fast_file_search, and `sift`, whose command is literally `ag`). They are
-all new and mostly single-author; the note `sift` is *not* the old The Silver
-Searcher (`ag`, which is slower than `rg` and unmaintained). Treat them as
-opt-in per machine, benchmark before adopting, and do not put one in the
-replacement table above until it has a track record on the operator's repos.
+A crop of indexed, agent-oriented search tools claims large speedups over `rg`
+by building a trigram/n-gram index and answering repeat queries in
+milliseconds. Benchmarked here on a 3.3k-file Rust/JS tree (a copy of
+`~/src/herdr`), pattern `serde`, file-list mode (`-l`), `hyperfine --warmup 3
+--runs 10`, indexes built:
+
+| Tool | Mean | vs `find \| xargs grep -l` | Files found (rg = 176) |
+|---|---:|---:|---:|
+| `find … \| xargs grep -l` | 144.5 ms | — | 176 |
+| `rg -l` | 60.4 ms | 2.4x | 176 |
+| `ag` (The Silver Searcher) | 71.6 ms | 2.0x | 149 |
+| `sift` (`cargo install sift-search`) | 75.4 ms | 1.9x | 176 |
+| `xg` (xgrep, `cargo install xgrep-search`) | 20.6 ms | 7.0x | 177 |
+| `ayg` (aygrep, brew `hemeda3/tap/ayg`) | 6.6 ms | 22x | 148 |
+
+Verdict: **`rg` stays the default**, and these are opt-in only.
+
+1. **`ag` is slower than `rg`** (the point of this exercise — the remembered
+   "ag" is the 2012 Silver Searcher). `sift`'s command is also `ag`, so
+   `cargo install sift-search` shadows the Silver Searcher on `PATH`; rename its
+   binary (`mv ~/.cargo/bin/ag ~/.cargo/bin/sift`).
+2. **`sift` adds nothing but composition.** Its default build is the `rg`
+   backend only (`lex`/`sem` are feature-gated and skipped), so it returns
+   byte-identical results to `rg` and is slower. Use it for `(pipe …)`-style
+   multi-stage queries, not speed.
+3. **`xg`/`ayg` are much faster but not safe as a default.**
+   - **Stale index:** a file created after the build is invisible until
+     re-index. Probe: `rg` and `ag` found a newly added file; `xg` and `ayg`
+     returned nothing.
+   - **Recall gaps:** `ayg` found 148 of `rg`'s 176 (it missed 28 markdown
+     files — it indexes code types only); `xg` returned one file `rg` ignores.
+   - **Pollution:** `ayg build` writes `ayg_index/` **inside the repo** (54.7 MB
+     for 3.3k files) — gitignore it or do not use it on a clean tree; `xg`'s
+     index goes to `~/Library/Caches/xgrep/`.
+   - **Build cost:** `xg init` 1.5 s, `ayg build` 2.2 s on this corpus, scaling
+     with repo size; that is worth it only for repeated sparse searches in a
+     tree that is not changing.
+4. One more find+grep candidate, `ffs` (`quangdang46/fast_file_search`), and
+   `ig` (MakFly/instant-grep) are not yet benchmarked here; treat both the same
+   way — opt-in, verify recall, re-index after edits.
+
