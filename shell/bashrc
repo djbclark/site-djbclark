@@ -252,7 +252,9 @@ if /sbin/mount | grep -q " on ${USB_DRIVE} "; then
     export PIP_CACHE_DIR="$USB_DRIVE/Caches/pip"
     export GOCACHE="$USB_DRIVE/Caches/go-build"
     export GOMODCACHE="$USB_DRIVE/Caches/go-mod"
-    export ANDROID_HOME="$USB_DRIVE/Android/sdk"
+    # The Android SDK moved to the internal SSD on 2026-10-11 (the drive stalled
+    # reads for minutes at a time; the emulator could not start), so ANDROID_HOME
+    # is set below, not here.
     export GRADLE_USER_HOME="$USB_DRIVE/Caches/gradle"
     export UV_CACHE_DIR="$USB_DRIVE/Caches/uv"
     export HF_HOME="$USB_DRIVE/Caches/huggingface"
