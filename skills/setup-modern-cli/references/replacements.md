@@ -21,14 +21,14 @@ add; it is not a policy.
 | `grep -r --include` | `rg` glob/type | `rg -n -g '*.py' '<pat>' <path>`, `rg -t py '<pat>' <path>` | ✅ |
 | `find . -name '*.py'` | `fd` | `fd -e py`, `fd -g '*.ts'`, `fd -e py --changed-within 1d` | ✅ |
 | `find … \| xargs grep …` | `rg` (one command) | `rg -n -g '*.py' '<pat>' <path>`; `rg -l` files, `rg -c` counts | ✅ |
-| `grep` inside PDFs/Office/zips | `rga` (ripgrep-all) | `rga -n '<pat>' <path>` | — |
+| `grep` inside PDFs/Office/zips | `rga` (ripgrep-all) | `rga -n '<pat>' <path>` | ✅ |
 | `cat` | `bat` | `bat -n FILE`, slice `bat -n --line-range 40:80 FILE` | ✅ |
 | `less` / `more` (non-interactive) | `bat` | `bat --paging=never -n FILE` (interactive pager `ov` if you want one) | ✅ |
-| `xxd` / `hexdump` | `hexyl` | `hexyl FILE` | — |
+| `xxd` / `hexdump` | `hexyl` | `hexyl FILE` | ✅ |
 | `sed -i s/a/b/` | `srgn` | `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` | ✅ |
 | `cut` / `awk` (columns) | `hck` (or `choose`) | `hck -d, -f2-4` | ✅ |
-| `xargs` + `awk` | `rargs` / GNU `parallel` | `rargs '…{}…'` | — |
-| `sort -u` on unsorted input | `runiq` | `runiq` | — |
+| `xargs` + `awk` | `rargs` / GNU `parallel` | `rargs '…{}…'` | ✅ |
+| `sort -u` on unsorted input | `runiq` | `runiq` | ✅ |
 | `du` (and `find` over caches) | `dust`, `gdu` (`dua`) | `dust -d 2 ~/.cache` — never `du`/`find` over `~/.cache`, it times out | ✅ |
 | `df` | `duf` | `duf` | ✅ |
 | `ps` (scripted) | `procs` | `procs --json` | ✅ |
@@ -42,12 +42,12 @@ add; it is not a policy.
 | `tail -f` a log while working | `rtk log`, `tailspin`, `lnav` | `rtk log < file` | ✅ |
 | `curl` for JSON APIs | `xh` | `xh POST url k:=v` | ✅ |
 | `wget` | `rtk wget`, `aria2c` | `rtk wget <url>` | ✅ |
-| `dig` | `doggo` | `doggo example.com MX` | — |
-| `tar`/`unzip`/`7z` | `ouch` | `ouch decompress x.tar.gz`, `ouch compress dir out.zip` | — |
+| `dig` | `doggo` | `doggo example.com MX` | ✅ |
+| `tar`/`unzip`/`7z` | `ouch` | `ouch decompress x.tar.gz`, `ouch compress dir out.zip` | ✅ |
 | `tree` | `eza --tree` | `eza --tree --level=2 --icons` | ✅ |
 | `grep` for code **shape** | ast-grep (`sg`) | `sg -p '<pattern>' -l <lang>` | ✅ |
 | noisy command output | `rtk` | `rtk git status`, `rtk test`, `rtk grep '<pat>'`, `rtk read FILE` | ✅ |
-| markdown to read | `glow` / `mdcat` | `glow README.md` | — |
+| markdown to read | `glow` / `mdcat` | `glow README.md` | ✅ glow |
 
 `rtk` is normally applied automatically — its Claude Code / OpenCode hook
 rewrites Bash calls to the `rtk` equivalent; that is why it appears as a
@@ -73,7 +73,7 @@ so for real stream programs the answer is a different tool, not a fancier `sd`.
 | `split` / `csplit` | GNU `gsplit` | `gsplit -l 1000 -d big.txt part-` | ✅ |
 | `head -c` / `tail -c` (GNU semantics) | `ghead` / `gtail` | `ghead -c 200` | ✅ |
 | `sed` doing ranges/loops/multi-line scripts | `srgn` for edits, `mlr` for records, `perl -pe`/`-ne` when it is genuinely a stream program, GNU `gsed` for GNU sed syntax | `perl -pe 's/x/y/g'`, `gsed -E '2,4d'` | ✅ |
-| `uniq` on unsorted input | `runiq` | `runiq` | — |
+| `uniq` on unsorted input | `runiq` | `runiq` | ✅ |
 | `xargs -I{}` + `awk` | `rargs` | `rargs 'mv {} {}.bak'` | — |
 | `date -d '2 days ago'` | GNU `gdate` | `gdate -d '2 days ago' +%F` | ✅ |
 | `base64`, checksums | `b3sum` (fast), `sha256sum` (macOS ships it now) | `b3sum FILE`, `sha256sum FILE` | ✅ |
@@ -133,16 +133,23 @@ either hangs waiting on stdin or returns nothing useful.
 
 ## Optional installs covering the gaps above
 
+All of these were installed and smoke-tested on 2026-10-11:
+
 ```bash
-HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav \
+HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo ripgrep-all rargs entr csvlens \
   miller gnu-sed gawk uutils-coreutils dasel qsv watchexec b3sum
+cargo install runiq                  # `runiq` is NOT in Homebrew (crates-only)
 ```
 
-The second line covers the A2/A3 gaps (`mlr` for awk/sed/sort/join; `gsed`/`gawk`
-and `uu-*` for GNU/portable semantics; plus the structured-data and watch tools)
-and **was installed and smoke-tested on 2026-10-11** — `mlr` 6.22, `gsed` 4.10,
-`qsv` 24.0, `dasel` 3, `b3sum`, `watchexec` 2.8 and `uu-*` all answered. The
-first line is still just a candidate set.
+The second row covers the A2/A3 gaps (`mlr` for awk/sed/sort/join; `gsed`/`gawk`
+and `uu-*` for GNU/portable semantics; plus the structured-data and watch tools).
+Smoke tests: `mlr` 6.22, `gsed` 4.10, `qsv` 24.0, `dasel` 3, `b3sum`,
+`watchexec` 2.8, `uu-sort`/`uu-wc`/`uu-comm`, `hexyl`, `ouch`, `glow`, `doggo`,
+`rga`, `rargs`, `entr`, `csvlens` and `runiq` all answered.
+
+Still uninstalled alternates — install only if a need appears: `gron` and `jaq`
+(the JSON companions to `jq`), `mdcat`, `angle-grinder` (`agrind`, awk over
+logs), `tailspin`, `lnav`, `fclones`, `f2`, `atuin`, `lazygit`, `aria2c`, `ov`.
 
 One idiom to keep right: `dasel` 3 replaced its old CLI. It is
 `dasel query -i json 'x.y' < f.json` — the query subcommand plus `-i`/`-o`, and
