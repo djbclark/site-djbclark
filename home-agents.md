@@ -39,8 +39,10 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (2026-10-09).
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
 6. **Never `--help` on a live-service CLI subcommand** (2026-10-09; `collie` is
-   read-only for agents).
-   (`memory/feedback_no_help_flag_on_live_service_cli.md`)
+   read-only for agents). **Secrets: `sudo-secretspec` only; load its skill
+   before scripting it** (every subcommand, `set` included, needs `--reason`;
+   2026-10-11). (`memory/feedback_no_help_flag_on_live_service_cli.md`,
+   `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains` skill, `web-get`);
    **all rungs fail for a needed source: pause** (checkpoint, report the URLs/
    queries, wait), never go on without it (2026-10-11;
