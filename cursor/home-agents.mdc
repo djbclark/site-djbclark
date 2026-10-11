@@ -297,10 +297,10 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    client's MCP rungs (Exa, Parallel, Jina, Firecrawl where present), its built-in
    tools, then `~/src/djbclark-ade/bin/web-get search|fetch` (exit 5 = every provider
    failed); ladder per client in the `fallback-chains` skill,
-   `references/web-access.md`. **If the whole ladder fails for a page or search the
-   task needs, pause the dependent work**: checkpoint, report each failed URL or
-   query with its errors, wait for djbclark or the provider. Never continue
-   without the source or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
+   `references/web-access.md`. **Every page the task needs is eventually fetched**: on
+   an error fall back (next rung, another URL form), fix the tool, or pause (checkpoint,
+   `hermes-ping` each failed URL with its errors, fix it with djbclark). Never accept
+   "unfetchable", continue without the source, or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 

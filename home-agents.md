@@ -44,9 +44,10 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    2026-10-11). (`memory/feedback_no_help_flag_on_live_service_cli.md`,
    `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains` skill, `web-get`);
-   **all rungs fail for a needed source: pause** (checkpoint, report the URLs/
-   queries, wait), never go on without it (2026-10-11;
-   `memory/feedback_web_failover_pause.md`).
+   **every needed page is eventually fetched**: on an error fall back (next
+   rung, another URL form), fix the tool, or pause (checkpoint, `hermes-ping`
+   the URLs, fix it with djbclark); never accept "unfetchable" and move on
+   (2026-10-11; `memory/feedback_web_failover_pause.md`).
 8. **Every bulleted list in a reply to djbclark uses numbers or letters, never
    plain `-`/`*` bullets** (tables are fine). **References must be unambiguous
    across the whole reply:** never restart at 1; use `1.1`/`2.1` or `1a`/`2b`
