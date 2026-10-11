@@ -1,11 +1,13 @@
-# Kill-on-sight for the Apple background daemons disabled by
+# Freeze/kill-on-sight for the Apple background daemons disabled by
 # macos/sip-doit-with-sudo.sh. 2026-10-10: the launchd disable flags do NOT
 # stop launchd activating these jobs on XPC/event demand, and bootout is
 # SIP-refused (rc 150 by label, rc 5 by plist path), so the enforcement is
-# this probe: it kills whatever it finds and reports healthy. Exit 1 = the
-# root helper half is broken (that is a config problem worth one alert);
-# exit 75 = no console user (skip). Kill log: ~/Library/Logs/watchdogd/
-# apple-daemon-ban.log; the reporting layer stays the sip script's --check.
+# this probe: it SIGSTOPs the gui-domain daemons (no CPU, and launchd never
+# respawns a job that has not exited), TERMs triald/helpd and the root
+# system-domain half, and reports healthy. Exit 1 = the root helper is
+# broken (config problem worth one alert); exit 75 = no console user
+# (skip). Action log: ~/Library/Logs/watchdogd/apple-daemon-ban.log; the
+# reporting layer stays the sip script's --check.
 name = "apple-daemons"
 interval_s = 60
 

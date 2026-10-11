@@ -31,17 +31,25 @@ kickstart that exited 0 counted as success.
 | `ai.hermes.gateway-restart-watcher` | Carries out restart requests from the gateway-restart Hermes plugin, 600 s cooldown | `hermes-gateway.toml` `[restart_request]` (plist WatchPaths keeps it immediate) |
 | `com.djbclark.funnel-healthcheck` + Hermes cron `Funnel Health` (`f821be766a47`) | Funnel probe, quit/reopen Tailscale after 2 all-down runs, 30 min cooldown; cron relayed the log | `funnel.toml` + `bin/funnel_probe.sh` |
 | Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
-| nothing (new, 2026-10-10) | kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) TERMs them every pass | `apple-daemons.toml` |
+| nothing (new, 2026-10-10) | freeze/kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) SIGSTOPs the gui-domain jobs and TERMs the rest every pass | `apple-daemons.toml` |
 
-## `apple-daemons`: kill-on-sight with a root helper
+## `apple-daemons`: freeze-on-sight with a root helper
 
 The probe IS the enforcement (exit 0 healthy, 1 = the root half is broken,
-75 = no console user); kills are logged to
+75 = no console user); actions are logged to
 `~/Library/Logs/watchdogd/apple-daemon-ban.log`, and *reporting* stays with
-the sip script's `--check`. The system-domain half (cloudd, triald.system,
-spindump, tailspind run as root) needs root; watchdogd itself stays a user
-LaunchAgent, so it calls a fixed root-owned helper through exactly one
-sudoers line. One-time manual install (the role stays become-free):
+the sip script's `--check`. The gui-domain half SIGSTOPs rather than kills:
+these daemons are pathological from their first second, so killing them
+every pass still burned ~a core in the gaps and fought App Tamer (TERM is
+undeliverable to a stopped process; the KILL escalation destroyed App
+Tamer's freezes and forced respawns). A frozen job burns no CPU and never
+exits, so launchd never respawns it — the only burn window is the ≤60 s
+after login/boot, and `--revert` in the sip script CONTs what it froze.
+triald/helpd (short one-shots) and the system-domain half (cloudd,
+triald.system, spindump, tailspind run as root) are TERMed. watchdogd
+itself stays a user LaunchAgent, so root comes from a fixed root-owned
+helper through exactly one sudoers line. One-time manual install (the role
+stays become-free):
 
 ```bash
 sudo mkdir -p /usr/local/libexec/djbclark

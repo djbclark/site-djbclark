@@ -39,8 +39,9 @@
 #     2. Normal boot: sudo ./sip-doit-with-sudo.sh   (bootout now succeeds)
 #     3. Recovery Terminal: --sip-enable, reboot.    (quiet ends at next login)
 #   Remaining levers with SIP on: the watchdogd "apple-daemons" rule
-#   (roles/watchdogd) TERMs every live instance on each 60 s pass — the
-#   actual enforcement; apply-mode kills; the --check monitor. Demand-side is
+#   (roles/watchdogd) SIGSTOPs every live gui-domain instance (frozen: no
+#   CPU, no respawn) and TERMs the system-domain ones — the actual
+#   enforcement; apply-mode kills; the --check monitor. Demand-side is
 #   already dark on macOS 27 (checked 2026-10-10): the old "Spotlight/Siri
 #   Suggestions" checkboxes are gone, their successors ("Show Related
 #   Content", per-app results, "Help Apple Improve Search", Siri itself) are
@@ -298,6 +299,15 @@ if [ "$MODE" = revert ]; then
   echo "------------------------------------------------------------------"
   for d in "${GUI_DAEMONS[@]}"; do converge_enabled "$GUI_DOMAIN" "$d"; done
   for d in "${SYSTEM_DAEMONS[@]}"; do converge_enabled system "$d"; done
+  echo ""
+  echo "Continuing (SIGCONT) instances frozen by the apple-daemons watchdog..."
+  for d in "${GUI_DAEMONS[@]}"; do
+    pid=$(job_pid "$GUI_DOMAIN" "$d")
+    case "$pid" in ''|*[!0-9]*|0) continue ;; esac
+    case "$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')" in
+      T*) kill -CONT "$pid" 2>/dev/null && echo "  $d: continued pid $pid" ;;
+    esac
+  done
   report_state
   echo ""
   echo "Re-enabled flags apply at the next login/boot (the deleted semantic stores are rebuilt by macOS)."
