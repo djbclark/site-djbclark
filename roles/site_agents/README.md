@@ -15,6 +15,24 @@ install to `~/.local/bin`; plists render to
 | jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00 — also restarts any `brew services` daemon left running a deleted binary after the upgrade, `mac-dns-apply` nightly at 03:30, `landing-health` hourly, `chrome-cache-trim` 4×/day on a pass with Chrome quit) |
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 
+## Chrome cache policy + trim
+
+Two complementary halves, both macOS-only (the `chrome-cache` tasks):
+
+1. **Disk cache cap (policy).** `site_agents_chrome_cache_defaults` writes
+   `DiskCacheSize` (512 MiB) and `MediaCacheSize` (256 MiB) into the
+   `com.google.Chrome` user defaults — the documented macOS policy route
+   (Chromium "Mac Quick Start"; no MDM needed). This bounds the HTTP/media disk
+   cache under `~/Library/Caches/Google/Chrome`. It is a *hint*, not a hard cap,
+   and Chrome must be restarted to pick it up (`chrome://policy` shows the
+   effective values). Google's rule of thumb is one order of magnitude between
+   free disk and cache; 512 MiB is deliberately below that.
+2. **Profile caches (Jobber).** `chrome-cache-trim` clears the caches the policy
+   does *not* cover — `Service Worker/CacheStorage`, `Service Worker/ScriptCache`,
+   `Code Cache`, `GPUCache`, `GrShaderCache`, `ShaderCache`, `DawnCache` — under
+   `~/Library/Application Support/Google/Chrome/<profile>/`. It runs 4×/day and
+   skips any pass with Chrome running, so it only ever clears a quit browser.
+
 ## Jobber Notifications (`jobber-notify`)
 
 Job failures in Jobber trigger `~/.local/bin/jobber-notify`, which implements three notification sinks:

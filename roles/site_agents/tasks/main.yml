@@ -176,6 +176,25 @@
     dest: "{{ site_agents_chrome_cache_trim_script }}"
     mode: "0755"
 
+- name: Read current Chrome cache policy defaults
+  ansible.builtin.command:
+    argv: [defaults, read, com.google.Chrome, "{{ item.key }}"]
+  loop: "{{ site_agents_chrome_cache_defaults }}"
+  register: _site_agents_chrome_defaults
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [chrome-cache]
+
+- name: Set Chrome cache policy defaults (idempotent)
+  ansible.builtin.command:
+    argv: [defaults, write, com.google.Chrome, "{{ item.item.key }}", -int, "{{ item.item.bytes }}"]
+  loop: "{{ _site_agents_chrome_defaults.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when: (item.stdout | default('') | trim) != (item.item.bytes | string)
+  tags: [chrome-cache]
+
 - name: Deploy Jobber configuration
   ansible.builtin.template:
     src: jobber.yaml.j2

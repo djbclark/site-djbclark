@@ -82,6 +82,14 @@ site_agents_brew_fast_upgrade_script: "{{ site_agents_bin_dir }}/brew-fast-upgra
 site_agents_brew_cache_volume: /Volumes/mac256usb
 site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
 site_agents_chrome_cache_trim_script: "{{ site_agents_bin_dir }}/chrome-cache-trim"
+# Chrome cache policy (user defaults) — the HTTP/media disk cache caps the
+# chrome-cache-trim job does NOT cover (it only clears profile caches the policy
+# leaves unbounded). Integer bytes; applied by the "Set Chrome cache policy
+# defaults" task. DiskCacheSize subsumes the documented 1/10-of-free-space rule
+# of thumb; see README.md and reference_chrome_disk_cache_policy_2026-10-11.md.
+site_agents_chrome_cache_defaults:
+  - {key: DiskCacheSize, bytes: 536870912}
+  - {key: MediaCacheSize, bytes: 268435456}
 site_agents_jobber_plist: "{{ site_agents_launchagents_dir }}/homebrew.mxcl.jobber.plist"
 site_agents_jobber_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.log"
 site_agents_jobber_error_log: "{{ site_agents_state_dir }}/jobber/jobberrunner.error.log"
