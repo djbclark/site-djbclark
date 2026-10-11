@@ -282,25 +282,25 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in
    place (a running bash dies). (`memory/feedback_edit_running_scripts_atomically.md`)
-3. **Default browser:** open pages with `open <url>` (Orion), not Chrome.
-   (`memory/feedback_always_use_default_browser_orion.md`)
-4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
-   (`memory/feedback_all_agents_includes_hermes.md`)
+3. **Default browser:** `open <url>` (Orion), not Chrome. (`memory/feedback_always_use_default_browser_orion.md`)
+4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
 5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether to
    add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (2026-10-09).
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
 6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
-   `collie update --help` started a real update). `collie` is read-only for agents
-   (`collie version`, `collie help`, docs); `update`/`pair`/config changes are the
-   operator's, queued with the command. (`memory/feedback_no_help_flag_on_live_service_cli.md`)
-7. **Web search and page fetch go through the failover ladder** (2026-10-11): each
-   client's MCP rungs (Exa, Parallel, Jina, Firecrawl where present), its built-in
-   tools, then `~/src/djbclark-ade/bin/web-get search|fetch` (exit 5 = every provider
-   failed); ladder per client in the `fallback-chains` skill,
-   `references/web-access.md`. **Every page the task needs is eventually fetched**: on
-   an error fall back (next rung, another URL form), fix the tool, or pause (checkpoint,
-   `hermes-ping` each failed URL with its errors, fix it with djbclark). Never accept
-   "unfetchable", continue without the source, or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
+   `collie update --help` started a real update); `collie` is read-only for agents
+   (`collie version`, `collie help`, docs), `update`/`pair`/config changes are the
+   operator's, queued with the command. **Secrets: `sudo-secretspec` only; load its
+   skill before scripting it** (every subcommand, `set` included, needs `--reason`;
+   2026-10-11). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
+7. **Web search and page fetch go through the failover ladder** (2026-10-11): each client's
+   MCP rungs (Exa, Parallel, Jina, Crawl4AI for JavaScript pages, Firecrawl where present),
+   its built-in tools, then `~/src/djbclark-ade/bin/web-get search|fetch` (exit 5 = every
+   provider failed); ladder per client in the `fallback-chains` skill, `references/web-access.md`.
+   **Every page the task needs is eventually fetched**: on an error fall back (next rung,
+   another URL form), fix the tool, or pause (checkpoint, `hermes-ping` each failed URL with its
+   errors, fix it with djbclark). Never accept "unfetchable", continue without the source, or
+   fill it in from memory. (`memory/feedback_web_failover_pause.md`)
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 
