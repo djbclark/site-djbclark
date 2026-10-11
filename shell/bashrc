@@ -247,18 +247,22 @@ USB_DRIVE="/Volumes/mac256usb"
 # runs before the PATH is assembled further down.
 if /sbin/mount | grep -q " on ${USB_DRIVE} "; then
     export HOMEBREW_CACHE="$USB_DRIVE/Caches/Homebrew"
-    export npm_config_cache="$USB_DRIVE/Caches/npm"
     export YARN_CACHE_FOLDER="$USB_DRIVE/Caches/yarn"
     export PIP_CACHE_DIR="$USB_DRIVE/Caches/pip"
-    export GOCACHE="$USB_DRIVE/Caches/go-build"
-    export GOMODCACHE="$USB_DRIVE/Caches/go-mod"
     # The Android SDK moved to the internal SSD on 2026-10-11 (the drive stalled
     # reads for minutes at a time; the emulator could not start), so ANDROID_HOME
     # is set below, not here.
-    export GRADLE_USER_HOME="$USB_DRIVE/Caches/gradle"
-    export UV_CACHE_DIR="$USB_DRIVE/Caches/uv"
     export HF_HOME="$USB_DRIVE/Caches/huggingface"
 fi
+
+# These caches live on the internal SSD. Their /Volumes/mac256usb/Caches entries
+# were only symlinks back to ~/.cache, so pointing through the drive just let a
+# drive stall hang Gradle and friends (2026-10-11).
+export npm_config_cache="$HOME/.cache/npm"
+export GOCACHE="$HOME/.cache/go-build"
+export GOMODCACHE="$HOME/.cache/go-mod"
+export GRADLE_USER_HOME="$HOME/.cache/gradle"
+export UV_CACHE_DIR="$HOME/.cache/uv"
 
 # Gradle's home moved back to the internal SSD on 2026-10-06: builds do many small
 # random reads, which the USB stick serves badly. The move script creates the marker
