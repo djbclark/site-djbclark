@@ -14,19 +14,34 @@
 #   ./sip-doit-with-sudo.sh --sip-disable    disable SIP (no-op if already off)
 #   ./sip-doit-with-sudo.sh --sip-enable     enable SIP  (no-op if already on)
 #
-# Full "stop them right now" sequence when `launchctl bootout` is blocked by SIP
-# (recoveryOS has no user session, so bootout cannot run there; two recovery trips):
-#   1. Recovery Terminal: --sip-disable, reboot.
-#   2. Normal boot: sudo ./sip-doit-with-sudo.sh   (bootout now succeeds, stores emptied)
-#   3. Recovery Terminal: --sip-enable, reboot.   (Skippable: the flags alone take effect
-#      at the next login; only needed if a disabled job is still running after re-login.)
-#
-# What "disabled" means here: `launchctl disable <domain>/<label>` writes a
-# persistent flag (visible in `launchctl print-disabled <domain>`). It is
-# reversible and does NOT touch the sealed system volume. `launchctl bootout`
-# (stop it now) is refused by SIP for Apple's own jobs, so after a run the job
-# may still be alive until the next login/boot; that is reported, not an error.
-# The flag may not survive a macOS update: just run this script again.
+# What "disabled" achieves — measured on this machine, not assumed (2026-10-10):
+#   `launchctl disable <domain>/<label>` writes a persistent, reversible flag
+#   (visible in `launchctl print-disabled <domain>`; on disk in
+#   /var/db/com.apple.xpc.launchd/disabled.<UID>.plist) and never touches the
+#   sealed system volume. BUT on this macOS build the flag does NOT stop
+#   launchd activating these jobs on XPC/event demand: the machine rebooted
+#   2026-10-05 with every flag already set (2026-10-04), and by 2026-10-10
+#   launchd had still launched suggestd 22x, triald 148x, photoanalysisd 104x,
+#   helpd 72x, spotlightknowledged 24x (+ .updater 31x) and cloudd 7x (the
+#   then-unflagged system cloudd 187x). The flags are the durable, verifiable
+#   half of the intent; killing running instances and the --check monitor
+#   (which also reports "running despite flag") are what actually keeps CPU
+#   time and semantic-store growth down. Flags may not survive a macOS
+#   update: just run this script again.
+#   `launchctl bootout` ("stop it now") is refused while SIP is on: rc 150
+#   "Operation not permitted" by label, rc 5 "Input/output error" by plist
+#   path (both tested as root 2026-10-10). With SIP off it succeeds but only
+#   unloads the job for the current session: at the next login launchd
+#   re-submits every /System/Library agent and activates it despite the flag.
+#   The one-quiet-session sequence (two recovery trips) is therefore NOT a
+#   fix, just a way to buy a single quiet session:
+#     1. Recovery Terminal: --sip-disable, reboot.
+#     2. Normal boot: sudo ./sip-doit-with-sudo.sh   (bootout now succeeds)
+#     3. Recovery Terminal: --sip-enable, reboot.    (quiet ends at next login)
+#   Remaining levers with SIP on: apply-mode kills, the --check monitor, and
+#   demand-side switches (System Settings → Siri & Spotlight → uncheck
+#   "Spotlight Suggestions" and "Siri Suggestions"; Siri itself is already
+#   off, Assistant Enabled = 0).
 #
 # History / decisions:
 #   - 2026-10-04 (zcode review): the AMFI bypass line of the downloaded original
@@ -40,15 +55,25 @@
 #     No Apple document describes the side effects of disabling
 #     spotlightknowledged; expect semantic/"Siri Suggestions" style results in
 #     Spotlight to go away. Undo with --revert.
+#   - 2026-10-10 (zcode review + fixes): falsified "flags apply at next
+#     login/boot" (runs counters above) and rewrote this header accordingly;
+#     added system-domain com.apple.cloudd and com.apple.triald.system;
+#     replaced pgrep detection with launchd's own pid (pgrep -x never matched
+#     triald — its process name is the truncated path "/usr/libexec/tri" — and
+#     pgrep -x cloudd conflated the gui and system jobs); --check now also
+#     reports jobs running despite their flag; dropped the stale powermetrics
+#     one-off.
 #
-# Preconditions (operator-verified 2026-10-04):
+# Preconditions (operator-verified 2026-10-04; revisited 2026-10-10):
 #   - No iCloud account is signed in (MobileMeAccounts domain absent), so
-#     disabling cloudd loses nothing now. RUN --revert BEFORE signing into an
-#     Apple ID, or iCloud will silently not sync.
-#   - suggestd's stuck-harvesting loop was already fixed via DB reset; it is
-#     disabled here as a precaution.
+#     disabling cloudd (gui AND system) loses nothing now. RUN --revert BEFORE
+#     signing into an Apple ID, or iCloud will silently not sync.
+#   - suggestd: the stuck-harvesting loop was fixed via DB reset (2026-10-04),
+#     but launchd still spawns it on ProactiveHarvesting XPC events despite
+#     the flag; the demand-side switches above are the remaining lever.
 #   - photoanalysisd disabled = no Photos face/scene analysis; helpd = no
-#     in-app Help Viewer content; spindump/tailspind = no hang/stall reports.
+#     in-app Help Viewer content; spindump/tailspind = no hang/stall reports;
+#     triald + triald.system = no Apple experiment-treatment updates.
 
 set -u
 
@@ -109,6 +134,8 @@ GUI_DAEMONS=(
 )
 
 SYSTEM_DAEMONS=(
+  "com.apple.cloudd"
+  "com.apple.triald.system"
   "com.apple.spindump"
   "com.apple.tailspind"
 )
@@ -134,12 +161,24 @@ is_loaded() {
   launchctl print "$1/$2" >/dev/null 2>&1
 }
 
-# proc_name <label>: process name = label without the com.apple. prefix
-# (spotlightknowledged.updater is the real process name of that job).
-proc_name() { echo "${1#com.apple.}"; }
+# job_pid <domain> <label>: the pid launchd reports for the job, or empty.
+# Detection deliberately avoids pgrep: triald's process name is the truncated
+# path "/usr/libexec/tri" (an exact-name match never fires), and pgrep -x cloudd
+# conflates the gui- and system-domain jobs. launchd's pid is per-domain and
+# per-label. Non-root callers can read the system domain too (verified
+# 2026-10-10), so the Hermes-run --check sees everything.
+job_pid() {
+  launchctl print "$1/$2" 2>/dev/null | awk '/^\tpid =/{print $3; exit}'
+}
 
-# running_pids <label>: pids of the job's process (exact name match).
-running_pids() { pgrep -x "$(proc_name "$1")"; }
+# is_running <domain> <label>: 0 only for a plausible positive pid (a stray
+# non-numeric value must never reach `kill` — kill -1 as root would broadcast).
+is_running() {
+  case "$(job_pid "$1" "$2")" in
+    ''|*[!0-9]*|0) return 1 ;;
+    *) return 0 ;;
+  esac
+}
 
 converge_disabled() {
   local domain=$1 label=$2
@@ -155,13 +194,14 @@ converge_disabled() {
       FAILED=1
     fi
   fi
-  # Stop it now if it is still alive. bootout is blocked by SIP for Apple's own
-  # jobs ("Operation not permitted"); that is expected and not an error.
+  # Stop it now if launchd still has it running. bootout is refused by SIP for
+  # Apple's own jobs (rc 150 by label, rc 5 by plist path), and the flags do
+  # not stop XPC re-activation, so a respawn later is possible and expected.
   if is_loaded "$domain" "$label"; then
     launchctl bootout "$domain/$label" >/dev/null 2>&1
   fi
-  if [ -n "$(running_pids "$label")" ]; then
-    pkill -x "$(proc_name "$label")" 2>/dev/null
+  if is_running "$domain" "$label"; then
+    kill "$(job_pid "$domain" "$label")" 2>/dev/null
   fi
 }
 
@@ -179,38 +219,40 @@ converge_enabled() {
 report_state() {
   echo ""
   echo "State of the targeted daemons:"
-  local d p flag
+  local d pid flag any_running=0
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" && flag=disabled || flag=enabled
-    p=$(running_pids "$d" | tr '\n' ' ')
-    echo "  $GUI_DOMAIN/$d: flag=$flag${p:+, running (pid ${p% })}"
+    pid=$(job_pid "$GUI_DOMAIN" "$d")
+    [ -n "$pid" ] && any_running=1
+    echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)}"
   done
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" && flag=disabled || flag=enabled
-    p=$(running_pids "$d" | tr '\n' ' ')
-    echo "  system/$d: flag=$flag${p:+, running (pid ${p% })}"
+    pid=$(job_pid system "$d")
+    [ -n "$pid" ] && any_running=1
+    echo "  system/$d: flag=$flag${pid:+, running (pid $pid)}"
   done
-  if [ "$MODE" = apply ]; then
-    for d in "${GUI_DAEMONS[@]}" "${SYSTEM_DAEMONS[@]}"; do
-      if [ -n "$(running_pids "$d")" ]; then
-        echo "  note: some disabled jobs are still running; SIP blocks bootout, so the"
-        echo "        flag takes effect at the next login/boot. Re-run afterwards to confirm."
-        break
-      fi
-    done
+  if [ "$MODE" = apply ] && [ "$any_running" -eq 1 ]; then
+    echo "  note: some disabled jobs are still/again running. The disable flag does NOT stop"
+    echo "        launchd re-activating them on XPC events (2026-10-10); --check reports them."
   fi
 }
 
 if [ "$MODE" = check ]; then
   # Regression monitor (Hermes cron --no-agent contract): empty stdout = healthy.
   # Alerts once per distinct problem set (and again after 24 h if it persists).
-  MAX_STORE_KB=51200   # 50 MB; the cleaned stores are ~2 MB, the backlog was GBs
+  # "running despite flag" strings carry no pid on purpose: the signature must
+  # stay stable for the dedup to work.
+  MAX_STORE_KB=51200   # 50 MB; DocumentProcessing was 42 MB and regrowing on
+                       # 2026-10-10 while the updater kept running despite its flag
   PROBLEMS=()
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" || PROBLEMS+=("flag not set: $GUI_DOMAIN/$d")
+    is_running "$GUI_DOMAIN" "$d" && PROBLEMS+=("running despite flag: $GUI_DOMAIN/$d")
   done
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" || PROBLEMS+=("flag not set: system/$d")
+    is_running system "$d" && PROBLEMS+=("running despite flag: system/$d")
   done
   for rel in "${SEMANTIC_STORES[@]}"; do
     kb=$(du -sk "$CONSOLE_HOME/$rel" 2>/dev/null | awk '{print $1}')
@@ -229,9 +271,11 @@ if [ "$MODE" = check ]; then
     exit 0
   fi
   if [ "$EUID" -ne 0 ]; then mkdir -p "$STATE_DIR" && echo "$SIG" > "$STATE_FILE"; fi
-  echo "macOS daemon disables REGRESSED on macOS $OSV (${#PROBLEMS[@]} problem(s)):"
+  echo "macOS daemon-disable report on macOS $OSV (${#PROBLEMS[@]} problem(s)):"
   for p in "${PROBLEMS[@]}"; do echo "  x $p"; done
-  echo "Likely cause: a macOS update reset the launchd disable flags. Fix: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
+  echo "Likely cause: 'flag not set' = a macOS update reset the launchd disable flags;"
+  echo "'running despite flag' = launchd re-activated a disabled job (known on this build; it"
+  echo "is killed by the next apply run). Fix: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
   exit 0
 fi
 
@@ -284,22 +328,6 @@ case "$CONSOLE_HOME" in
   *) echo "  skipped: unexpected home directory '$CONSOLE_HOME'" >&2; FAILED=1 ;;
 esac
 
-echo ""
-echo "Killing leftover powermetrics from the 2026-10-04 morning diagnostics..."
-PIDS=$(pgrep -f '^/usr/bin/powermetrics .*--samplers')
-if [ -n "$PIDS" ]; then
-  ps -p "${PIDS//$'\n'/,}" -o pid,lstart,command
-  echo "$PIDS" | xargs kill
-  sleep 1
-  if pgrep -f '^/usr/bin/powermetrics .*--samplers' >/dev/null; then
-    echo "WARNING: still running, escalate with: sudo kill -9 ${PIDS//$'\n'/ }"
-  else
-    echo "powermetrics gone."
-  fi
-else
-  echo "No powermetrics running (already cleaned up)."
-fi
-
 report_state
 
 echo ""
@@ -308,12 +336,15 @@ ps -Arco pcpu,time,comm | head -8
 
 if sip_enabled; then
   echo ""
-  echo "SIP is enabled, so bootout of Apple's jobs was skipped by the system. The flags apply at"
-  echo "next login/boot. If any disabled job is still running after that, use the recovery"
-  echo "sequence in this script's header (--sip-disable, run again, --sip-enable)."
+  echo "SIP is enabled: bootout of Apple's jobs is refused (rc 150), so still-running jobs were"
+  echo "killed by pid. The disable flags do NOT stop launchd re-activating these jobs on XPC"
+  echo "events (2026-10-10), so respawns are expected; --check reports them, and the demand-side"
+  echo "switches in this script's header reduce them."
 else
   echo ""
-  echo "SIP is DISABLED. When satisfied, boot to recoveryOS and run: $0 --sip-enable"
+  echo "SIP is DISABLED: bootout succeeded, so the jobs are unloaded for THIS login session."
+  echo "They return at the next login (re-submitted, then activated despite the flags)."
+  echo "When satisfied, boot to recoveryOS and run: $0 --sip-enable"
 fi
 
 if [ "$FAILED" -ne 0 ]; then
