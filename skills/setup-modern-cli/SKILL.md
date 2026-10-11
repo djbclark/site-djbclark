@@ -108,7 +108,7 @@ after — `sg` is slower and only worth it for shape.
 ## Install (Homebrew)
 
 ```bash
-brew install \
+HOMEBREW_NO_AUTO_UPDATE=1 brew install \
   ripgrep fd bat srgn eza hck git-delta jq yq xh ast-grep dust gdu
 ```
 
@@ -196,17 +196,17 @@ either hangs waiting on stdin or returns nothing useful.
 Optional installs from group A and B worth adding here:
 
 ```bash
-brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav
+HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo gron jaq ripgrep-all fclones f2 atuin lazygit lnav
 ```
 
-**Do not prefix installs with `HOMEBREW_NO_AUTO_UPDATE=1`** (an earlier version
-of this file did). Tools should update. On this machine `~/.bashrc:176`
-(`site-djbclark/shell/bashrc`) already exports that variable machine-wide, and
-the scheduled job `brew-fast-upgrade` (site-djbclark, Jobber, daily 03:10) runs
-`brew update && brew upgrade` for brew and npm globals — so nothing here goes
-stale. Set the variable on a single command only when a long *automated* setup
-must not trigger a mid-run `brew update`, which is slow and can fail on the
-nightly Wi-Fi blip.
+**About `HOMEBREW_NO_AUTO_UPDATE=1`: it is a performance knob, not an update
+switch.** It suppresses the `brew update` that brew otherwise runs in front of
+`install`/`upgrade` — minutes of network work that can fail on a flaky
+connection — so a multi-package install stays fast and deterministic. It does
+**not** stop anything updating: `brew update` and `brew upgrade` still work, and
+on this machine `site-djbclark/shell/bashrc` exports the variable machine-wide
+while the scheduled `brew-fast-upgrade` Jobber job (daily 03:10) updates brew and
+npm globals. Keep it on automated install lines; there is nothing wrong with it.
 
 ## Footguns
 
