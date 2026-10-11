@@ -18,7 +18,9 @@ conflict. This is its condensed copy for `cursor-agent`, which reads
 
 > A deliberate **subset** (`alwaysApply: true`: every section costs context on
 > every Cursor turn); omitted: backups, LLM gateway, Claude Code agent teams.
-> Agents maintain both copies without asking; keep home-agents.md under ~13 KB (2026-10-10) and this copy under ~20 KB.
+> Agents maintain both copies without asking; keep home-agents.md under 200 lines
+> (2026-10-11; Anthropic's CLAUDE.md target) and this copy under 360 lines (≈ its
+> old ~20 KB cap).
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
@@ -289,6 +291,14 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    `collie update --help` started a real update). `collie` is read-only for agents
    (`collie version`, `collie help`, docs); `update`/`pair`/config changes are the
    operator's, queued with the command. (`memory/feedback_no_help_flag_on_live_service_cli.md`)
+7. **Web search and page fetch go through the failover ladder** (2026-10-11): each
+   client's MCP rungs (Exa, Parallel, Jina, Firecrawl where present), its built-in
+   tools, then `~/src/djbclark-ade/bin/web-get search|fetch` (exit 5 = every provider
+   failed); ladder per client in the `fallback-chains` skill,
+   `references/web-access.md`. **If the whole ladder fails for a page or search the
+   task needs, pause the dependent work**: checkpoint, report each failed URL or
+   query with its errors, wait for djbclark or the provider. Never continue
+   without the source or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 
