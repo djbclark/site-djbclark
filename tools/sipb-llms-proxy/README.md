@@ -9,6 +9,23 @@ docstring in `sipb-llms-proxy`:
 2. a tool-calling stream ends with `finish_reason: "stop"`: the proxy rewrites it
    to `tool_calls`, without which Crush ends the turn after one tool call.
 
+Since 2026-10-12 it also (all via env vars, defaults in the docstring):
+
+3. serializes requests per model (`SIPB_MAX_CONCURRENCY`, default 1; the server
+   loads one model at a time and is shared), with a queue timeout;
+4. retries a POST on connection errors, HTTP 502/503/504 and an empty stream
+   (`SIPB_RETRIES`, default 2), only before any byte reached the client;
+5. appends one JSON line per POST to `~/.local/state/sipb-llms-proxy/requests.jsonl`
+   (model, prompt chars, queue wait, time to first token, total, status, raw and
+   sent finish_reason, retries; never content or the key): the evidence for
+   reports to the SIPB sysadmins;
+6. can prepend a rules file (`~/.config/sipb-llms-proxy/rules.md`, off unless the
+   file exists; `X-Sipb-Rules: off` skips it) to the first system message of every
+   chat request. NOT installed: the rules we use (`~/.config/crush/CRUSH.md`) are
+   Crush-specific and would be wrong for Hermes or opencode.
+
+Tests: `python3 tools/sipb-llms-proxy/test_proxy.py` (fake upstream, no network).
+
 No secrets: the API key travels in the client's `Authorization` header and is
 forwarded untouched.
 

@@ -12,20 +12,48 @@ tool calls (2026-10-12): Open WebUI ends a tool-calling stream with "stop", and
 Crush only runs the tool and continues on "tool_calls", so every turn ended
 after its first tool call.
 
+Behaviour added (2026-10-12), all stdlib, each behind an env var:
+    SIPB_UPSTREAM          override UPSTREAM (default https://llms-dev-1.mit.edu)
+    SIPB_RULES_FILE        rules.md to prepend to the first system message
+                           (default ~/.config/sipb-llms-proxy/rules.md); re-read
+                           per request; skip with header `X-Sipb-Rules: off`
+    SIPB_MAX_CONCURRENCY   max in-flight upstream requests per model (default 1)
+    SIPB_QUEUE_TIMEOUT     seconds to wait for the per-model slot (default 900)
+    SIPB_RETRIES           retries for POSTs on conn errors / 502/503/504 /
+                           empty stream, with 2 s then 5 s backoff (default 2)
+    SIPB_LOG               JSONL latency log (default
+                           ~/.local/state/sipb-llms-proxy/requests.jsonl)
+
 Usage:
     sipb-llms-proxy [port]            # default port 8890
 Then point Crush at it, e.g. in ~/.config/crush/crushrc:
     --base-url "http://127.0.0.1:8890/api"
 """
+import datetime
 import http.server
 import json
+import os
 import socketserver
 import sys
+import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
-UPSTREAM = "https://llms-dev-1.mit.edu"
+UPSTREAM = os.environ.get("SIPB_UPSTREAM", "https://llms-dev-1.mit.edu")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8890
+
+RULES_FILE = os.path.expanduser(
+    os.environ.get("SIPB_RULES_FILE", "~/.config/sipb-llms-proxy/rules.md")
+)
+MAX_CONCURRENCY = int(os.environ.get("SIPB_MAX_CONCURRENCY", "1"))
+QUEUE_TIMEOUT = float(os.environ.get("SIPB_QUEUE_TIMEOUT", "900"))
+RETRIES = int(os.environ.get("SIPB_RETRIES", "2"))
+LOG_PATH = os.path.expanduser(
+    os.environ.get("SIPB_LOG", "~/.local/state/sipb-llms-proxy/requests.jsonl")
+)
+LOG_MAX_BYTES = 20 * 1024 * 1024
 
 MESSAGE = (
     "SIPB LLMs returned no completion. This is what Open WebUI does when the "
@@ -35,6 +63,137 @@ MESSAGE = (
 )
 
 HOP_BY_HOP = ("transfer-encoding", "content-length", "connection")
+
+_sem_lock = threading.Lock()
+_semaphores = {}
+
+
+def _str(exc):
+    try:
+        return str(exc)
+    except Exception:
+        return type(exc).__name__
+
+
+def _status(resp):
+    code = getattr(resp, "code", None)
+    if code is not None:
+        return code
+    return getattr(resp, "status", None)
+
+
+def _get_semaphore(model):
+    with _sem_lock:
+        sem = _semaphores.get(model)
+        if sem is None:
+            sem = threading.Semaphore(MAX_CONCURRENCY)
+            _semaphores[model] = sem
+        return sem
+
+
+def _parse_sse(line):
+    if not line.startswith(b"data:"):
+        return None
+    data = line[5:].strip()
+    if data == b"[DONE]":
+        return None
+    try:
+        return json.loads(data)
+    except Exception:
+        return None
+
+
+def _delta_nonempty(event):
+    for choice in event.get("choices") or []:
+        delta = choice.get("delta") or {}
+        if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning"):
+            return True
+        if delta.get("tool_calls"):
+            return True
+    return False
+
+
+def _finish_reason(event):
+    for choice in event.get("choices") or []:
+        fr = choice.get("finish_reason")
+        if fr is not None:
+            return fr
+    return None
+
+
+def _finish_json(data):
+    try:
+        body = json.loads(data)
+    except Exception:
+        return None
+    return _finish_reason(body)
+
+
+def _load_rules():
+    try:
+        with open(RULES_FILE, "r") as f:
+            text = f.read()
+    except OSError:
+        return None
+    text = text.strip()
+    return text or None
+
+
+def _inject_rules(body):
+    """Prepend rules text to the first system message (or insert one at index 0).
+
+    Returns True when the body was modified. Idempotent: does nothing if the
+    rules text is already present in the first system message.
+    """
+    rules = _load_rules()
+    if not rules:
+        return False
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        body["messages"] = [{"role": "system", "content": rules}]
+        return True
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "system":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            if rules in content:
+                return False
+            msg["content"] = rules + "\n\n" + content
+            return True
+        if isinstance(content, list):
+            for part in content:
+                if (
+                    isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and rules in (part.get("text") or "")
+                ):
+                    return False
+            content.insert(0, {"type": "text", "text": rules + "\n\n"})
+            msg["content"] = content
+            return True
+        # Some other content shape: prepend as text.
+        msg["content"] = rules + "\n\n" + (str(content) if content else "")
+        return True
+    # No system message found: insert a new one at index 0.
+    messages.insert(0, {"role": "system", "content": rules})
+    return True
+
+
+def _append_log(record):
+    try:
+        d = os.path.dirname(LOG_PATH)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > LOG_MAX_BYTES:
+            try:
+                os.replace(LOG_PATH, LOG_PATH + ".1")
+            except OSError:
+                pass
+        with open(LOG_PATH, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -54,23 +213,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _fail(self, code, message):
         self._send_json(code, {"error": {"message": message, "type": "invalid_request_error"}})
 
-    def _proxy(self):
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        body = self.rfile.read(length) if length else None
-
+    def _make_request(self, body):
         req = urllib.request.Request(UPSTREAM + self.path, data=body, method=self.command)
         for key, value in self.headers.items():
             if key.lower() in ("host", "content-length", "connection"):
                 continue
             req.add_header(key, value)
+        return req
 
+    def _send_stream_headers(self, resp):
+        self.send_response(_status(resp))
+        for key, value in resp.headers.items():
+            if key.lower() in HOP_BY_HOP:
+                continue
+            self.send_header(key, value)
+        self.send_header("Connection", "close")
+        self.end_headers()
+        # A streamed SSE response has no Content-Length; make sure the handler
+        # closes the socket after the stream so the client sees a clean EOF.
+        self.close_connection = True
+
+    def _attempt(self, req, is_post, allow_retry, metrics):
+        """One upstream attempt. Returns "sent" (response handled) or "retry"
+        (nothing has been forwarded to the client yet)."""
+        start = time.time()
         try:
             resp = urllib.request.urlopen(req, timeout=600)
         except urllib.error.HTTPError as exc:
             resp = exc
-        except Exception as exc:  # noqa: BLE001
-            self._fail(502, "sipb-llms-proxy could not reach %s: %s" % (UPSTREAM, exc))
-            return
+        except Exception as exc:
+            metrics["last_status"] = None
+            metrics["last_error"] = _str(exc)
+            if allow_retry:
+                return "retry"
+            self._fail(502, "sipb-llms-proxy could not reach %s: %s" % (UPSTREAM, _str(exc)))
+            return "sent"
+
+        status = _status(resp)
+        metrics["last_status"] = status
+        metrics["last_error"] = None
+
+        if status in (502, 503, 504) and is_post and allow_retry:
+            try:
+                resp.read()
+            except Exception:
+                pass
+            return "retry"
 
         ctype = resp.headers.get("Content-Type", "")
 
@@ -78,11 +266,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Not a stream: either a normal JSON response, or Open WebUI's bare
             # `null` for an over-long prompt. Buffer it and decide.
             data = resp.read()
-            if self.command == "POST" and resp.status == 200 and data.strip() in (b"", b"null"):
-                self._fail(400, "%s (upstream replied %s %r)" % (MESSAGE, resp.status, data[:60]))
-                return
+            if is_post and status == 200 and data.strip() in (b"", b"null"):
+                self._fail(400, "%s (upstream replied %s %r)" % (MESSAGE, status, data[:60]))
+                return "sent"
+            metrics["finish_reason_raw"] = _finish_json(data)
             data = fix_json_body(data)
-            self.send_response(resp.status)
+            metrics["finish_reason_sent"] = _finish_json(data)
+            metrics["ttft_s"] = time.time() - start
+            self.send_response(status)
             for key, value in resp.headers.items():
                 if key.lower() in HOP_BY_HOP:
                     continue
@@ -90,27 +281,162 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
-            return
+            return "sent"
 
-        # Streaming response: pass it through as it arrives.
-        self.send_response(resp.status)
-        for key, value in resp.headers.items():
-            if key.lower() in HOP_BY_HOP:
-                continue
-            self.send_header(key, value)
-        self.send_header("Connection", "close")
-        self.end_headers()
+        # Streaming response. Buffer until the first non-empty delta (so an
+        # empty stream can be retried before anything reaches the client), then
+        # commit the response headers and forward.
         saw_tool_calls = False
+        saw_nonempty = False
+        committed = False
+        buf = []
         try:
             while True:
                 line = resp.readline()
                 if not line:
                     break
+                event = _parse_sse(line)
+                if event is not None:
+                    if _delta_nonempty(event) and not saw_nonempty:
+                        saw_nonempty = True
+                        metrics["ttft_s"] = time.time() - start
+                    fr = _finish_reason(event)
+                    if fr is not None:
+                        metrics["finish_reason_raw"] = fr
                 saw_tool_calls, line = fix_sse_line(line, saw_tool_calls)
-                self.wfile.write(line)
-                self.wfile.flush()
-        except Exception:  # noqa: BLE001
+                event2 = _parse_sse(line)
+                if event2 is not None:
+                    fr = _finish_reason(event2)
+                    if fr is not None:
+                        metrics["finish_reason_sent"] = fr
+                if committed:
+                    self.wfile.write(line)
+                    self.wfile.flush()
+                elif saw_nonempty:
+                    committed = True
+                    self._send_stream_headers(resp)
+                    for bl in buf:
+                        self.wfile.write(bl)
+                        self.wfile.flush()
+                    self.wfile.write(line)
+                    self.wfile.flush()
+                else:
+                    buf.append(line)
+        except Exception:
             pass
+
+        if not committed and is_post and allow_retry:
+            return "retry"
+        if not committed:
+            # Final attempt: forward the (empty) stream as-is.
+            self._send_stream_headers(resp)
+            for bl in buf:
+                self.wfile.write(bl)
+                self.wfile.flush()
+        return "sent"
+
+    def _run_with_retry(self, body, is_post, metrics):
+        retries = 0
+        for attempt in range(RETRIES + 1):
+            allow_retry = is_post and attempt < RETRIES
+            req = self._make_request(body)
+            result = self._attempt(req, is_post, allow_retry, metrics)
+            if result == "sent":
+                return retries
+            retries = attempt + 1
+            backoff = 2.0 if attempt == 0 else 5.0
+            self._log_retry(metrics, retries, backoff)
+            time.sleep(backoff)
+        return retries
+
+    def _log_retry(self, metrics, attempt, backoff):
+        _append_log({
+            "event": "retry",
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "attempt": attempt,
+            "backoff_s": backoff,
+            "upstream_status": metrics["last_status"],
+            "error": metrics["last_error"],
+        })
+
+    def _log_request(self, model, stream, n_messages, prompt_chars, queue_wait_s, start, metrics, retries):
+        _append_log({
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "model": model,
+            "stream": stream,
+            "n_messages": n_messages,
+            "prompt_chars": prompt_chars,
+            "queue_wait_s": round(queue_wait_s, 6),
+            "ttft_s": round(metrics["ttft_s"], 6) if metrics["ttft_s"] is not None else None,
+            "total_s": round(time.time() - start, 6),
+            "upstream_status": metrics["last_status"],
+            "finish_reason_raw": metrics["finish_reason_raw"],
+            "finish_reason_sent": metrics["finish_reason_sent"],
+            "retries": retries,
+            "error": metrics["last_error"],
+        })
+
+    def _proxy(self):
+        start = time.time()
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if length else None
+
+        path = urllib.parse.urlsplit(self.path).path
+        is_chat = self.command == "POST" and path.rstrip("/") == "/api/chat/completions"
+        is_post = self.command == "POST"
+
+        model = None
+        stream = False
+        n_messages = 0
+        prompt_chars = len(body) if body else 0
+
+        if is_chat and body:
+            try:
+                j = json.loads(body)
+            except Exception:
+                j = None
+            if isinstance(j, dict):
+                model = j.get("model")
+                stream = bool(j.get("stream"))
+                msgs = j.get("messages")
+                if isinstance(msgs, list):
+                    n_messages = len(msgs)
+                if (self.headers.get("X-Sipb-Rules") or "").strip().lower() != "off":
+                    if _inject_rules(j):
+                        body = json.dumps(j).encode()
+                        prompt_chars = len(body)
+
+        metrics = {
+            "last_status": None,
+            "last_error": None,
+            "finish_reason_raw": None,
+            "finish_reason_sent": None,
+            "ttft_s": None,
+        }
+        retries = 0
+        queue_wait_s = 0.0
+        sem = None
+        held = False
+        try:
+            if is_chat:
+                sem = _get_semaphore(model or "")
+                t0 = time.time()
+                held = sem.acquire(timeout=QUEUE_TIMEOUT)
+                if not held:
+                    metrics["last_error"] = "queue timeout waiting for model %r" % (model,)
+                    self._fail(
+                        503,
+                        "sipb-llms-proxy: timed out after %.1fs waiting for model %r"
+                        % (QUEUE_TIMEOUT, model),
+                    )
+                    return
+                queue_wait_s = time.time() - t0
+            retries = self._run_with_retry(body, is_post, metrics)
+        finally:
+            if sem is not None and held:
+                sem.release()
+            if is_post:
+                self._log_request(model, stream, n_messages, prompt_chars, queue_wait_s, start, metrics, retries)
 
     def do_GET(self):
         self._proxy()
