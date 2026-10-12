@@ -9,6 +9,28 @@ Server as observed: Open WebUI 0.6.30 in front of Ollama 0.32.13 at
 Client: Charm Crush (a terminal coding agent) driven non-interactively, one request
 at a time, models run serially so we never asked the server for two models at once.
 
+## TL;DR
+
+**Results.**
+
+1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
+2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
+3. What hurt reliability: tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around all four in a local proxy.
+
+**Server-side improvements, most to least useful** (hardware fixed; times are our estimates for an admin working with an AI assistant, not measured):
+
+| # | Change | Effect | Time | Details |
+| --- | --- | --- | --- | --- |
+| 1 | Upgrade Open WebUI past 0.6.30; try per-model "Function Calling: Native"; run our conformance script | Tool calls work for every client, not just ours | 1-3 h | 4.1, 7.1 |
+| 2 | Front proxy: SSE keepalive while queued, 429/503 + `Retry-After`, 400 instead of `null`, 1 request per key per model | No more silent 2-minute stalls, fair sharing | 1-3 h (adapt our proxy) | 4.2, 4.5, 7.6 |
+| 3 | Keep one fast mixture-of-experts model resident (`OLLAMA_KEEP_ALIVE=-1`, e.g. `qwen3.6:35b-a3b`) | Most requests skip the 7-19 s swap | 15-60 min | 4.6, 7.3 |
+| 4 | `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`, then try a larger context | Half the KV cache, room for longer prompts | 30-90 min | 4.5, 7.2 |
+| 5 | Fix or hide `gpt-oss:20b` and `devstral:24b` (re-pull tags, check templates) | Stop users picking models that cannot call tools | 10 min to hide, 1-3 h each to fix | 4.3, 4.4, 7.1 |
+| 6 | Presets per recommended model (`num_ctx`, `keep_alive`, reasoning effort) and a shorter model list | Fewer accidental swaps, thinking capped | 1-2 h | 7.3, 7.5 |
+| 7 | Etiquette note: one model, small prompts, no parallel agents; per-key request logs | Protects web-UI users from agent traffic | 1-2 h | 7.7 |
+| 8 | Status page: loaded model, queue length, rolling time to first token | "Down or busy?" becomes a lookup | 2-4 h | 7.8 |
+| 9 | Q4/Q5 builds instead of the F16 `aya` models | Faster loads, more headroom | 30-60 min | 7.2 |
+
 ## 1. Summary
 
 1. The server is fast enough for agentic coding when it is idle: about 10k-token
