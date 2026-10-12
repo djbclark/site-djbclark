@@ -36,7 +36,9 @@ add; it is not a policy.
 | raw `git diff` / `git log -p` | `delta` as the pager | set once in git config (ask first) | ✅ |
 | `time cmd` for real numbers | `hyperfine` | `hyperfine --warmup 3 'cmd'` | ✅ |
 | `man` (to recall flags) | `tldr` | `tldr rg` | ✅ |
-| hand-parsing JSON | `jq` (`jaq` is a faster clone; `gron` flattens for grep) | `jq -r '.accounts[].provider'` | ✅ jq |
+| hand-parsing JSON | `jq` (`jaq` is a faster clone; `gron` flattens for grep) | `jq -r '.accounts[].provider'`, `gron f.json \| rg provider` | ✅ jq, gron |
+| parsing classic command output | `jc` | `jc dig example.com \| jq '.[0].answer'`, `jc --pretty df` | ✅ |
+| ad-hoc aggregation over CSV/JSON/Parquet (long `awk`/`mlr`/`jq` chains) | `duckdb` | `duckdb -c "select provider, count(*) from 'x.csv' group by 1 order by 2 desc"`; reads CSVs/JSON/Parquet/globs with no import | ✅ |
 | hand-parsing YAML/TOML/XML | `yq`; `dasel` for a format zoo | `yq '.services[].image'`; `dasel query -i json 'x.y' < f.json` (`dasel` 3 takes the query plus `-i`/`-o`, and reads stdin — there is no file argument) | ✅ |
 | `cat x.csv` + eyeballing | `qsv` / `csvlens` | `qsv stats x.csv` | ✅ |
 | `tail -f` a log while working | `rtk log`, `tailspin`, `lnav` | `rtk log < file` | ✅ rtk log |
@@ -74,7 +76,9 @@ so for real stream programs the answer is a different tool, not a fancier `sd`.
 | `head -c` / `tail -c` (GNU semantics) | `ghead` / `gtail` | `ghead -c 200` | ✅ |
 | `sed` doing ranges/loops/multi-line scripts | `srgn` for edits, `mlr` for records, `perl -pe`/`-ne` when it is genuinely a stream program, GNU `gsed` for GNU sed syntax | `perl -pe 's/x/y/g'`, `gsed -E '2,4d'` | ✅ |
 | `uniq` on unsorted input | `runiq` | `runiq` | ✅ |
-| `xargs -I{}` + `awk` | `rargs` | `rargs 'mv {} {}.bak'` | — |
+| `xargs -I{}` + `awk` | `rargs` | `rargs 'mv {} {}.bak'` | ✅ |
+| writing a file from the middle of a pipeline | `sponge` (moreutils) | `sort f \| sponge f` — reads stdin, writes the file atomically | ✅ |
+| "only if the input is non-empty" | `ifne` (moreutils) | `rg -l '<pat>' . \| ifne bat --paging=never` | ✅ |
 | `date -d '2 days ago'` | GNU `gdate` | `gdate -d '2 days ago' +%F` | ✅ |
 | `base64`, checksums | `b3sum` (fast), `sha256sum` (macOS ships it now) | `b3sum FILE`, `sha256sum FILE` | ✅ |
 | `locate` | `plocate` | `plocate '*.pdf'` | ✅ |
@@ -145,7 +149,6 @@ run, or when it does something no installed tool can do. Otherwise it waits.
 | `tailspin` | colourising `tail -f` | Duplicate-ish — `rtk log` already compacts logs; the rest is cosmetic |
 | `aria2c` | `wget`/`curl` for large multi-connection downloads | Narrow — `rtk wget`/`xh` cover ordinary fetches |
 | `f2` | batch rename (`mv` loops) | Covered — `fd --exec-batch mv` handles most renames |
-| `gron` | nothing directly; flattens JSON to `path = value` lines so `rg` can search it | **Distinct** and occasionally handy; `jq -r` + `rg` has covered every case so far |
 | `angle-grinder` (`agrind`) | `awk` for log aggregation/slicing | **Distinct** DSL; `mlr`/`jq` cover structured data, no log-pipeline need yet |
 | `fclones` | duplicate-file **content** detection | **Distinct** — fd/dust cannot do it; pays off only under disk pressure |
 | `atuin`, `mcfly` | shell history over SQLite | Human-interactive (group B) — nothing an agent can call |
@@ -159,15 +162,20 @@ All of these were installed and smoke-tested on 2026-10-11:
 
 ```bash
 HOMEBREW_NO_AUTO_UPDATE=1 brew install hexyl ouch glow doggo ripgrep-all rargs entr csvlens \
-  miller gnu-sed gawk uutils-coreutils dasel qsv watchexec b3sum
+  miller gnu-sed gawk uutils-coreutils dasel qsv watchexec b3sum \
+  duckdb jc gron moreutils
 cargo install runiq                  # `runiq` is NOT in Homebrew (crates-only)
 ```
 
 The second row covers the A2/A3 gaps (`mlr` for awk/sed/sort/join; `gsed`/`gawk`
 and `uu-*` for GNU/portable semantics; plus the structured-data and watch tools).
+The third row is the agent-data batch added 2026-10-11: `duckdb` (SQL over
+CSV/JSON/Parquet), `jc` (command output → JSON), `gron` (flatten JSON for
+`rg`/`grep`) and `moreutils` (`sponge`, `ifne`, `vidir`).
 Smoke tests: `mlr` 6.22, `gsed` 4.10, `qsv` 24.0, `dasel` 3, `b3sum`,
 `watchexec` 2.8, `uu-sort`/`uu-wc`/`uu-comm`, `hexyl`, `ouch`, `glow`, `doggo`,
-`rga`, `rargs`, `entr`, `csvlens` and `runiq` all answered.
+`rga`, `rargs`, `entr`, `csvlens`, `runiq`, `duckdb` 1.5.6, `jc` 1.26.0,
+`gron` 0.7.1 and `sponge`/`ifne` all answered.
 
 The tools left out, and why, are in **Not installed, and why** above.
 

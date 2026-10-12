@@ -140,8 +140,10 @@ scheduled `brew-fast-upgrade` job owns updating.
    macOS's BSD userland. Use the `g`-prefixed GNU tool (`gsort`, `gsed`,
    `gdate`) or `uu-*`, and check it exists before relying on it.
 8. **Do not reach for `sed`/`awk` to transform structured data.** Named-field
-   work (CSV/TSV/JSON) is `mlr`, `jq`, `yq`/`dasel` or `qsv`; positional
-   `awk`-style slicing is how off-by-one field bugs get written.
+   work (CSV/TSV/JSON) is `mlr`, `jq`, `yq`/`dasel` or `qsv`, and *aggregation*
+   (group-by, join, count, window) over files is `duckdb` — it reads CSV, JSON
+   and Parquet by path with no import step. Positional `awk`-style slicing is how
+   off-by-one field bugs get written.
 
 ## How an agent should use this
 
@@ -152,7 +154,7 @@ scheduled `brew-fast-upgrade` job owns updating.
 3. For a repo with no toolchain yet, point at
    `djbclark-ade/docs/apply-toolchain-prompt.md` (full, versioned installer).
 4. Report which tool ran when a search is slow, so a missing install is visible
-   (`command -v rg fd ast-grep mlr`).
+   (`command -v rg fd ast-grep mlr duckdb`).
 
 ## Reference files
 
