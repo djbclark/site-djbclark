@@ -108,7 +108,7 @@ hosts:
       # added 2026-09-26 when 18796 was allocated. Pairs: raw mcp-proxy (even)
       # behind a bearer-auth caddy (odd) that the 8443 funnel fronts.
       - {port: 18790, bind: "127.0.0.1", owner: unmanaged, service: hermes-mcp-bridge, status: active,
-         note: "mcp-proxy → ~/.local/libexec/hermes-mcp-bridge/hermes_mcp_plus.py (hermes mcp serve + ask_hermes). Also the shared Hermes MCP for local Claude Code sessions since 2026-09-26 (~/.claude.json hermes → http://127.0.0.1:18790/mcp)"}
+         note: "mcp-proxy → ~/.local/libexec/hermes-mcp-bridge/hermes_mcp_plus.py (hermes mcp serve + ask_hermes). Also the shared Hermes MCP for local Claude Code sessions since 2026-09-26 (~/.claude.json hermes → http://127.0.0.1:18790/mcp), and for Codex since 2026-10-12 (~/.codex/config.toml [mcp_servers.hermes] url)"}
       - {port: 18791, bind: "127.0.0.1", owner: unmanaged, service: hermes-mcp-auth, status: active,
          note: "caddy bearer gate for 18790; funnel path 8443/hermes-mcp"}
       - {port: 18792, bind: "127.0.0.1", owner: unmanaged, service: saner-mcp-bridge, status: active,
