@@ -1,6 +1,6 @@
 # SIPB LLMs as an agentic-coding backend: measurements and requests
 
-Date: 2026-10-12. Author: a SIPB LLMs user (djbclark), measurements run by an AI
+Date: 2026-10-12 (updated the same evening with `qwen3.5:27b`). Author: a SIPB LLMs user (djbclark), measurements run by an AI
 coding agent (Claude Code) through a local logging proxy. No credentials, prompts
 or responses are included here.
 
@@ -14,8 +14,9 @@ at a time, models run serially so we never asked the server for two models at on
 **Results.**
 
 1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
-2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
-3. What hurt reliability: tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around all four in a local proxy.
+2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `qwen3.5:27b` (dense) works but is slower (36 chunks/s): small task 4 of 4, 5-phase task 2 of 2 with the verify loop (541 and 572 s), 0 of 3 without it. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
+3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy.
+4. **Test other models yourselves:** the whole harness is a skill you can run, [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
 
 **Server-side improvements, most to least useful** (hardware fixed). "Human" is hands-on admin time (reading, deciding, approving, checking), not time the AI works or the server spends downloading or restarting. "AI tokens" is the estimated total an AI assistant would spend doing the work. Both are our estimates, not measurements.
 
@@ -41,7 +42,8 @@ at a time, models run serially so we never asked the server for two models at on
    and two models whose tool calls do not come through (gpt-oss:20b, devstral:24b).
 3. Of the models we could run a real tool-using task on, `qwen3.6:35b-a3b-q4_K_M`
    was the best overall; `qwen3.5:35b` and `qwen3-coder:30b` are usable; `gemma4:26b`
-   works but thinks too long.
+   works but thinks too long; `qwen3.5:27b` works only with the verify loop, runs about
+   2.5x slower than the 35b models and has a 16k effective context (section 4.5).
 
 ## 2. Raw server speed (direct probes, one request at a time)
 
@@ -53,12 +55,13 @@ at a time, models run serially so we never asked the server for two models at on
 | devstral:24b | 8.5 s | 61 | 3.0 s / 0.5 s |
 | gpt-oss:20b | 8.3 s | 197 | 1.3 s / 0.8 s |
 | gemma4:26b | 18.1 s | 156 | 1.9 s / 1.1 s |
+| qwen3.5:27b | 1.6 s (model was probably already loaded, so not a swap time) | 36 | 4.0 s / 0.7 s |
 
 "Chunks/s" counts streamed deltas including reasoning, so it is an upper bound on
 tokens/s. Cold = first request after another model was loaded; a later swap probe
 took 10-19 s. The repeat-prefix speedup shows prefix caching works on a warm model.
 
-## 3. Task results (real tool use, 37 valid runs, all against this server; runs that hit another provider by mistake are excluded on this server)
+## 3. Task results (real tool use, 46 valid runs, all against this server; runs that hit another provider by mistake are excluded on this server)
 
 Task A (two runs per cell): a three-test Python repo with two bugs; fix it, run the tests, commit.
 Task B: a five-phase job (build a small package with 12+ tests, run it, make one
@@ -71,6 +74,8 @@ network call, extend it with 4+ tests, write notes and commit), 600-900 s cap.
 | qwen3.5:35b (thinking) | 45 s / 45 s, pass | 444 s, tests passed, forgot the commit |
 | qwen3-coder:30b | 117 s / 37 s, pass | hit the 600 s cap |
 | gemma4:26b | 133 s / 64 s, pass | hit the 600 s cap (about 2400 reasoning chunks) |
+| qwen3.5:27b (thinking) | 66 s / 92 s, pass | hit the 600 s cap (21 tests passing, no commit); rules only: failed (the final test command failed); rules + verify loop: 2 of 2 passed in 541 s and 572 s |
+| qwen3.5:27b (no thinking) | 78 s / 66 s, pass | 260 s, 16 tests passed, forgot the commit |
 | gpt-oss:20b | failed 9 of 9 (6 aborted streams, 3 no-data stalls) | not run |
 | devstral:24b | failed 4 of 4 (0 tool calls) | not run |
 
@@ -78,7 +83,7 @@ One run per cell unless noted; treat the B column as indicative.
 
 ## 4. Server-side problems and requests
 
-4.1 **Tool-call streams end with `finish_reason: "stop"`.** A streamed response that
+4.1 **Tool-call streams end with `finish_reason: "stop"`.** A streamed response (every model we tried, `qwen3.5:27b` included) that
 contains a complete `tool_calls` delta finishes with `"stop"`, not `"tool_calls"`. OpenAI-
 style clients that continue the loop only on `tool_calls` (Crush, and others) end the
 turn after the first tool call without running it. We worked around it in the proxy
@@ -104,7 +109,11 @@ and tool parser; this model is built for agentic coding and would be useful.
 
 4.5 **An over-long prompt returns HTTP 200 with the body `null`.** The effective context
 is about 32768 tokens; larger requests return `null` instead of an error. A 400 with a
-message would let clients trim and retry. (Our proxy converts it.) Please also publish the
+message would let clients trim and retry. (Our proxy converts it.) `qwen3.5:27b` behaves
+differently: a prompt of about 66k tokens returned HTTP 200 with a normal completion and
+`usage.prompt_tokens` of 16386, so its effective context is about 16k tokens and longer
+prompts are cut silently (probably the start, which holds the instructions and tool
+list). Our agent runs on it passed, but a 32k-window client can lose its system prompt without any error. Please also publish the
 effective context length per model; if memory allows, raising `OLLAMA_CONTEXT_LENGTH`
 (with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` to keep the cache small)
 would let coding agents carry more tool output.
@@ -125,7 +134,7 @@ if one model could stay permanently resident, a mixture-of-experts coding model 
 3. One model for all requests from our agents (no title/summary calls to a second model),
    to avoid forcing swaps for other users.
 4. A short persistent rules file for the agent and an optional "verify the work and try
-   again" loop; the rules alone gave 0 of 3 passes on task B (the final test command failed), adding the verify loop gave 3 of 3 (1-2 verify rounds each).
+   again" loop; the rules alone gave 0 of 3 passes on task B (the final test command failed), adding the verify loop gave 3 of 3 (1-2 verify rounds each). The same on `qwen3.5:27b`: rules alone 0 of 1, with the verify loop 2 of 2.
 
 ## 6. Questions for the admins
 
@@ -144,7 +153,7 @@ Native" setting so Open WebUI passes Ollama's own tool calls through instead of 
 For `gpt-oss:20b` and `devstral:24b`, re-pull the model tags (templates and tool parsers are updated
 in Ollama releases) and check `ollama show --modelfile <model>` for a template that handles tools.
 A 30-line conformance script (one tool, expect a `tool_calls` delta and `finish_reason: "tool_calls"`)
-run after each upgrade would catch regressions. Ours is [bench/toolcall_conformance.py](bench/toolcall_conformance.py) (stdlib Python, `SIPB_API_KEY=... toolcall_conformance.py MODEL...`, `--long` also checks the over-long-prompt case). On 2026-10-12 it failed against the server directly (`finish_reason 'stop'`, streamed and not) and passed through our proxy.
+run after each upgrade would catch regressions. Ours is [bench/toolcall_conformance.py](bench/toolcall_conformance.py) (stdlib Python, `SIPB_API_KEY=... toolcall_conformance.py MODEL...`, `--long` also checks the over-long-prompt case). On 2026-10-12 it failed against the server directly (`finish_reason 'stop'`, streamed and not) and passed through our proxy; it gave the same result for `qwen3.5:27b`, whose `--long` check also failed (200 with a truncated completion, not an error).
 
 7.2 **Make memory go further without new hardware.** `OLLAMA_FLASH_ATTENTION=1` plus
 `OLLAMA_KV_CACHE_TYPE=q8_0` roughly halves the KV cache, which either gives headroom at 32768 tokens
@@ -213,3 +222,4 @@ Code in other repositories:
 8. Our Crush build with the ACP bridge and an auto-approve mode (upstream pull requests):
    <https://github.com/charmbracelet/crush/pull/2450> and <https://github.com/charmbracelet/crush/pull/3909>.
 9. Index of all our SIPB-related material, including the quota collector: [README.md](README.md).
+10. **The benchmark as a skill, so you can test other models** (one model at a time, with an etiquette section and the steps to update this report on a branch): <https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench> (its [SKILL.md](https://github.com/djbclark/djbclark-ade/blob/master/skills/sipb-llm-bench/SKILL.md)). Run `bench.py run --models MODEL`, then `bench.py summary`.
