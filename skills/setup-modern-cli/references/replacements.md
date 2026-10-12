@@ -23,7 +23,7 @@ add; it is not a policy.
 | `find … \| xargs grep …` | `rg` (one command) | `rg -n -g '*.py' '<pat>' <path>`; `rg -l` files, `rg -c` counts | ✅ |
 | `grep` inside PDFs/Office/zips | `rga` (ripgrep-all) | `rga -n '<pat>' <path>` | ✅ |
 | `cat` | `bat` | `bat -n FILE`, slice `bat -n --line-range 40:80 FILE` | ✅ |
-| `less` / `more` (non-interactive) | `bat` | `bat --paging=never -n FILE` (interactive pager `ov` if you want one) | ✅ |
+| `less` / `more` (non-interactive) | `bat` | `bat --paging=never -n FILE` (interactive pager `ov` if you want one) | ✅ bat |
 | `xxd` / `hexdump` | `hexyl` | `hexyl FILE` | ✅ |
 | `sed -i s/a/b/` | `srgn` | `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` | ✅ |
 | `cut` / `awk` (columns) | `hck` (or `choose`) | `hck -d, -f2-4` | ✅ |
@@ -36,12 +36,12 @@ add; it is not a policy.
 | raw `git diff` / `git log -p` | `delta` as the pager | set once in git config (ask first) | ✅ |
 | `time cmd` for real numbers | `hyperfine` | `hyperfine --warmup 3 'cmd'` | ✅ |
 | `man` (to recall flags) | `tldr` | `tldr rg` | ✅ |
-| hand-parsing JSON | `jq` (`jaq` is a faster clone; `gron` flattens for grep) | `jq -r '.accounts[].provider'` | ✅ |
+| hand-parsing JSON | `jq` (`jaq` is a faster clone; `gron` flattens for grep) | `jq -r '.accounts[].provider'` | ✅ jq |
 | hand-parsing YAML/TOML/XML | `yq`; `dasel` for a format zoo | `yq '.services[].image'`; `dasel query -i json 'x.y' < f.json` (`dasel` 3 takes the query plus `-i`/`-o`, and reads stdin — there is no file argument) | ✅ |
 | `cat x.csv` + eyeballing | `qsv` / `csvlens` | `qsv stats x.csv` | ✅ |
-| `tail -f` a log while working | `rtk log`, `tailspin`, `lnav` | `rtk log < file` | ✅ |
+| `tail -f` a log while working | `rtk log`, `tailspin`, `lnav` | `rtk log < file` | ✅ rtk log |
 | `curl` for JSON APIs | `xh` | `xh POST url k:=v` | ✅ |
-| `wget` | `rtk wget`, `aria2c` | `rtk wget <url>` | ✅ |
+| `wget` | `rtk wget`, `aria2c` | `rtk wget <url>` | ✅ rtk wget |
 | `dig` | `doggo` | `doggo example.com MX` | ✅ |
 | `tar`/`unzip`/`7z` | `ouch` | `ouch decompress x.tar.gz`, `ouch compress dir out.zip` | ✅ |
 | `tree` | `eza --tree` | `eza --tree --level=2 --icons` | ✅ |
@@ -131,7 +131,29 @@ either hangs waiting on stdin or returns nothing useful.
 8. **Editing and bulk file work:** `helix`/`micro`/`fresh` (editors), `f2`/
    `nomino` (batch rename), `fclones` (duplicates), `kondo` (build artifacts).
 
-## Optional installs covering the gaps above
+## Not installed, and why
+
+Every tool above is a *candidate*; the ones below were deliberately left out.
+The rule: an alternate is installed when it is what the agent's own shell will
+run, or when it does something no installed tool can do. Otherwise it waits.
+
+| Not installed | Replaces / augments | Why it is out for now |
+|---|---|---|
+| `jaq` | `jq` (faster clone) | Duplicate — `jq` covers it; revisit only if jq's speed ever bites |
+| `mdcat` | markdown rendering | Duplicate — `glow` is installed and does the same |
+| `ov` | `less` (pager) | Duplicate — `bat`/`rtk log` cover non-interactive paging, `less` covers interactive |
+| `tailspin` | colourising `tail -f` | Duplicate-ish — `rtk log` already compacts logs; the rest is cosmetic |
+| `aria2c` | `wget`/`curl` for large multi-connection downloads | Narrow — `rtk wget`/`xh` cover ordinary fetches |
+| `f2` | batch rename (`mv` loops) | Covered — `fd --exec-batch mv` handles most renames |
+| `gron` | nothing directly; flattens JSON to `path = value` lines so `rg` can search it | **Distinct** and occasionally handy; `jq -r` + `rg` has covered every case so far |
+| `angle-grinder` (`agrind`) | `awk` for log aggregation/slicing | **Distinct** DSL; `mlr`/`jq` cover structured data, no log-pipeline need yet |
+| `fclones` | duplicate-file **content** detection | **Distinct** — fd/dust cannot do it; pays off only under disk pressure |
+| `atuin`, `mcfly` | shell history over SQLite | Human-interactive (group B) — nothing an agent can call |
+| `lazygit`, `gitui`, `tig`, `serie` | git TUI | Human-interactive — git here is driven through agents and the CLI |
+| `lnav` | log TUI | Human-interactive, and overlaps `rtk log`/`tailspin` |
+| `nomino`, `kondo` | batch rename / build-artifact pruning | Human-interactive (group B); not wanted yet |
+
+## Optional installs
 
 All of these were installed and smoke-tested on 2026-10-11:
 
@@ -147,9 +169,7 @@ Smoke tests: `mlr` 6.22, `gsed` 4.10, `qsv` 24.0, `dasel` 3, `b3sum`,
 `watchexec` 2.8, `uu-sort`/`uu-wc`/`uu-comm`, `hexyl`, `ouch`, `glow`, `doggo`,
 `rga`, `rargs`, `entr`, `csvlens` and `runiq` all answered.
 
-Still uninstalled alternates — install only if a need appears: `gron` and `jaq`
-(the JSON companions to `jq`), `mdcat`, `angle-grinder` (`agrind`, awk over
-logs), `tailspin`, `lnav`, `fclones`, `f2`, `atuin`, `lazygit`, `aria2c`, `ov`.
+The tools left out, and why, are in **Not installed, and why** above.
 
 One idiom to keep right: `dasel` 3 replaced its old CLI. It is
 `dasel query -i json 'x.y' < f.json` — the query subcommand plus `-i`/`-o`, and
