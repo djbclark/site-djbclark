@@ -30,6 +30,53 @@ path is now a symlink to this directory.)
 | [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) | the same harness packaged as a reusable skill (any model, one at a time, plus how to update the report); `bench/` below is the exact copy the report's numbers came from |
 | [bench/](bench/) | raw benchmark rows (`results.jsonl`), the harness (`bench.py`), the tool-call conformance check (`toolcall_conformance.py`), the agent rules file (`rules.md`), the Crush config without the key (`crushrc.example`) |
 
+## Test another model yourself
+
+The benchmark behind this report is packaged as an agent skill with a plain command-line
+interface, [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench)
+(Python standard library; MIT-licensed repo). It tests one model at a time, so it never asks the
+shared server for two models at once. Please read its "Be a good neighbour" section first:
+run it off-peak, one model at a time, never in a loop.
+
+**1. Get it** (about 30 s; a sparse checkout takes only the skill directory):
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/djbclark/djbclark-ade
+cd djbclark-ade && git sparse-checkout set skills/sipb-llm-bench
+cd skills/sipb-llm-bench
+export SIPB_API_KEY=sk-...        # Open WebUI: profile icon, Settings, Account, API keys
+```
+
+**2. Without any agent** (needs only Python 3.9+ and a network that reaches the server):
+
+```bash
+python3 toolcall_conformance.py --long MODEL     # 3 requests: do tool calls come back correctly?
+python3 bench.py run --models MODEL --probes-only --tag p1   # speed probes, about 1 minute
+python3 bench.py summary                          # markdown table from results.jsonl
+```
+
+**3. The full benchmark** (adds the two coding tasks, 15-40 minutes per model): needs an agent
+runner. The default is Charm Crush through `acp-run`
+([djbclark-ade/tools/acp-run](https://github.com/djbclark/djbclark-ade/tree/master/tools/acp-run), build notes in the skill's
+SKILL.md); any other agent works with `--runner 'CMD'` (placeholders `{dir}`, `{prompt}`, `{cap}`, `{log}`).
+Start the loopback proxy first, because Open WebUI 0.6.30 ends tool-call streams with the wrong
+`finish_reason` and agents then stop after one tool call (section 4.1):
+
+```bash
+git clone --depth 1 https://github.com/djbclark/site-djbclark && python3 site-djbclark/tools/sipb-llms-proxy/sipb-llms-proxy 8890 &
+SIPB_BASE=http://127.0.0.1:8890/api python3 bench.py run --models MODEL --dry-run   # the plan, nothing sent
+SIPB_BASE=http://127.0.0.1:8890/api python3 bench.py run --models MODEL --rules --extra '--verify|python3 -m unittest discover' --tag m1
+```
+
+**4. As a skill inside a coding agent:** link the directory into the agent's skills folder
+(`ln -s "$PWD" ~/.claude/skills/sipb-llm-bench` for Claude Code; other agents read their own
+skills directory) and say "test model MODEL on SIPB LLMs" or run `/sipb-llm-bench`.
+
+**5. Update this report with your results:** the skill's "Updating the report" section lists the
+exact steps (a branch of this repository, which rows and sections to touch, and
+`report/build_page.py` to render the web page). Send `bench/results.jsonl` rows (no prompts, no
+responses, no keys) or a pull request to `sipb-llms@mit.edu` or this repository.
+
 ## Related material in other repositories
 
 Public (GitHub, owner `djbclark`):
