@@ -92,8 +92,9 @@ answer "does X exist?" with `find` or an exact `read_note`. Detail:
 ## Where work happens — plain git in `~/ops`
 
 Work directly in `~/ops/{stayturgid,site-djbclark,site-private}`: edit in place,
-commit to `master`, **push at opportune moments** (branches/PRs only when you want
-review). **Running deployments read from `~/ops`**, so a bad commit is live at
+commit to `master`, **commit and push your own changes as each unit lands, unasked**
+(2026-10-12; a file also holding another agent's edits: stage only your hunks with
+`git apply --cached`; branches/PRs only when you want review). **Running deployments read from `~/ops`**, so a bad commit is live at
 once: check what reads a file first, keep commits small, prefer a quick revert.
 
 **Data, committed in place:** `site-private/memory/` and `site-djbclark/research/`.

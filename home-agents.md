@@ -106,13 +106,13 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     merge first if both are files). No standalone `CLAUDE.md`; vendor
     instruction files under `~` likewise, bar non-symlinkable formats (Cursor
     `.mdc`). (`memory/feedback_claude_md_symlink_to_agents_md.md`)
-21. Plain git: edit the three `~/ops` repos in place on `master`; **push at
-    opportune moments**. **Running deployments read from `~/ops`**: small
-    commits, quick reverts. **Data, committed in place:** `site-private/memory/`
-    and `site-djbclark/research/` (**site-djbclark is public**). Never stage
-    `site-private/codex/config.toml` or hand-edit `memory/codex/`. **Another
-    agent's unstaged edits in the checkout:** never stash, add or reset them,
-    never `commit -a` ([[reference_agent_rules_ops_housekeeping]]).
+21. **Commit and push your own changes, every repo, as each unit lands, unasked;
+    a file shared with another agent's edits: stage only your hunks (`git apply
+    --cached`)** (2026-10-12; `memory/feedback_commit_push_opportune.md`). `~/ops`:
+    plain `master`; **deployments read it**: small commits, quick reverts. **Data
+    in place:** `site-private/memory/`, `site-djbclark/research/` (**public**). Never
+    stage `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/
+    reset/`commit -a` others' edits ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`,
     never `~/s/...`** (2026-10-06; a generated, locked symlink farm: never write
     or start sessions there). After adding or removing a top-level `~/src` entry
