@@ -16,7 +16,7 @@ at a time, models run serially so we never asked the server for two models at on
 1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
 2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `qwen3.5:27b` (dense) works but is slower (36 chunks/s): small task 4 of 4, 5-phase task 2 of 2 with the verify loop (541 and 572 s), 0 of 3 without it. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
 3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy.
-4. **Test other models yourselves:** the whole harness is a skill you can run, [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
+4. **Test other models yourselves:** the whole harness is a skill you can run (install and use: section 9), [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
 
 **Server-side improvements, most to least useful** (hardware fixed). "Human" is hands-on admin time (reading, deciding, approving, checking), not time the AI works or the server spends downloading or restarting. "AI tokens" is the estimated total an AI assistant would spend doing the work. Both are our estimates, not measurements.
 
@@ -223,3 +223,11 @@ Code in other repositories:
    <https://github.com/charmbracelet/crush/pull/2450> and <https://github.com/charmbracelet/crush/pull/3909>.
 9. Index of all our SIPB-related material, including the quota collector: [README.md](README.md).
 10. **The benchmark as a skill, so you can test other models** (one model at a time, with an etiquette section and the steps to update this report on a branch): <https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench> (its [SKILL.md](https://github.com/djbclark/djbclark-ade/blob/master/skills/sipb-llm-bench/SKILL.md)). Run `bench.py run --models MODEL`, then `bench.py summary`.
+
+## 9. Test another model yourself
+
+The harness is a skill with a command-line interface that needs only Python and an API key: <https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench>.
+Install steps, the commands for probes only, for the full benchmark with an agent and the proxy, and for updating this report on a branch are in [README.md](README.md) ("Test another model yourself") and in the skill's SKILL.md. In short:
+`git clone --depth 1 --filter=blob:none --sparse https://github.com/djbclark/djbclark-ade`, `git sparse-checkout set skills/sipb-llm-bench`,
+`export SIPB_API_KEY=sk-...`, `python3 toolcall_conformance.py --long MODEL`, `python3 bench.py run --models MODEL --probes-only`.
+Run one model at a time, off-peak: the server holds one model on the GPU.
