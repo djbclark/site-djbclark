@@ -16,6 +16,8 @@ PROXY = "http://127.0.0.1:8890/api/chat/completions"
 COMBOS = {
     "q35-think":  ("qwen3.5:35b", True, "high"),
     "q35-nothink": ("qwen3.5:35b", False, "none"),
+    "q35-27b-think": ("qwen3.5:27b", True, "high"),
+    "q35-27b-nothink": ("qwen3.5:27b", False, "none"),
     "q36-think":  ("qwen3.6:35b-a3b-q4_K_M", True, "high"),
     "q36-nothink": ("qwen3.6:35b-a3b-q4_K_M", False, "none"),
     "coder30":    ("qwen3-coder:30b", False, None),

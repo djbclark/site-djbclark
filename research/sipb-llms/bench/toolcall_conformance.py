@@ -63,6 +63,14 @@ def check_long(base, model):
     try:
         with post(base, model, {"stream": False, "max_tokens": 4, "messages": big}, 600) as r:
             body = r.read()
+        try:
+            d = json.loads(body)
+        except ValueError:
+            d = body
+        if isinstance(d, dict):    # a real completion: say whether the prompt was cut to fit
+            pt = (d.get("usage") or {}).get("prompt_tokens")
+            return ("HTTP 200 with a completion for a prompt of about 66k tokens (prompt_tokens=%s): "
+                    "silently truncated, or a larger context than 32768 (expected an error status)" % pt)
         return "HTTP 200 with body %r for an over-long prompt (expected an error status)" % body[:40]
     except urllib.error.HTTPError:
         return None

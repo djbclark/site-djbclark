@@ -27,6 +27,7 @@ path is now a symlink to this directory.)
 | [openapi.json](openapi.json) | the Open WebUI OpenAPI spec served at `/openapi.json` (refreshed 2026-10-12) |
 | [setup.md](setup.md) | how Crush, Hermes, opencode and the proxy are wired on this machine |
 | [REPORT.md](REPORT.md) | measurements, problems and suggestions for the SIPB admins (2026-10-12) |
+| [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) | the same harness packaged as a reusable skill (any model, one at a time, plus how to update the report); `bench/` below is the exact copy the report's numbers came from |
 | [bench/](bench/) | raw benchmark rows (`results.jsonl`), the harness (`bench.py`), the tool-call conformance check (`toolcall_conformance.py`), the agent rules file (`rules.md`), the Crush config without the key (`crushrc.example`) |
 
 ## Related material in other repositories
