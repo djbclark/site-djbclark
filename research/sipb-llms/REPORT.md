@@ -97,7 +97,7 @@ if one model could stay permanently resident, a mixture-of-experts coding model 
 1. Loopback proxy (about 500 lines, stdlib Python): finish_reason fix, `null` to 400,
    per-model request serialization, retries, and a latency log (model, prompt size,
    queue wait, time to first token, total, status, raw and sent finish_reason; no content).
-   Happy to share it.
+   Source, tests and the launchd plist: <https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy>; its README documents the log fields.
 2. Client settings: 10-minute idle timeout, unused tools and skills disabled to keep
    prompts small (the default tool/skill prompt was about 28k tokens of a 32k window).
 3. One model for all requests from our agents (no title/summary calls to a second model),
@@ -122,7 +122,7 @@ Native" setting so Open WebUI passes Ollama's own tool calls through instead of 
 For `gpt-oss:20b` and `devstral:24b`, re-pull the model tags (templates and tool parsers are updated
 in Ollama releases) and check `ollama show --modelfile <model>` for a template that handles tools.
 A 30-line conformance script (one tool, expect a `tool_calls` delta and `finish_reason: "tool_calls"`)
-run after each upgrade would catch regressions; we can share ours.
+run after each upgrade would catch regressions. Ours is [bench/toolcall_conformance.py](bench/toolcall_conformance.py) (stdlib Python, `SIPB_API_KEY=... toolcall_conformance.py MODEL...`, `--long` also checks the over-long-prompt case). On 2026-10-12 it failed against the server directly (`finish_reason 'stop'`, streamed and not) and passed through our proxy.
 
 7.2 **Make memory go further without new hardware.** `OLLAMA_FLASH_ATTENTION=1` plus
 `OLLAMA_KV_CACHE_TYPE=q8_0` roughly halves the KV cache, which either gives headroom at 32768 tokens
@@ -149,7 +149,7 @@ agent clients then get the same behaviour as the web UI. Thinking models should 
 thinking budget capped (`gemma4:26b` produced ~2400 reasoning chunks on one task).
 
 7.6 **Tell clients what is happening while they wait.** A small reverse proxy (nginx, Caddy, or the
-~100 lines of Python we use) in front of Open WebUI can (a) send an SSE comment every 15 s while
+Python [proxy](https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy/sipb-llms-proxy) we use) in front of Open WebUI can (a) send an SSE comment every 15 s while
 a request is queued so idle timeouts do not fire, (b) cap in-flight requests per API key (1 per model
 is enough for an interactive agent), (c) answer 429 or 503 with `Retry-After` when the queue is
 longer than N instead of holding the connection, and (d) return a 400 with token counts for an
@@ -159,7 +159,7 @@ over-long prompt instead of `null`. Open WebUI itself has no queue visibility.
 with 20k+ token prompts; one agent can hold the only model for minutes. Per-key concurrency of 1,
 a published etiquette note (keep prompts small, one model, no parallel agents), and optionally
 off-peak guidance for long jobs would protect web-UI users. Per-key request logs (model, prompt
-size, time to first token, queue wait) would show who needs what; our log schema is in the proxy.
+size, time to first token, queue wait) would show who needs what; our log schema is in the [proxy README](https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy/README.md).
 
 7.8 **Observe and publish.** A status page with `ollama ps` (loaded model, memory), queue length and
 a rolling time-to-first-token would turn "is it down or busy?" (FAQ) into a lookup. Alert when
@@ -171,9 +171,23 @@ and [api.md](api.md).
 other users' load, and what Open WebUI features are enabled. If you share the GPU class and
 `ollama ps` output we can narrow the list.
 
-## 8. Related material
+## 8. Everything we used, with links
 
-The proxy, the aiuse collector, the agent-runner integration and the other pieces are indexed in
-[README.md](README.md) (Related material in other repositories), with links. Raw data and the
-harness are in [bench/](bench/); the proxy is
-<https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy>.
+Nothing is held back. Files in this directory (all public, `site-djbclark` repository):
+
+1. Raw measurements: [bench/results.jsonl](bench/results.jsonl), one JSON object per probe or task run
+   (runs marked INVALID were contaminated by a mistake on our side and are excluded from section 3).
+2. Benchmark harness: [bench/bench.py](bench/bench.py) (probes, then tasks A and B through an agent).
+3. Tool-call conformance check: [bench/toolcall_conformance.py](bench/toolcall_conformance.py).
+4. Agent rules file: [bench/rules.md](bench/rules.md). Crush configuration (key removed): [bench/crushrc.example](bench/crushrc.example).
+5. Server reference as we see it: [api.md](api.md), [openapi.json](openapi.json), [faq.md](faq.md), and how we set up clients: [setup.md](setup.md).
+
+Code in other repositories:
+
+6. The loopback proxy (finish_reason fix, `null` to 400, per-model queue, retries, latency log, tests, launchd plist):
+   <https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy>.
+7. `acp-run`, the agent runner with the verify-and-retry loop (`--verify CMD`):
+   <https://github.com/djbclark/djbclark-ade/tree/master/tools/acp-run>.
+8. Our Crush build with the ACP bridge and an auto-approve mode (upstream pull requests):
+   <https://github.com/charmbracelet/crush/pull/2450> and <https://github.com/charmbracelet/crush/pull/3909>.
+9. Index of all our SIPB-related material, including the quota collector: [README.md](README.md).

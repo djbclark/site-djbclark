@@ -27,7 +27,7 @@ path is now a symlink to this directory.)
 | [openapi.json](openapi.json) | the Open WebUI OpenAPI spec served at `/openapi.json` (refreshed 2026-10-12) |
 | [setup.md](setup.md) | how Crush, Hermes, opencode and the proxy are wired on this machine |
 | [REPORT.md](REPORT.md) | measurements, problems and suggestions for the SIPB admins (2026-10-12) |
-| [bench/](bench/) | raw benchmark rows (`results.jsonl`), the harness (`bench.py`), the agent rules file (`rules.md`) |
+| [bench/](bench/) | raw benchmark rows (`results.jsonl`), the harness (`bench.py`), the tool-call conformance check (`toolcall_conformance.py`), the agent rules file (`rules.md`), the Crush config without the key (`crushrc.example`) |
 
 ## Related material in other repositories
 
