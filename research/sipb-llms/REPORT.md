@@ -111,6 +111,69 @@ if one model could stay permanently resident, a mixture-of-experts coding model 
 2. Which model do you want agent traffic on, if you can pin one?
 3. Is an Open WebUI upgrade planned? 0.6.30 is behind Ollama 0.32.13.
 
-Raw data and scripts: `~/.local/state/bigteam/sipb-bench/` on the author's machine
-(`results.jsonl`, `bench.py`); the proxy and its tests are in
-`tools/sipb-llms-proxy/` of the author's site-djbclark repository.
+## 7. Suggestions for the admins (hardware treated as fixed)
+
+Everything below is a software or configuration change; none needs new hardware. We cannot see
+the server, so treat them as hypotheses to check, cheapest first.
+
+7.1 **Fix the tool-call path (the biggest win for coding agents).** Upgrade Open WebUI past
+0.6.30 and check whether the `finish_reason` mapping is fixed; try the per-model "Function Calling:
+Native" setting so Open WebUI passes Ollama's own tool calls through instead of re-parsing them.
+For `gpt-oss:20b` and `devstral:24b`, re-pull the model tags (templates and tool parsers are updated
+in Ollama releases) and check `ollama show --modelfile <model>` for a template that handles tools.
+A 30-line conformance script (one tool, expect a `tool_calls` delta and `finish_reason: "tool_calls"`)
+run after each upgrade would catch regressions; we can share ours.
+
+7.2 **Make memory go further without new hardware.** `OLLAMA_FLASH_ATTENTION=1` plus
+`OLLAMA_KV_CACHE_TYPE=q8_0` roughly halves the KV cache, which either gives headroom at 32768 tokens
+or lets `OLLAMA_CONTEXT_LENGTH` rise for the mixture-of-experts models whose weights are small
+(qwen3.6:35b-a3b, qwen3-coder:30b, gpt-oss:20b). Check `ollama ps` for the real split between
+GPU and CPU after each change. `aya:35b` and `aya:8b` are stored unquantized (F16): a Q4/Q5 build
+would load faster and leave room, and they are the likeliest cause of a slow swap.
+
+7.3 **Fewer, cheaper model swaps.** (a) Pin one fast general model with `OLLAMA_KEEP_ALIVE=-1`
+(or a day) so most requests find it loaded; our data says a mixture-of-experts model with about
+3B active parameters is the best fit (7.4). (b) Tag a short "recommended" set in Open WebUI and
+hide or group the rest: 48 entries, many of them niche, push users into swaps that cost everyone
+10-19 s. (c) Keep `OLLAMA_NUM_PARALLEL=1` for dense models (our prefix cache hit: 2.0 s first,
+0.6 s repeat for a 10k-token prompt), and try 2 only for small mixture-of-experts models.
+
+7.4 **Prefer mixture-of-experts models for shared GPUs.** On the same memory they decoded 1.5-3x
+faster than the dense models in our probes (qwen3-coder:30b 163 and gpt-oss:20b 197 chunks/s vs
+devstral:24b 61) and `qwen3.6:35b-a3b` was the most reliable agent model. Retiring or demoting dense
+models of similar quality (and the F16 ones) frees the single GPU slot for models that finish sooner.
+
+7.5 **Pin the settings that matter in Open WebUI model presets.** A preset per recommended model
+with `num_ctx`, `keep_alive` and a sane default reasoning effort removes per-client guesswork;
+agent clients then get the same behaviour as the web UI. Thinking models should have their
+thinking budget capped (`gemma4:26b` produced ~2400 reasoning chunks on one task).
+
+7.6 **Tell clients what is happening while they wait.** A small reverse proxy (nginx, Caddy, or the
+~100 lines of Python we use) in front of Open WebUI can (a) send an SSE comment every 15 s while
+a request is queued so idle timeouts do not fire, (b) cap in-flight requests per API key (1 per model
+is enough for an interactive agent), (c) answer 429 or 503 with `Retry-After` when the queue is
+longer than N instead of holding the connection, and (d) return a 400 with token counts for an
+over-long prompt instead of `null`. Open WebUI itself has no queue visibility.
+
+7.7 **Fair use between interactive and agent traffic.** Agent clients send 10-30 requests per task
+with 20k+ token prompts; one agent can hold the only model for minutes. Per-key concurrency of 1,
+a published etiquette note (keep prompts small, one model, no parallel agents), and optionally
+off-peak guidance for long jobs would protect web-UI users. Per-key request logs (model, prompt
+size, time to first token, queue wait) would show who needs what; our log schema is in the proxy.
+
+7.8 **Observe and publish.** A status page with `ollama ps` (loaded model, memory), queue length and
+a rolling time-to-first-token would turn "is it down or busy?" (FAQ) into a lookup. Alert when
+time to first token exceeds ~60 s. Publish a per-model capability matrix (context, tool calling,
+vision, thinking) and the Friday maintenance window next to the model list; ours is in section 3
+and [api.md](api.md).
+
+7.9 **What we cannot judge from outside:** GPU model and memory, whether CPU offload is in play,
+other users' load, and what Open WebUI features are enabled. If you share the GPU class and
+`ollama ps` output we can narrow the list.
+
+## 8. Related material
+
+The proxy, the aiuse collector, the agent-runner integration and the other pieces are indexed in
+[README.md](README.md) (Related material in other repositories), with links. Raw data and the
+harness are in [bench/](bench/); the proxy is
+<https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy>.
