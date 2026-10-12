@@ -8,11 +8,13 @@
 // Push vs poll: an AXObserver is registered (window/created/layout events) but
 // on macOS 27 Notification Center never delivers those events (verified: zero
 // callbacks with 9 notification types, with and without the AX enable flags),
-// so the real trigger is a 0.25 s tick that only reads each window's top few
+// so the real trigger is a 1 s tick that only reads each window's top few
 // AX levels and descends into elements whose subrole is AXNotificationCenter*
 // (banner / alert / alert stack). The desktop-widget windows that live in the
 // same process (Weather, Calendar, Photos) never match. Otifier does a full
-// tree walk every 1.5 s; this is ~6x faster and much cheaper per tick.
+// tree walk every 1.5 s; this is faster and much cheaper per tick. The tick
+// was 0.25 s until 2026-10-12: that kept NotificationCenter at ~30% CPU plus
+// ~15% here, a steady half core (djbclark chose 1 s).
 //
 //   otp-banner-watch                 run (what the LaunchAgent does)
 //   otp-banner-watch --dump          log banner text and AX events to stderr
@@ -130,5 +132,5 @@ NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunch
         _ = attach()
     }
 }
-Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in scan() }
+Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in scan() }
 RunLoop.main.run()
