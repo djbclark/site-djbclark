@@ -36,3 +36,10 @@ After editing: `launchctl kickstart -k gui/$(id -u)/land.charm.sipb-llms-proxy`;
 the port takes about 30 s to open when the machine is heavily loaded.
 Port 8890 is not in `registry/ports.yml` (adding it would make the landing-health
 pager watch it).
+
+Clients (2026-10-12): Crush (`~/.config/crush/crushrc`) and Hermes (provider `sipb-llms`
+in `~/.hermes/config.yaml`, `base_url: http://127.0.0.1:8890/api`) both go through it;
+opencode's `sipb` provider still goes direct. Reboots: it is a LaunchAgent with
+`RunAtLoad` and `KeepAlive`, so it starts at login and restarts if killed (checked
+2026-10-12 by bootout/bootstrap and `kill -9`); it needs no network to start. Like the
+other agents on this machine it does not run before anyone has logged in.
