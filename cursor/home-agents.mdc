@@ -104,6 +104,12 @@ drop notes in `memory/codex/extensions/ad_hoc/`. **If another agent has unstaged
 edits in the checkout,** never stash, add or reset their files: `git fetch`; if
 only ahead, plain `git push`; if behind, wait or ask.
 
+**A stopped or `launchctl`-disabled service may be deliberate** (2026-10-11):
+check `site-private/memory/` before "repairing" it — a deliberate disable looks
+like a fault, and `launchctl load -w`/`bootstrap` silently clears the override.
+Fix any role that says otherwise (as `stayturgid` #opencode-web did), rather than
+re-enabling the unit.
+
 ## `~/s` is a view — reference `~/src`, never `~/s` (2026-10-06)
 
 `~/s` is a generated, locked (`uchg`) symlink farm that lets djbclark browse

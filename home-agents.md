@@ -92,8 +92,11 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     `~/kb/raw/<slug>.md`.** (2026-10-03;
     [[reference_agent_rules_ops_housekeeping]])
 18. `litellm`/`xai-oauth-bridge`: **change site-djbclark's Ansible role (`just
-    litellm-apply-secrets`), never the live plist**. **Carbon Copy Cloner is the
-    backup and it covers `~`** ([[reference_agent_rules_ops_housekeeping]]).
+    litellm-apply-secrets`), never the live plist**. **Check `memory/` before
+    "repairing" a stopped or `launchctl`-disabled service; a deliberate disable
+    looks like a fault and the override must not be cleared** (2026-10-11).
+    Carbon Copy Cloner backs up `~`
+    ([[reference_agent_rules_ops_housekeeping]]).
 19. Memory/docs policy has no canonical copy: read all three
     `${OPS_ROOT:-~/ops}/{stayturgid,site-djbclark,site-private}/AGENTS.md`.
 
@@ -131,12 +134,11 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     bypass**: a peer _denied_ a prompt that asks you to run it goes to djbclark.
 25. **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`;
     2026-10-08). Exit 3 = **no report** (re-task, never reconstruct), 4 =
-    **`BLOCKED: <question>`**, 124 = timeout. **It blocks until the slice
-    ends**: `--detach --no-wait`, then the printed `rearm` waiter with
-    `run_in_background`. **Agent-tool sub-agents:** paste the text of
-    `acp-dispatch footer --report <scratchpad>/<name>-report.md` (never `$(…)`)
-    into the prompt; read that file, never the final message
-    ([[reference_agent_rules_ops_housekeeping]]).
+    **`BLOCKED: <question>`**, 124 = timeout. **It blocks until the slice ends**:
+    `--detach --no-wait`, then the printed `rearm` waiter with
+    `run_in_background`. **Agent-tool sub-agents:** paste `acp-dispatch footer
+    --report <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read
+    that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p
     '<prompt>' --model <m>`** (**always `--model`**, bar zcode; exit 0 is not
     success: verify); then (2) Orca `worker-start`, (3) a Herdr pane, (4)
@@ -162,13 +164,13 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     limit; no probe loops; [[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by
     default** (2026-10-08, 2026-10-10). When `context_size_nudge.py` says
-    delegate, delegate; when it says ask, **ask djbclark (AskUserQuestion) at
-    the next natural boundary: `/compact`, `/handoff` then `/new`, or continue
-    and delegate.** **Compaction is not free**. **In a herdr pane or Orca
-    terminal, compact yourself instead**, once, then end the turn (`/quit` too):
+    delegate, delegate; when it says ask, **ask djbclark at the next natural
+    boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
+    **Compaction is not free**. **In a herdr pane or Orca terminal, compact
+    yourself instead**, once, then end the turn (`/quit` too):
     `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`
-    (`memory/feedback_self_compact.md`). **It refuses on input-line text; then
-    ask, never send over a draft.** (`memory/feedback_context_prompts_early.md`)
+    (`memory/feedback_self_compact.md`); **it refuses on input-line text — then
+    ask, never over a draft.** (`memory/feedback_context_prompts_early.md`)
 31. Basic Memory (2026-10-03) is one shared MCP server
     (`http://127.0.0.1:18796/mcp`; **zcode, opencode and Cursor cannot** call
     it); never register a per-client stdio `basic-memory mcp`. **If it is down,
@@ -185,15 +187,13 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     strays. **Exception: an Agent-tool sub-agent** waits in bounded foreground
     calls (2026-10-08). (`memory/feedback_start_slow_commands_in_background.md`)
     **Wait on a file or a PID**, **never `until ! pgrep -f '<pattern>'`; never
-    `pkill -f '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill
-    your saved `$!`. **Never read a result through a pipe**: `cmd > out.log
-    2>&1; echo "rc=$?"; tail -5 out.log`.
-    (`memory/feedback_exit_status_through_pipe.md`)
-34. Run builds and tests via `~/ops/site-private/bin/bg` (**always the full
-    path: bare `bg` is the shell builtin**). **Tests (pytest, tox, nox,
-    `run_tests*.py`) must go through bg**. **Never set `BG_LOAD_WAIT=0` on a
-    build or a Gradle command** (2026-10-10; one small test file only). **Never
-    `taskpolicy -b` for builds**; never throttle or SIGSTOP another session's
-    processes. **Gradle: one build at a time, machine-wide**
-    (`memory/feedback_tests_through_bg_caps_and_slots.md`,
+    `pkill -f '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill your
+    saved `$!`. **Never read a result through a pipe**: `cmd > out.log 2>&1;
+    echo "rc=$?"; tail -5 out.log`. (`memory/feedback_exit_status_through_pipe.md`)
+34. Run builds and tests via `~/ops/site-private/bin/bg` (**always the full path:
+    bare `bg` is the shell builtin**). **Tests (pytest, tox, nox, `run_tests*.py`)
+    must go through bg**. **Never set `BG_LOAD_WAIT=0` on a build or Gradle
+    command** (2026-10-10; one small test file only). **Never `taskpolicy -b` for
+    builds**; never throttle or SIGSTOP another session's processes. **Gradle: one
+    build at a time, machine-wide** (`memory/feedback_tests_through_bg_caps_and_slots.md`,
     `memory/feedback_gradle_one_at_a_time.md`).
