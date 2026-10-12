@@ -35,9 +35,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
    (`memory/feedback_all_agents_includes_hermes.md`)
-5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether
-   to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (2026-10-09).
-   (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
+5. **New tool, MCP server or plugin added? Ask djbclark whether to add it to
+   `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in without
+   asking unless sensitive** (2026-10-09, 2026-10-12; `memory/feedback_ask_update_apply_toolchain_prompt.md`)
 6. **Never `--help` on a live-service CLI subcommand** (2026-10-09; `collie` is
    read-only for agents). **Secrets: `sudo-secretspec` only; load its skill
    before scripting it** (every subcommand, `set` included, needs `--reason`;

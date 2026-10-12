@@ -291,8 +291,9 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    place (a running bash dies). (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome. (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
-5. **New tool, MCP server, skill or plugin added anywhere? Ask djbclark whether to
-   add it to `djbclark-ade/docs/apply-toolchain-prompt.md`** (2026-10-09).
+5. **New tool, MCP server or plugin added anywhere? Ask djbclark whether to add it
+   to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in without
+   asking unless it looks sensitive** (2026-10-12).
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
 6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
    `collie update --help` started a real update); `collie` is read-only for agents
