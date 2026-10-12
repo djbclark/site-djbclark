@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Local proxy in front of the SIPB LLMs server (Open WebUI).
+
+Crush talks to this proxy instead of the server directly. The proxy passes
+everything through, except that when Open WebUI answers an over-long prompt
+with HTTP 200 and a bare `null` body (its behavior when the prompt exceeds the
+server's ~32768-token context), the proxy returns a clear HTTP 400 instead, so
+Crush shows a useful message rather than "stream transport error: unexpected EOF".
+
+It also rewrites finish_reason "stop" to "tool_calls" when a response carried
+tool calls (2026-10-12): Open WebUI ends a tool-calling stream with "stop", and
+Crush only runs the tool and continues on "tool_calls", so every turn ended
+after its first tool call.
+
+Usage:
+    sipb-llms-proxy [port]            # default port 8890
+Then point Crush at it, e.g. in ~/.config/crush/crushrc:
+    --base-url "http://127.0.0.1:8890/api"
+"""
+import http.server
+import json
+import socketserver
+import sys
+import urllib.error
+import urllib.request
+
+UPSTREAM = "https://llms-dev-1.mit.edu"
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8890
+
+MESSAGE = (
+    "SIPB LLMs returned no completion. This is what Open WebUI does when the "
+    "prompt exceeds the server's context window (~32768 tokens). Trim the prompt "
+    "(fewer skills / shorter conversation) or raise OLLAMA_CONTEXT_LENGTH on the "
+    "server."
+)
+
+HOP_BY_HOP = ("transfer-encoding", "content-length", "connection")
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _send_json(self, code, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _fail(self, code, message):
+        self._send_json(code, {"error": {"message": message, "type": "invalid_request_error"}})
+
+    def _proxy(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if length else None
+
+        req = urllib.request.Request(UPSTREAM + self.path, data=body, method=self.command)
+        for key, value in self.headers.items():
+            if key.lower() in ("host", "content-length", "connection"):
+                continue
+            req.add_header(key, value)
+
+        try:
+            resp = urllib.request.urlopen(req, timeout=600)
+        except urllib.error.HTTPError as exc:
+            resp = exc
+        except Exception as exc:  # noqa: BLE001
+            self._fail(502, "sipb-llms-proxy could not reach %s: %s" % (UPSTREAM, exc))
+            return
+
+        ctype = resp.headers.get("Content-Type", "")
+
+        if not ctype.startswith("text/event-stream"):
+            # Not a stream: either a normal JSON response, or Open WebUI's bare
+            # `null` for an over-long prompt. Buffer it and decide.
+            data = resp.read()
+            if self.command == "POST" and resp.status == 200 and data.strip() in (b"", b"null"):
+                self._fail(400, "%s (upstream replied %s %r)" % (MESSAGE, resp.status, data[:60]))
+                return
+            data = fix_json_body(data)
+            self.send_response(resp.status)
+            for key, value in resp.headers.items():
+                if key.lower() in HOP_BY_HOP:
+                    continue
+                self.send_header(key, value)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        # Streaming response: pass it through as it arrives.
+        self.send_response(resp.status)
+        for key, value in resp.headers.items():
+            if key.lower() in HOP_BY_HOP:
+                continue
+            self.send_header(key, value)
+        self.send_header("Connection", "close")
+        self.end_headers()
+        saw_tool_calls = False
+        try:
+            while True:
+                line = resp.readline()
+                if not line:
+                    break
+                saw_tool_calls, line = fix_sse_line(line, saw_tool_calls)
+                self.wfile.write(line)
+                self.wfile.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def do_GET(self):
+        self._proxy()
+
+    def do_POST(self):
+        self._proxy()
+
+
+def fix_sse_line(line, saw_tool_calls):
+    """Open WebUI ends a tool-calling stream with finish_reason "stop"; OpenAI
+    clients (Crush) only run the tool when it is "tool_calls". Rewrite it."""
+    if not line.startswith(b"data:") or (b"tool_calls" not in line and b"finish_reason" not in line):
+        return saw_tool_calls, line
+    try:
+        event = json.loads(line[5:].strip())
+        changed = False
+        for choice in event.get("choices") or []:
+            if (choice.get("delta") or {}).get("tool_calls"):
+                saw_tool_calls = True
+            if saw_tool_calls and choice.get("finish_reason") == "stop":
+                choice["finish_reason"] = "tool_calls"
+                changed = True
+    except Exception:  # noqa: BLE001
+        return saw_tool_calls, line
+    if not changed:
+        return saw_tool_calls, line
+    return saw_tool_calls, b"data: " + json.dumps(event).encode() + b"\n"
+
+
+def fix_json_body(data):
+    """Same rewrite for a non-streamed chat completion."""
+    if b"tool_calls" not in data:
+        return data
+    try:
+        body = json.loads(data)
+        changed = False
+        for choice in body.get("choices") or []:
+            if (choice.get("message") or {}).get("tool_calls") and choice.get("finish_reason") == "stop":
+                choice["finish_reason"] = "tool_calls"
+                changed = True
+    except Exception:  # noqa: BLE001
+        return data
+    return json.dumps(body).encode() if changed else data
+
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+if __name__ == "__main__":
+    with Server(("127.0.0.1", PORT), Handler) as httpd:
+        print("sipb-llms-proxy listening on http://127.0.0.1:%d" % PORT, file=sys.stderr)
+        httpd.serve_forever()
