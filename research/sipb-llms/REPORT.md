@@ -84,14 +84,14 @@ style clients that continue the loop only on `tool_calls` (Crush, and others) en
 turn after the first tool call without running it. We worked around it in the proxy
 (rewrite `stop` to `tool_calls` when the stream had tool calls); our log shows
 `finish_reason_raw: "stop"` with `finish_reason_sent: "tool_calls"`. Request: fix in
-Open WebUI (check whether a newer release than 0.6.30 already does).
+Open WebUI. The latest release is v0.12.0 (2026-10-10), well past the 0.6.30 we see. We searched open-webui/open-webui issues on 2026-10-12 (terms: `finish_reason tool_calls`, `tool_calls finish_reason stop`, `streaming tool call finish reason`) and found no report of exactly this behaviour; the nearest threads are [#28492](https://github.com/open-webui/open-webui/issues/28492) and [#27363](https://github.com/open-webui/open-webui/issues/27363). We did not test v0.12.0, so check it first and file an issue if it still happens.
 
 4.2 **Silent queueing.** 7 of our requests received no data at all for 2 minutes and
 were aborted by the client (windows 12:35-13:03 on 2026-10-12, models qwen3.6 and
 gpt-oss:20b; the same models answered in 10-19 s minutes later). We assume the
 requests were waiting behind another model or user. Request: any signal while a
 request is queued (an SSE comment every ~15 s, or an immediate 429/503 with
-`Retry-After`), and a note on how queued requests are ordered. Our proxy now serializes
+`Retry-After`), and a note on how queued requests are ordered. Open WebUI has an open feature request for exactly this, [#31408](https://github.com/open-webui/open-webui/issues/31408) (early SSE and heartbeat across streaming APIs for reverse-proxy compatibility). Our proxy now serializes
 our own requests per model and retries 502/503/504; we raised the client timeout to 10 min.
 
 4.3 **gpt-oss:20b tool calls fail.** The model's tool call arrives with empty
