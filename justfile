@@ -177,6 +177,21 @@ basic-memory-mcp-apply *args:
 basic-memory-mcp-check *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/basic_memory_mcp.yml --limit "{{ basic_memory_mcp_hosts }}" {{ args }}
 
+shared_mcp_hosts := env_var_or_default("SHARED_MCP_HOSTS", "mac")
+
+# One shared crawl4ai / arxiv / paper-search MCP server each (roles/shared_mcp).
+shared-mcp-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}
+
+shared-mcp-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}
+
+shared-mcp-status:
+    @for s in crawl4ai:18798 arxiv:18800 paper-search:18802; do n=${s%%:*}; p=${s##*:}; \
+      l=$(launchctl print "gui/$(id -u)/com.djbclark.$n-mcp" >/dev/null 2>&1 && echo loaded || echo "not loaded"); \
+      c=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$p/mcp"); \
+      echo "$n: launchd $l, http://127.0.0.1:$p/mcp -> $c"; done
+
 basic-memory-mcp-status:
     @if launchctl print "gui/$(id -u)/com.djbclark.basic-memory-mcp" >/dev/null 2>&1; then \
       echo "launchd: loaded (com.djbclark.basic-memory-mcp)"; \

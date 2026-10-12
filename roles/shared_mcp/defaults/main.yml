@@ -1,0 +1,83 @@
+---
+# roles/shared_mcp — ONE shared copy per machine of the heavy stdio MCP servers
+# every agent TUI registers (crawl4ai, arxiv, paper-search), over streamable
+# HTTP on loopback, instead of one copy per agent session. Same pattern as
+# roles/basic_memory_mcp.
+#
+# Why (measured 2026-10-12, load average 230 on the 8-core / 16 GB Mac, swap
+# 10.5 of 11.3 GB used): 15 concurrent agent sessions (claude, cursor-agent,
+# codex, agy, opencode, hermes) each ran their own crawl4ai (Python + Playwright
+# driver + 3 headless Chromium processes), arxiv and paper-search: ~3.4 GB,
+# ~0.8 GB and ~0.4 GB phys footprint (top MEM; ps RSS hides the compressed and
+# swapped pages). Every bigteam / acp-dispatch slice added another set.
+#
+# Safe to share: crawl4ai keeps ONE lifespan-managed AsyncWebCrawler for the
+# whole server (fastmcp server-level lifespan), so all clients share one
+# browser; arxiv's state is its paper store (--storage-path), shared already;
+# paper-search is stateless. crawl4ai and arxiv speak streamable HTTP
+# natively; paper-search is stdio-only, so mcp-proxy fronts it (as it fronts
+# the hermes bridge on 18790, which multiplexes many clients over one child).
+#
+# Rollback: put each client's stdio entry back (backups next to every client
+# config, suffix .bak-2026-10-12-shared-mcp) and
+# `launchctl bootout gui/$UID/com.<site_ns>.<name>-mcp` for each server.
+shared_mcp_home: >-
+  {{
+    (ansible_facts.get('env') or {}).get('HOME')
+    | default(lookup('env', 'HOME'), true)
+  }}
+shared_mcp_bind: "127.0.0.1"
+shared_mcp_bin_dir: "{{ shared_mcp_home }}/.local/bin"
+shared_mcp_logs_dir: "{{ shared_mcp_home }}/Library/Logs/shared-mcp"
+shared_mcp_plist_dir: "{{ shared_mcp_home }}/Library/LaunchAgents"
+shared_mcp_service_path: "{{ shared_mcp_home }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Same supervisor and timings as roles/basic_memory_mcp (kill_after < exit_timeout).
+shared_mcp_logpipe_script: "{{ playbook_dir | dirname }}/bin/litellm_logpipe.py"
+shared_mcp_log_max_bytes: 5000000
+shared_mcp_log_backups: 2
+shared_mcp_exit_timeout: 30
+shared_mcp_logpipe_kill_after: 15
+# Unpaywall wants a contact address. Read from git at apply time so the
+# address is not committed here.
+shared_mcp_unpaywall_email: "{{ lookup('ansible.builtin.pipe', 'git config --global user.email') }}"
+
+# Ports: even numbers in the 1879x/1880x block after basic-memory's 18796
+# (18797 is its auth caddy); odd ones stay free for a bearer gate, as with the
+# bridges. Registered in registry/ports.yml. Clients reach
+# http://127.0.0.1:<port>/mcp.
+shared_mcp_servers:
+  - name: crawl4ai
+    port: 18798
+    argv:
+      - "{{ shared_mcp_bin_dir }}/crawl4ai-mcp"
+      - --transport
+      - http
+      - --host
+      - "{{ shared_mcp_bind }}"
+      - --port
+      - "18798"
+    env: {}
+  - name: arxiv
+    port: 18800
+    argv:
+      - "{{ shared_mcp_bin_dir }}/arxiv-mcp-server"
+      - --storage-path
+      - "{{ shared_mcp_home }}/.local/share/arxiv-papers"
+    # arxiv-mcp-server takes its transport from pydantic settings (env).
+    env:
+      TRANSPORT: http
+      HOST: "{{ shared_mcp_bind }}"
+      PORT: "18800"
+  - name: paper-search
+    port: 18802
+    argv:
+      - "{{ shared_mcp_bin_dir }}/mcp-proxy"
+      - --host
+      - "{{ shared_mcp_bind }}"
+      - --port
+      - "18802"
+      - --pass-environment
+      - --
+      - "{{ shared_mcp_bin_dir }}/paper-search-mcp"
+    env:
+      PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: "{{ shared_mcp_unpaywall_email }}"

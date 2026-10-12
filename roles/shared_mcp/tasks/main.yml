@@ -1,0 +1,93 @@
+---
+- name: Assert shared MCP servers are loopback-only and Darwin is supported
+  ansible.builtin.assert:
+    that:
+      - shared_mcp_bind == '127.0.0.1'
+      - ansible_facts.os_family == 'Darwin'
+      - (shared_mcp_logpipe_kill_after | int) < (shared_mcp_exit_timeout | int)
+    fail_msg: Shared MCP servers stay loopback-only on the managed macOS host, and kill_after must be below exit_timeout.
+
+- name: Locate each shared MCP server binary
+  ansible.builtin.stat:
+    path: "{{ item.argv[0] }}"
+  loop: "{{ shared_mcp_servers }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: _shared_mcp_bins
+
+- name: Require each shared MCP server binary
+  ansible.builtin.fail:
+    msg: "{{ item.item.argv[0] }} not found (uv tool install the {{ item.item.name }} server)."
+  loop: "{{ _shared_mcp_bins.results }}"
+  loop_control: {label: "{{ item.item.name }}"}
+  when: not item.stat.exists
+
+- name: Ensure shared MCP directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ shared_mcp_logs_dir }}", mode: "0700"}
+    - {path: "{{ shared_mcp_plist_dir }}", mode: "0755"}
+
+- name: Render shared MCP LaunchAgents
+  ansible.builtin.template:
+    src: shared-mcp.plist.j2
+    dest: "{{ shared_mcp_plist_dir }}/com.{{ site_ns }}.{{ item.name }}-mcp.plist"
+    mode: "0600"
+  loop: "{{ shared_mcp_servers }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: _shared_mcp_plists
+
+- name: Probe shared MCP LaunchAgents
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ ansible_facts.user_uid }}/com.{{ site_ns }}.{{ item.name }}-mcp"]
+  loop: "{{ shared_mcp_servers }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: _shared_mcp_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out changed shared MCP LaunchAgents
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/com.{{ site_ns }}.{{ item.0.name }}-mcp"]
+  loop: "{{ shared_mcp_servers | zip(_shared_mcp_plists.results, _shared_mcp_loaded.results) | list }}"
+  loop_control: {label: "{{ item.0.name }}"}
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - item.1.changed
+    - item.2.rc == 0
+
+# launchd teardown race: bootstrap right after bootout can fail with rc=5. Retry.
+- name: Bootstrap shared MCP LaunchAgents
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ shared_mcp_plist_dir }}/com.{{ site_ns }}.{{ item.0.name }}-mcp.plist"]
+  loop: "{{ shared_mcp_servers | zip(_shared_mcp_plists.results, _shared_mcp_loaded.results) | list }}"
+  loop_control: {label: "{{ item.0.name }}"}
+  register: _shared_mcp_bootstrap
+  changed_when: _shared_mcp_bootstrap.rc == 0
+  failed_when: _shared_mcp_bootstrap.rc != 0
+  until: _shared_mcp_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - item.2.rc != 0 or item.1.changed
+
+# A bare GET on a streamable-HTTP endpoint answers 400/405/406 (no MCP
+# session): that is liveness. Connection refused is the failure. crawl4ai
+# starts Chromium first, so allow a minute.
+- name: Wait for shared MCP servers to answer
+  ansible.builtin.uri:
+    url: "http://{{ shared_mcp_bind }}:{{ item.port }}/mcp"
+    status_code: [200, 307, 400, 405, 406]
+    follow_redirects: none
+  loop: "{{ shared_mcp_servers }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: _shared_mcp_health
+  until: _shared_mcp_health.status in [200, 307, 400, 405, 406]
+  retries: 30
+  delay: 3
+  when: not ansible_check_mode

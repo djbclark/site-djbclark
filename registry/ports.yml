@@ -121,6 +121,14 @@ hosts:
          note: "caddy bearer gate for 18794; funnel path 8443/claude-mcp"}
       - {port: 18796, bind: "127.0.0.1", owner: site, service: basic-memory-mcp, status: active,
          note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private/memory and it is the memory search service (replaced the retired memory service)"}
+      - {port: 18797, bind: "127.0.0.1", owner: unmanaged, service: basic-memory-mcp-auth, status: active,
+         note: "caddy bearer gate for 18796 (com.djbclark.basic-memory-mcp-auth, ~/.local/libexec/basic-memory-mcp-bridge/Caddyfile); observed listening, registered 2026-10-12"}
+      - {port: 18798, bind: "127.0.0.1", owner: site, service: crawl4ai-mcp, status: active,
+         note: "2026-10-12: com.djbclark.crawl4ai-mcp launchd (roles/shared_mcp). crawl4ai-mcp --transport http, path /mcp. One shared server (one headless Chromium) replaces one stdio copy per agent session (~230 MB phys each)"}
+      - {port: 18800, bind: "127.0.0.1", owner: site, service: arxiv-mcp, status: active,
+         note: "2026-10-12: com.djbclark.arxiv-mcp launchd (roles/shared_mcp). arxiv-mcp-server TRANSPORT=http, path /mcp"}
+      - {port: 18802, bind: "127.0.0.1", owner: site, service: paper-search-mcp, status: active,
+         note: "2026-10-12: com.djbclark.paper-search-mcp launchd (roles/shared_mcp). mcp-proxy -> paper-search-mcp (stdio only), path /mcp"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same

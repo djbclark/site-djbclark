@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.{{ site_ns }}.{{ item.name }}-mcp</string>
+  {#- Supervised by bin/litellm_logpipe.py exactly like roles/basic_memory_mcp
+      (see its template for why `env python3`, -I -S and the timings). One
+      shared server per machine; clients reach http://{{ shared_mcp_bind }}:{{ item.port }}/mcp. #}
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>-I</string>
+    <string>-S</string>
+    <string>{{ shared_mcp_logpipe_script }}</string>
+    <string>--out</string><string>{{ shared_mcp_logs_dir }}/{{ item.name }}-mcp.log</string>
+    <string>--max-bytes</string><string>{{ shared_mcp_log_max_bytes | string }}</string>
+    <string>--backups</string><string>{{ shared_mcp_log_backups | string }}</string>
+    <string>--kill-after</string><string>{{ shared_mcp_logpipe_kill_after | string }}</string>
+    <string>--</string>
+{% for a in item.argv %}
+    <string>{{ a }}</string>
+{% endfor %}
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ExitTimeOut</key><integer>{{ shared_mcp_exit_timeout }}</integer>
+  <key>AbandonProcessGroup</key><false/>
+  <!-- Standard, not Background: clients do not retry a server that is not up yet at login. -->
+  <key>ProcessType</key><string>Standard</string>
+  <key>WorkingDirectory</key><string>{{ shared_mcp_home }}</string>
+  <key>StandardOutPath</key><string>{{ shared_mcp_logs_dir }}/{{ item.name }}-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{ shared_mcp_logs_dir }}/{{ item.name }}-launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{ shared_mcp_home }}</string>
+    <key>PATH</key><string>{{ shared_mcp_service_path }}</string>
+{% for k, v in item.env.items() %}
+    <key>{{ k }}</key><string>{{ v }}</string>
+{% endfor %}
+  </dict>
+</dict>
+</plist>
