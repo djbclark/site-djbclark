@@ -14,7 +14,7 @@
 # process, so the KILL escalation destroyed App Tamer's freezes and forced
 # a respawn. A frozen job burns no CPU, never exits, and therefore never
 # respawns; the only burn window is the ≤60 s after login/boot (or a reap).
-# triald/helpd (short one-shots) and the root system-domain jobs are TERMed.
+# triald/helpd/sirittsd (short one-shots) and the root system-domain jobs are TERMed.
 #
 # Exit codes (watchdogd "apple-daemons" command probe):
 #   0  healthy — nothing to do, or everything found was frozen/killed

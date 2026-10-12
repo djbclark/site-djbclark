@@ -79,7 +79,9 @@
 #     the flag; the demand-side switches above are the remaining lever.
 #   - photoanalysisd disabled = no Photos face/scene analysis; helpd = no
 #     in-app Help Viewer content; spindump/tailspind = no hang/stall reports;
-#     triald + triald.system = no Apple experiment-treatment updates.
+#     triald + triald.system = no Apple experiment-treatment updates;
+#     sirittsd (Siri text-to-speech agent, added 2026-10-12) = no Siri voices
+#     for Spoken Content/VoiceOver; it idle-exits on its own, so it is TERMed.
 
 set -u
 
