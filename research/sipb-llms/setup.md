@@ -56,8 +56,8 @@ key in plain text (mode 600).
 Provider `sipb-llms` in `~/.hermes/config.yaml`: `base_url: http://127.0.0.1:8890/api` (since
 2026-10-12; the proxy gives it the finish_reason fix, retries and the log), `api_key_env`
 `MIT_SIPB_API_KEY` (in `~/.hermes/.env`), `api_mode: chat_completions`, `discover_models: false`,
-39 models listed (the server had 39 chat models on 2026-10-12, but newer ones such as
-`qwen3.6:35b-a3b-q4_K_M` and `gemma4:26b` are not in Hermes' list yet). Not Hermes' default and
+39 models listed (the same 39 chat models the server lists, including `qwen3.6:35b-a3b-q4_K_M` and
+`gemma4:26b`; checked 2026-10-12). Not Hermes' default and
 not in its fallback chain. Verify with the real CLI (a bare resolver call returns the literal
 `${MIT_SIPB_API_KEY}` placeholder and a 401):
 
