@@ -92,6 +92,7 @@ FREEZE_LABELS=(
 TERM_LABELS=(
   "com.apple.triald"
   "com.apple.helpd"
+  "com.apple.sirittsd"
 )
 
 FROZEN=""

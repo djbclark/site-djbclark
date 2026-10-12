@@ -134,6 +134,7 @@ GUI_DAEMONS=(
   "com.apple.photoanalysisd"
   "com.apple.triald"
   "com.apple.helpd"
+  "com.apple.sirittsd"
   "com.apple.spotlightknowledged"
   "com.apple.spotlightknowledged.updater"
   "com.apple.spotlightknowledged.importer"
