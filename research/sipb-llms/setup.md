@@ -20,7 +20,7 @@ Consumers read it with `sudo-secretspec run -- <cmd>` and expand `$MIT_SIPB_API_
 inside the child. Exception, left as is by the owner: `~/.config/crush/crushrc` holds the
 key in plain text (mode 600).
 
-## The local proxy (everything except opencode goes through it)
+## The local proxy (Crush, Hermes and opencode all go through it)
 
 `tools/sipb-llms-proxy` in site-djbclark, launchd `land.charm.sipb-llms-proxy`,
 `127.0.0.1:8890`, upstream `https://llms-dev-1.mit.edu`. It rewrites the wrong
@@ -71,9 +71,11 @@ system prompt is ~110k characters (~28k tokens) per request, close to the 32k co
 ## opencode
 
 Provider `sipb` in `~/.config/opencode/opencode.json` (npm `@ai-sdk/openai-compatible`), 19-model
-subset, key in `~/.local/share/opencode/auth.json` under `sipb`. Still points straight at
-`https://llms-dev-1.mit.edu/api`, not the proxy. If opencode stops after one tool call on a SIPB
-model, point its `baseURL` at `http://127.0.0.1:8890/api` (untested). Config is read at start-up.
+subset, key in `~/.local/share/opencode/auth.json` under `sipb`. `baseURL` is
+`http://127.0.0.1:8890/api` (the proxy) since 2026-10-12 (backup of the old file:
+`~/backups/opencode.json.pre-sipb-proxy-2026-10-12`). Config is read at start-up. opencode's own
+system prompt is ~105k characters (~26k tokens), so a first call after a model swap can take minutes
+and a second request for the same model queues behind it in the proxy (`queue_wait_s` in the log).
 
 ## Verification status (2026-10-12)
 
@@ -81,4 +83,5 @@ model, point its `baseURL` at `http://127.0.0.1:8890/api` (untested). Config is 
 2. Hermes through the proxy: `PONG`.
 3. Proxy: tool-call stream raw `stop` sent as `tool_calls`, logged; reload from the plist and
    restart after `kill -9` both checked.
-4. opencode: last checked 2026-08-19 (`opencode run --model sipb/qwen3.5:9b` printed `OK`).
+4. opencode through the proxy: `opencode run --model sipb/qwen3.5:9b "Reply with exactly: OK"` printed `OK` and
+   appears in the proxy log (2026-10-12).
