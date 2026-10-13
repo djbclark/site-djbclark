@@ -86,6 +86,7 @@ STEPS: list[tuple[str, str, list[str]]] = [
     ("cline-scan", "s1_cline.py", ["scan"]),
     ("qwen-scan", "s1_qwen.py", ["scan"]),
     ("cursor-ide-scan", "s1_cursor_ide.py", ["scan"]),
+    ("cursor-transcripts-scan", "s1_cursor_transcripts.py", ["scan"]),
     ("search-index", "s1_search.py", ["index"]),
 ]
 

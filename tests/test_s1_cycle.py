@@ -45,7 +45,8 @@ STUB = textwrap.dedent(
 
 NAMES = (
     "s1_claude", "s1_hermes", "s1_codex", "s1_acprun", "s1_copilot", "s1_grok",
-    "s1_opencode", "s1_zcode", "s1_cursor_cli", "s1_agy", "s1_crush", "s1_cline", "s1_qwen", "s1_cursor_ide", "s1_search",
+    "s1_opencode", "s1_zcode", "s1_cursor_cli", "s1_agy", "s1_crush", "s1_cline", "s1_qwen", "s1_cursor_ide", "s1_cursor_transcripts",
+    "s1_search",
 )
 
 
@@ -93,7 +94,7 @@ class TestCycle(CycleTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log()
         for step in ("claude-scan", "hermes-sink", "codex-scan", "acprun-scan", "copilot-scan",
-                     "grok-scan", "opencode-sink", "zcode-sink", "cursor-scan", "agy-scan", "crush-scan", "cline-scan", "qwen-scan", "cursor-ide-scan",
+                     "grok-scan", "opencode-sink", "zcode-sink", "cursor-scan", "agy-scan", "crush-scan", "cline-scan", "qwen-scan", "cursor-ide-scan", "cursor-transcripts-scan",
                      "search-index"):
             self.assertRegex(log, rf"step={step} status=ok rc=0 secs=\S+ files=2 created=5\n")
         self.assertIn("cycle end status=ok", log)
