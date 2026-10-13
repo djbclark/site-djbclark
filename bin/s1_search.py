@@ -834,7 +834,7 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--window", type=int, default=3)
     st = sub.add_parser("stats")
     st.add_argument("--check", action="store_true",
-                    help="also run the FTS5 integrity-check on both indexes (slow)")
+                    help="also run the FTS5 integrity-check on both indexes (slow; it is a write, so it holds the write lock for minutes: on the live store run it under maintenance.lock)")
     m = sub.add_parser("migrate", help="convert a search index to an explicitly selected layout")
     m.add_argument("--to-layout", choices=("2", "3"), default="2",
                    help="target layout (default: 2); use 3 to stage/resume zstd compression")
