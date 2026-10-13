@@ -162,13 +162,13 @@ jobs:
             detail="${detail} Open the run log: ${run_url}"
           elif [ "$PROMOTE_STATE" = blocked ]; then
             kind=blocked
-            headline="NixOS lock bump built but NOT promoted"
-            detail="${DEPLOY_BRANCH} has unpromoted changes under nixos/ (${PENDING}),"
-            detail="${detail} so the new lock is on master only. Review them, then run:"
+            headline="NixOS changes on master are NOT promoted"
+            detail="${DEPLOY_BRANCH} lags master: unpromoted changes under nixos/ (${PENDING});"
+            detail="${detail} any new lock built by this run is on master only. Review them, then run:"
             detail="${detail} ${deploy}. Run: ${run_url}"
           elif [ "$PROMOTE_STATE" = diverged ]; then
             kind=diverged
-            headline="NixOS lock bump built but NOT promoted"
+            headline="NixOS changes on master are NOT promoted"
             detail="${DEPLOY_BRANCH} is not an ancestor of master (someone committed to it"
             detail="${detail} directly). Merge it into master, then run: ${deploy}. Run: ${run_url}"
           else
