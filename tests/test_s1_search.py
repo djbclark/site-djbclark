@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import json
+import random
+import sqlite3
+import string
 import sys
 import tempfile
 import unittest
@@ -457,6 +460,126 @@ class TestStats(SearchTestCase):
         self.assertEqual(st["events"], 2)
         self.assertEqual(st["indexed"], 1)
         self.assertEqual(st["pending"], 1)
+
+
+class TestCompressedLayout(SearchTestCase):
+    def add_corpus(self) -> tuple[str, str]:
+        rng = random.Random(481516)
+        noisy = "".join(rng.choice(string.ascii_letters + string.digits + "!?@#$%^&*()")
+                        for _ in range(64))
+        tiny_id = self.add("ok", locator="tiny")
+        noisy_id = self.add(noisy, locator="noisy", json_payload=False)
+        for i in range(140):
+            self.add(
+                f"common reusable phrase brown fox event {i} "
+                "the migration keeps each projected body identical " * 60,
+                locator=f"corpus-{i}",
+                seq=100 + i,
+            )
+        self.index.build()
+        return tiny_id, noisy_id
+
+    def test_migrate_preserves_hits_snippets_and_dictionary_id(self) -> None:
+        tiny_id, noisy_id = self.add_corpus()
+        queries = [
+            ("brown", "fts"), ('"brown fox"', "fts"), ("common reusable", "fts"),
+            ("migration keeps", "fts"), ("usable phrase brown", "trigram"),
+            ("brown fox event", "trigram"), ("identical projected", "trigram"),
+        ]
+        before = {
+            (query, mode): [(r["event_id"], r["snip"])
+                            for r in self.index.search(query, mode=mode)]
+            for query, mode in queries
+        }
+        migrated = search.migrate_layout3(self.store.db, batch_size=19)
+        self.assertTrue(migrated["migrated"], migrated)
+        self.assertEqual(search.store_layout(self.store.db), 3)
+        dict_id = int(self.store.db.execute(
+            "SELECT value FROM s1_meta WHERE key='search_dict_id'"
+        ).fetchone()[0])
+        dictionary = self.store.db.execute(
+            "SELECT dict FROM s1_text_dict WHERE id=?", (dict_id,)
+        ).fetchone()
+        self.assertIsNotNone(dictionary)
+        self.assertGreater(len(dictionary[0]), 0, "fixture should train a real dictionary")
+        self.assertEqual(self.store.db.execute(
+            "SELECT dict_id FROM event_text_data WHERE event_id=?", (tiny_id,)
+        ).fetchone()[0], 0, "short rows are stored raw")
+        self.assertEqual(self.store.db.execute(
+            "SELECT dict_id FROM event_text_data WHERE event_id=?", (noisy_id,)
+        ).fetchone()[0], 0, "incompressible rows are stored raw")
+
+        compressed_index = search.SearchIndex(self.store)
+        after = {
+            (query, mode): [(r["event_id"], r["snip"])
+                            for r in compressed_index.search(query, mode=mode)]
+            for query, mode in queries
+        }
+        self.assertEqual(after, before)
+        stats = compressed_index.stats(check=True)
+        self.assertTrue(stats["healthy"], stats)
+        self.assertEqual(stats["text_check"]["decompression_sample_rows"], 32)
+
+    def test_write_insert_replace_delete_and_resume(self) -> None:
+        ids = [self.add(f"resumable token {i} " + "repeatable corpus words " * 5,
+                        locator=f"resume-{i}", seq=200 + i) for i in range(7)]
+        self.index.build()
+        partial = search.migrate_layout3(self.store.db, batch_size=2, max_batches=1)
+        self.assertTrue(partial["resumable"], partial)
+        self.assertEqual(search.store_layout(self.store.db), 2)
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM event_text_zstage"
+        ).fetchone()[0], 2)
+        resumed = search.migrate_layout3(self.store.db, batch_size=2)
+        self.assertTrue(resumed["migrated"], resumed)
+
+        index = search.SearchIndex(self.store)
+        new_id = self.add("inserted zebra content", locator="inserted", seq=300)
+        self.assertEqual(index.build()["indexed"], 1)
+        self.assertEqual(len(index.search("zebra", mode="fts")), 1)
+        with (
+            mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 1),
+            mock.patch.object(search, "project", lambda _: "replacement giraffe words"),
+        ):
+            self.assertEqual(index.build()["indexed"], 8)
+        self.assertEqual(index.search("token", mode="fts"), [])
+        self.assertEqual(len(index.search("giraffe", mode="fts")), 8)
+        self.assertTrue(index._delete_text(ids[0]))
+        self.assertFalse(index._delete_text(ids[0]))
+        self.assertTrue(index.stats(check=True)["healthy"])
+        self.assertEqual(index.search("giraffe", mode="fts")[0]["event_id"] != ids[0], True)
+        self.assertNotEqual(new_id, ids[0])
+
+    def test_unregistered_connection_fails_on_view_content(self) -> None:
+        self.add("snippet needs decompression", locator="content")
+        self.index.build()
+        search.migrate_layout3(self.store.db, batch_size=2)
+        unregistered = sqlite3.connect(self.store.path)
+        try:
+            with self.assertRaisesRegex(
+                sqlite3.OperationalError, "no such function: s1_unzstd"
+            ):
+                unregistered.execute("SELECT body FROM event_text LIMIT 1").fetchall()
+            # FTS5 masks the missing-view-function detail on this SQLite build;
+            # it raises SQL logic error rather than returning an empty/wrong hit.
+            with self.assertRaisesRegex(sqlite3.OperationalError, "SQL logic error"):
+                unregistered.execute(
+                    "SELECT snippet(event_fts,1,'[',']','…',12) FROM event_fts "
+                    "WHERE event_fts MATCH 'snippet'"
+                ).fetchall()
+        finally:
+            unregistered.close()
+
+    def test_layout2_is_still_the_automatic_default(self) -> None:
+        self.add("layout two stays active")
+        self.index.build()
+        self.assertEqual(search.store_layout(self.store.db), 2)
+        names = {r[0] for r in self.store.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        )}
+        self.assertNotIn("event_text_data", names)
+        self.assertNotIn("s1_text_dict", names)
+        self.assertTrue(self.index.stats(check=True)["healthy"])
 
 
 if __name__ == "__main__":
