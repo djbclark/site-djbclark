@@ -106,6 +106,18 @@ jobs:
     notifyOnFailure: [*programSink, *filesystemSink]
     mode: "0755"
 
+  # Weekly: in-place VACUUM of app databases that are mostly free pages (a sync
+  # app's 352 MB file was 99.9% empty). Skips any file a process has open, so the
+  # live stores on the list are done whenever their app is closed. Exit 1 (Jobber
+  # notifies) only when a VACUUM failed its integrity or row-count check.
+  sqlite-vacuum:
+    cmd: {{ site_agents_sqlite_vacuum_script }}{% for db in site_agents_sqlite_vacuum_dbs %} '{{ db }}'{% endfor %}
+
+    time: 0 0 5 * * 0
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]
+
   chrome-cache-trim:
     cmd: {{ site_agents_chrome_cache_trim_script }}
     time: 0 45 0,6,12,18 * * *

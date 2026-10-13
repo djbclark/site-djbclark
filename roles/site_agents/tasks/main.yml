@@ -182,6 +182,12 @@
     dest: "{{ site_agents_apfs_compress_script }}"
     mode: "0755"
 
+- name: Install sqlite-vacuum script
+  ansible.builtin.copy:
+    src: sqlite-vacuum
+    dest: "{{ site_agents_sqlite_vacuum_script }}"
+    mode: "0755"
+
 - name: Read current Chrome cache policy defaults
   ansible.builtin.command:
     argv: [defaults, read, com.google.Chrome, "{{ item.key }}"]

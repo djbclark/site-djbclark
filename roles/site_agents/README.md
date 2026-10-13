@@ -37,6 +37,21 @@ open for write (one `lsof` snapshot). mtime and logical size are preserved, so
 readers that resume by offset or detect change by size/mtime are unaffected. Never
 add live SQLite stores (hermes state.db, opencode.db, cursor chats, s1-evidence).
 
+## SQLite vacuum job (`sqlite-vacuum`)
+
+Weekly Jobber job (Sunday 05:00) that runs an in-place `VACUUM` on the app
+databases in `site_agents_sqlite_vacuum_dbs`, because SQLite never shrinks a file
+by itself (2026-10-13: FolderSync 463 MB to 0.3 MB, a Zed backup 257 MB to 0.4 MB,
+both 99.9% free pages). A file is vacuumed only when at least 30% of its pages are
+free, at least 50 MB would come back, no process has it (or its `-wal`/`-shm`) open,
+and the volume has room for the temporary copy. So the live stores on the list
+(`opencode.db`, Zed, Basic Memory) are picked up on a week when their app is closed;
+a busy one is simply retried. Before each VACUUM it takes an APFS clone when there
+is room; afterwards it runs `integrity_check` and compares per-table row counts, and
+keeps the clone and exits 1 (Jobber notifies) if either fails. Dry run:
+`~/.local/bin/sqlite-vacuum --dry-run <paths>`; the script lives in
+`roles/site_agents/files/sqlite-vacuum`, tests in `tests/test_sqlite_vacuum.py`.
+
 ## Chrome cache policy + trim
 
 Two complementary halves, both macOS-only (the `chrome-cache` tasks):

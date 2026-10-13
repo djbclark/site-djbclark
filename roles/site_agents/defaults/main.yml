@@ -103,6 +103,19 @@ site_agents_brew_cache_volume: /Volumes/mac256usb
 site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
 site_agents_chrome_cache_trim_script: "{{ site_agents_bin_dir }}/chrome-cache-trim"
 site_agents_apfs_compress_script: "{{ site_agents_bin_dir }}/apfs-compress"
+site_agents_sqlite_vacuum_script: "{{ site_agents_bin_dir }}/sqlite-vacuum"
+# Databases (HOME-relative; globs allowed) whose free pages the weekly sqlite-vacuum
+# job gives back. It vacuums one only when >= 30% of its pages are free, >= 50 MB
+# would come back and no process has it open, so live app stores (opencode,
+# Zed, Basic Memory) are done opportunistically whenever the app happens to be
+# closed. Add only stores whose owner tolerates an in-place VACUUM; never s1-evidence
+# (S1 has its own `vacuum`) or 1Password / system databases.
+site_agents_sqlite_vacuum_dbs:
+  - Library/Application Support/FolderSync/database/foldersync.db
+  - Library/Application Support/Zed/db/0-stable/db.sqlite
+  - Library/Application Support/Zed/recovery-backups/*.sqlite
+  - .local/share/opencode/opencode.db
+  - .basic-memory/memory.db
 # uv processes the apfs-compress job ignores when deciding whether uv is idle
 # (long-lived servers that hold the uv cache lock for days). ERE for grep -E.
 # Cold agent transcripts (HOME-relative) that the apfs-compress job also compresses:

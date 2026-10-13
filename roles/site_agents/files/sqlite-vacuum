@@ -1,0 +1,191 @@
+#!/opt/homebrew/bin/python3
+"""Jobber sqlite-vacuum: give back the free pages inside SQLite files.
+
+SQLite never shrinks a database file on its own: deleted rows leave free pages
+that stay allocated until a VACUUM. Some app databases end up mostly empty (a
+sync app's 352 MB file that was 99.9% free pages). This job runs an in-place
+`VACUUM` on a fixed list of such files when it is worth it and safe.
+
+A file is vacuumed only when ALL of these hold:
+1. it is a real SQLite file (header check) that exists;
+2. no process has it, its `-wal` or its `-shm` open (one `lsof` call), so a
+   running app is never made to wait and a busy file is retried next week;
+3. at least MIN_FREE_RATIO of its pages are free and at least MIN_RECLAIM_BYTES
+   would come back;
+4. the volume has room for the temporary copy VACUUM writes (2x the file).
+
+Safety net: before VACUUM an APFS clone (`cp -c`, no space until the files
+diverge) is taken when the volume has 3x the file size free; after VACUUM the
+job runs `PRAGMA integrity_check` and compares per-table row counts with the
+state before. Clone removed only when both pass; otherwise it is kept and the
+job exits 1 so Jobber notifies. In-place VACUUM is SQLite's own atomic
+operation (it takes the database lock, so an app that opens the file meanwhile
+sees SQLITE_BUSY for a few seconds rather than a replaced file).
+
+Usage: sqlite-vacuum [--dry-run] [--min-free-ratio 0.3] [--min-bytes 50000000]
+                     PATH_OR_GLOB...   (paths relative to $HOME are accepted)
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HEADER = b"SQLite format 3\x00"
+SIDECARS = ("", "-wal", "-shm")
+
+
+def expand(patterns: list[str], home: Path) -> list[Path]:
+    seen: dict[Path, None] = {}
+    for pattern in patterns:
+        pattern = os.path.expanduser(pattern)
+        if not os.path.isabs(pattern):
+            pattern = str(home / pattern)
+        for hit in sorted(glob.glob(pattern)):
+            seen.setdefault(Path(hit), None)
+    return list(seen)
+
+
+def is_sqlite(path: Path) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(16) == HEADER
+    except OSError:
+        return False
+
+
+def holders(path: Path) -> list[str]:
+    """Commands holding the db or its sidecars open (empty when none)."""
+    files = [str(path) + s for s in SIDECARS if os.path.exists(str(path) + s)]
+    result = subprocess.run(["lsof", *files], capture_output=True, text=True)
+    return sorted({f"{ln.split()[0]}:{ln.split()[1]}"
+                   for ln in result.stdout.splitlines()[1:] if ln.strip()})
+
+
+def free_stats(path: Path) -> tuple[int, int, int]:
+    """(page_size, page_count, freelist_count), read-only."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    try:
+        return (conn.execute("pragma page_size").fetchone()[0],
+                conn.execute("pragma page_count").fetchone()[0],
+                conn.execute("pragma freelist_count").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def row_counts(path: Path) -> dict[str, int | str]:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    out: dict[str, int | str] = {}
+    try:
+        names = [r[0] for r in conn.execute(
+            "select name from sqlite_master where type='table'"
+            " and name not like 'sqlite_%' and sql not like 'CREATE VIRTUAL%'")]
+        for name in names:
+            try:
+                out[name] = conn.execute(f'select count(*) from "{name}"').fetchone()[0]
+            except sqlite3.Error as exc:  # a module-backed table we cannot read
+                out[name] = f"ERR {exc.__class__.__name__}"
+    finally:
+        conn.close()
+    return out
+
+
+def total_bytes(path: Path) -> int:
+    return sum(os.path.getsize(str(path) + s) for s in SIDECARS
+               if os.path.exists(str(path) + s))
+
+
+def clone(path: Path) -> Path:
+    bak = Path(str(path) + ".sqlite-vacuum-clone")
+    for s in SIDECARS:
+        if os.path.exists(str(path) + s):
+            subprocess.run(["cp", "-c", str(path) + s, str(bak) + s], check=True)
+    return bak
+
+
+def drop_clone(bak: Path) -> None:
+    for s in SIDECARS:
+        try:
+            os.remove(str(bak) + s)
+        except FileNotFoundError:
+            pass
+
+
+def process(path: Path, *, min_ratio: float, min_bytes: int, dry_run: bool) -> tuple[str, bool]:
+    """Returns (log line, ok). ok False means a failed verification (exit 1)."""
+    if not path.exists():
+        return f"{path}: absent", True
+    if not is_sqlite(path):
+        return f"{path}: not a SQLite file, skipped", True
+    try:
+        page_size, page_count, free = free_stats(path)
+    except sqlite3.Error as exc:
+        return f"{path}: cannot read ({exc}), skipped", True
+    reclaim = free * page_size
+    ratio = free / page_count if page_count else 0.0
+    if ratio < min_ratio or reclaim < min_bytes:
+        return (f"{path}: {reclaim / 1e6:.0f} MB free ({ratio:.0%}), below threshold,"
+                " skipped"), True
+    busy = holders(path)
+    if busy:
+        return f"{path}: {reclaim / 1e6:.0f} MB reclaimable but open by {busy}, retry next run", True
+    size = page_size * page_count
+    avail = shutil.disk_usage(path.parent).free
+    if avail < 2 * size + (1 << 30):
+        return f"{path}: only {avail / 1e9:.1f} GB free for a {size / 1e6:.0f} MB vacuum, skipped", True
+    if dry_run:
+        return f"{path}: would vacuum, {reclaim / 1e6:.0f} MB reclaimable ({ratio:.0%})", True
+
+    before = total_bytes(path)
+    bak = clone(path) if avail >= 3 * size + (1 << 30) else None
+    counts_before = row_counts(path)
+    started = time.time()
+    conn = sqlite3.connect(str(path), timeout=5, isolation_level=None)
+    try:
+        conn.execute("pragma busy_timeout=5000")
+        conn.execute("VACUUM")
+        integrity = conn.execute("pragma integrity_check").fetchone()[0]
+        conn.execute("pragma wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error as exc:
+        conn.close()
+        if bak:
+            drop_clone(bak)  # VACUUM is atomic: a failure leaves the db as it was
+        return f"{path}: VACUUM failed ({exc}); file unchanged", True
+    conn.close()
+    same = row_counts(path) == counts_before
+    after = total_bytes(path)
+    line = (f"{path}: {before / 1e6:.0f} MB -> {after / 1e6:.1f} MB in {time.time() - started:.1f}s,"
+            f" integrity={integrity}, row counts identical={same}")
+    if integrity == "ok" and same:
+        if bak:
+            drop_clone(bak)
+        return line, True
+    return line + (f"; KEPT clone {bak}" if bak else "; no clone was taken"), False
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("paths", nargs="+", help="databases or globs (relative to $HOME)")
+    parser.add_argument("--min-free-ratio", type=float, default=0.30)
+    parser.add_argument("--min-bytes", type=int, default=50_000_000)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+
+    ok_all = True
+    for path in expand(args.paths, Path.home()):
+        line, ok = process(path, min_ratio=args.min_free_ratio,
+                           min_bytes=args.min_bytes, dry_run=args.dry_run)
+        print(line, flush=True)
+        ok_all &= ok
+    return 0 if ok_all else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
