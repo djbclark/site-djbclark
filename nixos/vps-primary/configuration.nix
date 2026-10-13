@@ -81,17 +81,30 @@
     };
   };
 
-  # Unattended updates: follow root's `nixos` channel (nixos-26.05, set with
-  # nix-channel; the module runs `nix-channel --update` itself, so manual
-  # `nixos-rebuild` sees the same nixpkgs). Do not set `channel` here: it makes the
-  # module fetch the URL without updating root's channel, and a manual rebuild
-  # then downgrades the host. Apply daily with a random
-  # delay. A kernel/initrd change reboots the host, but only inside the window;
-  # outside it the new generation stays staged for the next boot. Supervised
-  # reboot tested 2026-10-13 (back in ~22 s).
+  # The host builds this configuration from git, never from /etc/nixos:
+  # github:djbclark/site-djbclark, branch deploy-vps-primary, flake in nixos/. Deploy =
+  # `git push origin master:deploy-vps-primary`, then `systemctl start nixos-upgrade` on
+  # the host (or wait for the 04:00 run). Never run `nixos-rebuild` by hand on the host:
+  # it would build whatever /etc/nixos or the lock file says, not the deployed branch.
+  # nixpkgs follows the stable branch head (the same stream the old channel gave), via the
+  # override below, not the lock file, so updates keep arriving without a lock-bump CI job.
+  # A kernel/initrd change reboots the host, but only inside the window; outside it the new
+  # generation stays staged for the next boot. Supervised reboot tested 2026-10-13.
+  nix.settings.experimental-features = [
+    "nix-command"
+    "flakes"
+  ];
+
   system.autoUpgrade = {
     enable = true;
     operation = "switch";
+    flake = "github:djbclark/site-djbclark/deploy-vps-primary?dir=nixos#vps-primary";
+    flags = [
+      "--override-input"
+      "nixpkgs"
+      "github:NixOS/nixpkgs/nixos-26.05"
+    ];
+    upgrade = false;
     dates = "04:00";
     randomizedDelaySec = "45min";
     fixedRandomDelay = true;
@@ -112,6 +125,5 @@
   nix.optimise.automatic = true;
   boot.loader.grub.configurationLimit = 10;
 
-  system.copySystemConfiguration = true;
   system.stateVersion = "26.05";
 }
