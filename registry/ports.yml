@@ -264,6 +264,8 @@ hosts:
     ports:
       - {port: 4000,  bind: "127.0.0.1", owner: site, service: litellm-proxy, status: planned,
          note: "E5: com.djbclark.litellm systemd --user; loopback until master key + Tailscale bind design"}
+      - {port: 5071,  bind: "100.125.249.107", owner: site, service: gradle-build-cache, status: active,
+         note: "2026-10-13: Develocity Build Cache Node 21.2 in Podman (podman-gradle-cache.service, nixos/vps-primary/configuration.nix); bound to the VPS tailnet address only, because a published Podman port bypasses networking.firewall. Anonymous access off, one readwrite user, UI off; password is sudo-secretspec GRADLE_BUILD_CACHE_PASSWORD. Data /var/lib/gradle-build-cache. Deprecated by Gradle: gone after 2026-12-31. See docs/gradle-remote-cache.md."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:
