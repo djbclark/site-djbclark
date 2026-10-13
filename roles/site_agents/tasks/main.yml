@@ -255,3 +255,76 @@
     _agent_script: "{{ site_agents_hermes_dashboard_plist }}"
   when: site_agents_hermes_dashboard_enabled | bool
   tags: [hermes-dashboard]
+
+# S1 evidence ingest cycle (2026-10-12). Off by default; see defaults/main.yml.
+- name: Check the S1 ingest cycle script and interpreter
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ site_agents_s1_ingest_bin_dir }}/s1_cycle.py"
+    - "{{ site_agents_s1_ingest_python }}"
+  register: site_agents_s1_ingest_paths_stat
+  when: site_agents_s1_ingest_enabled | bool
+  tags: [s1-ingest]
+
+- name: Fail when the S1 ingest cycle cannot run
+  ansible.builtin.assert:
+    that:
+      - site_agents_s1_ingest_paths_stat.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      {{ site_agents_s1_ingest_bin_dir }}/s1_cycle.py or
+      {{ site_agents_s1_ingest_python }} not found; override
+      site_agents_s1_ingest_bin_dir / site_agents_s1_ingest_python.
+  when: site_agents_s1_ingest_enabled | bool
+  tags: [s1-ingest]
+
+- name: Render s1-ingest LaunchAgent
+  ansible.builtin.template:
+    src: s1-ingest.plist.j2
+    dest: "{{ site_agents_s1_ingest_plist }}"
+    mode: "0644"
+  register: site_agents_s1_ingest_rendered
+  when: site_agents_s1_ingest_enabled | bool
+  tags: [s1-ingest]
+
+- name: Manage s1-ingest LaunchAgent
+  ansible.builtin.include_tasks:
+    file: launchagent.yml
+    apply:
+      tags: [s1-ingest]
+  vars:
+    _agent_label: "{{ site_agents_s1_ingest_label }}"
+    _agent_plist_path: "{{ site_agents_s1_ingest_plist }}"
+    _agent_plist: "{{ site_agents_s1_ingest_rendered }}"
+    _agent_script: "{{ site_agents_s1_ingest_plist }}"
+  when: site_agents_s1_ingest_enabled | bool
+  tags: [s1-ingest]
+
+# Disabled: boot out a loaded job and remove its plist (which also turns
+# fleet-watch's S1 freshness check off). A no-op when it was never enabled.
+- name: Probe whether s1-ingest is loaded
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ site_agents_uid }}/{{ site_agents_s1_ingest_label }}"]
+  register: site_agents_s1_ingest_launch_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not (site_agents_s1_ingest_enabled | bool)
+  tags: [s1-ingest]
+
+- name: Boot out s1-ingest while disabled
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ site_agents_uid }}/{{ site_agents_s1_ingest_label }}"]
+  changed_when: true
+  when:
+    - not (site_agents_s1_ingest_enabled | bool)
+    - not ansible_check_mode
+    - site_agents_s1_ingest_launch_state.rc == 0
+  tags: [s1-ingest]
+
+- name: Remove s1-ingest LaunchAgent while disabled
+  ansible.builtin.file:
+    path: "{{ site_agents_s1_ingest_plist }}"
+    state: absent
+  when: not (site_agents_s1_ingest_enabled | bool)
+  tags: [s1-ingest]

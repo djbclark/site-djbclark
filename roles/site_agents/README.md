@@ -14,6 +14,7 @@ install to `~/.local/bin`; plists render to
 | aiuse | `com.{{ site_ns }}.aiuse` | Every 180s + RunAtLoad | `aiuse sample`: collects hourly when idle, every 15 min when quota moved, every 3 min in a burst; snapshots under `~/.cache/aiuse/snapshots`, token ledger under `~/.cache/aiuse/ledger` |
 | jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:00 — also restarts any `brew services` daemon left running a deleted binary after the upgrade, `mac-dns-apply` nightly at 03:30, `landing-health` hourly, `chrome-cache-trim` 4×/day on a pass with Chrome quit) |
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
+| s1-ingest | `com.{{ site_ns }}.s1-ingest` | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed |
 
 ## Chrome cache policy + trim
 
@@ -93,6 +94,10 @@ launchctl bootout "gui/$uid/com.djbclark.hibernate-disk-check"
 launchctl bootout "gui/$uid/com.djbclark.cswap-auto"
 launchctl bootout "gui/$uid/com.djbclark.aiuse"
 ```
+
+s1-ingest is rolled back through its flag, not by hand: set
+`site_agents_s1_ingest_enabled: false` and apply (`just site-agents-apply --tags
+s1-ingest`), which boots the job out and removes its plist.
 
 To restore pre-F1 hand-managed copies after apply replaced them:
 

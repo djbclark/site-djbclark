@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ site_agents_s1_ingest_label }}</string>
+
+    <!-- One cycle: s1_claude scan, s1_hermes sink, s1_search index, under
+         ingest.lock; skips while maintenance.lock exists. See the header of
+         s1_cycle.py. launchd never starts a second instance of a running job. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ site_agents_s1_ingest_python }}</string>
+        <string>-I</string>
+        <string>{{ site_agents_s1_ingest_bin_dir }}/s1_cycle.py</string>
+        <string>run</string>
+        <string>--deadline</string>
+        <string>{{ site_agents_s1_ingest_deadline_seconds }}</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>{{ site_agents_s1_ingest_interval_seconds }}</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{ site_agents_s1_ingest_log }}</string>
+    <key>StandardErrorPath</key>
+    <string>{{ site_agents_s1_ingest_error_log }}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ site_agents_home }}/.local/bin:{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{{ site_agents_home }}</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>{{ site_agents_s1_ingest_nice }}</integer>
+</dict>
+</plist>

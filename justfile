@@ -317,6 +317,11 @@ site-agents-status:
     else \
       echo "launchd: not loaded (com.djbclark.hermes-dashboard)"; \
     fi
+    @if launchctl print "gui/$(id -u)/com.djbclark.s1-ingest" >/dev/null 2>&1; then \
+      echo "launchd: loaded (com.djbclark.s1-ingest; last: $(tail -1 ~/.local/share/s1-evidence/cycle.log 2>/dev/null))"; \
+    else \
+      echo "launchd: not loaded (com.djbclark.s1-ingest; site_agents_s1_ingest_enabled)"; \
+    fi
 
 # ---------------------------------------------------------------------------
 # F4 — Merged-Brewfile projection + flock serialization (step1 §4.3)
