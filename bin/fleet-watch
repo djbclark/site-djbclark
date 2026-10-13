@@ -4,6 +4,7 @@
 #   fleet-watch            one check: print the status line, notify if it changed
 #   fleet-watch status     print the last status line and when it was taken
 #   fleet-watch s1         only the S1 evidence freshness check (see below)
+#   fleet-watch load       only the machine-overload check (see Machine overload)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
 #   fleet-watch install    write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
@@ -50,6 +51,15 @@
 # while the ingest LaunchAgent (com.djbclark.s1-ingest, roles/site_agents) is installed,
 # so the watchdog switches on and off with the schedule it watches; 1 forces it on, 0 off.
 
+# Machine overload (2026-10-13): the 16 GB Mac hit load 134-183 with swap 10.6 of 11.3 GB on
+# 2026-10-12 and 10-13 (a bare `swift test`, nine agents' MCP servers) and was diagnosed by hand.
+# Each check reads load1 and swap; when load1 > FLEET_WATCH_LOAD_MULT x cores (default 4) AND
+# swap used >= FLEET_WATCH_SWAP_PCT percent (default 90), one notice names the biggest memory
+# users (`top -o mem`) with the agent that owns each, then at most one reminder per
+# FLEET_WATCH_LOAD_COOLDOWN seconds (default 1800). The open incident is the file
+# $STATE_DIR/load-high; one recovery notice when the condition clears. Notice only: it never
+# kills or stops anything. `fleet-watch load` runs just this check.
+
 set -uo pipefail
 
 LABEL=com.djbclark.fleet-watch
@@ -75,6 +85,9 @@ S1_PRODUCERS="${FLEET_WATCH_S1_PRODUCERS:-claude-code hermes}"
 S1_MAX_AGE="${FLEET_WATCH_S1_MAX_AGE:-21600}"
 S1_TIMEOUT="${FLEET_WATCH_S1_TIMEOUT:-30}"
 S1_PLIST="$HOME/Library/LaunchAgents/com.djbclark.s1-ingest.plist"
+LOAD_MULT="${FLEET_WATCH_LOAD_MULT:-4}"
+SWAP_PCT="${FLEET_WATCH_SWAP_PCT:-90}"
+LOAD_COOLDOWN="${FLEET_WATCH_LOAD_COOLDOWN:-1800}"
 # Socket probes run under system python3, never bash's /dev/tcp: macOS SIGKILLs
 # homebrew bash the moment its socket connects, in the launchd context (kernel
 # "[bash: killed]", observed 2026-10-10); system binaries are exempt there.
@@ -408,6 +421,55 @@ s1_watch() {
   if ((${#stale[@]})); then S1_STATE="stale:$(IFS=+; echo "${stale[*]}")"; else S1_STATE=ok; fi
 }
 
+# Which agent TUI a process belongs to: the nearest ancestor that looks like one, else "-".
+agent_of() {
+  local pid=$1 i comm
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ -n "$pid" && "$pid" -gt 1 ]] || break
+    comm=$(ps -o command= -p "$pid" 2>/dev/null)
+    case "$comm" in
+      *acp-run*|*/claude*|claude*|*codex*|*cursor-agent*|*opencode*|*"agy "*|*"/agy"*|*grok*|*hermes*|*crush*|*zcode*)
+        echo "$(basename "${comm%% *}")[$pid]"
+        return
+        ;;
+    esac
+  done
+  echo "-"
+}
+
+load_watch() {
+  local flag="$STATE_DIR/load-high" cores load1 used total over pct now mtime
+  cores=$(sysctl -n hw.ncpu 2>/dev/null) || return 0
+  load1=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')
+  read -r used total <<<"$(sysctl -n vm.swapusage 2>/dev/null | awk '{gsub("M",""); print $6, $3}')"
+  [[ -n "$cores" && -n "$load1" && -n "$used" && -n "$total" ]] || return 0
+  over=$(awk -v l="$load1" -v c="$cores" -v m="$LOAD_MULT" -v u="$used" -v t="$total" -v p="$SWAP_PCT" \
+    'BEGIN { print (l > c * m && t > 0 && u * 100 / t >= p) ? 1 : 0 }')
+  pct=$(awk -v u="$used" -v t="$total" 'BEGIN { printf "%d", (t > 0) ? u * 100 / t : 0 }')
+  now=$(date +%s)
+  if [[ "$over" != 1 ]]; then
+    if [[ -f "$flag" ]]; then
+      notify "load" "back to normal: load $load1 on $cores cores, swap ${pct}% used" && rm -f "$flag"
+    fi
+    return 0
+  fi
+  if [[ -f "$flag" ]]; then
+    mtime=$(stat -f %m "$flag" 2>/dev/null || echo 0)
+    ((now - mtime < LOAD_COOLDOWN)) && return 0
+  fi
+  local top5 line pid mem cmd who parts=()
+  top5=$(top -l 1 -o mem -n 5 -stats pid,mem,command 2>/dev/null | awk '/^PID/ {go=1; next} go && NF >= 3 {print}')
+  while read -r pid mem cmd; do
+    [[ -n "$pid" ]] || continue
+    who=$(agent_of "$pid")
+    parts+=("$cmd $mem (pid $pid, agent $who)")
+  done <<<"$top5"
+  if notify "load" "HIGH: load $load1 on $cores cores, swap ${pct}% used. Biggest: $(IFS=';'; echo "${parts[*]}")"; then
+    : >"$flag"
+  fi
+}
+
 check() {
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
@@ -424,6 +486,7 @@ check() {
     parts+=("${h}sshd=$SSHD_STATE")
     sshdk+="${h}sshd "
   done
+  load_watch
   local r
   for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
   # S1 freshness speaks for itself (once per incident), so s1= is shown, never diffed.
@@ -492,6 +555,7 @@ case "${1:-check}" in
     s1_watch
     echo "s1=$S1_STATE ${S1_AGES:-}"
     ;;
+  load) load_watch ;;
   test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && tail -2 "$STATE_DIR/hermes.log" ;;
   install)
     cat >"$PLIST" <<EOF
@@ -525,7 +589,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    sed -n '2,9p' "$0"
+    sed -n '2,10p' "$0"
     exit 1
     ;;
 esac
