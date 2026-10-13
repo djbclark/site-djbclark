@@ -74,6 +74,12 @@ EXIT_DEADLINE = 124
 STEPS: list[tuple[str, str, list[str]]] = [
     ("claude-scan", "s1_claude.py", ["scan", "--quiet"]),
     ("hermes-sink", "s1_hermes.py", ["sink"]),
+    ("codex-scan", "s1_codex.py", ["scan", "--quiet"]),
+    ("acprun-scan", "s1_acprun.py", ["scan", "--quiet"]),
+    ("copilot-scan", "s1_copilot.py", ["scan", "--quiet"]),
+    ("grok-scan", "s1_grok.py", ["scan", "--quiet"]),
+    ("opencode-sink", "s1_opencode.py", ["sink"]),
+    ("zcode-sink", "s1_zcode.py", ["sink"]),
     ("search-index", "s1_search.py", ["index"]),
 ]
 

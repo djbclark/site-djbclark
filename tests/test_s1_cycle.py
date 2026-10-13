@@ -43,7 +43,10 @@ STUB = textwrap.dedent(
     """
 )
 
-NAMES = ("s1_claude", "s1_hermes", "s1_search")
+NAMES = (
+    "s1_claude", "s1_hermes", "s1_codex", "s1_acprun", "s1_copilot", "s1_grok",
+    "s1_opencode", "s1_zcode", "s1_search",
+)
 
 
 def dead_pid() -> int:
@@ -89,7 +92,8 @@ class TestCycle(CycleTestCase):
         result = self.run_cycle()
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log()
-        for step in ("claude-scan", "hermes-sink", "search-index"):
+        for step in ("claude-scan", "hermes-sink", "codex-scan", "acprun-scan", "copilot-scan",
+                     "grok-scan", "opencode-sink", "zcode-sink", "search-index"):
             self.assertRegex(log, rf"step={step} status=ok rc=0 secs=\S+ files=2 created=5\n")
         self.assertIn("cycle end status=ok", log)
         self.assertNotIn("dry_run", log)  # booleans are not counts
