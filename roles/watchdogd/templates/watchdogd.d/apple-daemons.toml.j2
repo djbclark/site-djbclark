@@ -3,7 +3,7 @@
 # stop launchd activating these jobs on XPC/event demand, and bootout is
 # SIP-refused (rc 150 by label, rc 5 by plist path), so the enforcement is
 # this probe: it SIGSTOPs the gui-domain daemons (no CPU, and launchd never
-# respawns a job that has not exited), TERMs triald/helpd/sirittsd and the root
+# respawns a job that has not exited), TERMs triald/helpd/sirittsd, the Apple Intelligence agents and the root
 # system-domain half, and reports healthy. Exit 1 = the root helper is
 # broken (config problem worth one alert); exit 75 = no console user
 # (skip). Action log: ~/Library/Logs/watchdogd/apple-daemon-ban.log; the

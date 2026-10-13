@@ -40,6 +40,8 @@ SYSTEM_LABELS=(
   "com.apple.triald.system"
   "com.apple.spindump"
   "com.apple.tailspind"
+  "com.apple.modelmanagerd"
+  "com.apple.modelcatalogd"
 )
 
 for label in "${SYSTEM_LABELS[@]}"; do

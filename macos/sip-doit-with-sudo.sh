@@ -82,6 +82,13 @@
 #     triald + triald.system = no Apple experiment-treatment updates;
 #     sirittsd (Siri text-to-speech agent, added 2026-10-12) = no Siri voices
 #     for Spoken Content/VoiceOver; it idle-exits on its own, so it is TERMed.
+#   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
+#     request: gui generativeexperiencesd, intelligencecontextd,
+#     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
+#     SIGSTOPped one would hang its clients instead of failing them fast) and
+#     system modelmanagerd, modelcatalogd (root, TERMed by the root helper).
+#     Expect Writing Tools, Siri/Apple Intelligence features and on-device
+#     model downloads to stop working. Undo with --revert.
 
 set -u
 
@@ -137,6 +144,9 @@ GUI_DAEMONS=(
   "com.apple.triald"
   "com.apple.helpd"
   "com.apple.sirittsd"
+  "com.apple.generativeexperiencesd"
+  "com.apple.intelligencecontextd"
+  "com.apple.intelligenceflowd"
   "com.apple.spotlightknowledged"
   "com.apple.spotlightknowledged.updater"
   "com.apple.spotlightknowledged.importer"
@@ -147,6 +157,8 @@ SYSTEM_DAEMONS=(
   "com.apple.triald.system"
   "com.apple.spindump"
   "com.apple.tailspind"
+  "com.apple.modelmanagerd"
+  "com.apple.modelcatalogd"
 )
 
 # CoreSpotlight semantic-search stores (embeddings, journals). Safe to delete;
