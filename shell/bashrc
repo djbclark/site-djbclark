@@ -258,18 +258,28 @@ fi
 # These caches live on the internal SSD. Their /Volumes/mac256usb/Caches entries
 # were only symlinks back to ~/.cache, so pointing through the drive just let a
 # drive stall hang Gradle and friends (2026-10-11).
-export npm_config_cache="$HOME/.cache/npm"
-export GOCACHE="$HOME/.cache/go-build"
-export GOMODCACHE="$HOME/.cache/go-mod"
-export GRADLE_USER_HOME="$HOME/.cache/gradle"
-export UV_CACHE_DIR="$HOME/.cache/uv"
+# A value the caller set is kept unless it is empty or on the USB drive: BASH_ENV
+# sources this file in every bash script (bg included), so a hard export here
+# silently undid `GRADLE_USER_HOME=<tmp> bg ./gradlew ...` (2026-10-12).
+__cache_var() {
+    case "${!1-}" in
+        "" | "$USB_DRIVE"/*) export "$1=$2" ;;
+        *) export "$1" ;;
+    esac
+}
+__cache_var npm_config_cache "$HOME/.cache/npm"
+__cache_var GOCACHE "$HOME/.cache/go-build"
+__cache_var GOMODCACHE "$HOME/.cache/go-mod"
+__cache_var GRADLE_USER_HOME "$HOME/.cache/gradle"
+__cache_var UV_CACHE_DIR "$HOME/.cache/uv"
+unset -f __cache_var
 
 # Gradle's home moved back to the internal SSD on 2026-10-06: builds do many small
 # random reads, which the USB stick serves badly. The move script creates the marker
 # only after the final copy, then turns the USB path into a symlink here, so shells
 # that still hold the old value keep working.
 if [ -e "$HOME/.cache/gradle/.moved-from-usb" ]; then
-    export GRADLE_USER_HOME="$HOME/.cache/gradle"
+    case "$GRADLE_USER_HOME" in "$USB_DRIVE"/*) export GRADLE_USER_HOME="$HOME/.cache/gradle" ;; esac
 fi
 
 # uv, npm and the Go caches moved back to the internal SSD on 2026-10-06 (copy only:
