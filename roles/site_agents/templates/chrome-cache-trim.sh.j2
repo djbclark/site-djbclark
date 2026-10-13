@@ -45,17 +45,24 @@ cache_subdirs=(
   "DawnWebGPUCache"
 )
 
+# Chrome keeps these in two places: the profile dir (Service Worker, GPU caches)
+# and the per-profile dirs under ~/Library/Caches/Google/Chrome, where the V8
+# "Code Cache" (js + wasm, hundreds of MiB, not bounded by DiskCacheSize) lives.
+cache_roots=("$chrome_dir" "$HOME/Library/Caches/Google/Chrome")
+
 cleared=0
-for profile in "$chrome_dir"/*/; do
-  [ -d "$profile" ] || continue
-  for rel in "${cache_subdirs[@]}"; do
-    d="${profile}${rel}"
-    [ -d "$d" ] || continue
-    before="$(du -sk "$d" 2>/dev/null | awk '{print $1}' || echo 0)"
-    find "$d" -mindepth 1 -delete 2>/dev/null || true
-    if [ "${before:-0}" -gt 0 ]; then
-      cleared=$((cleared + before))
-    fi
+for root in "${cache_roots[@]}"; do
+  for profile in "$root"/*/; do
+    [ -d "$profile" ] || continue
+    for rel in "${cache_subdirs[@]}"; do
+      d="${profile}${rel}"
+      [ -d "$d" ] || continue
+      before="$(du -sk "$d" 2>/dev/null | awk '{print $1}' || echo 0)"
+      find "$d" -mindepth 1 -delete 2>/dev/null || true
+      if [ "${before:-0}" -gt 0 ]; then
+        cleared=$((cleared + before))
+      fi
+    done
   done
 done
 
