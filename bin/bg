@@ -45,7 +45,7 @@
 #   TOKENIZERS_PARALLELISM=false
 # Rust/C pools and Python < 3.13 ignore PYTHON_CPU_COUNT; pass the tool's own worker flag too.
 #
-# Test slots: a pytest/tox/nox/run_tests*.py command takes one of BG_TEST_SLOTS machine-wide slots
+# Test slots: a pytest/tox/nox/run_tests*.py, `swift build|test|run` or xcodebuild command takes one of BG_TEST_SLOTS machine-wide slots
 # (default 2) for its whole run, waiting up to BG_TEST_WAIT seconds (default 1800), the same
 # shlock mechanism as the Gradle slot. --version/--help/--collect-only don't take one.
 # BG_TEST_SLOTS=0 disables it (don't advertise that in messages agents see).
@@ -79,6 +79,50 @@ for a in "$@"; do
     *" pytest "*|*" pytest"|"pytest "*|*"run_tests"*) is_test=1 ;;
   esac
 done
+# Swift/Xcode builds and tests (2026-10-13): `swift test --filter X` on CodexBar compiled the whole
+# test target with one swift-frontend per core (8 on 8 cores, 0.2-3.5 GB each) and, with a Gradle
+# daemon, pushed the 16 GB Mac to load 180 and 10.6 of 11.3 GB of swap. So `swift build|test|run`
+# and `xcodebuild` take a test slot and get a jobs cap (-j / -jobs BG_CPUS) unless the caller set one.
+swift_idx=0
+xcode=0
+i=0
+for a in "$@"; do
+  i=$((i + 1))
+  case "${a##*/}" in
+    swift) [ "$swift_idx" = 0 ] && swift_idx=$i ;;
+    xcodebuild) xcode=1 ;;
+  esac
+done
+if [ "$swift_idx" -gt 0 ]; then
+  j=0
+  sub=0
+  for a in "$@"; do
+    j=$((j + 1))
+    [ "$j" -le "$swift_idx" ] && continue
+    case "$a" in -*) continue ;; esac
+    case "$a" in build|test|run) sub=$j ;; esac
+    break
+  done
+  if [ "$sub" -gt 0 ]; then
+    has_jobs=0
+    for a in "$@"; do
+      case "$a" in -j|-j[0-9]*|--jobs|--jobs=*) has_jobs=1 ;; esac
+    done
+    is_test=1
+    if [ "$has_jobs" = 0 ]; then
+      jobs_n="${BG_CPUS:-3}"
+      set -- "${@:1:$sub}" -j "$jobs_n" "${@:$((sub + 1))}"
+    fi
+  fi
+fi
+if [ "$xcode" = 1 ]; then
+  is_test=1
+  has_jobs=0
+  for a in "$@"; do
+    case "$a" in -jobs|-jobs=*) has_jobs=1 ;; esac
+  done
+  [ "$has_jobs" = 1 ] || set -- "$@" -jobs "${BG_CPUS:-3}"
+fi
 max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
 wait_s="${BG_LOAD_WAIT:-900}"
 # A Gradle build always keeps the load gate (2026-10-10: a release build started with

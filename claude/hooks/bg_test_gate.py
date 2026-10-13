@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse (Bash): deny a pytest / tox / nox / run_tests*.py command that is not run
-through ~/ops/site-private/bin/bg.
+"""PreToolUse (Bash): deny a pytest / tox / nox / run_tests*.py / swift build|test|run /
+xcodebuild command that is not run through ~/ops/site-private/bin/bg.
+
+2026-10-13: a bare `swift test --filter X` ran one swift-frontend per core (8 on 8 cores, up to
+3.5 GB each) and took the load to 180 with swap full; bg now slots and caps swift/xcodebuild.
 
 Why (2026-10-08): one session ran a project's full pytest suite directly, with a runner
 sized by os.cpu_count() (8 workers, each spawning children). The load average went from
@@ -44,7 +47,10 @@ def strip_literals(c: str) -> str:
     return re.sub(r'"[^"]*"', '""', s)
 
 
-TEST_WORD = r"(?:pytest|py\.test|tox|nox|run_tests\w*\.py)"
+TEST_WORD = (
+    r"(?:pytest|py\.test|tox|nox|run_tests\w*\.py|xcodebuild|swift-(?:test|build)"
+    r"|swift\s+(?:-\S+\s+)*(?:test|build|run))"
+)
 # A test command: the word is the command itself, or follows python -m / uv run / env VAR=x /
 # a path, at the start of a pipeline segment.
 SEGMENT = re.compile(
