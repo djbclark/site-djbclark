@@ -53,6 +53,13 @@ directory-canonical.
   already-canonical — old files keep working unmigrated; migration is
   opt-in per directory, done the next time that workspace is written
   through the new tool (§9).
+- **Side workspaces (2026-10-13):** a `workspaces` entry with `"side": true`
+  is a repo another chain owns. It is recorded with its git anchor but gets
+  no pointer, its sidecars stay with the owner, and its head moving does not
+  mark the log stale. A chain made only of side workspaces has no pointer at
+  all and is found through `chains/` (the discovery fallback). Added after an
+  omp session that worked only in repos owned by three other chains could not
+  write a log without stealing one of their pointers.
 
 **What did not change:** the directories themselves. `~/ops` stays
 deploy-only, pinned to tagged releases; `~/src/ops-worktrees/` stays where
