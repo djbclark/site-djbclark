@@ -15,11 +15,16 @@
 // constructor and runs despite --tests filters, left the build at 0% CPU holding the slot for
 // 100 min; Gradle logged "Did not receive connection preamble within 10s") is handled twice:
 //   1. Every Test task gets a timeout unless its build sets one (GRADLE_TEST_TIMEOUT_MIN, default
-//      90; 0 = none), so a hung test run fails and frees the slot.
+//      180; 0 = none), so a hung test run fails and frees the slot. (A full plektra suite took
+//      71 min under load on 2026-10-12, so 90 was too tight.)
 //   2. A waiter watches the holder's process tree (the pid in STATUS and its descendants, read
 //      with `ps`, since on macOS Java can't read another process's CPU time). If the tree gains
 //      less than 30 s of CPU in GRADLE_SLOT_IDLE_MIN minutes (default 15), the holder is treated
-//      as stuck: the waiter logs a warning naming it, appends a line to STATUS and starts anyway.
+//      as stuck. The detached Kotlin compile daemon and aapt2 daemons count too (they are not in
+//      the Gradle daemon's process tree, and a long compile happens there). A waiter that finds
+//      the holder stuck must then take the one overflow slot (slot-overflow.lock, its holder in
+//      STATUS-overflow) before it starts, so a stuck holder costs at most one extra build; the
+//      others keep waiting. It logs a warning naming the holder and appends a line to STATUS.
 //      It never kills the holder. An idle daemon ticks ~1 s of CPU a minute, a working build
 //      far more, so the 30 s margin separates them; it's a delta, so the daemon's lifetime total
 //      doesn't matter.
@@ -48,6 +53,9 @@ import org.gradle.api.tasks.testing.Test
 abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.None>, AutoCloseable {
     private FileChannel channel
     private FileLock lock
+    private FileChannel overflowChannel
+    private FileLock overflowLock
+    private Path overflowStatus
     private Path status
     private boolean done
 
@@ -64,7 +72,8 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
         long start = System.currentTimeMillis()
         long lastNote = 0
         long lastSample = 0
-        String watched = null       // the STATUS line of the holder being watched
+        String watched = null       // the first STATUS line (the holder) being watched
+        String passWhy = null       // set once the holder looks stuck: then wait for the overflow slot
         long markCpuMs = -1         // its tree's CPU time at the last sign of progress
         long markAt = 0             // when that was
         while (true) {
@@ -84,24 +93,27 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
             }
             if (idleMs > 0 && now - lastSample >= 60_000) {
                 lastSample = now
-                String holder = read(status)
+                String holder = read(status).readLines().with { it ? it[0] : '' }
                 Long cpu = treeCpuMs(holder)
                 if (holder != watched || cpu == null) {
                     // A new holder, or one whose CPU time can't be read: start watching afresh.
                     watched = holder; markCpuMs = cpu == null ? -1 : cpu; markAt = now
                 } else if (markCpuMs < 0 || cpu - markCpuMs >= 30_000) {
                     markCpuMs = cpu; markAt = now
-                } else if (now - markAt >= idleMs) {
-                    String why = "the holder used ${(cpu - markCpuMs).intdiv(1000)} s of CPU in the last " +
+                } else if (passWhy == null && now - markAt >= idleMs) {
+                    passWhy = "the holder used ${(cpu - markCpuMs).intdiv(1000)} s of CPU in the last " +
                         "${(now - markAt).intdiv(60_000)} min, so it looks stuck"
-                    log.warn("machine-gradle-slot: WATCHDOG: ${why}; starting anyway without the slot. Holder: ${holder}")
-                    try {
-                        Files.write(status, "watchdog: ${ProcessHandle.current().pid()} ${who} started without the slot at ${Instant.now()}: ${why}\n".getBytes('UTF-8'),
-                            StandardOpenOption.APPEND)
-                    } catch (Exception ignored) { }
-                    channel.close(); channel = null
-                    return
+                    log.warn("machine-gradle-slot: WATCHDOG: ${passWhy}; taking the overflow slot when it is free. Holder: ${holder}")
                 }
+            }
+            if (passWhy != null && takeOverflow(dir, who)) {
+                log.warn("machine-gradle-slot: WATCHDOG: starting without the slot, in the overflow slot (${passWhy}). Holder: ${read(status)}")
+                try {
+                    Files.write(status, "watchdog: ${ProcessHandle.current().pid()} ${who} started in the overflow slot at ${Instant.now()}: ${passWhy}\n".getBytes('UTF-8'),
+                        StandardOpenOption.APPEND)
+                } catch (Exception ignored) { }
+                channel.close(); channel = null
+                return
             }
             if (now - lastNote >= 60_000) {
                 lastNote = now
@@ -115,6 +127,22 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
         if (waited >= 5) log.quiet("machine-gradle-slot: got the Gradle slot after ${waited} s")
     }
 
+    // The one overflow slot for a waiter that passes a stuck holder. True once this JVM holds it.
+    private boolean takeOverflow(Path dir, String who) {
+        try {
+            if (overflowChannel == null) {
+                overflowStatus = dir.resolve('STATUS-overflow')
+                overflowChannel = FileChannel.open(dir.resolve('slot-overflow.lock'), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+            }
+            overflowLock = overflowChannel.tryLock()
+        } catch (OverlappingFileLockException ignored) {
+            return false
+        }
+        if (overflowLock == null) return false
+        Files.write(overflowStatus, "${ProcessHandle.current().pid()} ${who} since ${Instant.now()}\n".getBytes('UTF-8'))
+        return true
+    }
+
     // Total CPU time of the holder's pid (first word of STATUS) and all its descendants, or null.
     // ProcessHandle lists the tree, but its totalCpuDuration() is empty for other processes on
     // macOS, so the times come from `ps -o time=` ([[dd-]hh:]mm:ss.ss).
@@ -124,9 +152,17 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
             def ph = ProcessHandle.of(pid)
             if (!ph.isPresent()) return null
             def pids = ([ph.get()] + ph.get().descendants().toList()).collect { it.pid() }
-            def proc = new ProcessBuilder('ps', '-o', 'time=', '-p', pids.join(',')).redirectErrorStream(true).start()
+            // The Kotlin compile daemon and aapt2 daemons are detached (parent launchd), so they are
+            // not descendants; a long compile happens there. Count every one this user runs.
+            ProcessHandle.allProcesses().each { p ->
+                def c = p.info().commandLine().orElse('')
+                if (c.contains('KotlinCompileDaemon') || c.contains('aapt2')) pids << p.pid()
+            }
+            def proc = new ProcessBuilder('ps', '-o', 'time=', '-p', pids.unique().join(',')).redirectErrorStream(true).start()
+            // Wait first: reading .text blocks until ps exits, so a hung ps would never time out.
+            // ps prints one short line per pid, far below the pipe buffer.
+            if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) { proc.destroyForcibly(); return null }
             String out = proc.inputStream.text
-            if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) { proc.destroy(); return null }
             long total = 0
             boolean any = false
             out.readLines().collect { it.trim() }.findAll { it }.each { t ->
@@ -157,8 +193,13 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
         if (lock != null && status != null) {
             try { Files.write(status, "free (last: ${read(status)}, released ${Instant.now()})\n".getBytes('UTF-8')) } catch (Exception ignored) { }
         }
+        if (overflowLock != null && overflowStatus != null) {
+            try { Files.write(overflowStatus, "free (last: ${read(overflowStatus)}, released ${Instant.now()})\n".getBytes('UTF-8')) } catch (Exception ignored) { }
+        }
         try { lock?.release() } catch (Exception ignored) { }
         try { channel?.close() } catch (Exception ignored) { }
+        try { overflowLock?.release() } catch (Exception ignored) { }
+        try { overflowChannel?.close() } catch (Exception ignored) { }
     }
 }
 
@@ -170,7 +211,7 @@ if (System.getenv('GRADLE_SLOT') != 'off') {
 
 // A default timeout for every Test task the build leaves unset, so a hung test worker can't
 // hold the slot forever (see the header).
-long testTimeoutMin = MachineGradleSlot.envLong('GRADLE_TEST_TIMEOUT_MIN', 90)
+long testTimeoutMin = MachineGradleSlot.envLong('GRADLE_TEST_TIMEOUT_MIN', 180)
 if (testTimeoutMin > 0) {
     gradle.allprojects { p ->
         p.tasks.withType(Test).configureEach { t ->

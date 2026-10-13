@@ -32,13 +32,15 @@ several agents building at once everything slowed down.
    spec mocking `java.net.URL`'s constructor that runs despite `--tests` filters, left the
    build at 0% CPU holding the slot ~90 min; Gradle logged "Did not receive connection
    preamble within 10s", which is a symptom, not the cause) is handled on both sides. The holder: every Test task gets a
-   timeout unless the build sets one (`GRADLE_TEST_TIMEOUT_MIN`, default 90; 0 = none), so a
-   hung test run fails and releases the slot. The waiter: a watchdog reads the CPU time of the
-   STATUS holder's process tree (pid plus descendants, through `ps`) once a minute; if it gains
-   less than 30 s in `GRADLE_SLOT_IDLE_MIN` minutes (default 15), the waiter prints
-   "machine-gradle-slot: WATCHDOG: …", appends a `watchdog:` line to `STATUS` and starts
-   anyway. It never kills the holder: the stuck build's own session must stop it. On release
-   `STATUS` reads `free (last: …)`.
+   timeout unless the build sets one (`GRADLE_TEST_TIMEOUT_MIN`, default 180; 0 = none; a full
+   plektra suite took 71 min under load), so a hung test run fails and releases the slot. The
+   waiter: a watchdog reads, once a minute through `ps`, the CPU time of the STATUS holder's
+   process tree (pid plus descendants) plus every detached Kotlin compile daemon and aapt2
+   daemon. If that gains less than 30 s in `GRADLE_SLOT_IDLE_MIN` minutes (default 15), the
+   waiter prints "machine-gradle-slot: WATCHDOG: …" and waits for the one **overflow slot**
+   (`slot-overflow.lock`, holder in `STATUS-overflow`); with it, it appends a `watchdog:` line
+   to `STATUS` and starts. So a stuck holder costs at most one extra build. It never kills the
+   holder: the stuck build's own session must stop it. On release `STATUS` reads `free (last: …)`.
    Added 2026-10-06 after 9 concurrent `--no-daemon` runs outside `bg` took the load to 224.
    For djbclark only, not for agent-facing text: `GRADLE_SLOT=off` skips the gate for one
    build. A waiting build already has a JVM (~200 MB), which is far cheaper than thrashing.

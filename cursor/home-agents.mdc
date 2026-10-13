@@ -238,8 +238,8 @@ processes: its shell moves on and the harness kills the tree.
 **Gradle: one build at a time, machine-wide (2026-10-06).** Check `pgrep -fl
 'GradleWrapperMain|gradle-wrapper.jar'` first (Gradle 9's wrapper runs as `-jar`); "Waiting for the machine-wide Gradle slot" means queued,
 not hung: don't kill or retry it (`~/.local/state/gradle-slot/STATUS`); a holder
-stuck at ~0% CPU is passed by the waiter's watchdog after 15 min, and Test tasks
-time out after 90 min by default (site-djbclark `docs/gradle-limits.md`). Limits
+stuck at ~0% CPU is passed by one waiter (the overflow slot) after 15 min, and Test
+tasks time out after 180 min by default (site-djbclark `docs/gradle-limits.md`). Limits
 (2026-10-05): profiles in `~/ops/site-private/gradle/profiles/` (default `low`: 2
 workers, JVMs see 2 CPUs, low priority; `night` only with an expiry via
 `bin/gradle-limits set night --until 07:00`), linked into every Gradle home. Don't
