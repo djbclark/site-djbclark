@@ -80,6 +80,7 @@ STEPS: list[tuple[str, str, list[str]]] = [
     ("grok-scan", "s1_grok.py", ["scan", "--quiet"]),
     ("opencode-sink", "s1_opencode.py", ["sink"]),
     ("zcode-sink", "s1_zcode.py", ["sink"]),
+    ("cursor-scan", "s1_cursor_cli.py", ["scan"]),
     ("search-index", "s1_search.py", ["index"]),
 ]
 
