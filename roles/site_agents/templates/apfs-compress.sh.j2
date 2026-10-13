@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Jobber apfs-compress: re-apply APFS (decmpfs) compression to the caches that
+# keep receiving new, uncompressed files: the pnpm store, the uv cache and the
+# Android SDK (bar system-images, whose files are mostly incompressible and
+# over afsctool's 2 GB per-file limit).
+#
+# One-off measurements (2026-10-13): pnpm store -43%, uv cache -28%, Android
+# platforms -27%, build-tools -22%, ndk -31%. Undo any path with
+# `afsctool -d <path>`.
+#
+# Safety: never touches a path while a process that uses it is running, runs at
+# low priority, and skips files that save under 10%. The uv cache is held open
+# for the whole life of every `uv run` (shared flock), so "uv idle" means no uv
+# process besides the long-lived server wrappers in uv_keep.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+command -v afsctool >/dev/null 2>&1 || { echo "apfs-compress: afsctool not installed"; exit 0; }
+
+uv_keep='{{ site_agents_apfs_compress_uv_keep }}'
+
+uv_busy() {
+  local pid
+  for pid in $(pgrep -x uv || true); do
+    ps -o command= -p "$pid" | grep -Eq "$uv_keep" || return 0
+  done
+  return 1
+}
+
+# Another afsctool pass (manual or earlier run) is still going: retry next time.
+if pgrep -x afsctool >/dev/null 2>&1; then
+  echo "apfs-compress: afsctool already running; skipping this pass"
+  exit 0
+fi
+
+run() { # run <label> <path>...
+  local label=$1; shift
+  local p existing=()
+  for p in "$@"; do [ -e "$p" ] && existing+=("$p"); done
+  [ -n "${existing[*]:-}" ] || return 0
+  nice -n 15 afsctool -c -j2 -f -s 10 "${existing[@]}" >/dev/null 2>&1 \
+    && echo "apfs-compress: $label done" \
+    || echo "apfs-compress: $label exited non-zero"
+}
+
+run pnpm "$HOME/Library/pnpm/store"
+
+if uv_busy; then
+  echo "apfs-compress: uv is active; skipping the uv cache this pass"
+else
+  run uv "$HOME/.cache/uv"
+fi
+
+if pgrep -f 'qemu-system|Android Studio|gradlew' >/dev/null 2>&1; then
+  echo "apfs-compress: Android tooling is active; skipping the SDK this pass"
+else
+  sdk="$HOME/Library/Android/sdk"
+  run android "$sdk/platforms" "$sdk/build-tools" "$sdk/ndk" "$sdk/sources" "$sdk/cmake"
+fi
+exit 0

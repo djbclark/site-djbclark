@@ -176,6 +176,12 @@
     dest: "{{ site_agents_chrome_cache_trim_script }}"
     mode: "0755"
 
+- name: Install apfs-compress script
+  ansible.builtin.template:
+    src: apfs-compress.sh.j2
+    dest: "{{ site_agents_apfs_compress_script }}"
+    mode: "0755"
+
 - name: Read current Chrome cache policy defaults
   ansible.builtin.command:
     argv: [defaults, read, com.google.Chrome, "{{ item.key }}"]

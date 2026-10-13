@@ -102,6 +102,10 @@ site_agents_brew_fast_upgrade_script: "{{ site_agents_bin_dir }}/brew-fast-upgra
 site_agents_brew_cache_volume: /Volumes/mac256usb
 site_agents_landing_health_script: "{{ site_agents_bin_dir }}/landing-health"
 site_agents_chrome_cache_trim_script: "{{ site_agents_bin_dir }}/chrome-cache-trim"
+site_agents_apfs_compress_script: "{{ site_agents_bin_dir }}/apfs-compress"
+# uv processes the apfs-compress job ignores when deciding whether uv is idle
+# (long-lived servers that hold the uv cache lock for days). ERE for grep -E.
+site_agents_apfs_compress_uv_keep: 'saner_mcp\.py|stayturgid/control/bin/dashboard\.py'
 # Chrome cache policy (user defaults) — the HTTP/media disk cache caps the
 # chrome-cache-trim job does NOT cover (it only clears profile caches the policy
 # leaves unbounded). Integer bytes; applied by the "Set Chrome cache policy

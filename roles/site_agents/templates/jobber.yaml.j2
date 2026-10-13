@@ -96,6 +96,16 @@ jobs:
   # cover — the HTTP/media disk cache itself is policy-capped and untouched.
   # The script skips any pass with Chrome running, so it is scheduled a few
   # times a day to catch a window with the browser quit. Silent on success.
+  # Weekly: re-apply APFS compression to the pnpm store, uv cache and Android SDK
+  # (new files land uncompressed). Skips any cache whose tooling is running.
+  apfs-compress:
+    cmd: {{ site_agents_apfs_compress_script }}
+    time: 0 30 4 * * 0
+    onError: Backoff
+    notifyOnError: [*programSink]
+    notifyOnFailure: [*programSink, *filesystemSink]
+    mode: "0755"
+
   chrome-cache-trim:
     cmd: {{ site_agents_chrome_cache_trim_script }}
     time: 0 45 0,6,12,18 * * *

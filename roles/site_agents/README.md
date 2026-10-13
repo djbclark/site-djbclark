@@ -16,6 +16,20 @@ install to `~/.local/bin`; plists render to
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 | s1-ingest | `com.{{ site_ns }}.s1-ingest` | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed |
 
+## APFS compression job (`apfs-compress`)
+
+Weekly Jobber job (Sunday 04:30) that re-applies APFS (decmpfs) compression with
+`afsctool` to caches that keep receiving uncompressed files: `~/Library/pnpm/store`,
+`~/.cache/uv`, and the Android SDK (`platforms`, `build-tools`, `ndk`, `sources`,
+`cmake`; never `system-images`, whose files are mostly incompressible and over
+afsctool's 2 GB per-file limit). Measured 2026-10-13: pnpm -43%, uv -28%, Android
+-22% to -31%. Needs `afsctool` (brew); a host without it exits 0. Runs niced, and
+skips a cache while its tooling is active. For uv "active" means any `uv` process
+other than the long-lived servers in `site_agents_apfs_compress_uv_keep`, because
+`uv run` holds the cache lock for its whole life. Undo: `afsctool -d <path>`. Do
+not point it at cow pastures or other APFS-cloned trees: compressing a clone
+rewrites it and breaks the sharing.
+
 ## Chrome cache policy + trim
 
 Two complementary halves, both macOS-only (the `chrome-cache` tasks):
