@@ -84,10 +84,11 @@
   # The host builds this configuration from git, never from /etc/nixos:
   # github:djbclark/site-djbclark, branch deploy-vps-primary, flake in nixos/. Deploy =
   # `git push origin master:deploy-vps-primary`, then `systemctl start nixos-upgrade` on
-  # the host (or wait for the 04:00 run). Never run `nixos-rebuild` by hand on the host:
-  # it would build whatever /etc/nixos or the lock file says, not the deployed branch.
-  # nixpkgs follows the stable branch head (the same stream the old channel gave), via the
-  # override below, not the lock file, so updates keep arriving without a lock-bump CI job.
+  # the host (or wait for the 04:00 run). Never run `nixos-rebuild` by hand on the host
+  # (/etc/nixos holds no configuration on purpose).
+  # nixpkgs is exactly nixos/flake.lock. The weekly workflow .github/workflows/nixos-lock-update.yml
+  # bumps the lock, builds this system on a runner first, and promotes it to the deploy branch;
+  # when that fails it opens an issue and messages Hermes (docs/nixos-in-git.md).
   # A kernel/initrd change reboots the host, but only inside the window; outside it the new
   # generation stays staged for the next boot. Supervised reboot tested 2026-10-13.
   nix.settings.experimental-features = [
@@ -99,11 +100,6 @@
     enable = true;
     operation = "switch";
     flake = "github:djbclark/site-djbclark/deploy-vps-primary?dir=nixos#vps-primary";
-    flags = [
-      "--override-input"
-      "nixpkgs"
-      "github:NixOS/nixpkgs/nixos-26.05"
-    ];
     upgrade = false;
     dates = "04:00";
     randomizedDelaySec = "45min";
