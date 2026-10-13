@@ -230,6 +230,20 @@ def project(payload: bytes) -> str:
 
 
 def _project(payload: bytes) -> str:
+    # Lossless row envelopes may be much larger than the projection window.
+    # Their canonical JSON puts this key first, so decode just its JSON string
+    # instead of parsing a deliberately truncated document or indexing base64.
+    projection_prefix = b'{"_s1_search_text":'
+    if payload.startswith(projection_prefix):
+        try:
+            projected, _ = json.JSONDecoder().raw_decode(
+                payload[len(projection_prefix) :].decode("utf-8")
+            )
+        except (UnicodeDecodeError, ValueError):
+            projected = None
+        if isinstance(projected, str):
+            return projected[:PROJECTION_CHARS]
+
     head = payload[: PROJECTION_CHARS * 2]
     try:
         obj = json.loads(head.decode("utf-8", errors="replace"))
