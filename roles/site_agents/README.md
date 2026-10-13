@@ -30,6 +30,13 @@ other than the long-lived servers in `site_agents_apfs_compress_uv_keep`, becaus
 not point it at cow pastures or other APFS-cloned trees: compressing a clone
 rewrites it and breaks the sharing.
 
+It also compresses cold agent transcripts (`site_agents_apfs_compress_cold_dirs`:
+`~/.claude/projects`, `~/.codex/sessions`, `~/.grok/sessions`, `~/.copilot/session-state`,
+`~/.local/state/acp-run`): only jsonl/json/log/txt files untouched for 7+ days and not
+open for write (one `lsof` snapshot). mtime and logical size are preserved, so
+readers that resume by offset or detect change by size/mtime are unaffected. Never
+add live SQLite stores (hermes state.db, opencode.db, cursor chats, s1-evidence).
+
 ## Chrome cache policy + trim
 
 Two complementary halves, both macOS-only (the `chrome-cache` tasks):

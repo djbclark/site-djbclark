@@ -43,6 +43,32 @@ run() { # run <label> <path>...
     || echo "apfs-compress: $label exited non-zero"
 }
 
+# Cold agent transcripts: only files untouched for 7+ days and not open for write.
+cold_dirs=(
+{% for d in site_agents_apfs_compress_cold_dirs %}
+  "$HOME/{{ d }}"
+{% endfor %}
+)
+cold_pass() {
+  command -v fd >/dev/null 2>&1 || { echo "apfs-compress: fd missing; skipping cold transcripts"; return 0; }
+  local open_list file_list d before after
+  open_list="$(mktemp)"; file_list="$(mktemp)"
+  # Paths currently open for write (lsof access mode w or u), one lsof call total.
+  lsof -w -F an 2>/dev/null | awk '/^a/{m=substr($0,2)} /^n\//{if(m=="w"||m=="u")print substr($0,2)}' | sort -u > "$open_list" || true
+  for d in "${cold_dirs[@]}"; do
+    [ -d "$d" ] || continue
+    before="$(du -sk "$d" 2>/dev/null | awk '{print $1}')"
+    fd --type f --hidden --no-ignore --changed-before 7d -e jsonl -e json -e log -e txt --absolute-path . "$d" 2>/dev/null \
+      | grep -vxFf "$open_list" > "$file_list" || true
+    if [ -s "$file_list" ]; then
+      tr '\n' '\0' < "$file_list" | xargs -0 nice -n 15 afsctool -c -j2 -s 10 >/dev/null 2>&1 || true
+    fi
+    after="$(du -sk "$d" 2>/dev/null | awk '{print $1}')"
+    echo "apfs-compress: cold $d ${before:-0} KiB -> ${after:-0} KiB"
+  done
+  rm -f "$open_list" "$file_list"
+}
+
 run pnpm "$HOME/Library/pnpm/store"
 
 if uv_busy; then
@@ -57,4 +83,6 @@ else
   sdk="$HOME/Library/Android/sdk"
   run android "$sdk/platforms" "$sdk/build-tools" "$sdk/ndk" "$sdk/sources" "$sdk/cmake"
 fi
+
+cold_pass
 exit 0

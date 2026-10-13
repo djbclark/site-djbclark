@@ -105,6 +105,16 @@ site_agents_chrome_cache_trim_script: "{{ site_agents_bin_dir }}/chrome-cache-tr
 site_agents_apfs_compress_script: "{{ site_agents_bin_dir }}/apfs-compress"
 # uv processes the apfs-compress job ignores when deciding whether uv is idle
 # (long-lived servers that hold the uv cache lock for days). ERE for grep -E.
+# Cold agent transcripts (HOME-relative) that the apfs-compress job also compresses:
+# text-like files (jsonl/json/log/txt) not modified for 7+ days and not open for
+# write. Never add live SQLite stores (hermes state.db, opencode.db, cursor chats,
+# s1-evidence) here.
+site_agents_apfs_compress_cold_dirs:
+  - .claude/projects
+  - .codex/sessions
+  - .grok/sessions
+  - .copilot/session-state
+  - .local/state/acp-run
 site_agents_apfs_compress_uv_keep: 'saner_mcp\.py|stayturgid/control/bin/dashboard\.py'
 # Chrome cache policy (user defaults) — the HTTP/media disk cache caps the
 # chrome-cache-trim job does NOT cover (it only clears profile caches the policy
