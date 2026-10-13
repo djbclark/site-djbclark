@@ -26,6 +26,14 @@
 
   environment.systemPackages = [ pkgs.vim pkgs.python3 ];
 
+  # Joined to the tailnet 2026-10-13 with a one-time tagged auth key
+  # (tag:server: no key expiry); node state lives in /var/lib/tailscale.
+  # Public SSH on 22 stays open until the tailnet path is proven.
+  services.tailscale = {
+    enable = true;
+    openFirewall = true;
+  };
+
   # Unattended updates: follow root's `nixos` channel (nixos-26.05, set with
   # nix-channel; the module runs `nix-channel --update` itself, so manual
   # `nixos-rebuild` sees the same nixpkgs). Do not set `channel` here: it makes the

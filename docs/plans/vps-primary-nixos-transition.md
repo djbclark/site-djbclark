@@ -55,7 +55,26 @@ reboot test after it: SSH back in about 22 s on the new kernel, no failed units,
 same IPv4. Then `allowReboot = true` with `rebootWindow` 03:00-05:00 UTC: a
 kernel/initrd change reboots inside the window, otherwise the generation stays
 staged. A failed run shows in `systemctl status nixos-upgrade`; no failure
-notification yet (see the Tailscale/fleet-watch item below once done).
+notification from the VPS itself; the Mac's `fleet-watch` covers it (below).
+
+Tailscale joined 2026-10-13: `services.tailscale` (openFirewall) in the tracked
+config; joined once with a tagged (`tag:server`, no key expiry), non-reusable auth
+key kept in sudo-secretspec as `TAILSCALE_AUTHKEY_VPS` (a runtime `add`, optional;
+mirror it into the tracked declarations through release or `undeclare` it). The key
+went over ssh stdin to a root-only tmpfs file that `tailscale up --auth-key=file:...`
+read and `rm` deleted; the config does not reference it, so a logged-out node needs
+a new key. Tailnet address `100.125.249.107`
+(`vps-primary.greyhound-sidemirror.ts.net`); host key matched the verified
+fingerprint. The ACL (login.tailscale.com/admin/acls/file) has
+`tagOwners: {"tag:server": ["autogroup:admin"]}`; the allow-all grant covers the
+tag. Public SSH on 22 stays open for now.
+
+`bin/fleet-watch vps` (also part of the 5-minute `check`): ssh over the tailnet
+(public address as the second route), reads `nixos-upgrade` Result and failed
+units, and `hermes-ping`s once per incident for: `down` (unreachable on both
+routes for 3 checks, covering the 03:00-05:00 UTC reboot), `upgrade-failed`,
+`tailnet-down`, `units-failed`, then "recovered". State in
+`~/.local/state/fleet-watch/vps-state`.
 
 **Do not set `system.autoUpgrade.channel` on this host.** With it set the module
 fetches the channel URL directly and never runs `nix-channel --update`, so root's

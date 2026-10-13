@@ -6,6 +6,7 @@
 #   fleet-watch s1         only the S1 evidence freshness check (see below)
 #   fleet-watch load       only the machine-overload check (see Machine overload)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
+#   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch install    write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
 #
@@ -88,6 +89,16 @@ S1_PLIST="$HOME/Library/LaunchAgents/com.djbclark.s1-ingest.plist"
 LOAD_MULT="${FLEET_WATCH_LOAD_MULT:-4}"
 SWAP_PCT="${FLEET_WATCH_SWAP_PCT:-90}"
 LOAD_COOLDOWN="${FLEET_WATCH_LOAD_COOLDOWN:-1800}"
+# vps-primary (NixOS, unattended upgrades; added 2026-10-13): probed over the tailnet,
+# with the public address as a second route to tell "tailnet down" from "host down".
+VPS="${FLEET_WATCH_VPS:-on}"
+VPS_TS="${FLEET_WATCH_VPS_TS:-100.125.249.107}"
+VPS_PUBLIC="${FLEET_WATCH_VPS_PUBLIC:-178.105.34.223}"
+VPS_KEY="${FLEET_WATCH_VPS_KEY:-$HOME/.ssh/vps_primary_key}"
+VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
+# Consecutive failed probes before "down" is announced. 3 x 5 min covers the
+# unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
+VPS_DOWN_AFTER="${FLEET_WATCH_VPS_DOWN_AFTER:-3}"
 # Socket probes run under system python3, never bash's /dev/tcp: macOS SIGKILLs
 # homebrew bash the moment its socket connects, in the launchd context (kernel
 # "[bash: killed]", observed 2026-10-10); system binaries are exempt there.
@@ -470,6 +481,61 @@ load_watch() {
   fi
 }
 
+vps_probe() {
+  # $1 = address. Prints "<upgrade Result> <ActiveState> <failed units>" on success.
+  runb "$VPS_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=8 -o IdentitiesOnly=yes \
+    -o IdentityAgent=none -i "$VPS_KEY" -o StrictHostKeyChecking=accept-new "root@$1" \
+    'r=$(systemctl show nixos-upgrade.service -p Result --value); a=$(systemctl show nixos-upgrade.service -p ActiveState --value); f=$(systemctl --failed --plain --no-legend | wc -l); echo "$r $a $f"' 2>/dev/null |
+    tail -1
+}
+
+vps_watch() {
+  # Sets VPS_STATE (shown in the status line); notifies itself on transitions only,
+  # once per incident, and records the notified state only when the notice went out.
+  VPS_STATE=off
+  [[ "$VPS" == on ]] || return 0
+  local sf="$STATE_DIR/vps-state" cf="$STATE_DIR/vps-fails" prev fails out via=tailnet
+  prev=$(cat "$sf" 2>/dev/null || echo ok)
+  out=$(vps_probe "$VPS_TS")
+  if [[ -z "$out" ]]; then
+    out=$(vps_probe "$VPS_PUBLIC")
+    via=public
+  fi
+  local state detail
+  if [[ -z "$out" ]]; then
+    fails=$(( $(cat "$cf" 2>/dev/null || echo 0) + 1 ))
+    echo "$fails" >"$cf"
+    VPS_STATE="unreachable($fails)"
+    ((fails >= VPS_DOWN_AFTER)) || return 0
+    state=down
+    detail="vps-primary unreachable on the tailnet and on the public address for $fails checks (unattended reboot window is 03:00-05:00 UTC; a failed boot needs the Hetzner console: pick the previous generation in GRUB)"
+  else
+    echo 0 >"$cf"
+    local res act nfail
+    read -r res act nfail <<<"$out"
+    if [[ "$res" != success && "$act" == inactive ]] || [[ "$act" == failed ]]; then
+      state=upgrade-failed
+      detail="vps-primary: nixos-upgrade failed (Result=$res); run: ssh vps journalctl -u nixos-upgrade -n 50"
+    elif [[ "$via" == public ]]; then
+      state=tailnet-down
+      detail="vps-primary answers on the public address but not on the tailnet (check tailscaled on the VPS)"
+    elif ((nfail > 0)); then
+      state=units-failed
+      detail="vps-primary: $nfail failed systemd unit(s); run: ssh vps systemctl --failed"
+    else
+      state=ok
+    fi
+    VPS_STATE="$state"
+  fi
+  [[ "$state" == "$prev" ]] && return 0
+  if [[ "$state" == ok ]]; then
+    notify "vps-primary" "recovered, healthy again (was: $prev)" && echo ok >"$sf"
+  else
+    notify "vps-primary" "$detail" && echo "$state" >"$sf"
+  fi
+  return 0
+}
+
 check() {
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
@@ -487,6 +553,8 @@ check() {
     sshdk+="${h}sshd "
   done
   load_watch
+  vps_watch
+  [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   local r
   for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
   # S1 freshness speaks for itself (once per incident), so s1= is shown, never diffed.
@@ -556,6 +624,10 @@ case "${1:-check}" in
     echo "s1=$S1_STATE ${S1_AGES:-}"
     ;;
   load) load_watch ;;
+  vps)
+    vps_watch
+    echo "vps=$VPS_STATE"
+    ;;
   test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && tail -2 "$STATE_DIR/hermes.log" ;;
   install)
     cat >"$PLIST" <<EOF
