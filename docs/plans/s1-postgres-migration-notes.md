@@ -12,7 +12,10 @@ zstd `event_text`) shrank `candidates.sqlite3` to about 6.1 GiB; the CAS pack
 Replicate SQLite instead of migrating (Litestream-style WAL shipping, or a
 periodic `VACUUM INTO` plus rsync). That needs no code change and gives a
 read-only copy. Choose Postgres only for concurrent writers or network
-clients.
+clients. Caveat: a layout-3 copy can only be searched through `s1_search.py`
+(the `event_text` view calls the Python SQL function `s1_unzstd`); plain
+`sqlite3` fails on snippets and the view, so a replica host needs this repo's
+code, Python and libzstd.
 
 ## 1. Where the code touches the store
 
