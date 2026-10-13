@@ -12,6 +12,15 @@ tool calls (2026-10-12): Open WebUI ends a tool-calling stream with "stop", and
 Crush only runs the tool and continues on "tool_calls", so every turn ended
 after its first tool call.
 
+It also rewrites a tool call the model wrote as *text* into a native
+`tool_calls` delta (2026-10-13): on some turns the server does not translate the
+model's tool call at all and the content is the call in a pseudo-syntax
+(`<tool_calls><invoke name="bash">…`, `<function=ls>…`, `<tool_use name="view">…`,
+`<view><location>…`). Crush treats that as a plain answer and does nothing. The
+proxy detects the marker mid-stream, holds the rest, and replaces it with a
+native tool_calls delta. It does NOT touch a bare ```bash fence (a model often
+prints a command just to show it). Disable with SIPB_NORMALIZE_TOOLCALLS=0.
+
 Behaviour added (2026-10-12), all stdlib, each behind an env var:
     SIPB_UPSTREAM          override UPSTREAM (default https://llms-dev-1.mit.edu)
     SIPB_RULES_FILE        rules.md to prepend to the first system message
@@ -23,6 +32,8 @@ Behaviour added (2026-10-12), all stdlib, each behind an env var:
                            empty stream, with 2 s then 5 s backoff (default 2)
     SIPB_LOG               JSONL latency log (default
                            ~/.local/state/sipb-llms-proxy/requests.jsonl)
+    SIPB_NORMALIZE_TOOLCALLS  rewrite a text-form tool call into a native
+                           tool_calls delta (default 1; 0 to disable)
 
 Usage:
     sipb-llms-proxy [port]            # default port 8890
@@ -33,6 +44,7 @@ import datetime
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -40,6 +52,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 UPSTREAM = os.environ.get("SIPB_UPSTREAM", "https://llms-dev-1.mit.edu")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8890
@@ -54,6 +67,10 @@ LOG_PATH = os.path.expanduser(
     os.environ.get("SIPB_LOG", "~/.local/state/sipb-llms-proxy/requests.jsonl")
 )
 LOG_MAX_BYTES = 20 * 1024 * 1024
+# Rewrite a tool call the model wrote as text into an OpenAI tool_calls delta
+# (Open WebUI 0.6.30 did not translate it). See text_toolcalls(). On by default.
+NORMALIZE_TOOLCALLS = os.environ.get("SIPB_NORMALIZE_TOOLCALLS", "1").lower() not in (
+    "0", "false", "no", "off", "")
 
 MESSAGE = (
     "SIPB LLMs returned no completion. This is what Open WebUI does when the "
@@ -127,6 +144,162 @@ def _finish_json(data):
     except Exception:
         return None
     return _finish_reason(body)
+
+
+# ---------------------------------------------------------------------------
+# Tool calls written as text (Open WebUI/Ollama did not return `tool_calls`).
+#
+# Models on the SIPB server sometimes put the tool call in the message content
+# instead of a native `tool_calls` delta — in a harness-specific pseudo-syntax
+# (`<tool_calls><invoke name="bash">…`, `<function=ls>…`, `<tool_use name="view">
+# …`, `<view><location>…`). Crush runs a tool only when the delta carries
+# `tool_calls`, so those turns do nothing. We recognise the *explicit* encodings
+# and re-emit them as a native tool_calls delta. We deliberately do NOT touch a
+# bare ```bash fence (a model often prints a command just to show it).
+# ---------------------------------------------------------------------------
+
+_TOOLCALL_MARKER = re.compile(r"<tool_calls>|<invoke\b|<function\s*=|</?tool_use\b|<view>|<file\s+path=")
+# Inner tags a model uses for a single argument -> the tool parameter name.
+_FILE_TAGS = ("crush_path", "location", "file_path", "path")
+_SCALAR_TAGS = ("command", "content", "pattern", "old_string", "new_string", "description")
+
+
+def _delta_text(event):
+    """Assistant `content` text of a streamed chunk (not reasoning)."""
+    parts = []
+    for choice in event.get("choices") or []:
+        content = (choice.get("delta") or {}).get("content")
+        if isinstance(content, str):
+            parts.append(content)
+    return "".join(parts)
+
+
+def _coerce(value):
+    """A parameter value as JSON when it looks like JSON, else a trimmed string."""
+    s = value.strip()
+    if s[:1] in ('{', '[', '"'):
+        try:
+            return json.loads(s)
+        except ValueError:
+            pass
+    if s in ("true", "false"):
+        return s == "true"
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    return s
+
+
+def _param_pairs(block):
+    """`<parameter name="x">v</parameter>` (and `<parameter=x>v</parameter>`) -> [(x, v)]."""
+    out = []
+    for m in re.finditer(
+        r"<parameter(?:\s+name\s*=\s*[\"']?([\w.\-]+)[\"']?|=\s*[\"']?([\w.\-]+)[\"']?)\s*>(.*?)</parameter>",
+        block, re.S,
+    ):
+        name = m.group(1) or m.group(2)
+        out.append((name, m.group(3)))
+    return out
+
+
+def _map_tag(tool, tag):
+    """A generic inner tag -> the parameter name this tool expects."""
+    if tag in _FILE_TAGS:
+        return "path" if tool in ("ls", "grep", "glob") else "file_path"
+    return tag
+
+
+def text_toolcalls(text):
+    """Parse a model's text-form tool call into [{"name":…, "arguments":{…}}].
+
+    Returns None when the text is not a recognised tool call, so a plain answer
+    is never rewritten. Handles the encodings seen on the SIPB server:
+    `<tool_calls><invoke name=…><parameter name=…>…`, `<function=NAME>…`,
+    `<tool_use name=…>…`, and a bare `<view><location>…</view>`.
+    """
+    if not text or "<" not in text:
+        return None
+    calls = []
+    spans = []  # text spans consumed by the first two forms, to avoid double-count
+
+    for m in re.finditer(r"<invoke\s+name\s*=\s*[\"']?([\w.\-]+)[\"']?\s*>(.*?)</invoke>", text, re.S):
+        args = {k: _coerce(v) for k, v in _param_pairs(m.group(2))}
+        calls.append({"name": m.group(1), "arguments": args})
+        spans.append(m.span())
+
+    for m in re.finditer(r"<function\s*=\s*[\"']?([\w.\-]+)[\"']?\s*>(.*?)</function>", text, re.S):
+        args = {k: _coerce(v) for k, v in _param_pairs(m.group(2))}
+        calls.append({"name": m.group(1), "arguments": args})
+        spans.append(m.span())
+
+    for m in re.finditer(r"<tool_use\s+name\s*=\s*[\"']?([\w.\-]+)[\"']?\s*>(.*?)</tool_use>", text, re.S):
+        tool, body = m.group(1), m.group(2)
+        args = {k: _coerce(v) for k, v in _param_pairs(body)}
+        for tag, value in re.findall(r"<([a-z_]+)\s*>(.*?)</\1>", body, re.S):
+            if tag in _FILE_TAGS or tag in _SCALAR_TAGS:
+                args[_map_tag(tool, tag)] = _coerce(value)
+        calls.append({"name": tool, "arguments": args})
+        spans.append(m.span())
+
+    for m in re.finditer(r"<view\b[^>]*>(.*?)</view>", text, re.S):
+        if any(a <= m.start() and m.end() <= b for a, b in spans):
+            continue  # already handled as a <tool_use name="view">
+        loc = re.search(r"<location\s*>(.*?)</location>", m.group(1), re.S)
+        if loc:
+            calls.append({"name": "view", "arguments": {"file_path": _coerce(loc.group(1))}})
+
+    return calls or None
+
+
+def _native_tool_calls(calls):
+    """Parsed calls -> OpenAI message tool_calls entries."""
+    return [{
+        "id": "call_" + uuid.uuid4().hex[:12],
+        "type": "function",
+        "function": {"name": c["name"], "arguments": json.dumps(c["arguments"])},
+    } for c in calls]
+
+
+def _stream_toolcall_sse(calls):
+    """SSE chunks that deliver parsed text-form calls as native tool_calls."""
+    out = []
+    for i, c in enumerate(calls):
+        chunk = {
+            "id": "chatcmpl-" + uuid.uuid4().hex[:12],
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": i, "id": "call_" + uuid.uuid4().hex[:12], "type": "function",
+                "function": {"name": c["name"], "arguments": json.dumps(c["arguments"])},
+            }]}, "finish_reason": None}],
+        }
+        out.append(b"data: " + json.dumps(chunk).encode() + b"\n\n")
+    out.append(b'data: ' + json.dumps({
+        "id": "chatcmpl-" + uuid.uuid4().hex[:12], "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+    }).encode() + b"\n\n")
+    out.append(b"data: [DONE]\n\n")
+    return out
+
+
+def normalize_json_body(data):
+    """Same rewrite for a non-streamed completion (no native tool_calls)."""
+    if not NORMALIZE_TOOLCALLS or b"tool_calls" in data:
+        return data
+    try:
+        body = json.loads(data)
+    except ValueError:
+        return data
+    changed = False
+    for choice in body.get("choices") or []:
+        msg = choice.get("message") or {}
+        if msg.get("tool_calls"):
+            continue
+        calls = text_toolcalls(msg.get("content") or "")
+        if calls:
+            msg["tool_calls"] = _native_tool_calls(calls)
+            msg["content"] = ""
+            choice["finish_reason"] = "tool_calls"
+            changed = True
+    return json.dumps(body).encode() if changed else data
 
 
 def _load_rules():
@@ -271,6 +444,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return "sent"
             metrics["finish_reason_raw"] = _finish_json(data)
             data = fix_json_body(data)
+            data = normalize_json_body(data)
             metrics["finish_reason_sent"] = _finish_json(data)
             metrics["ttft_s"] = time.time() - start
             self.send_response(status)
@@ -285,11 +459,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # Streaming response. Buffer until the first non-empty delta (so an
         # empty stream can be retried before anything reaches the client), then
-        # commit the response headers and forward.
+        # commit the response headers and forward. While forwarding, watch for
+        # the model emitting its tool call as text; on the first marker, stop
+        # forwarding and hold the rest so the held text can be replaced by a
+        # native tool_calls delta at the end of the stream.
         saw_tool_calls = False
         saw_nonempty = False
         committed = False
-        buf = []
+        buf = []            # raw lines before the response is committed
+        norm = []           # accumulated assistant text (for text_toolcalls)
+        holding = False     # a tool-call marker was seen; buffer the remainder
+        held = []           # raw lines withheld while holding
         try:
             while True:
                 line = resp.readline()
@@ -303,12 +483,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     fr = _finish_reason(event)
                     if fr is not None:
                         metrics["finish_reason_raw"] = fr
+                    if NORMALIZE_TOOLCALLS:
+                        txt = _delta_text(event)
+                        if txt:
+                            norm.append(txt)
                 saw_tool_calls, line = fix_sse_line(line, saw_tool_calls)
                 event2 = _parse_sse(line)
                 if event2 is not None:
                     fr = _finish_reason(event2)
                     if fr is not None:
                         metrics["finish_reason_sent"] = fr
+                if (NORMALIZE_TOOLCALLS and not saw_tool_calls and not holding
+                        and _TOOLCALL_MARKER.search("".join(norm))):
+                    holding = True
+                if holding:
+                    held.append(line)
+                    continue
                 if committed:
                     self.wfile.write(line)
                     self.wfile.flush()
@@ -318,6 +508,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for bl in buf:
                         self.wfile.write(bl)
                         self.wfile.flush()
+                    buf = []
                     self.wfile.write(line)
                     self.wfile.flush()
                 else:
@@ -325,15 +516,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
+        if holding and not saw_tool_calls:
+            calls = text_toolcalls("".join(norm))
+            if calls:
+                saw_tool_calls = True
+                if not committed:
+                    committed = True
+                    self._send_stream_headers(resp)
+                    self._write(buf)
+                    buf = []
+                for chunk in _stream_toolcall_sse(calls):
+                    self.wfile.write(chunk)
+                self.wfile.flush()
+                metrics["finish_reason_sent"] = "tool_calls"
+                held = []  # replaced by the tool_calls delta
+            elif not committed:
+                # Not a real tool call: keep the text we held.
+                committed = True
+                self._send_stream_headers(resp)
+
         if not committed and is_post and allow_retry:
             return "retry"
         if not committed:
             # Final attempt: forward the (empty) stream as-is.
             self._send_stream_headers(resp)
-            for bl in buf:
-                self.wfile.write(bl)
-                self.wfile.flush()
+            self._write(buf)
+            buf = []
+        self._write(buf + held)
         return "sent"
+
+    def _write(self, lines):
+        if lines:
+            self.wfile.write(b"".join(lines))
+            self.wfile.flush()
 
     def _run_with_retry(self, body, is_post, metrics):
         retries = 0

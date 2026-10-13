@@ -10,8 +10,10 @@
 #
 # Crush talks to sipb-llms-proxy (launchd label land.charm.sipb-llms-proxy) on
 # 127.0.0.1:8890, which forwards to the server but turns the opaque `null`
-# Open WebUI returns for an over-long prompt into a readable HTTP 400 error.
-# If the proxy is down: launchctl kickstart -k gui/$(id -u)/land.charm.sipb-llms-proxy
+# Open WebUI returns for an over-long prompt into a readable HTTP 400 error, and
+# rewrites a tool call the model wrote as text into a native tool_calls delta
+# (see the proxy README). If the proxy is down:
+# launchctl kickstart -k gui/$(id -u)/land.charm.sipb-llms-proxy
 #
 # The server caps inference context at ~32768 tokens and answers larger
 # requests with that bare `null`. The product-specific / non-coding skills are
@@ -31,11 +33,16 @@ model add sipb-llms/qwen3.5:35b \
   --context-window 32768 \
   --default-max-tokens 8192
 
-model add sipb-llms/deepseek-r1:32b \
-  --name "DeepSeek R1 32B" \
-  --can-reason true \
-  --context-window 32768 \
-  --default-max-tokens 8192
+# deepseek-r1:32b is DROPPED (2026-10-13): it fabricates success on file/command
+# tasks (writes the command in a ```bash fence plus a false "[file created]" line
+# as text, no tool call), so crush runs nothing. Re-enable only after
+# `toolcall_conformance.py deepseek-r1:32b` passes. See REPORT.md section 4.7.
+#
+# model add sipb-llms/deepseek-r1:32b \
+#   --name "DeepSeek R1 32B" \
+#   --can-reason true \
+#   --context-window 32768 \
+#   --default-max-tokens 8192
 
 model add sipb-llms/qwen3-coder:30b \
   --name "Qwen3 Coder 30B" \

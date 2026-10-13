@@ -84,6 +84,8 @@ Public (GitHub, owner `djbclark`):
 1. **site-djbclark**: [`tools/sipb-llms-proxy/`](https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy)
    (the loopback proxy, its README, tests and launchd plist) and this directory,
    [`research/sipb-llms/`](https://github.com/djbclark/site-djbclark/tree/master/research/sipb-llms).
+   The proxy also rewrites a tool call the model wrote as *text* into a real `tool_calls`
+   delta, without which the agent runs nothing (see [REPORT.md](REPORT.md) section 4.7).
 2. **aiuse**: [`docs/sipb-quota.md`](https://github.com/djbclark/aiuse/blob/main/docs/sipb-quota.md),
    the collector [`src/aiuse/collectors/sipb.py`](https://github.com/djbclark/aiuse/blob/main/src/aiuse/collectors/sipb.py),
    [`tests/test_sipb.py`](https://github.com/djbclark/aiuse/blob/main/tests/test_sipb.py), the

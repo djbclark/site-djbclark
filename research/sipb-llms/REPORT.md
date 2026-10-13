@@ -1,6 +1,25 @@
 # SIPB LLMs as an agentic-coding backend: measurements and requests
 
-Date: 2026-10-12 (updated the same evening with `qwen3.5:27b`). Author: a SIPB LLMs user (djbclark), measurements run by an AI
+> ### 2026-10-13 — models that silently do nothing on a tool call
+>
+> Every model we drive a coding agent with on this server sometimes (one of them
+> always) returns its tool call as **text** instead of an OpenAI `tool_calls`
+> delta. The agent runs a tool only when it sees `tool_calls`, so the turn ends
+> with **nothing done** — e.g. "make a file" leaves no file. Commands a model
+> only wrote in a ```` ```bash ```` fence are never executed. `deepseek-r1:32b`
+> does this every time and even prints a false success line; the three `qwen`
+> models do it intermittently.
+>
+> - **Complete description, per-model examples and evidence:** [section 4.7](#47-a-tool-call-the-server-did-not-translate-arrives-as-text-so-the-client-runs-nothing).
+> - **What we have done about it on the client side** (a proxy rewrite of the
+>   text form into a real `tool_calls`, and dropping `deepseek-r1:32b`):
+>   [section 5](#5-what-we-changed-on-our-side), items 5 and 6.
+> - **What we ask the server to do:** upgrade Open WebUI past 0.6.30 and enable
+>   the per-model "Function Calling: Native" setting, then run our conformance
+>   script ([section 7.1](#71-fix-the-tool-call-path-the-biggest-win-for-coding-agents)).
+
+Date: 2026-10-12 (updated the same evening with `qwen3.5:27b`; updated 2026-10-13 with the
+text-form tool-call problem and the client workarounds). Author: a SIPB LLMs user (djbclark), measurements run by an AI
 coding agent (Claude Code) through a local logging proxy. No credentials, prompts
 or responses are included here.
 
@@ -15,7 +34,7 @@ at a time, models run serially so we never asked the server for two models at on
 
 1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
 2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `qwen3.5:27b` (dense) works but is slower (36 chunks/s): small task 4 of 4, 5-phase task 2 of 2 with the verify loop (541 and 572 s), 0 of 3 without it. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
-3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy.
+3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy. A fifth appeared on 2026-10-13: on some turns a model writes its tool call as **text** rather than a `tool_calls` delta and the agent then runs nothing (`deepseek-r1:32b` does this every time); see section 4.7 and the proxy workaround in section 5.
 4. **Test other models yourselves:** the whole harness is a skill you can run (install and use: section 9), [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
 
 **Server-side improvements, most to least useful** (hardware fixed). "Human" is hands-on admin time (reading, deciding, approving, checking), not time the AI works or the server spends downloading or restarting. "AI tokens" is the estimated total an AI assistant would spend doing the work. Both are our estimates, not measurements.
@@ -123,6 +142,50 @@ trigger 4.2. Requests: a longer `OLLAMA_KEEP_ALIVE` for the shared default model
 if one model could stay permanently resident, a mixture-of-experts coding model such as
 `qwen3.6:35b-a3b-q4_K_M` (about 3B active parameters) is the cheapest for the hardware.
 
+4.7 **A tool call the server did not translate arrives as text, so the client runs nothing.**
+(Added 2026-10-13.) On some turns the server returns `finish_reason: "stop"` with the
+model's tool call embedded in the message **content** as text, in a harness-specific
+syntax, instead of a `tool_calls` delta. A standard OpenAI client (we use Crush) runs a
+tool only when the delta carries `tool_calls`, so it treats the turn as a plain answer,
+does nothing, and asks the user again. The `finish_reason` fix in 4.1 cannot help: there
+is no `tool_calls` at all.
+
+What each model returned, for the same trivial task ("make a file `/tmp/X` with the
+contents `hi`"), captured from Crush's session store:
+
+| model | what it returned as text |
+| --- | --- |
+| `qwen3.6:35b-a3b` | `<tool_calls><invoke name="bash"><parameter name="command">…</parameter></invoke></tool_calls>`; also `<tool_use name="view"><crush_path>…</crush_path></tool_use>` and `<file path="…">` |
+| `qwen3-coder:30b` | `<function=ls><parameter=path>…</parameter></function>` |
+| `qwen3.5:35b` | `<view><location>…</location></view>` and bare ```` ```bash ```` fences |
+| `deepseek-r1:32b` | no tool syntax at all: a fabricated `[file created](file:///…)` line plus a ```` ```bash ```` fence with the command — and no tool call |
+
+`deepseek-r1:32b` does this **every time** (reproduced 2026-10-13; the file is never
+created, and the "created" line is simply false). The three `qwen` models do it
+intermittently: the identical request succeeds on some turns and produces the text form on
+others, so it is not something we can fix in a prompt alone.
+
+Evidence, all from this machine: the text is in Crush's session store
+`~/src/aiuse/.crush/crush.db` (the turns in question have a `text` part and no `tool_call`
+part); our proxy log (`~/.local/state/sipb-llms-proxy/requests.jsonl`) shows those turns
+with `finish_reason_sent: "stop"` and no tool-call delta. Ground truth for a tool call is
+the delta, not the text: a model that prints the call as prose has, in the OpenAI sense,
+called nothing.
+
+Requests:
+
+1. This is the same root as 4.1/7.1 — the tool-call path. Upgrading Open WebUI past
+   0.6.30 and enabling the per-model "Function Calling: Native" setting is the fix we
+   would most like to see, and our conformance script (`bench/toolcall_conformance.py`)
+   is the check.
+2. For `deepseek-r1:32b` specifically, please check the Ollama template/tool parser for
+   that tag: it answers with the call as prose, which suggests it is not using the
+   server's tool-call format at all. Re-pulling the tag may help.
+3. It would also help to publish the models on which tool calls are known-good; a single
+   reliable tool-calling model is worth more to a coding agent than a larger menu.
+
+Client-side workarounds we shipped are in section 5 (items 5 and 6).
+
 ## 5. What we changed on our side
 
 1. Loopback proxy (about 500 lines, stdlib Python): finish_reason fix, `null` to 400,
@@ -135,6 +198,18 @@ if one model could stay permanently resident, a mixture-of-experts coding model 
    to avoid forcing swaps for other users.
 4. A short persistent rules file for the agent and an optional "verify the work and try
    again" loop; the rules alone gave 0 of 3 passes on task B (the final test command failed), adding the verify loop gave 3 of 3 (1-2 verify rounds each). The same on `qwen3.5:27b`: rules alone 0 of 1, with the verify loop 2 of 2.
+5. **Text-form tool-call rewrite (2026-10-13).** The loopback proxy (item 1) now also
+   rewrites the explicit text encodings of section 4.7 (`<tool_calls><invoke name=…>…`,
+   `<function=…>…`, `<tool_use name=…>…`, `<view><location>…</location></view>`) into a
+   real `tool_calls` delta, mid-stream, so the agent runs the tool. It deliberately does
+   **not** execute a bare ```` ```bash ```` fence (illustrative commands are not run).
+   Disable with `SIPB_NORMALIZE_TOOLCALLS=0`. Code and tests:
+   [tools/sipb-llms-proxy](https://github.com/djbclark/site-djbclark/tree/master/tools/sipb-llms-proxy).
+6. **Dropped `deepseek-r1:32b` from the agent's model menu (2026-10-13).** It fails the
+   file/command task on every attempt and prints a success line it did not earn
+   (section 4.7), which is worse than failing loudly. Re-enable only after
+   `toolcall_conformance.py` passes for it. The example config
+   ([bench/crushrc.example](bench/crushrc.example)) shows it commented out.
 
 ## 6. Questions for the admins
 

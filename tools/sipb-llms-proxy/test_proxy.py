@@ -401,6 +401,97 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(data.decode()), models)
 
+    # --- 7. text-form tool calls -> native tool_calls -----------------------
+
+    def _stream_text(self, text, finish="stop"):
+        chunks = text if isinstance(text, list) else [text]
+        body = b""
+        for c in chunks:
+            body += b"data: " + json.dumps({"choices": [{"delta": {"content": c}}]}).encode() + b"\n\n"
+        body += b"data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": finish}]}).encode() + b"\n\ndata: [DONE]\n\n"
+        return 200, "text/event-stream", body
+
+    def _collect_toolcalls(self, data):
+        calls = []
+        finish = None
+        for line in data.split(b"\n"):
+            ev = sse_event(line)
+            if ev is None:
+                continue
+            for ch in ev.get("choices") or []:
+                for tc in (ch.get("delta") or {}).get("tool_calls") or []:
+                    calls.append(tc)
+                if ch.get("finish_reason"):
+                    finish = ch["finish_reason"]
+        return calls, finish
+
+    def test_normalize_stream_invoke(self):
+        text = '<tool_calls>\n<invoke name="bash">\n<parameter name="command">ls -la</parameter>\n</invoke>\n</tool_calls>'
+        STATE.handler = lambda *a: self._stream_text(text)
+        status, headers, data = post_json({"model": "m", "stream": True, "messages": []})
+        self.assertEqual(status, 200)
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["function"]["name"], "bash")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"command": "ls -la"})
+        self.assertNotIn(b"<invoke", data)  # the pseudo-syntax is replaced, not leaked
+
+    def test_normalize_stream_function(self):
+        text = '<function=ls>\n<parameter=path>\n/tmp\n</parameter>\n</function>\n</tool_call>'
+        STATE.handler = lambda *a: self._stream_text(text)
+        status, headers, data = post_json({"model": "m", "stream": True, "messages": []})
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(calls[0]["function"]["name"], "ls")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"path": "/tmp"})
+
+    def test_normalize_stream_view(self):
+        text = ["I'll read it.\n", "<view><location>/etc/hosts</location></view>"]
+        STATE.handler = lambda *a: self._stream_text(text)
+        status, headers, data = post_json({"model": "m", "stream": True, "messages": []})
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(calls[0]["function"]["name"], "view")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"file_path": "/etc/hosts"})
+        self.assertIn(b"I'll read it.", data)  # prose before the marker still streams
+
+    def test_normalize_json(self):
+        body = {"choices": [{"message": {"role": "assistant",
+                "content": '<function=ls><parameter=path>/tmp</parameter></function>'},
+                "finish_reason": "stop"}]}
+
+        def handler(method, path, body_, headers):
+            return 200, "application/json", json.dumps(body).encode()
+
+        STATE.handler = handler
+        status, headers, data = post_json({"model": "m", "stream": False, "messages": []})
+        got = json.loads(data.decode())
+        ch = got["choices"][0]
+        self.assertEqual(ch["finish_reason"], "tool_calls")
+        self.assertEqual(ch["message"]["tool_calls"][0]["function"]["name"], "ls")
+        self.assertEqual(ch["message"]["content"], "")
+
+    def test_normalize_leaves_plain_text(self):
+        def handler(method, path, body, headers):
+            return 200, "application/json", json.dumps({"choices": [
+                {"message": {"content": "The answer is 42."}, "finish_reason": "stop"}]}).encode()
+
+        STATE.handler = handler
+        status, headers, data = post_json({"model": "m", "stream": False, "messages": []})
+        got = json.loads(data.decode())
+        self.assertNotIn("tool_calls", got["choices"][0]["message"])
+        self.assertEqual(got["choices"][0]["finish_reason"], "stop")
+
+    def test_normalize_leaves_code_fence(self):
+        text = "Here is the command:\n\n```bash\ntouch /tmp/x && echo hi > /tmp/x\n```"
+        STATE.handler = lambda *a: self._stream_text(text)
+        status, headers, data = post_json({"model": "m", "stream": True, "messages": []})
+        calls, finish = self._collect_toolcalls(data)
+        self.assertFalse(calls)  # a bare fence is illustrative: not executed
+        self.assertEqual(finish, "stop")
+        self.assertIn(b"touch /tmp/x", data)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

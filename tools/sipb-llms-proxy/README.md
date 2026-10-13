@@ -1,13 +1,16 @@
 # sipb-llms-proxy
 
 Loopback proxy (127.0.0.1:8890) between Crush and the SIPB LLMs server
-(Open WebUI at llms-dev-1.mit.edu). It fixes two server quirks; see the
+(Open WebUI at llms-dev-1.mit.edu). It fixes three server quirks; see the
 docstring in `sipb-llms-proxy`:
 
 1. an over-long prompt returns HTTP 200 with a bare `null` body: the proxy turns
    it into a readable HTTP 400;
 2. a tool-calling stream ends with `finish_reason: "stop"`: the proxy rewrites it
-   to `tool_calls`, without which Crush ends the turn after one tool call.
+   to `tool_calls`, without which Crush ends the turn after one tool call;
+3. a tool call the model wrote as *text* (the server did not translate it) is
+   rewritten into a native `tool_calls` delta, without which Crush treats the
+   turn as a plain answer and runs nothing. See "Text-form tool calls" below.
 
 Since 2026-10-12 it also (all via env vars, defaults in the docstring):
 
@@ -25,6 +28,33 @@ Since 2026-10-12 it also (all via env vars, defaults in the docstring):
    Crush-specific and would be wrong for Hermes or opencode.
 
 Tests: `python3 tools/sipb-llms-proxy/test_proxy.py` (fake upstream, no network).
+
+## Text-form tool calls (added 2026-10-13)
+
+On some turns the SIPB server does not return a `tool_calls` delta at all: the
+model puts its tool call in the message **content**, in a harness-specific
+pseudo-syntax, and the server passes it through as text. Crush runs a tool only
+when the delta carries `tool_calls`, so the turn silently does nothing. Observed
+forms (2026-10-13), one per model:
+
+| model | text-form call |
+| --- | --- |
+| qwen3.6:35b-a3b | `<tool_calls><invoke name="bash"><parameter name="command">…`, `<tool_use name="view"><crush_path>…`, `<file path=…>` |
+| qwen3-coder:30b | `<function=ls><parameter=path>…</function>` |
+| qwen3.5:35b | `<view><location>…</location></view>`, bare ```` ```bash ```` fences |
+| deepseek-r1:32b | no syntax at all — a fabricated "[file created]" line |
+
+The proxy recognises the **explicit** XML encodings and re-emits them as a native
+`tool_calls` delta (`text_toolcalls()`), mid-stream: it holds the stream from the
+first marker and, at end of stream, replaces the held text with the tool call.
+Prose before the marker has already streamed. It deliberately does **not** touch a
+bare ```` ```bash ```` fence — a model often prints a command just to show it, and
+turning that into an executed command would be unsafe. So models that only emit a
+fence (deepseek-r1:32b) are *not* rescued by this and should be dropped
+(`crushrc`, REPORT.md section 4.7). Disable the whole feature with
+`SIPB_NORMALIZE_TOOLCALLS=0` (default on).
+
+Tests for it: the `test_normalize_*` cases in `test_proxy.py`.
 
 No secrets: the API key travels in the client's `Authorization` header and is
 forwarded untouched.
