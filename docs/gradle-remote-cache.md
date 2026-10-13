@@ -57,6 +57,13 @@ Switches: `GRADLE_REMOTE_CACHE=off` (skip everything), `GRADLE_REMOTE_CACHE_URL=
    errors") and the build carries on.
 4. Reboot: after `systemctl reboot` the container started on its own once the tailnet
    address was up (cache `/ping` 200 at 35 s, one start, no restart loop, no failed units).
+5. Gradle versions: pushed and pulled on 9.7.1 (JDK 25), and pushed on 8.14 under JDK 21.
+   **Gradle 8.13 (4 of the projects under `~/src`) was not run and is assumed the same as 8.14.**
+   **Gradle 8.x cannot run on this Mac's default JDK 25** (`JAVA_HOME` is `openjdk@25`): the
+   build fails in its own Kotlin DSL compilation with "What went wrong: 25.0.4.1", with or
+   without this init script (checked against an empty Gradle home). An 8.x build needs JDK 17
+   or 21 (`/opt/homebrew/opt/openjdk@21` is installed). Do not read that failure as a cache
+   problem.
 
 ## Deprecated: replace before 2026-12-31
 
