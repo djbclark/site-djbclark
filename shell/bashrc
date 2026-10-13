@@ -680,6 +680,8 @@ __agent_default_opts() {
   else command "$cmd" "${defaults[@]}" "$@"; fi
 }
 qwen()  { __agent_default_opts qwen  "--yolo -y --approval-mode"       --yolo -- "$@"; }
+# CRUSH_GLOBAL_DATA: SIPB-only data dir, so a Charm Hyper login/model in the shared one cannot override crushrc (2026-10-12)
+crush() { CRUSH_GLOBAL_DATA="$HOME/.local/share/crush-acp" __agent_default_opts crush "--yolo -y"                       --yolo -- "$@"; }
 aider() { __agent_default_opts aider "--yes-always --no-yes-always"    --yes-always -- "$@"; }
 devin() { __agent_default_opts devin "--permission-mode"               --permission-mode dangerous -- "$@"; }
 # cline: --yolo is a ONE-SHOT mode (exits after the turn), so the interactive
@@ -779,3 +781,6 @@ complete -F _cow cow
 function _cowcd() { COMPREPLY=($(compgen -W "$(_cow_pasture_names)" -- "${COMP_WORDS[1]}")); }
 complete -F _cowcd cowcd
 
+
+# MIT Libraries EZproxy prefix for the research skill (research_check.py fetch retries paywalled pages through it); IP-authenticated on the MIT VPN
+export RESEARCH_PROXY_URL="https://libproxy.mit.edu/login?url="
