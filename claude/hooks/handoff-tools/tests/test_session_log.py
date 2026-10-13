@@ -60,6 +60,13 @@ def canonical_path(state, chain="x-1"):
     return state / "chains" / chain / "SESSION_LOG.md"
 
 
+def recent_stamp():
+    """A sidecar timestamp inside the 30-day retention window. Fixed dates aged
+    out: on 2026-10-13 the two folding tests failed because their 2026-08-03
+    sidecars were dropped by the age cap before the assertion."""
+    return (datetime.now().astimezone() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
 def test_read_missing_is_not_error(state, repo):
     d = pointer_dir(state)
     d.mkdir(parents=True)
@@ -158,7 +165,7 @@ def test_sidecars_folded_and_deleted(state, repo):
     d.mkdir(parents=True)
     (d / "precompact-20260803T120000Z.md").write_text(
         "---\ncompacted: true\ntrigger: manual\n"
-        "updated_at: 2026-08-03T08:00:00-0400\n---\n\nclean\n")
+        f"updated_at: {recent_stamp()}\n---\n\nclean\n")
     run(["write", "--state-root", str(state)], stdin=payload(repo))
     text = canonical_path(state).read_text()
     assert "unplanned compaction" in text
@@ -215,10 +222,42 @@ def test_fold_folds_into_canonical_not_pointer(state, repo):
     d = pointer_dir(state)
     (d / "precompact-20260803T130000Z.md").write_text(
         "---\ncompacted: true\ntrigger: manual\n"
-        "updated_at: 2026-08-03T09:00:00-0400\n---\n\ndirty\n")
+        f"updated_at: {recent_stamp()}\n---\n\ndirty\n")
     p = run(["fold", "--state-root", str(state), "--dir", str(d)])
     assert p.returncode == 0, p.stderr
     assert "unplanned compaction" in canonical_path(state).read_text()
     assert not list(d.glob("precompact-*.md"))
     # Pointer file itself is untouched by fold.
     assert "redirect:" in (d / "SESSION_LOG.md").read_text()
+
+
+def test_side_workspace_leaves_owner_chain_alone(state, repo):
+    """A repo another chain owns can be recorded without taking its pointer."""
+    run(["write", "--state-root", str(state)], stdin=payload(repo))
+    d = pointer_dir(state)
+    sidecar = d / "precompact-20260803T140000Z.md"
+    sidecar.write_text("---\ncompacted: true\ntrigger: manual\n"
+                       "updated_at: 2026-08-03T10:00:00-0400\n---\n\nowner's\n")
+    side = payload(repo, chain=["y-2"], workspaces=[
+        {"repo": "repo", "task": "main", "dir": str(repo), "side": True}])
+    p = run(["write", "--state-root", str(state)], stdin=side)
+    assert p.returncode == 0, p.stderr
+    assert "redirect: chains/x-1/SESSION_LOG.md" in (d / "SESSION_LOG.md").read_text()
+    assert sidecar.exists()
+    text = canonical_path(state, "y-2").read_text()
+    assert "side: true" in text and head(repo) in text
+    # The owner moving the repo does not make the side chain's log stale.
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "--allow-empty", "-m", "owner moves"],
+                   cwd=repo, check=True)
+    out = json.loads(run(["read", "--state-root", str(state),
+                          "--dir", str(state / "chains" / "y-2")]).stdout)
+    assert out["workspaces"][0]["side"] is True and out["workspaces"][0]["stale"] is True
+    assert out["stale"] is False
+
+
+def test_side_must_be_boolean(state, repo):
+    bad = json.loads(payload(repo))
+    bad["workspaces"][0]["side"] = "yes"
+    p = run(["write", "--state-root", str(state)], stdin=json.dumps(bad))
+    assert p.returncode != 0

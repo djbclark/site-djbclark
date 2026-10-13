@@ -9,7 +9,10 @@ with its own git anchor for staleness checking. Every touched location also
 gets a small pointer file at the conventional
 ``<state-root>/<repo>/<task>/SESSION_LOG.md`` path that just redirects to the
 canonical file — that's what preserves the existing "ls the repo directory,
-read whatever's there" discovery behavior.
+read whatever's there" discovery behavior. A workspace marked ``"side": true``
+(a repo another chain owns, touched in passing) is recorded with its git anchor
+but gets no pointer, keeps its sidecars, and does not make the log stale; a
+chain made only of side workspaces is found through ``chains/``.
 
 The program deliberately has no hook-style error suppression: a failed git
 command, malformed input, or unwritable state directory is an invocation
@@ -241,6 +244,8 @@ def require_payload(raw: str) -> dict[str, Any]:
             isinstance(ws.get(k), str) and ws.get(k) for k in ("repo", "task", "dir")
         ):
             raise ValueError("each workspace needs non-empty string repo, task, and dir")
+        if not isinstance(ws.get("side", False), bool):
+            raise ValueError("workspace side must be true or false")
     return data
 
 
@@ -283,8 +288,12 @@ def read_command(state_root: Path, dir_: Path) -> None:
             except Exception:
                 actual_head, stale = None, True
             staleness.append({"repo": ws.get("repo"), "task": ws.get("task"),
-                              "actual_head": actual_head, "stale": stale})
-    overall_stale = any(w["stale"] for w in staleness) if staleness else None
+                              "actual_head": actual_head, "stale": stale,
+                              "side": bool(ws.get("side"))})
+    # Side workspaces belong to other chains, so their heads move without this
+    # chain: report them, but only owned workspaces make the log stale.
+    owned = [w for w in staleness or [] if not w["side"]]
+    overall_stale = any(w["stale"] for w in owned) if staleness else None
     print(json.dumps({"exists": True, "frontmatter": frontmatter, "body": body,
                       "canonical_path": str(canonical_path), "workspaces": staleness,
                       "stale": overall_stale,
@@ -305,10 +314,16 @@ def write_command(state_root: Path, raw: str) -> None:
     for ws in payload["workspaces"]:
         repo_dir = Path(ws["dir"]).expanduser()
         branch, head_sha, dirty = repository_state(repo_dir)
-        workspace_records.append({
+        record = {
             "repo": ws["repo"], "task": ws["task"], "dir": str(repo_dir),
             "branch": branch, "head_sha": head_sha, "dirty": dirty,
-        })
+        }
+        workspace_records.append(record)
+        # A side workspace is a repo this chain touched but another chain owns:
+        # its git state is recorded, but its pointer and sidecars stay with the owner.
+        if ws.get("side"):
+            record["side"] = True
+            continue
         ws_state_dir = state_root / ws["repo"] / ws["task"]
         ws_state_dir.mkdir(parents=True, exist_ok=True)
         entries, deletions = sidecar_entries(ws_state_dir)
@@ -337,6 +352,8 @@ def write_command(state_root: Path, raw: str) -> None:
         sidecar.unlink()
 
     for ws in workspace_records:
+        if ws.get("side"):
+            continue
         pointer_dir = state_root / ws["repo"] / ws["task"]
         pointer_dir.mkdir(parents=True, exist_ok=True)
         pointer_frontmatter = {
