@@ -99,7 +99,7 @@ once: check what reads a file first, keep commits small, prefer a quick revert.
 
 **Data, committed in place:** `site-private/memory/` and `site-djbclark/research/`.
 `git pull --rebase` *before* editing, append to `MEMORY.md` (never rewrite it),
-commit exact paths (never `commit -a`), push. Never hand-edit the Codex summaries
+commit exact paths (never `commit -a` or `pull --autostash`), push. Never hand-edit the Codex summaries
 (`memory/codex/memory_summary.md`, `raw_memories.md`; Codex regenerates them):
 drop notes in `memory/codex/extensions/ad_hoc/`. **If another agent has unstaged
 edits in the checkout,** never stash, add or reset their files: `git fetch`; if

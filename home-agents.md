@@ -112,7 +112,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     plain `master`; **deployments read it**: small commits, quick reverts. **Data
     in place:** `site-private/memory/`, `site-djbclark/research/` (**public**). Never
     stage `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/
-    reset/`commit -a` others' edits ([[reference_agent_rules_ops_housekeeping]]).
+    reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`,
     never `~/s/...`** (2026-10-06; a generated, locked symlink farm: never write
     or start sessions there). After adding or removing a top-level `~/src` entry
