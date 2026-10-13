@@ -45,6 +45,11 @@ class Session:
     session_id: str
     directory: Path
     layout: str
+    uri_id: str = ""  # checkpoint identity; differs from session_id only for a duplicate copy
+
+    @property
+    def key(self) -> str:
+        return self.uri_id or self.session_id
 
     @property
     def store(self) -> Path:
@@ -87,7 +92,36 @@ def discover_sessions(
             ):
                 continue
             found.append(Session(directory.name, directory, "acp-sessions"))
-    return found
+    return _collapse_duplicates(found)
+
+
+def _collapse_duplicates(found: list[Session]) -> list[Session]:
+    """The same session UUID can sit in several workspace buckets (copies, or an
+    emptied leftover). The first copy that has a store.db keeps the plain session
+    key; every other copy gets its own checkpoint key, so two stores with
+    different contents never fight over one checkpoint and an emptied leftover
+    is never mistaken for the session's store going missing."""
+    groups: dict[str, list[Session]] = {}
+    for session in found:
+        groups.setdefault(session.session_id, []).append(session)
+    out: list[Session] = []
+    for members in groups.values():
+        with_store = [m for m in members if m.store.is_file()]
+        keep = with_store + [m for m in members if m not in with_store]
+        for index, member in enumerate(keep):
+            if index == 0:
+                out.append(member)
+            else:
+                suffix = member.directory.parent.name
+                out.append(
+                    Session(
+                        member.session_id,
+                        member.directory,
+                        member.layout,
+                        f"{member.session_id}@{suffix}",
+                    )
+                )
+    return out
 
 
 def _is_allowlisted(session: Session, path: Path) -> bool:
@@ -216,7 +250,7 @@ def _put_raw(
         return False
     event_id, created = store.put_event(
         producer=PRODUCER,
-        source_uri=source_uri(session.session_id),
+        source_uri=source_uri(session.key),
         source_locator=locator,
         raw=raw,
         ts_utc=now_iso(),
@@ -257,7 +291,7 @@ def _metadata_events(
         except (OSError, PermissionError):
             gaps += _record_gap(
                 store,
-                source_uri(session.session_id),
+                source_uri(session.key),
                 "allow-listed session metadata unavailable",
                 dry_run=dry_run,
             )
@@ -295,7 +329,7 @@ def _metadata_events(
                     gaps
                     + _record_gap(
                         store,
-                        source_uri(session.session_id),
+                        source_uri(session.key),
                         "meta table absent",
                         dry_run=dry_run,
                     ),
@@ -321,7 +355,7 @@ def _metadata_events(
     except (sqlite3.Error, OSError, PermissionError):
         gaps += _record_gap(
             store,
-            source_uri(session.session_id),
+            source_uri(session.key),
             "session metadata row unavailable",
             dry_run=dry_run,
         )
@@ -498,7 +532,7 @@ def _blob_event(
         try:
             event_id, created = store.put_event(
                 producer=PRODUCER,
-                source_uri=source_uri(session.session_id),
+                source_uri=source_uri(session.key),
                 source_locator=locator,
                 raw=raw,
                 ts_utc=ts_utc,
@@ -549,7 +583,7 @@ def scan_session(
         "gaps": 0,
         "failed": False,
     }
-    uri = source_uri(session.session_id)
+    uri = source_uri(session.key)
     meta_created, meta_skipped, meta_gaps = _metadata_events(
         store, session, batch=batch, dry_run=dry_run
     )
@@ -712,7 +746,7 @@ def scan(
     sessions = discover_sessions(chats, acp_sessions, config_chats)
     if limit is not None:
         sessions = sessions[: max(0, limit)]
-    present = {session.session_id for session in sessions}
+    present = {session.key for session in sessions}
     for session in sessions:
         current = scan_session(store, session, batch=batch, dry_run=dry_run)
         for key in (

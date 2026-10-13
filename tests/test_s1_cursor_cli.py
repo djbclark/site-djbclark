@@ -287,6 +287,35 @@ class TestCursorIngest(CursorCliTestCase):
         self.assertGreaterEqual(result["gaps"], 1)
         self.assertGreaterEqual(self.store.stats()["gaps"], 1)
 
+    def test_duplicate_session_copies_do_not_fight_or_fail(self) -> None:
+        """One UUID in several buckets: each real store keeps its own checkpoint,
+        and an emptied leftover copy is not a missing store."""
+        other = self.chats / hashlib.md5(b"/workspace/other", usedforsecurity=False).hexdigest()
+        copy = adapter.Session(self.session_id, other / self.session_id, "chats")
+        copy.directory.mkdir(parents=True)
+        empty_bucket = self.chats / hashlib.md5(b"/workspace/gone", usedforsecurity=False).hexdigest()
+        leftover = empty_bucket / self.session_id
+        leftover.mkdir(parents=True)
+        (leftover / "prompt_history.json").write_text('["old"]', encoding="utf-8")
+        self.create_db(self.session)
+        self.create_db(copy)
+        self.add_blob(self.session, b'{"role":"user","content":"first copy"}')
+        self.add_blob(copy, b'{"role":"user","content":"second copy"}')
+        self.add_blob(copy, b'{"role":"assistant","content":"second copy more"}')
+        first = self.run_scan()
+        self.assertFalse(first["failed"])
+        second = self.run_scan()
+        self.assertFalse(second["failed"])
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["gaps"], 0)
+        uris = {
+            row[0]
+            for row in self.store.db.execute(
+                "SELECT DISTINCT source_uri FROM event WHERE producer='cursor-cli'"
+            )
+        }
+        self.assertGreaterEqual(len(uris), 2)
+
     def test_store_shrink_records_gap_and_rescans(self) -> None:
         self.create_db(self.session)
         self.add_blob(self.session, b'{"role":"user","content":"one"}')
