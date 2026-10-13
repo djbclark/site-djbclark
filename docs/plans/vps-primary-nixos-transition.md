@@ -41,6 +41,20 @@ pre-change copy at `/root/configuration.nix.2026-10-08.bak` on the host);
 `pong`. Inventory stays `provisioning`. Next: the role audit (step 3), still
 read-only; no role has been applied.
 
+Automatic updates enabled 2026-10-13 on operator instruction (applied with
+`nixos-rebuild test` then `switch`; pre-change copy at
+`/root/configuration.nix.2026-10-13.bak`; generation 3). `system.autoUpgrade`
+follows the `nixos-26.05` channel (the host is channel-based, no flake), daily
+04:00 UTC plus a 45 min fixed random delay, `operation = "switch"`,
+`allowReboot = false`. Weekly `nix.gc` (`--delete-older-than 14d`), automatic
+store optimisation, GRUB `configurationLimit = 10`. Reboot stays manual because
+the reboot test is still deferred (console recovery undecided): kernel/initrd
+updates are installed but apply at the next manual reboot. To go unattended,
+test one reboot, then set `allowReboot = true` with a `rebootWindow`. Rollback:
+`nixos-rebuild switch --rollback`, or pick an older generation in GRUB from the
+Hetzner console. A failed run shows in `systemctl status nixos-upgrade`; there is
+no failure notification yet.
+
 The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
 executable reads; a fresh ISO boot did. Detachment cause remains unknown.
