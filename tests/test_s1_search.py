@@ -301,6 +301,30 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(len(index.search("brown", mode="fts")), 2)
         self.assertTrue(index.stats(check=True)["healthy"])
 
+    def test_damaged_old_index_needs_explicit_opt_in(self) -> None:
+        # Make the old trigram index disagree with its own content table.
+        self.store.db.execute("UPDATE event_trigram_content SET c1='tampered' WHERE id=1")
+        self.store.db.commit()
+        with self.assertRaisesRegex(search.LayoutError, "--ignore-old-index-errors"):
+            search.migrate_layout(self.store.db)
+        self.assertEqual(search.store_layout(self.store.db), 1)
+        r = search.migrate_layout(self.store.db, ignore_old_index_errors=True)
+        self.assertEqual(len(r["ignored_old_index_errors"]), 1)
+        self.assertIn("event_trigram", r["ignored_old_index_errors"][0])
+        # event_text comes from event_fts_content, which was not touched.
+        index = search.SearchIndex(self.store)
+        self.assertTrue(index.stats(check=True)["healthy"])
+        self.assertEqual(len(index.search("quick brown", mode="trigram")), 1)
+
+    def test_only_old_index_errors_are_tolerable(self) -> None:
+        ok = search._OLD_INDEX_ERROR.fullmatch
+        self.assertTrue(ok('fts5: checksum mismatch for table "event_fts"'))
+        self.assertTrue(ok("malformed inside FTS5 table main.event_trigram"))
+        self.assertTrue(ok("malformed inverted index for FTS5 table main.event_fts"))
+        self.assertFalse(ok("row 7 missing from index event_ts_idx"))
+        self.assertFalse(ok('fts5: checksum mismatch for table "other_fts"'))
+        self.assertFalse(ok("malformed inside FTS5 table main.event_fts_extra"))
+
     def test_cli_refuses_while_another_connection_is_open(self) -> None:
         self.assertTrue(search.other_writer_files(self.db_path), "WAL file expected")
         self.assertEqual(self.cli("migrate"), 2)

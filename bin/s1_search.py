@@ -108,22 +108,42 @@ def other_writer_files(db_path: str | Path) -> list[Path]:
             if p.exists()]
 
 
-def migrate_layout(db: sqlite3.Connection) -> dict[str, Any]:
+# PRAGMA quick_check rows that blame only the two layout-1 indexes, which
+# migrate_layout() drops and rebuilds from their content table. The wording
+# varies across SQLite versions (3.53.1 and 3.54.0 seen).
+_OLD_INDEX_ERROR = re.compile(
+    r'fts5: checksum mismatch for table "(event_fts|event_trigram)"'
+    r'|(malformed inside|malformed inverted index for|unable to validate the inverted index for)'
+    r' FTS5 table main\.(event_fts|event_trigram)(: .*)?')
+
+
+def migrate_layout(db: sqlite3.Connection, *,
+                   ignore_old_index_errors: bool = False) -> dict[str, Any]:
     """Convert a layout-1 store to layout 2 in one transaction. Idempotent.
 
     The text comes from layout 1's `event_fts_content`, which holds the same
     projection build() wrote, so nothing is re-read from the CAS and
     `search_indexed` stays valid. Freed pages stay in the file until `vacuum`.
+
+    Refuses when PRAGMA quick_check reports anything. With
+    `ignore_old_index_errors`, it proceeds when every reported problem is in
+    the old event_fts/event_trigram indexes, which it is about to discard.
+    Two SQLite 3.54.0 builds disagreed about exactly that on the live store
+    (2026-10-12): Apple's passed both indexes, Homebrew's flagged both.
     """
     found = store_layout(db)
     if found == SEARCH_LAYOUT:
         return {"migrated": False, "layout": SEARCH_LAYOUT}
     if found is not None and found != 1:
         raise LayoutError(f"unknown search layout {found}")
-    quick = db.execute("PRAGMA quick_check").fetchone()[0]
-    if quick != "ok":
-        raise LayoutError(f"PRAGMA quick_check failed, not migrating: {quick}")
+    problems = [r[0] for r in db.execute("PRAGMA quick_check(100)")]
     report: dict[str, Any] = {"migrated": True, "from_layout": found, "layout": SEARCH_LAYOUT}
+    if problems != ["ok"]:
+        tolerable = found == 1 and all(_OLD_INDEX_ERROR.fullmatch(p) for p in problems)
+        if not (ignore_old_index_errors and tolerable):
+            hint = " (all in the old indexes: --ignore-old-index-errors)" if tolerable else ""
+            raise LayoutError(f"PRAGMA quick_check failed, not migrating{hint}: {problems}")
+        report["ignored_old_index_errors"] = problems
     db.execute("BEGIN IMMEDIATE")
     try:
         if found == 1:
@@ -406,7 +426,9 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("stats")
     st.add_argument("--check", action="store_true",
                     help="also run the FTS5 integrity-check on both indexes (slow)")
-    sub.add_parser("migrate", help="convert a layout-1 index to layout 2 (one-off, idempotent)")
+    m = sub.add_parser("migrate", help="convert a layout-1 index to layout 2 (one-off, idempotent)")
+    m.add_argument("--ignore-old-index-errors", action="store_true",
+                   help="proceed when quick_check blames only the indexes being replaced")
     v = sub.add_parser("vacuum", help="return free pages after migrate (explicit, slow)")
     v.add_argument("--into", default=None, help="write a compacted copy here instead")
 
@@ -434,7 +456,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run(args: argparse.Namespace, store: EvidenceStore) -> int:
     if args.command == "migrate":
-        print(json.dumps(migrate_layout(store.db), indent=2))
+        print(json.dumps(migrate_layout(
+            store.db, ignore_old_index_errors=args.ignore_old_index_errors), indent=2))
         return 0
     if args.command == "vacuum":
         print(json.dumps(vacuum(store, args.into), indent=2))
