@@ -229,5 +229,40 @@ class TestValidation(S1TestCase):
         self.assertTrue(s1.now_iso().endswith("Z"))
 
 
+class TestFreshness(S1TestCase):
+    NOW = 1_787_536_800  # 2026-08-24T02:00:00Z
+
+    def test_newest_event_per_producer_with_age(self) -> None:
+        self.ingest(b"a", "1", ts_utc="2026-08-23T20:00:00Z")
+        self.ingest(b"b", "2", ts_utc="2026-08-24T01:13:00Z")
+        self.ingest(b"c", "1", producer="hermes", ts_utc="2026-08-24T01:59:30.123Z")
+        self.ingest(b"d", "1", producer="hindsight", ts_utc="2026-07-01T00:00:00.198631Z")
+        newest = self.store.newest_by_producer(now=self.NOW)
+        self.assertEqual(sorted(newest), ["claude-code", "hermes", "hindsight"])
+        self.assertEqual(newest["claude-code"],
+                         {"newest_ts_utc": "2026-08-24T01:13:00Z", "age_seconds": 2820, "age": "47m"})
+        self.assertEqual(newest["hermes"]["age"], "30s")
+        self.assertEqual(newest["hindsight"]["age"], "54d2h")
+
+    def test_stats_adds_ages_and_keeps_existing_keys(self) -> None:
+        self.ingest()
+        stats = self.store.stats()
+        for key in ("db", "cas", "events", "raw_bytes", "producers", "sessions",
+                    "objects", "conversations", "gaps", "schema_version"):
+            self.assertIn(key, stats)
+        self.assertEqual(list(stats["newest_by_producer"]), ["claude-code"])
+        self.assertIsInstance(stats["newest_by_producer"]["claude-code"]["age_seconds"], int)
+
+    def test_empty_store_has_no_producers(self) -> None:
+        self.assertEqual(self.store.stats()["newest_by_producer"], {})
+
+    def test_format_age(self) -> None:
+        cases = {0: "0s", 59: "59s", 60: "1m", 3599: "59m", 3600: "1h0m",
+                 7 * 3600 + 125: "7h2m", 86400: "1d0h", 49 * 86400 + 3 * 3600 + 59: "49d3h",
+                 -5: "0s"}
+        for seconds, want in cases.items():
+            self.assertEqual(s1.format_age(seconds), want, seconds)
+
+
 if __name__ == "__main__":
     unittest.main()

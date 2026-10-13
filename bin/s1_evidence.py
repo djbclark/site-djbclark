@@ -55,6 +55,18 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def format_age(seconds: int) -> str:
+    """Compact age: 49d3h, 6h12m, 45m, 30s. fleet-watch prints the same form."""
+    if seconds < 60:
+        return f"{max(seconds, 0)}s"
+    minutes, hours, days = seconds // 60, seconds // 3600, seconds // 86400
+    if days:
+        return f"{days}d{hours % 24}h"
+    if hours:
+        return f"{hours}h{minutes % 60}m"
+    return f"{minutes}m"
+
+
 def derive_event_id(producer: str, source_uri: str, source_locator: str, raw_sha256: str) -> str:
     """Deterministic identity: producer | source_uri | source_locator | raw_sha256.
 
@@ -468,7 +480,36 @@ class EvidenceStore:
             "schema_version": self.db.execute(
                 "SELECT value FROM s1_meta WHERE key='schema_version'"
             ).fetchone()[0],
+            "newest_by_producer": self.newest_by_producer(),
         }
+
+    def newest_by_producer(self, now: int | None = None) -> dict[str, dict[str, Any]]:
+        """Newest event per producer and its age: how stale the store is.
+
+        Nothing scheduled ingest until 2026-10-12 and the store sat seven weeks
+        stale unnoticed; fleet-watch now pages on the same numbers. Both
+        queries ride indexes (a skip-scan for the producers, then a backward
+        walk of event_ts_idx), so this stays fast on a ~450k-event store.
+        """
+        now = int(datetime.now(timezone.utc).timestamp()) if now is None else now
+        producers = [r[0] for r in self.db.execute(
+            "WITH RECURSIVE p(x) AS (SELECT MIN(producer) FROM event"
+            " UNION ALL SELECT (SELECT MIN(producer) FROM event WHERE producer > x)"
+            " FROM p WHERE x IS NOT NULL) SELECT x FROM p WHERE x IS NOT NULL"
+        )]
+        newest: dict[str, dict[str, Any]] = {}
+        for producer in producers:
+            ts, epoch = self.db.execute(
+                "SELECT ts_utc, CAST(strftime('%s', ts_utc) AS INTEGER) FROM event"
+                " INDEXED BY event_ts_idx WHERE producer=? ORDER BY ts_utc DESC LIMIT 1",
+                (producer,),
+            ).fetchone()
+            entry: dict[str, Any] = {"newest_ts_utc": ts, "age_seconds": None, "age": None}
+            if epoch is not None:
+                entry["age_seconds"] = now - epoch
+                entry["age"] = format_age(now - epoch)
+            newest[producer] = entry
+        return newest
 
     def snapshot(self, destination: str | Path) -> Path:
         """Consistent backup via VACUUM INTO, per the retention policy.
