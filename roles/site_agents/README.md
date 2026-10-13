@@ -45,7 +45,7 @@ by itself (2026-10-13: FolderSync 463 MB to 0.3 MB, a Zed backup 257 MB to 0.4 M
 both 99.9% free pages). A file is vacuumed only when at least 30% of its pages are
 free, at least 50 MB would come back, no process has it (or its `-wal`/`-shm`) open,
 and the volume has room for the temporary copy. So the live stores on the list
-(`opencode.db`, Zed, Basic Memory) are picked up on a week when their app is closed;
+(`opencode.db`, Zed, Basic Memory, `~/.superbrain-server/superbrain.db`, whose app now prunes old usage events daily) are picked up on a week when their app is closed;
 a busy one is simply retried. Before each VACUUM it takes an APFS clone when there
 is room; afterwards it runs `integrity_check` and compares per-table row counts, and
 keeps the clone and exits 1 (Jobber notifies) if either fails. Dry run:

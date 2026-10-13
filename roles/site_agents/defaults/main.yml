@@ -116,6 +116,7 @@ site_agents_sqlite_vacuum_dbs:
   - Library/Application Support/Zed/recovery-backups/*.sqlite
   - .local/share/opencode/opencode.db
   - .basic-memory/memory.db
+  - .superbrain-server/superbrain.db
 # uv processes the apfs-compress job ignores when deciding whether uv is idle
 # (long-lived servers that hold the uv cache lock for days). ERE for grep -E.
 # Cold agent transcripts (HOME-relative) that the apfs-compress job also compresses:
