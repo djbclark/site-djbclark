@@ -3,6 +3,7 @@
 #
 #   fleet-watch            one check: print the status line, notify if it changed
 #   fleet-watch status     print the last status line and when it was taken
+#   fleet-watch s1         only the S1 evidence freshness check (see below)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
 #   fleet-watch install    write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
@@ -36,6 +37,18 @@
 # Recv-Q line from a read-only `adb shell ss -ltn` as evidence. Every network probe
 # in a run is bounded (the phone ssh included: ConnectTimeout does not cover the
 # banner wait), so one wedged phone cannot stall the checks of the rest.
+#
+# S1 evidence freshness (2026-10-12): the S1 store sat seven weeks stale (newest event
+# 2026-08-24) because nothing scheduled its ingest and nothing noticed. Each check reads,
+# read-only, the newest event ts_utc of each producer in FLEET_WATCH_S1_PRODUCERS (default
+# "claude-code hermes"; the one-off hindsight import is never checked) from
+# FLEET_WATCH_S1_DB, and when one is older than FLEET_WATCH_S1_MAX_AGE seconds (default
+# 21600, 6 h) sends one notice per producer per incident, "s1-evidence: <producer> stale
+# <age>". The open incident is the file $STATE_DIR/s1-stale-<producer>; when the producer
+# is fresh again one recovery notice goes out and the file goes. A store that cannot be
+# read changes nothing (s1=unknown, logged). FLEET_WATCH_S1=auto (default) checks only
+# while the ingest LaunchAgent (com.djbclark.s1-ingest, roles/site_agents) is installed,
+# so the watchdog switches on and off with the schedule it watches; 1 forces it on, 0 off.
 
 set -uo pipefail
 
@@ -56,6 +69,12 @@ ADB_TIMEOUT="${FLEET_WATCH_ADB_TIMEOUT:-5}"
 HELM_TIMEOUT="${FLEET_WATCH_HELM_TIMEOUT:-15}"
 GH_TIMEOUT="${FLEET_WATCH_GH_TIMEOUT:-30}"
 SSHD_EV_PREFIX="$STATE_DIR/sshd-ev"
+S1_MODE="${FLEET_WATCH_S1:-auto}"
+S1_DB="${FLEET_WATCH_S1_DB:-$HOME/.local/share/s1-evidence/candidates.sqlite3}"
+S1_PRODUCERS="${FLEET_WATCH_S1_PRODUCERS:-claude-code hermes}"
+S1_MAX_AGE="${FLEET_WATCH_S1_MAX_AGE:-21600}"
+S1_TIMEOUT="${FLEET_WATCH_S1_TIMEOUT:-30}"
+S1_PLIST="$HOME/Library/LaunchAgents/com.djbclark.s1-ingest.plist"
 # Socket probes run under system python3, never bash's /dev/tcp: macOS SIGKILLs
 # homebrew bash the moment its socket connects, in the launchd context (kernel
 # "[bash: killed]", observed 2026-10-10); system binaries are exempt there.
@@ -74,9 +93,11 @@ notify() {
   # hermes send fails loudly (non-zero) on a dead transport; record that rather
   # than pretend the operator was told.
   # hermes-ping adds where the notice comes from (launchd com.djbclark.fleet-watch).
+  # Returns non-zero on failure so a once-per-incident notice can be retried.
   if ! HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" \
        "$HOME/.local/bin/hermes-ping" "$1: $2" >>"$STATE_DIR/hermes.log" 2>&1; then
     printf '%s hermes send FAILED for: %s\n' "$(date '+%F %T')" "$2" >>"$LOG"
+    return 1
   fi
 }
 
@@ -305,6 +326,88 @@ repo() {
   fi
 }
 
+s1_enabled() {
+  case "$S1_MODE" in
+    1 | on | yes) return 0 ;;
+    0 | off | no) return 1 ;;
+    *) [[ -f "$S1_PLIST" ]] ;;
+  esac
+}
+
+s1_age() {
+  # Compact age, the same form as s1_evidence.py stats: 49d3h, 6h12m, 45m, 30s.
+  local s=$1
+  if ((s >= 86400)); then echo "$((s / 86400))d$((s % 86400 / 3600))h"
+  elif ((s >= 3600)); then echo "$((s / 3600))h$((s % 3600 / 60))m"
+  elif ((s >= 60)); then echo "$((s / 60))m"
+  else echo "$((s < 0 ? 0 : s))s"
+  fi
+}
+
+s1_ages() {
+  # "<producer> <age seconds>|none" per producer, read-only and runb-bounded; non-zero
+  # when the store cannot be read. FLEET_WATCH_S1_NOW (epoch) pins "now" for tests.
+  # shellcheck disable=SC2086  # the producer list is meant to split
+  runb "$S1_TIMEOUT" "$PY3" - "$S1_DB" "${FLEET_WATCH_S1_NOW:-}" $1 <<'PYEOF'
+import sqlite3
+import sys
+import time
+
+db, now, producers = sys.argv[1], sys.argv[2], sys.argv[3:]
+now = int(now) if now else int(time.time())
+try:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+    con.execute("SELECT 1 FROM event LIMIT 1")
+except sqlite3.Error:
+    # A WAL store without its -shm cannot always be opened mode=ro; immutable
+    # reads the main file only, which at worst looks older than it is.
+    con = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+newest = ("SELECT CAST(strftime('%s', ts_utc) AS INTEGER) FROM event {} WHERE producer=?"
+          " ORDER BY ts_utc DESC LIMIT 1")
+for producer in producers:
+    try:
+        # Walk the timestamp index backwards: instant for a producer that is current.
+        row = con.execute(newest.format("INDEXED BY event_ts_idx"), (producer,)).fetchone()
+    except sqlite3.OperationalError:
+        row = con.execute(newest.format(""), (producer,)).fetchone()
+    print(producer, "none" if row is None or row[0] is None else now - row[0])
+PYEOF
+}
+
+s1_watch() {
+  # S1 evidence freshness: sets S1_STATE (ok | stale:<p>+<p> | unknown) and sends one
+  # notice per producer per incident, then one when it recovers.
+  local producers="" p ages age words flag stale=()
+  for p in $S1_PRODUCERS; do [[ "$p" == hindsight ]] || producers+="$p "; done
+  if [[ ! -f "$S1_DB" ]] || ! ages=$(s1_ages "$producers" 2>>"$LOG"); then
+    S1_STATE=unknown
+    printf '%s s1: cannot read %s\n' "$(date '+%F %T')" "$S1_DB" >>"$LOG"
+    return
+  fi
+  S1_AGES=""
+  for p in $producers; do
+    age=$(awk -v p="$p" '$1 == p { print $2 }' <<<"$ages")
+    flag="$STATE_DIR/s1-stale-$p"
+    if [[ "$age" == none ]]; then
+      words=never
+    elif [[ "$age" =~ ^-?[0-9]+$ ]]; then
+      words=$(s1_age "$age")
+    else
+      continue
+    fi
+    S1_AGES+="$p=$words "
+    if [[ "$age" == none ]] || ((age > S1_MAX_AGE)); then
+      stale+=("$p")
+      [[ -f "$flag" ]] && continue
+      notify "s1-evidence" "$p stale ${words/#never/(no events)}" &&
+        printf '%s age=%s\n' "$(date '+%F %T')" "$age" >"$flag"
+    elif [[ -f "$flag" ]]; then
+      notify "s1-evidence" "$p fresh again (newest event $words old)" && rm -f "$flag"
+    fi
+  done
+  if ((${#stale[@]})); then S1_STATE="stale:$(IFS=+; echo "${stale[*]}")"; else S1_STATE=ok; fi
+}
+
 check() {
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
@@ -323,6 +426,11 @@ check() {
   done
   local r
   for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
+  # S1 freshness speaks for itself (once per incident), so s1= is shown, never diffed.
+  if s1_enabled; then
+    s1_watch
+    parts+=("s1=$S1_STATE")
+  fi
   local now_line="${parts[*]}"
   local prev_line=""
   [[ -f "$LAST" ]] && prev_line=$(sed -n 2p "$LAST")
@@ -376,6 +484,14 @@ case "${1:-check}" in
   status)
     if [[ -f "$LAST" ]]; then cat "$LAST"; else echo "no check has run yet"; fi
     ;;
+  s1)
+    if ! s1_enabled; then
+      echo "s1=off (FLEET_WATCH_S1=$S1_MODE; ingest plist $S1_PLIST $([[ -f "$S1_PLIST" ]] && echo present || echo absent))"
+      exit 0
+    fi
+    s1_watch
+    echo "s1=$S1_STATE ${S1_AGES:-}"
+    ;;
   test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && tail -2 "$STATE_DIR/hermes.log" ;;
   install)
     cat >"$PLIST" <<EOF
@@ -409,7 +525,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    sed -n '2,8p' "$0"
+    sed -n '2,9p' "$0"
     exit 1
     ;;
 esac
