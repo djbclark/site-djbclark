@@ -52,8 +52,11 @@ Two complementary halves, both macOS-only (the `chrome-cache` tasks):
 2. **Profile caches (Jobber).** `chrome-cache-trim` clears the caches the policy
    does *not* cover — `Service Worker/CacheStorage`, `Service Worker/ScriptCache`,
    `Code Cache`, `GPUCache`, `GrShaderCache`, `ShaderCache`, `DawnCache` — under
-   `~/Library/Application Support/Google/Chrome/<profile>/`. It runs 4×/day and
-   skips any pass with Chrome running, so it only ever clears a quit browser.
+   `~/Library/Application Support/Google/Chrome/<profile>/` and the same
+   subdirs under `~/Library/Caches/Google/Chrome/<profile>/` (where the V8
+   `Code Cache` lives; the HTTP `Cache_Data` there is policy-bounded and left
+   alone). It runs 4×/day and skips any pass with Chrome running, so it only
+   ever clears a quit browser.
 
 ## Jobber Notifications (`jobber-notify`)
 
