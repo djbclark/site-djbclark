@@ -95,7 +95,9 @@ no container. Keep the access model (no anonymous write, tailnet-only bind).
    ```
 
 6. Update the image: change the tag in `configuration.nix` deliberately (it is pinned, and
-   the node is deprecated), then `nixos-rebuild switch` on the VPS.
+   the node is deprecated), commit, then promote and apply it as in
+   [nixos-in-git.md](nixos-in-git.md) (`git push origin master:deploy-vps-primary`, then
+   `systemctl start nixos-upgrade` on the VPS).
 
 ## Pitfalls met
 

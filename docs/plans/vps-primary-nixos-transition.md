@@ -8,9 +8,10 @@ on `/dev/sda1`, and swap on `/dev/sda2`. NetworkManager obtains the retained
 IPv4 address by DHCP on `enp1s0`, with gateway `172.31.1.1`.
 
 The exact installed configuration is tracked in
-[`nixos/vps-primary/`](../../nixos/vps-primary/). Keep both files synchronized
-with `/etc/nixos/` when making authorized changes. This directory is not wired
-to an automatic deployment; tracking it does not authorize a rebuild.
+[`nixos/vps-primary/`](../../nixos/vps-primary/), and since 2026-10-13 the host builds
+**from that git copy** (flake in `nixos/`, branch `deploy-vps-primary`): see
+[`docs/nixos-in-git.md`](../nixos-in-git.md). Before that date this directory was
+copied onto the host by hand and was not wired to any deployment.
 
 Root SSH works with the existing Mac `~/.ssh/vps_primary_key`; effective
 settings require public-key authentication and disable password and
@@ -75,6 +76,11 @@ units, and `hermes-ping`s once per incident for: `down` (unreachable on both
 routes for 3 checks, covering the 03:00-05:00 UTC reboot), `upgrade-failed`,
 `tailnet-down`, `units-failed`, then "recovered". State in
 `~/.local/state/fleet-watch/vps-state`.
+
+**Superseded 2026-10-13 (later the same day):** the host moved to a flake in git; the
+channel-based setup described in this paragraph and the next no longer exists. The channel
+pitfall below is kept as history and is the reason for the rule "never run `nixos-rebuild` by
+hand on the host" in `docs/nixos-in-git.md`.
 
 **Do not set `system.autoUpgrade.channel` on this host.** With it set the module
 fetches the channel URL directly and never runs `nix-channel --update`, so root's
