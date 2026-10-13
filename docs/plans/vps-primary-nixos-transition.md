@@ -42,18 +42,29 @@ pre-change copy at `/root/configuration.nix.2026-10-08.bak` on the host);
 read-only; no role has been applied.
 
 Automatic updates enabled 2026-10-13 on operator instruction (applied with
-`nixos-rebuild test` then `switch`; pre-change copy at
-`/root/configuration.nix.2026-10-13.bak`; generation 3). `system.autoUpgrade`
-follows the `nixos-26.05` channel (the host is channel-based, no flake), daily
-04:00 UTC plus a 45 min fixed random delay, `operation = "switch"`,
-`allowReboot = false`. Weekly `nix.gc` (`--delete-older-than 14d`), automatic
-store optimisation, GRUB `configurationLimit = 10`. Reboot stays manual because
-the reboot test is still deferred (console recovery undecided): kernel/initrd
-updates are installed but apply at the next manual reboot. To go unattended,
-test one reboot, then set `allowReboot = true` with a `rebootWindow`. Rollback:
-`nixos-rebuild switch --rollback`, or pick an older generation in GRUB from the
-Hetzner console. A failed run shows in `systemctl status nixos-upgrade`; there is
-no failure notification yet.
+`nixos-rebuild test` then `switch`; pre-change copies at
+`/root/configuration.nix.2026-10-13*.bak`). `system.autoUpgrade` follows root's
+`nixos` channel (`nixos-26.05`; the host is channel-based, no flake), daily 04:00
+UTC plus a 45 min fixed random delay, `operation = "switch"`. Weekly `nix.gc`
+(`--delete-older-than 14d`), automatic store optimisation, GRUB
+`configurationLimit = 10`.
+
+First run triggered by hand the same day: `nixos-upgrade.service` succeeded in
+2m17s, `26.05.4364` to `26.05.11767`, kernel 6.18.38 to 6.18.56. Supervised
+reboot test after it: SSH back in about 22 s on the new kernel, no failed units,
+same IPv4. Then `allowReboot = true` with `rebootWindow` 03:00-05:00 UTC: a
+kernel/initrd change reboots inside the window, otherwise the generation stays
+staged. A failed run shows in `systemctl status nixos-upgrade`; no failure
+notification yet (see the Tailscale/fleet-watch item below once done).
+
+**Do not set `system.autoUpgrade.channel` on this host.** With it set the module
+fetches the channel URL directly and never runs `nix-channel --update`, so root's
+`nixos` channel goes stale and a manual `nixos-rebuild switch` silently downgrades
+the host (happened 2026-10-13: 11767 back to 4364 until fixed by removing
+`channel` and running `nix-channel --update`). Without it the module's
+`--upgrade` updates root's channel and manual rebuilds match. Rollback:
+`nixos-rebuild switch --rollback`, or an older generation in GRUB from the
+Hetzner console.
 
 The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
