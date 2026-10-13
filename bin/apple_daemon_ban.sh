@@ -14,10 +14,12 @@
 # process, so the KILL escalation destroyed App Tamer's freezes and forced
 # a respawn. A frozen job burns no CPU, never exits, and therefore never
 # respawns; the only burn window is the ≤60 s after login/boot (or a reap).
-# triald/helpd/sirittsd (short one-shots), the on-demand Apple Intelligence
-# agents (generativeexperiencesd, intelligencecontextd, intelligenceflowd;
-# frozen they would hang their XPC clients) and the root system-domain jobs
-# are TERMed.
+# triald/helpd/sirittsd (short one-shots) and the root system-domain jobs are
+# TERMed. The Apple Intelligence daemons (generativeexperiencesd,
+# intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are
+# flag-only (2026-10-13): persistent clients reactivate them within ~1 s of a
+# kill, so enforcing them only churned; see sip-doit-with-sudo.sh
+# FLAG_ONLY_DAEMONS.
 #
 # Exit codes (watchdogd "apple-daemons" command probe):
 #   0  healthy — nothing to do, or everything found was frozen/killed
@@ -96,9 +98,6 @@ TERM_LABELS=(
   "com.apple.triald"
   "com.apple.helpd"
   "com.apple.sirittsd"
-  "com.apple.generativeexperiencesd"
-  "com.apple.intelligencecontextd"
-  "com.apple.intelligenceflowd"
 )
 
 FROZEN=""

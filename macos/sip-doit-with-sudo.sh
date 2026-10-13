@@ -98,7 +98,10 @@
 #     modelmanagerd -> coreaudiod/launchd CPU climb. modelmanagerd and
 #     modelcatalogd are now FLAG-ONLY (FLAG_ONLY_DAEMONS below): the disable flag
 #     is set and checked, nothing kills them, and --check ignores them running.
-#     Other three keep the TERM rule. With SIP on, launchd may drop the flags at
+#     Later the same day the gui trio (generativeexperiencesd,
+#     intelligencecontextd, intelligenceflowd) became flag-only too: 12 straight
+#     minutes of per-minute respawns after the restrictions profile was in force.
+#     With SIP on, launchd may drop the flags at
 #     reboot (reported on 26.5/27): --check will then say "flag not set".
 
 set -u
@@ -172,9 +175,10 @@ SYSTEM_DAEMONS=(
   "com.apple.modelcatalogd"
 )
 
-# System daemons that get the disable flag but are NOT killed or checked for
-# running (respawned within ~1 s by coreaudiod; killing them only churns).
-FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd "
+# Daemons (gui or system domain) that get the disable flag but are NOT killed or
+# checked for running: persistent clients (assistantd, coreaudiod, Siri AI)
+# reactivate them within ~1 s of a kill, so enforcing them only churns.
+FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd com.apple.generativeexperiencesd com.apple.intelligencecontextd com.apple.intelligenceflowd "
 is_flag_only() { case "$FLAG_ONLY_DAEMONS" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # CoreSpotlight semantic-search stores (embeddings, journals). Safe to delete;
@@ -277,6 +281,10 @@ report_state() {
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" && flag=disabled || flag=enabled
     pid=$(job_pid "$GUI_DOMAIN" "$d")
+    if is_flag_only "$d"; then
+      echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)} (flag-only: not killed)"
+      continue
+    fi
     if [ -n "$pid" ] && is_frozen "$pid"; then
       echo "  $GUI_DOMAIN/$d: flag=$flag, frozen (pid $pid)"
     else
@@ -316,6 +324,7 @@ if [ "$MODE" = check ]; then
   SURVIVED_UNFROZEN_S=120
   for d in "${GUI_DAEMONS[@]}"; do
     is_disabled "$GUI_DOMAIN" "$d" || PROBLEMS+=("flag not set: $GUI_DOMAIN/$d")
+    is_flag_only "$d" && continue
     pid=$(job_pid "$GUI_DOMAIN" "$d")
     if [ -n "$pid" ] && ! is_frozen "$pid" \
        && [ "$(age_s "$pid" 2>/dev/null || echo 999999)" -gt "$SURVIVED_UNFROZEN_S" ]; then
