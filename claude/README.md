@@ -1,10 +1,11 @@
 # Tracked mirrors of `~/.claude/` session-handoff artifacts
 
 Live copies under `~/.claude/hooks/` are canonical — this directory only
-versions them. **The `claude/skills/{handoff,resume,session-handoff}/` mirrors are
-historical (note added 2026-10-09, #137 C2.1):** the live skills now resolve to
-`~/src/djbclark-ade/skills/` (edit them there), the mirrors here have diverged
-from them, and `resume` was folded into `baton` on 2026-10-08.
+versions them. **`claude/skills/{handoff,session-handoff}` are symlinks to
+`~/src/djbclark-ade/skills/<name>`** (the canonical skills; edit them there),
+and `claude/skills/resume` points at `djbclark-ade/skills/baton`, which `resume`
+was folded into on 2026-10-08. They replaced diverged copies on 2026-10-13
+(#137 C2.1); the canonical skills were already a superset of them.
 
 ## model-routing skill lives elsewhere
 
