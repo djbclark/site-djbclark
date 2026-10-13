@@ -41,13 +41,17 @@ link_homes() {
     if [ -e "$dst" ] && [ ! -L "$dst" ]; then echo "SKIP    $dst is a real file; merge it into a profile first" >&2; continue; fi
     ln -sfn "$live" "$dst" && echo "linked  $dst"
   done
-  # The machine-wide one-build-at-a-time slot (gradle/init.d/machine-slot.gradle).
-  local slot="$repo/gradle/init.d/machine-slot.gradle"
-  for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
-    mkdir -p "$h/init.d"
-    dst="$h/init.d/machine-slot.gradle"
-    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$slot" ]; then echo "ok      $dst"; continue; fi
-    ln -sfn "$slot" "$dst" && echo "linked  $dst"
+  # Machine-wide init scripts: the one-build-at-a-time slot (gradle/init.d/machine-slot.gradle)
+  # and the shared remote build cache (gradle/init.d/global-remote-cache.init.gradle.kts).
+  local init src
+  for init in machine-slot.gradle global-remote-cache.init.gradle.kts; do
+    src="$repo/gradle/init.d/$init"
+    for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
+      mkdir -p "$h/init.d"
+      dst="$h/init.d/$init"
+      if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then echo "ok      $dst"; continue; fi
+      ln -sfn "$src" "$dst" && echo "linked  $dst"
+    done
   done
 }
 

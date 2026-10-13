@@ -45,6 +45,12 @@ several agents building at once everything slowed down.
    For djbclark only, not for agent-facing text: `GRADLE_SLOT=off` skips the gate for one
    build. A waiting build already has a JVM (~200 MB), which is far cheaper than thrashing.
 
+6. **Shared remote build cache** (`gradle/init.d/global-remote-cache.init.gradle.kts`, linked
+   by the same `gradle-limits link`): every build uses the cache node on vps-primary and falls
+   back to the local disk cache when it is unreachable. See
+   [gradle-remote-cache.md](gradle-remote-cache.md). A build's reported time includes any wait
+   for the slot in item 5.
+
 ## Memory (2026-10-06)
 
 On 2026-10-06 eight agents were building Pastiera worktrees at once. Each started its own

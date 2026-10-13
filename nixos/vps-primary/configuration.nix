@@ -34,6 +34,53 @@
     openFirewall = true;
   };
 
+  # Shared Gradle remote build cache (2026-10-13): Develocity Build Cache Node,
+  # pinned. Gradle deprecated it ("no longer distributed, supported or available
+  # after 2026-12-31"; the replacement, Develocity Edge, needs Develocity), so the
+  # image is pinned and a replacement is due by then. Reachable only on the tailnet:
+  # a published Podman port is DNAT-ed and bypasses networking.firewall, so a
+  # tailscale0 firewall rule would restrict nothing; the bind address does. Access
+  # control lives in /var/lib/gradle-build-cache/conf/config.yaml (anonymous none,
+  # one readwrite user, UI off); that file holds a password hash, so it is not
+  # managed here (the Nix store is world-readable).
+  users.groups.gradle-cache.gid = 5071;
+  users.users.gradle-cache = {
+    isSystemUser = true;
+    uid = 5071;
+    group = "gradle-cache";
+  };
+  systemd.tmpfiles.rules = [
+    "d /var/lib/gradle-build-cache 0750 gradle-cache gradle-cache -"
+  ];
+
+  virtualisation.podman.enable = true;
+  virtualisation.oci-containers = {
+    backend = "podman";
+    containers.gradle-cache = {
+      image = "gradle/build-cache-node:21.2";
+      cmd = [ "start" ];
+      user = "5071:5071";
+      ports = [ "100.125.249.107:5071:5071" ];
+      volumes = [ "/var/lib/gradle-build-cache:/data" ];
+      extraOptions = [
+        "--memory=2g"
+        "--cap-drop=ALL"
+        "--security-opt=no-new-privileges"
+      ];
+    };
+  };
+  # The bind address exists only once tailscaled has brought the tailnet up.
+  systemd.services.podman-gradle-cache = {
+    after = [ "tailscaled.service" ];
+    wants = [ "tailscaled.service" ];
+    serviceConfig = {
+      ExecStartPre = [
+        "${pkgs.coreutils}/bin/timeout 120 ${pkgs.bash}/bin/sh -c 'until ${pkgs.tailscale}/bin/tailscale ip -4 | ${pkgs.gnugrep}/bin/grep -qx 100.125.249.107; do sleep 1; done'"
+      ];
+      RestartSec = "10s";
+    };
+  };
+
   # Unattended updates: follow root's `nixos` channel (nixos-26.05, set with
   # nix-channel; the module runs `nix-channel --update` itself, so manual
   # `nixos-rebuild` sees the same nixpkgs). Do not set `channel` here: it makes the

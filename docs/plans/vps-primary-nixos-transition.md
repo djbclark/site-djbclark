@@ -85,6 +85,11 @@ the host (happened 2026-10-13: 11767 back to 4364 until fixed by removing
 `nixos-rebuild switch --rollback`, or an older generation in GRUB from the
 Hetzner console.
 
+Gradle remote build cache added 2026-10-13: Podman plus the Develocity Build Cache Node
+`21.2`, bound to the tailnet address only, anonymous access off. It is deprecated by
+Gradle (gone after 2026-12-31) and needs a successor by then. Everything is in
+[`docs/gradle-remote-cache.md`](../gradle-remote-cache.md).
+
 The installer temporarily lost access to its virtual CD-ROM and reported
 `Medium not present` and SquashFS read errors. Reattachment alone did not restore
 executable reads; a fresh ISO boot did. Detachment cause remains unknown.
