@@ -61,6 +61,11 @@ INDEX_VERSION = 1
 SEARCH_LAYOUT = 2
 TRIGRAM_MIN_CHARS = 3
 INDEX_TABLES = ("event_fts", "event_trigram")
+# SQLite up to 3.53 decodes the noncharacters U+FFFE and U+FFFF as U+FFFD;
+# 3.54.0 (2026-10-09) keeps them. The same text then tokenizes differently
+# under the two, and an FTS5 integrity-check written by one fails under the
+# other. Indexed text stores them as U+FFFD, the way the older builds read it.
+_NONCHARACTERS = str.maketrans({0xFFFE: 0xFFFD, 0xFFFF: 0xFFFD})
 
 _LAYOUT_DDL = """
 CREATE TABLE IF NOT EXISTS event_text (
@@ -128,8 +133,9 @@ def migrate_layout(db: sqlite3.Connection, *,
     Refuses when PRAGMA quick_check reports anything. With
     `ignore_old_index_errors`, it proceeds when every reported problem is in
     the old event_fts/event_trigram indexes, which it is about to discard.
-    Two SQLite 3.54.0 builds disagreed about exactly that on the live store
-    (2026-10-12): Apple's passed both indexes, Homebrew's flagged both.
+    On the live store (2026-10-12) SQLite 3.54.0 flagged both, because two
+    rows hold U+FFFF and the older build that wrote them read it as U+FFFD
+    (see _NONCHARACTERS); SQLite 3.53.1 and Apple's build passed them.
     """
     found = store_layout(db)
     if found == SEARCH_LAYOUT:
@@ -156,6 +162,10 @@ def migrate_layout(db: sqlite3.Connection, *,
                 " (SELECT MAX(id) FROM event_fts_content"
                 "  WHERE c0 IS NOT NULL AND c1 IS NOT NULL GROUP BY c0)"
                 " ORDER BY id")
+            report["noncharacters_replaced"] = db.execute(
+                "UPDATE event_text SET body = replace(replace(body,"
+                " char(65534), char(65533)), char(65535), char(65533))"
+                " WHERE instr(body, char(65534)) > 0 OR instr(body, char(65535)) > 0").rowcount
             db.execute("DROP TABLE event_fts")
             db.execute("DROP TABLE event_trigram")
         for stmt in _LAYOUT_DDL.split(";"):
@@ -216,6 +226,10 @@ def project(payload: bytes) -> str:
     means indexing keys and punctuation, which pollutes every query with
     structural noise. Non-JSON falls back to decoded text.
     """
+    return _project(payload).translate(_NONCHARACTERS)
+
+
+def _project(payload: bytes) -> str:
     head = payload[: PROJECTION_CHARS * 2]
     try:
         obj = json.loads(head.decode("utf-8", errors="replace"))

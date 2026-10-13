@@ -57,6 +57,10 @@ class TestProjection(SearchTestCase):
         body = search.project(json.dumps({"c": "x" * 50000}).encode())
         self.assertLessEqual(len(body), search.PROJECTION_CHARS)
 
+    def test_noncharacters_become_replacement_character(self) -> None:
+        body = search.project(json.dumps({"c": "a￾b￿c"}).encode())
+        self.assertEqual(body, "a�b�c")
+
     def test_malformed_payload_does_not_raise(self) -> None:
         self.assertIsInstance(search.project(b"\xff\xfe not json"), str)
 
@@ -231,7 +235,7 @@ class TestMigration(unittest.TestCase):
     """A layout-1 store, written the way the old build() wrote it."""
 
     TEXTS = ["the quick brown fox", "deploy_ops_release.py syncs memory",
-             "AU CAFÉ NOIR", "unrelated words here"]
+             "AU CAFÉ NOIR", "unrelated words here", "odd￿byte"]
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -247,7 +251,8 @@ class TestMigration(unittest.TestCase):
                 ts_utc=f"2026-08-23T20:00:{n:02d}Z", role="user", origin="human",
                 source_seq=n)
             self.ids.append(eid)
-            body = search.project(self.store.raw_for(eid))
+            # The old project() kept U+FFFF; reproduce what it stored.
+            body = search._project(self.store.raw_for(eid))
             for table in ("event_fts", "event_trigram"):
                 self.store.db.execute(f"INSERT INTO {table} (event_id, body) VALUES (?,?)",
                                       (eid, body))
@@ -277,6 +282,10 @@ class TestMigration(unittest.TestCase):
         self.assertTrue(r["migrated"])
         self.assertEqual(r["text_rows"], len(self.TEXTS))
         self.assertEqual(r["reset_indexed"], 0)
+        self.assertEqual(r["noncharacters_replaced"], 1)
+        self.assertEqual(self.store.db.execute(
+            "SELECT body FROM event_text WHERE event_id=?", (self.ids[4],)).fetchone()[0],
+            "odd�byte", "migrated text must equal what project() now returns")
         names = {row[0] for row in self.store.db.execute("SELECT name FROM sqlite_master")}
         self.assertNotIn("event_fts_content", names)
         self.assertNotIn("event_trigram_content", names)
@@ -285,7 +294,7 @@ class TestMigration(unittest.TestCase):
         index = search.SearchIndex(self.store)
         st = index.stats(check=True)
         self.assertTrue(st["healthy"], st)
-        self.assertEqual((st["indexed"], st["pending"], st["text_rows"]), (4, 0, 4))
+        self.assertEqual((st["indexed"], st["pending"], st["text_rows"]), (5, 0, 5))
         self.assertEqual([r["event_id"] for r in index.search("brown", mode="fts")],
                          [self.ids[0]])
         self.assertEqual([r["event_id"] for r in index.search("ops_rel", mode="trigram")],
