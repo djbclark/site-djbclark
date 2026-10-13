@@ -28,9 +28,10 @@ several agents building at once everything slowed down.
    takes an OS file lock on `~/.local/state/gradle-slot/slot.lock`, printing "Waiting for the
    machine-wide Gradle slot …" every 60 s and writing the holder to `STATUS`. It's released at
    build end, or by the OS if the JVM dies; after 90 min of waiting a build starts anyway.
-   **A stuck holder** (2026-10-12: twice in one evening a test worker failed its handshake
-   under load, "Did not receive connection preamble within 10s", and the build sat at 0% CPU
-   holding the slot ~90 min) is handled on both sides. The holder: every Test task gets a
+   **A stuck holder** (2026-10-12: twice in one evening a test that never finished, a Kotest
+   spec mocking `java.net.URL`'s constructor that runs despite `--tests` filters, left the
+   build at 0% CPU holding the slot ~90 min; Gradle logged "Did not receive connection
+   preamble within 10s", which is a symptom, not the cause) is handled on both sides. The holder: every Test task gets a
    timeout unless the build sets one (`GRADLE_TEST_TIMEOUT_MIN`, default 90; 0 = none), so a
    hung test run fails and releases the slot. The waiter: a watchdog reads the CPU time of the
    STATUS holder's process tree (pid plus descendants, through `ps`) once a minute; if it gains

@@ -11,8 +11,9 @@
 // the lock in close() at the end of the build and marks STATUS free; if the JVM dies, the OS
 // releases it.
 //
-// A hung holder (2026-10-12: a Robolectric test worker never finished its handshake under load
-// 86, and the build sat at 0% CPU holding the slot for 100 min) is handled twice:
+// A hung holder (2026-10-12: a test that never finished, a Kotest spec that mocks java.net.URL's
+// constructor and runs despite --tests filters, left the build at 0% CPU holding the slot for
+// 100 min; Gradle logged "Did not receive connection preamble within 10s") is handled twice:
 //   1. Every Test task gets a timeout unless its build sets one (GRADLE_TEST_TIMEOUT_MIN, default
 //      90; 0 = none), so a hung test run fails and frees the slot.
 //   2. A waiter watches the holder's process tree (the pid in STATUS and its descendants, read
