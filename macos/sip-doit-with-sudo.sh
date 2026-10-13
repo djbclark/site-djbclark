@@ -86,9 +86,20 @@
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
 #     SIGSTOPped one would hang its clients instead of failing them fast) and
-#     system modelmanagerd, modelcatalogd (root, TERMed by the root helper).
+#     system modelmanagerd, modelcatalogd (flag only, see below).
 #     Expect Writing Tools, Siri/Apple Intelligence features and on-device
 #     model downloads to stop working. Undo with --revert.
+#   - 2026-10-13 (later, investigation): the five come straight back because
+#     persistent clients reconnect within ~1 s of a kill (assistantd ->
+#     intelligenceflowd -> intelligencecontextd; coreaudiod -> modelmanagerd ->
+#     modelcatalogd; Siri AI.app/BackgroundShortcutRunner ->
+#     generativeexperiencesd), and none can be stopped with SIP on. A 60 s kill
+#     loop therefore costs ~4% of a core in respawn work and risks the reported
+#     modelmanagerd -> coreaudiod/launchd CPU climb. modelmanagerd and
+#     modelcatalogd are now FLAG-ONLY (FLAG_ONLY_DAEMONS below): the disable flag
+#     is set and checked, nothing kills them, and --check ignores them running.
+#     Other three keep the TERM rule. With SIP on, launchd may drop the flags at
+#     reboot (reported on 26.5/27): --check will then say "flag not set".
 
 set -u
 
@@ -160,6 +171,11 @@ SYSTEM_DAEMONS=(
   "com.apple.modelmanagerd"
   "com.apple.modelcatalogd"
 )
+
+# System daemons that get the disable flag but are NOT killed or checked for
+# running (respawned within ~1 s by coreaudiod; killing them only churns).
+FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd "
+is_flag_only() { case "$FLAG_ONLY_DAEMONS" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # CoreSpotlight semantic-search stores (embeddings, journals). Safe to delete;
 # the daemons rebuild empty directories. NOT the file index.
@@ -271,6 +287,10 @@ report_state() {
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" && flag=disabled || flag=enabled
     pid=$(job_pid system "$d")
+    if is_flag_only "$d"; then
+      echo "  system/$d: flag=$flag${pid:+, running (pid $pid)} (flag-only: not killed)"
+      continue
+    fi
     [ -n "$pid" ] && any_unfrozen=1
     echo "  system/$d: flag=$flag${pid:+, running (pid $pid)}"
   done
@@ -304,6 +324,7 @@ if [ "$MODE" = check ]; then
   done
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" || PROBLEMS+=("flag not set: system/$d")
+    is_flag_only "$d" && continue
     pid=$(job_pid system "$d")
     if [ -n "$pid" ] \
        && [ "$(age_s "$pid" 2>/dev/null || echo 999999)" -gt "$SURVIVED_UNFROZEN_S" ]; then

@@ -10,6 +10,10 @@
 # allows djbclark to run exactly this path, no arguments. It must stay
 # root-owned: a user-writable copy would make that grant a root shell.
 #
+# modelmanagerd/modelcatalogd are deliberately NOT here (2026-10-13): coreaudiod
+# re-activates them within ~1 s of a kill, so they are flag-only in
+# macos/sip-doit-with-sudo.sh (FLAG_ONLY_DAEMONS).
+#
 # Output: one line per kill ("TERM system/<label> pid <n>"), for the caller's
 # log. Exit 0 always — a job that is not running is not an error.
 
@@ -40,8 +44,6 @@ SYSTEM_LABELS=(
   "com.apple.triald.system"
   "com.apple.spindump"
   "com.apple.tailspind"
-  "com.apple.modelmanagerd"
-  "com.apple.modelcatalogd"
 )
 
 for label in "${SYSTEM_LABELS[@]}"; do

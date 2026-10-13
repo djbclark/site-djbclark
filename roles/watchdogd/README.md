@@ -49,7 +49,7 @@ after login/boot, and `--revert` in the sip script CONTs what it froze.
 triald/helpd/sirittsd (short one-shots), the on-demand Apple Intelligence agents
 (generativeexperiencesd, intelligencecontextd, intelligenceflowd; frozen they would hang
 their XPC clients) and the system-domain half (cloudd, triald.system, spindump,
-tailspind, modelmanagerd, modelcatalogd run as root) are TERMed. watchdogd
+tailspind run as root; modelmanagerd and modelcatalogd are flag-only, never killed) are TERMed. watchdogd
 itself stays a user LaunchAgent, so root comes from a fixed root-owned
 helper through exactly one sudoers line. One-time manual install (the role
 stays become-free):
