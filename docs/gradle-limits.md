@@ -28,6 +28,16 @@ several agents building at once everything slowed down.
    takes an OS file lock on `~/.local/state/gradle-slot/slot.lock`, printing "Waiting for the
    machine-wide Gradle slot …" every 60 s and writing the holder to `STATUS`. It's released at
    build end, or by the OS if the JVM dies; after 90 min of waiting a build starts anyway.
+   **A stuck holder** (2026-10-12: twice in one evening a test worker failed its handshake
+   under load, "Did not receive connection preamble within 10s", and the build sat at 0% CPU
+   holding the slot ~90 min) is handled on both sides. The holder: every Test task gets a
+   timeout unless the build sets one (`GRADLE_TEST_TIMEOUT_MIN`, default 90; 0 = none), so a
+   hung test run fails and releases the slot. The waiter: a watchdog reads the CPU time of the
+   STATUS holder's process tree (pid plus descendants, through `ps`) once a minute; if it gains
+   less than 30 s in `GRADLE_SLOT_IDLE_MIN` minutes (default 15), the waiter prints
+   "machine-gradle-slot: WATCHDOG: …", appends a `watchdog:` line to `STATUS` and starts
+   anyway. It never kills the holder: the stuck build's own session must stop it. On release
+   `STATUS` reads `free (last: …)`.
    Added 2026-10-06 after 9 concurrent `--no-daemon` runs outside `bg` took the load to 224.
    For djbclark only, not for agent-facing text: `GRADLE_SLOT=off` skips the gate for one
    build. A waiting build already has a JVM (~200 MB), which is far cheaper than thrashing.

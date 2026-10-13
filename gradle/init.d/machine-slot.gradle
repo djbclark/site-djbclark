@@ -8,7 +8,20 @@
 // How: at the start of a build, take an OS file lock (FileChannel.tryLock) on
 // ~/.local/state/gradle-slot/slot.lock, retrying every 2 s and printing a note every 60 s.
 // The holder's pid, project dir and tasks go into STATUS next to it. A BuildService releases
-// the lock in close() at the end of the build; if the JVM dies, the OS releases it.
+// the lock in close() at the end of the build and marks STATUS free; if the JVM dies, the OS
+// releases it.
+//
+// A hung holder (2026-10-12: a Robolectric test worker never finished its handshake under load
+// 86, and the build sat at 0% CPU holding the slot for 100 min) is handled twice:
+//   1. Every Test task gets a timeout unless its build sets one (GRADLE_TEST_TIMEOUT_MIN, default
+//      90; 0 = none), so a hung test run fails and frees the slot.
+//   2. A waiter watches the holder's process tree (the pid in STATUS and its descendants, read
+//      with `ps`, since on macOS Java can't read another process's CPU time). If the tree gains
+//      less than 30 s of CPU in GRADLE_SLOT_IDLE_MIN minutes (default 15), the holder is treated
+//      as stuck: the waiter logs a warning naming it, appends a line to STATUS and starts anyway.
+//      It never kills the holder. An idle daemon ticks ~1 s of CPU a minute, a working build
+//      far more, so the 30 s margin separates them; it's a delta, so the daemon's lifetime total
+//      doesn't matter.
 //
 //   GRADLE_SLOT=off     skip the gate for one build (env of the gradle/gradlew call)
 //   GRADLE_SLOT_DIR=…   use another lock dir (tests)
@@ -24,14 +37,17 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
+import java.time.Duration
 import java.time.Instant
 import org.gradle.api.logging.Logging
 import org.gradle.api.services.BuildService
 import org.gradle.api.services.BuildServiceParameters
+import org.gradle.api.tasks.testing.Test
 
 abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.None>, AutoCloseable {
     private FileChannel channel
     private FileLock lock
+    private Path status
     private boolean done
 
     synchronized void acquire(String who) {
@@ -41,10 +57,15 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
         def env = System.getenv('GRADLE_SLOT_DIR')
         Path dir = env ? Paths.get(env) : Paths.get(System.getProperty('user.home'), '.local', 'state', 'gradle-slot')
         Files.createDirectories(dir)
-        Path status = dir.resolve('STATUS')
+        status = dir.resolve('STATUS')
         channel = FileChannel.open(dir.resolve('slot.lock'), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        long idleMs = envLong('GRADLE_SLOT_IDLE_MIN', 15) * 60_000
         long start = System.currentTimeMillis()
         long lastNote = 0
+        long lastSample = 0
+        String watched = null       // the STATUS line of the holder being watched
+        long markCpuMs = -1         // its tree's CPU time at the last sign of progress
+        long markAt = 0             // when that was
         while (true) {
             try {
                 lock = channel.tryLock()
@@ -60,6 +81,27 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
                 channel.close(); channel = null
                 return
             }
+            if (idleMs > 0 && now - lastSample >= 60_000) {
+                lastSample = now
+                String holder = read(status)
+                Long cpu = treeCpuMs(holder)
+                if (holder != watched || cpu == null) {
+                    // A new holder, or one whose CPU time can't be read: start watching afresh.
+                    watched = holder; markCpuMs = cpu == null ? -1 : cpu; markAt = now
+                } else if (markCpuMs < 0 || cpu - markCpuMs >= 30_000) {
+                    markCpuMs = cpu; markAt = now
+                } else if (now - markAt >= idleMs) {
+                    String why = "the holder used ${(cpu - markCpuMs).intdiv(1000)} s of CPU in the last " +
+                        "${(now - markAt).intdiv(60_000)} min, so it looks stuck"
+                    log.warn("machine-gradle-slot: WATCHDOG: ${why}; starting anyway without the slot. Holder: ${holder}")
+                    try {
+                        Files.write(status, "watchdog: ${ProcessHandle.current().pid()} ${who} started without the slot at ${Instant.now()}: ${why}\n".getBytes('UTF-8'),
+                            StandardOpenOption.APPEND)
+                    } catch (Exception ignored) { }
+                    channel.close(); channel = null
+                    return
+                }
+            }
             if (now - lastNote >= 60_000) {
                 lastNote = now
                 log.quiet("Waiting for the machine-wide Gradle slot (one build at a time); held by ${read(status)}. " +
@@ -72,12 +114,48 @@ abstract class MachineGradleSlot implements BuildService<BuildServiceParameters.
         if (waited >= 5) log.quiet("machine-gradle-slot: got the Gradle slot after ${waited} s")
     }
 
+    // Total CPU time of the holder's pid (first word of STATUS) and all its descendants, or null.
+    // ProcessHandle lists the tree, but its totalCpuDuration() is empty for other processes on
+    // macOS, so the times come from `ps -o time=` ([[dd-]hh:]mm:ss.ss).
+    private static Long treeCpuMs(String holder) {
+        try {
+            long pid = Long.parseLong(holder.tokenize(' \n')[0])
+            def ph = ProcessHandle.of(pid)
+            if (!ph.isPresent()) return null
+            def pids = ([ph.get()] + ph.get().descendants().toList()).collect { it.pid() }
+            def proc = new ProcessBuilder('ps', '-o', 'time=', '-p', pids.join(',')).redirectErrorStream(true).start()
+            String out = proc.inputStream.text
+            if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) { proc.destroy(); return null }
+            long total = 0
+            boolean any = false
+            out.readLines().collect { it.trim() }.findAll { it }.each { t ->
+                long days = 0
+                if (t.contains('-')) { days = Long.parseLong(t.substring(0, t.indexOf('-'))); t = t.substring(t.indexOf('-') + 1) }
+                def parts = t.tokenize(':').reverse()
+                double secs = Double.parseDouble(parts[0])
+                if (parts.size() > 1) secs += 60 * Long.parseLong(parts[1])
+                if (parts.size() > 2) secs += 3600 * Long.parseLong(parts[2])
+                total += (long) ((secs + days * 86400) * 1000); any = true
+            }
+            return any ? total : null
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    static long envLong(String name, long dflt) {
+        try { return Long.parseLong(System.getenv(name) ?: "${dflt}") } catch (Exception ignored) { return dflt }
+    }
+
     private static String read(Path p) {
         try { return new String(Files.readAllBytes(p), 'UTF-8').trim() } catch (Exception ignored) { return '?' }
     }
 
     @Override
     void close() {
+        if (lock != null && status != null) {
+            try { Files.write(status, "free (last: ${read(status)}, released ${Instant.now()})\n".getBytes('UTF-8')) } catch (Exception ignored) { }
+        }
         try { lock?.release() } catch (Exception ignored) { }
         try { channel?.close() } catch (Exception ignored) { }
     }
@@ -87,4 +165,15 @@ if (System.getenv('GRADLE_SLOT') != 'off') {
     def sp = gradle.startParameter
     def who = "${sp.currentDir} ${sp.taskNames.join(' ')}".trim()
     gradle.sharedServices.registerIfAbsent('machineGradleSlot', MachineGradleSlot) { }.get().acquire(who)
+}
+
+// A default timeout for every Test task the build leaves unset, so a hung test worker can't
+// hold the slot forever (see the header).
+long testTimeoutMin = MachineGradleSlot.envLong('GRADLE_TEST_TIMEOUT_MIN', 90)
+if (testTimeoutMin > 0) {
+    gradle.allprojects { p ->
+        p.tasks.withType(Test).configureEach { t ->
+            if (!t.timeout.isPresent()) t.timeout.set(Duration.ofMinutes(testTimeoutMin))
+        }
+    }
 }
