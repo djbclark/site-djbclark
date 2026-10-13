@@ -1,0 +1,207 @@
+# Weekly nixpkgs bump for the NixOS hosts in nixos/ (vps-primary).
+#
+# The host builds exactly nixos/flake.lock from the deploy-vps-primary branch, so this job is
+# what moves nixpkgs forward: update the lock, BUILD the whole vps-primary system on the runner
+# (that build is the gate), commit the lock to master, and fast-forward deploy-vps-primary to it
+# when nothing else under nixos/ is waiting there (a pending config change is never promoted
+# for you). The host's own nightly run then picks it up.
+#
+# It must never fail quietly. On a failed build, a blocked or diverged promotion, it opens (or
+# comments on) one GitHub issue labelled nixos-lock and sends a Telegram message to the standing
+# Hermes topic; when a later run finds everything promoted it comments, closes the issue and
+# says so. GitHub also emails the failed run itself. Design: docs/nixos-in-git.md.
+#
+# Setup: TELEGRAM_BOT_TOKEN as a repository secret (already used by the other monitors here).
+# Test the alarm path with: gh workflow run nixos-lock-update.yml -f simulate_failure=true
+
+---
+name: NixOS lock update
+
+"on":
+  schedule:
+    # Monday 02:23 UTC: before the host's 04:00-04:45 run, so a good bump lands that night.
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: >-
+          Fail on purpose after the update step, to exercise the issue and Telegram alarm
+        type: boolean
+        default: false
+
+concurrency:
+  group: nixos-lock-update
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  update:
+    name: Update, build, promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24  # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Update flake.lock
+        id: update
+        run: |
+          set -euo pipefail
+          old=$(jq -r '.nodes.nixpkgs.locked.rev[0:7]' nixos/flake.lock)
+          nix flake update --flake ./nixos
+          new=$(jq -r '.nodes.nixpkgs.locked.rev[0:7]' nixos/flake.lock)
+          if git diff --quiet -- nixos/flake.lock; then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            echo "flake.lock already current (nixpkgs $old)."
+          else
+            {
+              echo "changed=true"
+              echo "old=$old"
+              echo "new=$new"
+            } >>"$GITHUB_OUTPUT"
+            echo "nixpkgs $old -> $new"
+          fi
+
+      - name: Simulated failure (test of the alarm path)
+        if: inputs.simulate_failure
+        run: |
+          echo "::error::simulate_failure was set; failing on purpose."
+          exit 1
+
+      - name: Build vps-primary (the gate)
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          nix build --no-link --print-build-logs \
+            './nixos#nixosConfigurations.vps-primary.config.system.build.toplevel'
+
+      - name: Commit the lock to master
+        if: steps.update.outputs.changed == 'true'
+        env:
+          OLD: ${{ steps.update.outputs.old }}
+          NEW: ${{ steps.update.outputs.new }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nixos/flake.lock
+          git commit -m "nixos: bump flake.lock, nixpkgs ${OLD} -> ${NEW} (vps-primary builds)"
+          for _ in 1 2 3; do
+            git pull --rebase --quiet origin master
+            if git push origin HEAD:master; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::could not push the lock commit to master after 3 attempts."
+          exit 1
+
+      - name: Promote to deploy-vps-primary
+        id: promote
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master deploy-vps-primary
+          pending=""
+          if git diff --quiet origin/deploy-vps-primary origin/master -- nixos; then
+            state=in-sync
+          else
+            pending=$(git diff --name-only origin/deploy-vps-primary origin/master -- nixos |
+              { grep -vx 'nixos/flake.lock' || true; } | paste -sd, -)
+            if [ -n "$pending" ]; then
+              state=blocked
+            elif git merge-base --is-ancestor origin/deploy-vps-primary origin/master; then
+              git push origin origin/master:refs/heads/deploy-vps-primary
+              state=promoted
+            else
+              state=diverged
+            fi
+          fi
+          echo "state=$state" >>"$GITHUB_OUTPUT"
+          echo "pending=$pending" >>"$GITHUB_OUTPUT"
+          echo "promotion: $state ${pending:+(pending: $pending)}"
+
+      - name: Report (issue and Telegram)
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          PROMOTE_STATE: ${{ steps.promote.outputs.state }}
+          PENDING: ${{ steps.promote.outputs.pending }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          label=nixos-lock
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          deploy="git push origin master:deploy-vps-primary"
+
+          if [ "$JOB_STATUS" != success ]; then
+            kind=failed
+            headline="NixOS lock update FAILED"
+            detail="The weekly nixpkgs bump did not finish; nothing was promoted by this run."
+            detail="${detail} Open the run log: ${run_url}"
+          elif [ "$PROMOTE_STATE" = blocked ]; then
+            kind=blocked
+            headline="NixOS lock bump built but NOT promoted"
+            detail="deploy-vps-primary has unpromoted changes under nixos/ (${PENDING}),"
+            detail="${detail} so the new lock is on master only. Review them, then run:"
+            detail="${detail} ${deploy}. Run: ${run_url}"
+          elif [ "$PROMOTE_STATE" = diverged ]; then
+            kind=diverged
+            headline="NixOS lock bump built but NOT promoted"
+            detail="deploy-vps-primary is not an ancestor of master (someone committed to it"
+            detail="${detail} directly). Merge it into master, then run: ${deploy}. Run: ${run_url}"
+          else
+            kind=ok
+          fi
+
+          open=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+
+          if [ "$kind" != ok ]; then
+            footer="Automated by .github/workflows/nixos-lock-update.yml;"
+            footer="${footer} this issue closes itself when a later run finds nothing outstanding."
+            body="**${headline}**"$'\n\n'"${detail}"$'\n\n'"${footer}"
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "$body"
+            else
+              gh issue create --title "$headline" --label "$label" --body "$body"
+            fi
+            text="⚠️ ${headline}"$'\n'"${detail}"
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" --body "Resolved: master and deploy-vps-primary agree on nixos/ again (run: ${run_url})."
+            gh issue close "$open"
+            text="✅ NixOS lock update: back to normal, issue #${open} closed."$'\n'"${run_url}"
+          else
+            echo "All good; nothing to report."
+            exit 0
+          fi
+
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::warning::TELEGRAM_BOT_TOKEN is not set; the issue is the only alarm."
+            exit 0
+          fi
+          response=$(mktemp)
+          telegram_url="https://api.telegram.org/bot"
+          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+          curl --fail-with-body --silent --show-error \
+            -X POST "$telegram_url" \
+            -d chat_id=838808636 \
+            -d message_thread_id=22158 \
+            --data-urlencode "text=${text}" \
+            --output "$response"
+          jq -e 'if .ok == true then true else error(.description) end' "$response" >/dev/null
+          echo "Telegram accepted the notification."
