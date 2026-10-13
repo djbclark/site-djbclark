@@ -28,6 +28,11 @@ name: NixOS lock update
           Fail on purpose after the update step, to exercise the issue and Telegram alarm
         type: boolean
         default: false
+      deploy_branch:
+        description: >-
+          Promote to this branch instead of deploy-vps-primary (a test seam; leave the default)
+        type: string
+        default: deploy-vps-primary
 
 concurrency:
   group: nixos-lock-update
@@ -45,6 +50,7 @@ jobs:
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
+      DEPLOY_BRANCH: ${{ inputs.deploy_branch || 'deploy-vps-primary' }}
     steps:
       - name: Check out master
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -116,17 +122,17 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          git fetch --quiet origin master deploy-vps-primary
+          git fetch --quiet origin master "$DEPLOY_BRANCH"
           pending=""
-          if git diff --quiet origin/deploy-vps-primary origin/master -- nixos; then
+          if git diff --quiet "origin/$DEPLOY_BRANCH" origin/master -- nixos; then
             state=in-sync
           else
-            pending=$(git diff --name-only origin/deploy-vps-primary origin/master -- nixos |
+            pending=$(git diff --name-only "origin/$DEPLOY_BRANCH" origin/master -- nixos |
               { grep -vx 'nixos/flake.lock' || true; } | paste -sd, -)
             if [ -n "$pending" ]; then
               state=blocked
-            elif git merge-base --is-ancestor origin/deploy-vps-primary origin/master; then
-              git push origin origin/master:refs/heads/deploy-vps-primary
+            elif git merge-base --is-ancestor "origin/$DEPLOY_BRANCH" origin/master; then
+              git push origin "origin/master:refs/heads/$DEPLOY_BRANCH"
               state=promoted
             else
               state=diverged
@@ -147,7 +153,7 @@ jobs:
           set -euo pipefail
           label=nixos-lock
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          deploy="git push origin master:deploy-vps-primary"
+          deploy="git push origin master:${DEPLOY_BRANCH}"
 
           if [ "$JOB_STATUS" != success ]; then
             kind=failed
@@ -157,13 +163,13 @@ jobs:
           elif [ "$PROMOTE_STATE" = blocked ]; then
             kind=blocked
             headline="NixOS lock bump built but NOT promoted"
-            detail="deploy-vps-primary has unpromoted changes under nixos/ (${PENDING}),"
+            detail="${DEPLOY_BRANCH} has unpromoted changes under nixos/ (${PENDING}),"
             detail="${detail} so the new lock is on master only. Review them, then run:"
             detail="${detail} ${deploy}. Run: ${run_url}"
           elif [ "$PROMOTE_STATE" = diverged ]; then
             kind=diverged
             headline="NixOS lock bump built but NOT promoted"
-            detail="deploy-vps-primary is not an ancestor of master (someone committed to it"
+            detail="${DEPLOY_BRANCH} is not an ancestor of master (someone committed to it"
             detail="${detail} directly). Merge it into master, then run: ${deploy}. Run: ${run_url}"
           else
             kind=ok
@@ -182,7 +188,7 @@ jobs:
             fi
             text="⚠️ ${headline}"$'\n'"${detail}"
           elif [ -n "$open" ]; then
-            gh issue comment "$open" --body "Resolved: master and deploy-vps-primary agree on nixos/ again (run: ${run_url})."
+            gh issue comment "$open" --body "Resolved: master and ${DEPLOY_BRANCH} agree on nixos/ again (run: ${run_url})."
             gh issue close "$open"
             text="✅ NixOS lock update: back to normal, issue #${open} closed."$'\n'"${run_url}"
           else
