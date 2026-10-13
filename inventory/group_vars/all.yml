@@ -107,3 +107,6 @@ tailnet_magicdns_nameservers:
 tailnet_search_domains:
   - greyhound-sidemirror.ts.net
   - dclark.us
+
+# S1 evidence ingest every 15 min (com.djbclark.s1-ingest); enabled 2026-10-13 after the R1 index and CAS pack migrations.
+site_agents_s1_ingest_enabled: true
