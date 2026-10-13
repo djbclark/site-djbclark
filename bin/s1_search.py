@@ -8,8 +8,10 @@ are really there — but at 448k events it is far too slow to actually use.
 This adds three indexed modes on top:
 
 - **fts** — word and phrase search (FTS5, unicode61). The everyday mode.
-- **trigram** — substring and typo-tolerant search (FTS5 trigram), for when
-  you half-remember a symbol or a path.
+- **trigram** — literal substring search (FTS5 trigram), for when you
+  half-remember a symbol or a path. Case-insensitive with Unicode case
+  folding; `_` and `%` are literal; queries under 3 characters return
+  nothing, because a trigram index cannot match them.
 - **neighbours** — given a hit, the events around it in the same
   conversation. Retrieval that returns a single message out of a 200-turn
   session is usually useless; the surrounding turns are the answer.
@@ -20,6 +22,20 @@ of raw bytes would cost several GB and index mostly JSON punctuation. The
 projection keeps the index small and covers the searchable head of an event;
 `exact` still scans the full bytes when completeness matters. This is a
 deliberate trade, and the reason both modes exist.
+
+**One copy of the text, two indexes over it (layout 2).** The projection is
+stored once, in `event_text`; `event_fts` and `event_trigram` are FTS5
+*external-content* tables that read it for snippets and match checks. The
+trigram index is `detail=none` (no positions): 0.4 GB instead of 2.6 GB.
+Without positions FTS5 cannot run a quoted trigram phrase, so trigram mode
+asks `body LIKE '%q%'` (index-assisted; it narrows to rows that hold every
+trigram) and then re-checks the literal in Python. Hit sets equal the old
+phrase query; ranking within them is coarser, because bm25 has no term
+frequencies under `detail=none`. Layout 1 (each index with its own internal
+copy of the text, trigram at `detail=full`) took 5.4 GB at 448k events;
+layout 2 takes 2.3 GB once vacuumed. `migrate` converts a layout-1 store;
+`vacuum` then returns the freed pages. The layout is recorded in `s1_meta`
+(`search_layout`) and the two are never mixed.
 
 The index is derived state — it can be dropped and rebuilt from the CAS at
 any time, and never carries information the evidence does not.
@@ -36,10 +52,141 @@ from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from s1_evidence import EvidenceStore, now_iso  # noqa: E402
+from s1_evidence import DEFAULT_DB, EvidenceStore, now_iso  # noqa: E402
 
 PROJECTION_CHARS = 8192
+# Version of project(): bump it and build() re-indexes every event.
 INDEX_VERSION = 1
+# Version of the table layout (module docstring), stored in s1_meta.
+SEARCH_LAYOUT = 2
+TRIGRAM_MIN_CHARS = 3
+INDEX_TABLES = ("event_fts", "event_trigram")
+
+_LAYOUT_DDL = """
+CREATE TABLE IF NOT EXISTS event_text (
+  id       INTEGER PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  body     TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_text_event_idx ON event_text(event_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS event_fts
+  USING fts5(event_id UNINDEXED, body, tokenize='unicode61',
+             content='event_text', content_rowid='id');
+CREATE VIRTUAL TABLE IF NOT EXISTS event_trigram
+  USING fts5(event_id UNINDEXED, body, tokenize='trigram',
+             content='event_text', content_rowid='id', detail=none);
+CREATE TABLE IF NOT EXISTS search_indexed (
+  event_id   TEXT PRIMARY KEY REFERENCES event(event_id) ON DELETE CASCADE,
+  indexed_at TEXT NOT NULL,
+  version    INTEGER NOT NULL
+);
+"""
+
+
+class LayoutError(RuntimeError):
+    """The store's search tables are not in a layout this code may touch."""
+
+
+def store_layout(db: sqlite3.Connection) -> int | None:
+    """The search layout of an open store: None when it has no index yet."""
+    row = db.execute("SELECT value FROM s1_meta WHERE key='search_layout'").fetchone()
+    if row is not None:
+        return int(row[0])
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='event_fts'").fetchone():
+        return 1
+    return None
+
+
+def other_writer_files(db_path: str | Path) -> list[Path]:
+    """Journal files beside a database that no connection of ours has opened.
+
+    A clean close removes `-wal` and `-shm`, and a committed rollback journal
+    is deleted, so any of them before we open the file means another
+    connection is live or one crashed mid-write.
+    """
+    return [p for p in (Path(f"{db_path}{s}") for s in ("-wal", "-shm", "-journal"))
+            if p.exists()]
+
+
+def migrate_layout(db: sqlite3.Connection) -> dict[str, Any]:
+    """Convert a layout-1 store to layout 2 in one transaction. Idempotent.
+
+    The text comes from layout 1's `event_fts_content`, which holds the same
+    projection build() wrote, so nothing is re-read from the CAS and
+    `search_indexed` stays valid. Freed pages stay in the file until `vacuum`.
+    """
+    found = store_layout(db)
+    if found == SEARCH_LAYOUT:
+        return {"migrated": False, "layout": SEARCH_LAYOUT}
+    if found is not None and found != 1:
+        raise LayoutError(f"unknown search layout {found}")
+    quick = db.execute("PRAGMA quick_check").fetchone()[0]
+    if quick != "ok":
+        raise LayoutError(f"PRAGMA quick_check failed, not migrating: {quick}")
+    report: dict[str, Any] = {"migrated": True, "from_layout": found, "layout": SEARCH_LAYOUT}
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        if found == 1:
+            db.execute("CREATE TABLE event_text (id INTEGER PRIMARY KEY,"
+                       " event_id TEXT NOT NULL, body TEXT NOT NULL)")
+            # One row per event; a duplicate (never seen) keeps its newest text.
+            db.execute(
+                "INSERT INTO event_text (id, event_id, body)"
+                " SELECT id, c0, c1 FROM event_fts_content WHERE id IN"
+                " (SELECT MAX(id) FROM event_fts_content"
+                "  WHERE c0 IS NOT NULL AND c1 IS NOT NULL GROUP BY c0)"
+                " ORDER BY id")
+            db.execute("DROP TABLE event_fts")
+            db.execute("DROP TABLE event_trigram")
+        for stmt in _LAYOUT_DDL.split(";"):
+            if stmt.strip():
+                db.execute(stmt)
+        for table in INDEX_TABLES:
+            db.execute(f"INSERT INTO {table} ({table}) VALUES ('rebuild')")
+            db.execute(f"INSERT INTO {table} ({table}) VALUES ('optimize')")
+        # An event marked indexed whose text did not carry over is re-indexed.
+        report["reset_indexed"] = db.execute(
+            "DELETE FROM search_indexed WHERE event_id NOT IN"
+            " (SELECT event_id FROM event_text)").rowcount
+        db.execute("INSERT OR REPLACE INTO s1_meta (key, value) VALUES ('search_layout', ?)",
+                   (str(SEARCH_LAYOUT),))
+        db.execute("COMMIT")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    report["text_rows"] = db.execute("SELECT COUNT(*) FROM event_text").fetchone()[0]
+    return report
+
+
+def vacuum(store: EvidenceStore, into: str | Path | None = None) -> dict[str, Any]:
+    """Return free pages: VACUUM in place, or VACUUM INTO a new file."""
+    before = store.path.stat().st_size
+    if into is None:
+        store.db.execute("VACUUM")
+        target = store.path
+    else:
+        target = Path(into).expanduser()
+        if target.exists():
+            raise FileExistsError(target)
+        store.db.execute("VACUUM INTO ?", (str(target),))
+    return {"file": str(target), "bytes_before": before, "bytes_after": target.stat().st_size}
+
+
+def _contains(body: str | None, query: str | None) -> bool:
+    return body is not None and query is not None and query.casefold() in body.casefold()
+
+
+def _like_pattern(query: str) -> str:
+    """A LIKE pattern that matches every row containing `query`, and maybe more.
+
+    LIKE folds ASCII case only, so a non-ASCII character with case variants
+    becomes `_` (any one character). `_` and `%` in the query stay wildcards:
+    escaping them with ESCAPE turns off the trigram index. Either way the
+    pattern can only over-match, and s1_contains() then checks the literal.
+    """
+    return "%" + "".join(
+        "_" if ord(c) > 127 and (c.lower() != c or c.upper() != c or c.casefold() != c) else c
+        for c in query) + "%"
 
 
 def project(payload: bytes) -> str:
@@ -79,23 +226,20 @@ class SearchIndex:
     def __init__(self, store: EvidenceStore):
         self.store = store
         self.db = store.db
+        self.db.create_function("s1_contains", 2, _contains, deterministic=True)
         self._migrate()
 
     def _migrate(self) -> None:
+        found = store_layout(self.db)
+        if found is not None and found != SEARCH_LAYOUT:
+            raise LayoutError(
+                f"{self.store.path}: search layout {found}, this code needs {SEARCH_LAYOUT};"
+                " run `s1_search.py migrate`, then `s1_search.py vacuum`")
         self.db.executescript(
-            """
-        CREATE VIRTUAL TABLE IF NOT EXISTS event_fts
-          USING fts5(event_id UNINDEXED, body, tokenize='unicode61');
-        CREATE VIRTUAL TABLE IF NOT EXISTS event_trigram
-          USING fts5(event_id UNINDEXED, body, tokenize='trigram');
-        CREATE TABLE IF NOT EXISTS search_indexed (
-          event_id   TEXT PRIMARY KEY REFERENCES event(event_id) ON DELETE CASCADE,
-          indexed_at TEXT NOT NULL,
-          version    INTEGER NOT NULL
-        );
-        """
-        )
-        self.db.commit()
+            "BEGIN;" + _LAYOUT_DDL +
+            "INSERT OR IGNORE INTO s1_meta (key, value)"
+            f" VALUES ('search_layout', '{SEARCH_LAYOUT}');"
+            "COMMIT;")
 
     # -- indexing ---------------------------------------------------------
 
@@ -122,11 +266,7 @@ class SearchIndex:
             except FileNotFoundError:
                 missing += 1
                 continue
-            body = project(payload)
-            self.db.execute("INSERT INTO event_fts (event_id, body) VALUES (?,?)",
-                            (row["event_id"], body))
-            self.db.execute("INSERT INTO event_trigram (event_id, body) VALUES (?,?)",
-                            (row["event_id"], body))
+            self._put_text(row["event_id"], project(payload))
             self.db.execute(
                 "INSERT OR REPLACE INTO search_indexed (event_id, indexed_at, version)"
                 " VALUES (?,?,?)", (row["event_id"], now_iso(), INDEX_VERSION))
@@ -137,24 +277,51 @@ class SearchIndex:
         self.db.commit()
         return {"indexed": done, "cas_missing": missing, "remaining": self.pending()}
 
+    def _put_text(self, event_id: str, body: str) -> None:
+        """Write one event's text to event_text and both indexes, in step.
+
+        External-content FTS5 never reads event_text on a write. Replacing a
+        row therefore needs the FTS5 'delete' command with the *old* text
+        first, or the old tokens stay in the index pointing at the new body.
+        """
+        old = self.db.execute("SELECT id, body FROM event_text WHERE event_id=?",
+                              (event_id,)).fetchone()
+        if old is None:
+            rowid = self.db.execute("INSERT INTO event_text (event_id, body) VALUES (?,?)",
+                                    (event_id, body)).lastrowid
+        else:
+            rowid = old["id"]
+            for table in INDEX_TABLES:
+                self.db.execute(f"INSERT INTO {table} ({table}, rowid, event_id, body)"
+                                " VALUES ('delete', ?, ?, ?)", (rowid, event_id, old["body"]))
+            self.db.execute("UPDATE event_text SET body=? WHERE id=?", (body, rowid))
+        for table in INDEX_TABLES:
+            self.db.execute(f"INSERT INTO {table} (rowid, event_id, body) VALUES (?,?,?)",
+                            (rowid, event_id, body))
+
     # -- querying ---------------------------------------------------------
 
-    def _hits(self, table: str, query: str, limit: int) -> list[sqlite3.Row]:
+    def _hits(self, table: str, where: str, params: tuple, limit: int) -> list[sqlite3.Row]:
         return self.db.execute(
             f"SELECT e.*, snippet({table}, 1, '[', ']', '…', 12) AS snip"
             f" FROM {table} JOIN event e ON e.event_id = {table}.event_id"
-            f" WHERE {table} MATCH ? ORDER BY rank LIMIT ?",
-            (query, limit),
+            f" WHERE {where} ORDER BY rank LIMIT ?",
+            (*params, limit),
         ).fetchall()
 
     def search(self, query: str, *, mode: str = "fts", limit: int = 20) -> list[sqlite3.Row]:
         """fts = words/phrases; trigram = substrings; exact = full-byte scan."""
         if mode == "fts":
-            return self._hits("event_fts", query, limit)
+            return self._hits("event_fts", "event_fts MATCH ?", (query,), limit)
         if mode == "trigram":
-            # Trigram MATCH wants a literal; quote it so punctuation in a path
-            # or symbol name is not read as FTS syntax.
-            return self._hits("event_trigram", '"' + query.replace('"', '""') + '"', limit)
+            # The trigram index cannot match under 3 characters, and a LIKE
+            # would turn into a full scan, so short queries find nothing.
+            if len(query) < TRIGRAM_MIN_CHARS:
+                return []
+            return self._hits(
+                "event_trigram",
+                "event_trigram.body LIKE ? AND s1_contains(event_trigram.body, ?)",
+                (_like_pattern(query), query), limit)
         if mode == "exact":
             return self.store.search(query, limit=limit)
         raise ValueError("mode must be one of: fts, trigram, exact")
@@ -187,14 +354,32 @@ class SearchIndex:
         i = ids.index(event_id)
         return ordered[max(0, i - window): i + window + 1]
 
-    def stats(self) -> dict[str, Any]:
-        return {
+    def check(self) -> dict[str, str]:
+        """FTS5 integrity-check of each index, including against event_text."""
+        result = {}
+        for table in INDEX_TABLES:
+            try:
+                self.db.execute(f"INSERT INTO {table} ({table}, rank) VALUES ('integrity-check', 1)")
+                result[table] = "ok"
+            except sqlite3.DatabaseError as exc:
+                result[table] = str(exc)
+        self.db.commit()  # the INSERT opened a transaction; the check writes nothing
+        return result
+
+    def stats(self, *, check: bool = False) -> dict[str, Any]:
+        result = {
             "events": self.db.execute("SELECT COUNT(*) FROM event").fetchone()[0],
             "indexed": self.db.execute("SELECT COUNT(*) FROM search_indexed").fetchone()[0],
+            "text_rows": self.db.execute("SELECT COUNT(*) FROM event_text").fetchone()[0],
             "pending": self.pending(),
             "projection_chars": PROJECTION_CHARS,
             "index_version": INDEX_VERSION,
+            "search_layout": store_layout(self.db),
         }
+        if check:
+            result["integrity_check"] = self.check()
+            result["healthy"] = all(v == "ok" for v in result["integrity_check"].values())
+        return result
 
 
 def _print(rows: list[sqlite3.Row]) -> None:
@@ -218,7 +403,12 @@ def main(argv: list[str] | None = None) -> int:
     n = sub.add_parser("neighbours")
     n.add_argument("event_id")
     n.add_argument("--window", type=int, default=3)
-    sub.add_parser("stats")
+    st = sub.add_parser("stats")
+    st.add_argument("--check", action="store_true",
+                    help="also run the FTS5 integrity-check on both indexes (slow)")
+    sub.add_parser("migrate", help="convert a layout-1 index to layout 2 (one-off, idempotent)")
+    v = sub.add_parser("vacuum", help="return free pages after migrate (explicit, slow)")
+    v.add_argument("--into", default=None, help="write a compacted copy here instead")
 
     args = parser.parse_args(argv)
     kwargs: dict[str, Any] = {}
@@ -226,8 +416,30 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["db_path"] = args.db
     if args.cas:
         kwargs["cas_root"] = args.cas
-    index = SearchIndex(EvidenceStore(**kwargs))
+    if args.command in ("migrate", "vacuum"):
+        busy = other_writer_files(Path(args.db or DEFAULT_DB).expanduser())
+        if busy:
+            print(f"refusing to {args.command}: another writer may be live: "
+                  + ", ".join(map(str, busy)), file=sys.stderr)
+            return 2
+    store = EvidenceStore(**kwargs)
+    try:
+        return _run(args, store)
+    except (LayoutError, FileExistsError) as exc:
+        print(f"{args.command}: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        store.close()
 
+
+def _run(args: argparse.Namespace, store: EvidenceStore) -> int:
+    if args.command == "migrate":
+        print(json.dumps(migrate_layout(store.db), indent=2))
+        return 0
+    if args.command == "vacuum":
+        print(json.dumps(vacuum(store, args.into), indent=2))
+        return 0
+    index = SearchIndex(store)
     if args.command == "index":
         print(json.dumps(index.build(limit=args.limit), indent=2))
     elif args.command == "search":
@@ -235,7 +447,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "neighbours":
         _print(index.neighbours(args.event_id, window=args.window))
     elif args.command == "stats":
-        print(json.dumps(index.stats(), indent=2))
+        result = index.stats(check=args.check)
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("healthy", True) else 1
     return 0
 
 

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
@@ -130,6 +131,194 @@ class TestSearchModes(SearchTestCase):
             self.add(f"repeated needle {i}", locator=f"extra{i}", seq=100 + i)
         self.index.build()
         self.assertEqual(len(self.index.search("needle", mode="fts", limit=3)), 3)
+
+
+class TestTrigramLiterals(SearchTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.add("deploy ops_release now")
+        self.add("deploy opsXrelease now")
+        self.add("save 50% today")
+        self.add("save 50x today")
+        self.add("au café noir")
+        self.add("AU CAFÉ NOIR")
+        self.add("plain cafe here")
+        self.index.build()
+
+    def bodies(self, query: str) -> set[str]:
+        return {json.loads(self.store.raw_for(r["event_id"]))["content"]
+                for r in self.index.search(query, mode="trigram")}
+
+    def test_underscore_is_literal(self) -> None:
+        self.assertEqual(self.bodies("ops_rel"), {"deploy ops_release now"})
+
+    def test_percent_is_literal(self) -> None:
+        self.assertEqual(self.bodies("50%"), {"save 50% today"})
+
+    def test_non_ascii_case_folds(self) -> None:
+        both = {"au café noir", "AU CAFÉ NOIR"}
+        self.assertEqual(self.bodies("CAFÉ"), both)
+        self.assertEqual(self.bodies("café"), both)
+        self.assertEqual(self.bodies("Café N"), both)
+
+    def test_ascii_case_folds(self) -> None:
+        self.assertEqual(self.bodies("OPS_RELEASE"), {"deploy ops_release now"})
+
+    def test_short_queries_find_nothing(self) -> None:
+        for query in ("", "a", "50", "%%", "__"):
+            self.assertEqual(self.index.search(query, mode="trigram"), [], query)
+
+    def test_snippet_present(self) -> None:
+        hits = self.index.search("ops_release", mode="trigram")
+        self.assertIn("[", hits[0]["snip"])
+
+
+class TestExternalContent(SearchTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.ids = [self.add("original wording alpha"), self.add("original wording beta")]
+        self.index.build()
+
+    def test_fresh_store_is_current_layout_and_consistent(self) -> None:
+        st = self.index.stats(check=True)
+        self.assertEqual(st["search_layout"], search.SEARCH_LAYOUT)
+        self.assertEqual(st["text_rows"], 2)
+        self.assertTrue(st["healthy"], st)
+
+    def test_reindex_replaces_text_and_index_entries(self) -> None:
+        with mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 1), \
+             mock.patch.object(search, "project",
+                               lambda payload: "rewritten zebra " + payload.decode()):
+            self.assertEqual(self.index.pending(), 2)
+            self.assertEqual(self.index.build()["indexed"], 2)
+            self.assertEqual(self.index.stats(check=True)["integrity_check"],
+                             {"event_fts": "ok", "event_trigram": "ok"})
+        self.assertEqual(self.index.stats()["text_rows"], 2)
+        self.assertEqual(len(self.index.search("zebra", mode="fts")), 2)
+        self.assertEqual(len(self.index.search("rewritten zeb", mode="trigram")), 2)
+        # A second re-index drops every earlier word; any hit on one would be
+        # a stale index entry that the 'delete' command failed to remove.
+        with mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 2), \
+             mock.patch.object(search, "project", lambda payload: "only giraffe"):
+            self.index.build()
+            self.assertEqual(self.index.search("zebra", mode="fts"), [])
+            self.assertEqual(self.index.search("wording", mode="fts"), [])
+            self.assertEqual(self.index.search("ebra", mode="trigram"), [])
+            self.assertEqual(len(self.index.search("giraffe", mode="fts")), 2)
+            self.assertTrue(self.index.stats(check=True)["healthy"])
+
+    def test_check_detects_text_changed_behind_the_index(self) -> None:
+        self.store.db.execute("UPDATE event_text SET body='something else' WHERE event_id=?",
+                              (self.ids[0],))
+        self.store.db.commit()
+        st = self.index.stats(check=True)
+        self.assertFalse(st["healthy"])
+        self.assertNotEqual(st["integrity_check"]["event_fts"], "ok")
+
+
+OLD_LAYOUT_DDL = """
+CREATE VIRTUAL TABLE event_fts USING fts5(event_id UNINDEXED, body, tokenize='unicode61');
+CREATE VIRTUAL TABLE event_trigram USING fts5(event_id UNINDEXED, body, tokenize='trigram');
+CREATE TABLE search_indexed (
+  event_id   TEXT PRIMARY KEY REFERENCES event(event_id) ON DELETE CASCADE,
+  indexed_at TEXT NOT NULL,
+  version    INTEGER NOT NULL
+);
+"""
+
+
+class TestMigration(unittest.TestCase):
+    """A layout-1 store, written the way the old build() wrote it."""
+
+    TEXTS = ["the quick brown fox", "deploy_ops_release.py syncs memory",
+             "AU CAFÉ NOIR", "unrelated words here"]
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.db_path, self.cas = root / "s1.sqlite3", root / "cas"
+        self.store = s1.EvidenceStore(self.db_path, self.cas)
+        self.store.db.executescript(OLD_LAYOUT_DDL)
+        self.ids = []
+        for n, text in enumerate(self.TEXTS):
+            eid, _ = self.store.put_event(
+                producer="claude-code", source_uri="file:///t.jsonl",
+                source_locator=f"l{n}", raw=json.dumps({"content": text}).encode(),
+                ts_utc=f"2026-08-23T20:00:{n:02d}Z", role="user", origin="human",
+                source_seq=n)
+            self.ids.append(eid)
+            body = search.project(self.store.raw_for(eid))
+            for table in ("event_fts", "event_trigram"):
+                self.store.db.execute(f"INSERT INTO {table} (event_id, body) VALUES (?,?)",
+                                      (eid, body))
+            self.store.db.execute("INSERT INTO search_indexed VALUES (?,?,1)",
+                                  (eid, s1.now_iso()))
+        self.store.db.commit()
+
+    def tearDown(self) -> None:
+        self.store.close()
+        self._tmp.cleanup()
+
+    def cli(self, *args: str) -> int:
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            return search.main(["--db", str(self.db_path), "--cas", str(self.cas), *args])
+
+    def test_old_layout_is_refused_not_mixed(self) -> None:
+        self.assertEqual(search.store_layout(self.store.db), 1)
+        with self.assertRaises(search.LayoutError):
+            search.SearchIndex(self.store)
+        self.assertIsNotNone(self.store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='event_fts_content'").fetchone())
+        self.assertIsNone(self.store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='event_text'").fetchone())
+
+    def test_migrate_keeps_results_and_is_idempotent(self) -> None:
+        r = search.migrate_layout(self.store.db)
+        self.assertTrue(r["migrated"])
+        self.assertEqual(r["text_rows"], len(self.TEXTS))
+        self.assertEqual(r["reset_indexed"], 0)
+        names = {row[0] for row in self.store.db.execute("SELECT name FROM sqlite_master")}
+        self.assertNotIn("event_fts_content", names)
+        self.assertNotIn("event_trigram_content", names)
+        self.assertFalse(search.migrate_layout(self.store.db)["migrated"])
+
+        index = search.SearchIndex(self.store)
+        st = index.stats(check=True)
+        self.assertTrue(st["healthy"], st)
+        self.assertEqual((st["indexed"], st["pending"], st["text_rows"]), (4, 0, 4))
+        self.assertEqual([r["event_id"] for r in index.search("brown", mode="fts")],
+                         [self.ids[0]])
+        self.assertEqual([r["event_id"] for r in index.search("ops_rel", mode="trigram")],
+                         [self.ids[1]])
+        self.assertEqual([r["event_id"] for r in index.search("café", mode="trigram")],
+                         [self.ids[2]])
+        # New events after the migration go through the new write path.
+        eid, _ = self.store.put_event(
+            producer="claude-code", source_uri="file:///t.jsonl", source_locator="l9",
+            raw=json.dumps({"content": "fresh brown bear"}).encode(),
+            ts_utc="2026-08-23T20:00:09Z", role="user", origin="human", source_seq=9)
+        self.assertEqual(index.build()["indexed"], 1)
+        self.assertEqual(len(index.search("brown", mode="fts")), 2)
+        self.assertTrue(index.stats(check=True)["healthy"])
+
+    def test_cli_refuses_while_another_connection_is_open(self) -> None:
+        self.assertTrue(search.other_writer_files(self.db_path), "WAL file expected")
+        self.assertEqual(self.cli("migrate"), 2)
+        self.assertEqual(search.store_layout(self.store.db), 1)
+
+    def test_cli_migrate_then_vacuum(self) -> None:
+        self.store.close()
+        self.assertEqual(search.other_writer_files(self.db_path), [])
+        self.assertEqual(self.cli("migrate"), 0)
+        self.assertEqual(self.cli("migrate"), 0)
+        self.assertEqual(self.cli("stats", "--check"), 0)
+        into = Path(self._tmp.name) / "compact.sqlite3"
+        self.assertEqual(self.cli("vacuum", "--into", str(into)), 0)
+        self.assertEqual(self.cli("vacuum", "--into", str(into)), 2, "never overwrites")
+        self.assertEqual(self.cli("vacuum"), 0)
+        self.store = s1.EvidenceStore(into, self.cas)
+        self.assertEqual(search.store_layout(self.store.db), search.SEARCH_LAYOUT)
+        self.assertEqual(len(search.SearchIndex(self.store).search("quick", mode="fts")), 1)
 
 
 class TestNeighbours(SearchTestCase):
