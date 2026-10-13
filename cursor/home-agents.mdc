@@ -265,8 +265,10 @@ before `cat`/`rg`/Grep for **code discovery**; plain text search is right for
 prose and config. `token-savior` is kept only for what graft cannot do
 (`find_dead_code`, `detect_breaking_changes`, `analyze_config`,
 `find_semantic_duplicates`, index-aware edits), never as a navigator; `rtk` owns
-Bash output compaction, so **never run `ts init`**. Defects and the registration
-list: `site-djbclark/docs/tooling-policy.md`.
+Bash output compaction, so **never run `ts init`**. A no-hit `graft grep` is
+usually over-specific; immediately retry with the bare symbol or a short literal,
+not the full signature. Defects and the registration list:
+`site-djbclark/docs/tooling-policy.md`.
 
 ## Run commands yourself (2026-10-06)
 

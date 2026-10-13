@@ -19,7 +19,9 @@ numbered once across the file.
 **`graft` is the navigator in every repo** (`graft build` if no `graft/`): graft
 or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 "tokens saved ≈ N" banner** as a total. `rtk` compacts Bash output: **never run
-`ts init`** ([[reference_agent_rules_code_discovery_and_cli_table]]).
+`ts init`**. A no-hit `graft grep` is usually over-specific: immediately retry
+with the bare symbol or a short literal, not the full signature
+([[reference_agent_rules_code_discovery_and_cli_table]]; 2026-10-13).
 
 1. **Fast tools:** `rg` **always with a path** (2026-10-09), `fd`, `ast-grep`,
    `uv` not `pip`, **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11:
