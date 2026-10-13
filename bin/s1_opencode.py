@@ -79,6 +79,7 @@ CONTENT_COLUMNS: dict[str, tuple[str, ...]] = {
     "session_message": ("id", "session_id", "type", "seq", "time_created", "data"),
 }
 REQUIRED_TABLES = ("session", "message", "part")
+SOURCE_BASENAMES = {"opencode": "opencode.db", "zcode": "db.sqlite"}
 ROLE_MAP = {
     "user": ("user", "human"),
     "assistant": ("assistant", "model"),
@@ -223,6 +224,17 @@ def sink(
         "failed": 0,
     }
     batch = batch or f"{producer}-sqlite:{now_iso()}"
+    expected_name = SOURCE_BASENAMES.get(producer)
+    if expected_name is None or source.name != expected_name:
+        result["gaps"] += _record_gap(
+            store,
+            producer,
+            uri,
+            "source path is outside the history database allow-list",
+            dry_run=dry_run,
+        )
+        result["failed"] = 1
+        return result
     if not source.is_file():
         result["gaps"] += _record_gap(
             store,

@@ -169,6 +169,14 @@ class TestZcodeSink(ZcodeAdapterTestCase):
 
         with patch.object(s1_opencode.sqlite3, "connect", side_effect=tracked_connect):
             self.sink()
+            rejected = adapter.sink(self.store, self.root / "credentials.json")
+            rejected_opencode = s1_opencode.sink(
+                self.store, self.root / "auth.json", producer="opencode"
+            )
+        self.assertEqual((rejected["failed"], rejected["gaps"]), (1, 1))
+        self.assertEqual(
+            (rejected_opencode["failed"], rejected_opencode["gaps"]), (1, 1)
+        )
         self.assertEqual(len(opened), 1)
         self.assertIn("db.sqlite", opened[0])
         payloads = [
