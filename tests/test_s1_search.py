@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for S1 retrieval: fts, trigram, neighbours, and incremental indexing."""
+
 from __future__ import annotations
 
 import json
@@ -26,15 +27,26 @@ class SearchTestCase(unittest.TestCase):
         self.store.close()
         self._tmp.cleanup()
 
-    def add(self, text: str, *, locator: str | None = None, seq: int | None = None,
-            conversation: str | None = None, json_payload: bool = True, **kw):
-        raw = (json.dumps({"content": text}).encode() if json_payload
-               else text.encode())
+    def add(
+        self,
+        text: str,
+        *,
+        locator: str | None = None,
+        seq: int | None = None,
+        conversation: str | None = None,
+        json_payload: bool = True,
+        **kw,
+    ):
+        raw = json.dumps({"content": text}).encode() if json_payload else text.encode()
         n = seq if seq is not None else self.store.stats()["events"]
         params = dict(
-            producer="claude-code", source_uri="file:///t.jsonl",
-            source_locator=locator or f"l{n}#{n}", raw=raw,
-            ts_utc=f"2026-08-23T20:00:{n:02d}Z", role="user", origin="human",
+            producer="claude-code",
+            source_uri="file:///t.jsonl",
+            source_locator=locator or f"l{n}#{n}",
+            raw=raw,
+            ts_utc=f"2026-08-23T20:00:{n:02d}Z",
+            role="user",
+            origin="human",
             source_seq=n,
         )
         params.update(kw)
@@ -46,7 +58,9 @@ class SearchTestCase(unittest.TestCase):
 
 class TestProjection(SearchTestCase):
     def test_json_is_flattened_to_values(self) -> None:
-        body = search.project(json.dumps({"role": "user", "content": "needle here"}).encode())
+        body = search.project(
+            json.dumps({"role": "user", "content": "needle here"}).encode()
+        )
         self.assertIn("needle here", body)
         self.assertNotIn("content", body, "JSON keys should not be indexed as content")
 
@@ -91,7 +105,10 @@ class TestIndexing(SearchTestCase):
     def test_missing_cas_object_is_counted_not_fatal(self) -> None:
         eid = self.add("vanishing")
         digest = self.store.get_event(eid)["raw_sha256"]
-        self.store.cas_path(digest).unlink()
+        self.store.pack_db.execute(
+            "DELETE FROM obj WHERE sha=?", (bytes.fromhex(digest),)
+        )
+        self.store.pack_db.commit()
         r = self.index.build()
         self.assertEqual(r["cas_missing"], 1)
         self.assertEqual(r["indexed"], 0)
@@ -150,8 +167,10 @@ class TestTrigramLiterals(SearchTestCase):
         self.index.build()
 
     def bodies(self, query: str) -> set[str]:
-        return {json.loads(self.store.raw_for(r["event_id"]))["content"]
-                for r in self.index.search(query, mode="trigram")}
+        return {
+            json.loads(self.store.raw_for(r["event_id"]))["content"]
+            for r in self.index.search(query, mode="trigram")
+        }
 
     def test_underscore_is_literal(self) -> None:
         self.assertEqual(self.bodies("ops_rel"), {"deploy ops_release now"})
@@ -180,7 +199,10 @@ class TestTrigramLiterals(SearchTestCase):
 class TestExternalContent(SearchTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.ids = [self.add("original wording alpha"), self.add("original wording beta")]
+        self.ids = [
+            self.add("original wording alpha"),
+            self.add("original wording beta"),
+        ]
         self.index.build()
 
     def test_fresh_store_is_current_layout_and_consistent(self) -> None:
@@ -190,20 +212,27 @@ class TestExternalContent(SearchTestCase):
         self.assertTrue(st["healthy"], st)
 
     def test_reindex_replaces_text_and_index_entries(self) -> None:
-        with mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 1), \
-             mock.patch.object(search, "project",
-                               lambda payload: "rewritten zebra " + payload.decode()):
+        with (
+            mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 1),
+            mock.patch.object(
+                search, "project", lambda payload: "rewritten zebra " + payload.decode()
+            ),
+        ):
             self.assertEqual(self.index.pending(), 2)
             self.assertEqual(self.index.build()["indexed"], 2)
-            self.assertEqual(self.index.stats(check=True)["integrity_check"],
-                             {"event_fts": "ok", "event_trigram": "ok"})
+            self.assertEqual(
+                self.index.stats(check=True)["integrity_check"],
+                {"event_fts": "ok", "event_trigram": "ok"},
+            )
         self.assertEqual(self.index.stats()["text_rows"], 2)
         self.assertEqual(len(self.index.search("zebra", mode="fts")), 2)
         self.assertEqual(len(self.index.search("rewritten zeb", mode="trigram")), 2)
         # A second re-index drops every earlier word; any hit on one would be
         # a stale index entry that the 'delete' command failed to remove.
-        with mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 2), \
-             mock.patch.object(search, "project", lambda payload: "only giraffe"):
+        with (
+            mock.patch.object(search, "INDEX_VERSION", search.INDEX_VERSION + 2),
+            mock.patch.object(search, "project", lambda payload: "only giraffe"),
+        ):
             self.index.build()
             self.assertEqual(self.index.search("zebra", mode="fts"), [])
             self.assertEqual(self.index.search("wording", mode="fts"), [])
@@ -212,8 +241,10 @@ class TestExternalContent(SearchTestCase):
             self.assertTrue(self.index.stats(check=True)["healthy"])
 
     def test_check_detects_text_changed_behind_the_index(self) -> None:
-        self.store.db.execute("UPDATE event_text SET body='something else' WHERE event_id=?",
-                              (self.ids[0],))
+        self.store.db.execute(
+            "UPDATE event_text SET body='something else' WHERE event_id=?",
+            (self.ids[0],),
+        )
         self.store.db.commit()
         st = self.index.stats(check=True)
         self.assertFalse(st["healthy"])
@@ -234,8 +265,13 @@ CREATE TABLE search_indexed (
 class TestMigration(unittest.TestCase):
     """A layout-1 store, written the way the old build() wrote it."""
 
-    TEXTS = ["the quick brown fox", "deploy_ops_release.py syncs memory",
-             "AU CAFÉ NOIR", "unrelated words here", "odd￿byte"]
+    TEXTS = [
+        "the quick brown fox",
+        "deploy_ops_release.py syncs memory",
+        "AU CAFÉ NOIR",
+        "unrelated words here",
+        "odd￿byte",
+    ]
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -246,18 +282,25 @@ class TestMigration(unittest.TestCase):
         self.ids = []
         for n, text in enumerate(self.TEXTS):
             eid, _ = self.store.put_event(
-                producer="claude-code", source_uri="file:///t.jsonl",
-                source_locator=f"l{n}", raw=json.dumps({"content": text}).encode(),
-                ts_utc=f"2026-08-23T20:00:{n:02d}Z", role="user", origin="human",
-                source_seq=n)
+                producer="claude-code",
+                source_uri="file:///t.jsonl",
+                source_locator=f"l{n}",
+                raw=json.dumps({"content": text}).encode(),
+                ts_utc=f"2026-08-23T20:00:{n:02d}Z",
+                role="user",
+                origin="human",
+                source_seq=n,
+            )
             self.ids.append(eid)
             # The old project() kept U+FFFF; reproduce what it stored.
             body = search._project(self.store.raw_for(eid))
             for table in ("event_fts", "event_trigram"):
-                self.store.db.execute(f"INSERT INTO {table} (event_id, body) VALUES (?,?)",
-                                      (eid, body))
-            self.store.db.execute("INSERT INTO search_indexed VALUES (?,?,1)",
-                                  (eid, s1.now_iso()))
+                self.store.db.execute(
+                    f"INSERT INTO {table} (event_id, body) VALUES (?,?)", (eid, body)
+                )
+            self.store.db.execute(
+                "INSERT INTO search_indexed VALUES (?,?,1)", (eid, s1.now_iso())
+            )
         self.store.db.commit()
 
     def tearDown(self) -> None:
@@ -266,16 +309,24 @@ class TestMigration(unittest.TestCase):
 
     def cli(self, *args: str) -> int:
         with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
-            return search.main(["--db", str(self.db_path), "--cas", str(self.cas), *args])
+            return search.main(
+                ["--db", str(self.db_path), "--cas", str(self.cas), *args]
+            )
 
     def test_old_layout_is_refused_not_mixed(self) -> None:
         self.assertEqual(search.store_layout(self.store.db), 1)
         with self.assertRaises(search.LayoutError):
             search.SearchIndex(self.store)
-        self.assertIsNotNone(self.store.db.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='event_fts_content'").fetchone())
-        self.assertIsNone(self.store.db.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='event_text'").fetchone())
+        self.assertIsNotNone(
+            self.store.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='event_fts_content'"
+            ).fetchone()
+        )
+        self.assertIsNone(
+            self.store.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='event_text'"
+            ).fetchone()
+        )
 
     def test_migrate_keeps_results_and_is_idempotent(self) -> None:
         r = search.migrate_layout(self.store.db)
@@ -283,10 +334,16 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(r["text_rows"], len(self.TEXTS))
         self.assertEqual(r["reset_indexed"], 0)
         self.assertEqual(r["noncharacters_replaced"], 1)
-        self.assertEqual(self.store.db.execute(
-            "SELECT body FROM event_text WHERE event_id=?", (self.ids[4],)).fetchone()[0],
-            "odd�byte", "migrated text must equal what project() now returns")
-        names = {row[0] for row in self.store.db.execute("SELECT name FROM sqlite_master")}
+        self.assertEqual(
+            self.store.db.execute(
+                "SELECT body FROM event_text WHERE event_id=?", (self.ids[4],)
+            ).fetchone()[0],
+            "odd�byte",
+            "migrated text must equal what project() now returns",
+        )
+        names = {
+            row[0] for row in self.store.db.execute("SELECT name FROM sqlite_master")
+        }
         self.assertNotIn("event_fts_content", names)
         self.assertNotIn("event_trigram_content", names)
         self.assertFalse(search.migrate_layout(self.store.db)["migrated"])
@@ -295,24 +352,36 @@ class TestMigration(unittest.TestCase):
         st = index.stats(check=True)
         self.assertTrue(st["healthy"], st)
         self.assertEqual((st["indexed"], st["pending"], st["text_rows"]), (5, 0, 5))
-        self.assertEqual([r["event_id"] for r in index.search("brown", mode="fts")],
-                         [self.ids[0]])
-        self.assertEqual([r["event_id"] for r in index.search("ops_rel", mode="trigram")],
-                         [self.ids[1]])
-        self.assertEqual([r["event_id"] for r in index.search("café", mode="trigram")],
-                         [self.ids[2]])
+        self.assertEqual(
+            [r["event_id"] for r in index.search("brown", mode="fts")], [self.ids[0]]
+        )
+        self.assertEqual(
+            [r["event_id"] for r in index.search("ops_rel", mode="trigram")],
+            [self.ids[1]],
+        )
+        self.assertEqual(
+            [r["event_id"] for r in index.search("café", mode="trigram")], [self.ids[2]]
+        )
         # New events after the migration go through the new write path.
         eid, _ = self.store.put_event(
-            producer="claude-code", source_uri="file:///t.jsonl", source_locator="l9",
+            producer="claude-code",
+            source_uri="file:///t.jsonl",
+            source_locator="l9",
             raw=json.dumps({"content": "fresh brown bear"}).encode(),
-            ts_utc="2026-08-23T20:00:09Z", role="user", origin="human", source_seq=9)
+            ts_utc="2026-08-23T20:00:09Z",
+            role="user",
+            origin="human",
+            source_seq=9,
+        )
         self.assertEqual(index.build()["indexed"], 1)
         self.assertEqual(len(index.search("brown", mode="fts")), 2)
         self.assertTrue(index.stats(check=True)["healthy"])
 
     def test_damaged_old_index_needs_explicit_opt_in(self) -> None:
         # Make the old trigram index disagree with its own content table.
-        self.store.db.execute("UPDATE event_trigram_content SET c1='tampered' WHERE id=1")
+        self.store.db.execute(
+            "UPDATE event_trigram_content SET c1='tampered' WHERE id=1"
+        )
         self.store.db.commit()
         with self.assertRaisesRegex(search.LayoutError, "--ignore-old-index-errors"):
             search.migrate_layout(self.store.db)
@@ -351,7 +420,9 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(self.cli("vacuum"), 0)
         self.store = s1.EvidenceStore(into, self.cas)
         self.assertEqual(search.store_layout(self.store.db), search.SEARCH_LAYOUT)
-        self.assertEqual(len(search.SearchIndex(self.store).search("quick", mode="fts")), 1)
+        self.assertEqual(
+            len(search.SearchIndex(self.store).search("quick", mode="fts")), 1
+        )
 
 
 class TestNeighbours(SearchTestCase):
