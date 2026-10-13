@@ -267,8 +267,8 @@ check_resolves cargo /opt/homebrew/opt/rustup/bin
 # not shadow macOS sqlite3, and adb comes from Homebrew (same release).
 check_resolves adb /opt/homebrew/bin
 check_resolves sqlite3 /usr/bin
-check_resolves grok  "$HOME/.local/bin"
-check_resolves opencode "$HOME/.opencode/bin"
+check_resolves grok  /opt/homebrew/bin   # cask grok-build, reinstalled after the 2026-10-08 removal
+check_resolves opencode "$HOME/.local/bin"   # OpenCode v2 (npm @opencode/cli), 2026-10-13
 check_resolves codex "$HOME/.opencodex/bin"   # opencodex 2.78+ shim beats the native launcher
 check_resolves aiuse "$HOME/.local/bin"
 # codex is a shell function in interactive bash, so ask for the binary path.
@@ -310,10 +310,10 @@ else
   note "keep these as functions (or other names) in ~/.bashrc tier 2."
 fi
 
-# OpenCode only accepts --auto for its TUI and `run`; prepending it to
-# administrative subcommands makes the CLI print root help and exit 1.
+# OpenCode v2 accepts --auto only for its TUI and after `run`; put before an
+# administrative subcommand it makes the CLI print an error and exit 1.
 if env -i HOME="$HOME" TERM=xterm /bin/bash -ic \
-     'opencode debug info >/dev/null 2>&1'; then
+     'opencode debug paths >/dev/null 2>&1'; then
   ok "opencode wrapper leaves administrative subcommands untouched"
 else
   bad "opencode wrapper breaks administrative subcommands"

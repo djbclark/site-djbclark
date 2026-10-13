@@ -215,14 +215,18 @@ fi
 #   herdr  -> .herdr-wrapper/bin beats .local/bin   (self-closure defense)
 #   cargo, rustc, rustfmt, clippy-driver, rustdoc
 #          -> rustup/bin beats .cargo/bin beats homebrew
-#   agent, grok        -> .local/bin beats .grok/bin
+#   agent              -> .local/bin beats .grok/bin
+#   grok               -> homebrew (cask grok-build); the .local/bin and
+#                         .grok/bin links went with the old install (2026-10-08)
 #   composio           -> .local/bin beats .composio
 #   aiuse, ai, cursor, cursor-agent, tg -> .local/bin beats homebrew
 #   hermes             -> .local/bin (durable source venv install, full
 #                         messaging extra: Telegram/Discord/Slack) beats the
 #                         deprecated Homebrew formula and survives brew
 #                         upgrades (moved here from ~/.bashrc.local)
-#   opencode           -> .opencode/bin beats homebrew
+#   opencode           -> .local/bin (OpenCode v2, npm @opencode/cli) beats
+#                         homebrew's v2 formula; v1's ~/.opencode/bin is off
+#                         PATH since the v2 switch (2026-10-13)
 #   codex              -> .opencodex/bin (opencodex 2.78+ autostart shim, kept
 #                         off package-manager paths; it execs the native
 #                         launcher it recorded) beats .local/bin and homebrew
@@ -306,7 +310,6 @@ __path_prepend_force \
   "$HOME/.collie/current/bin" \
   "/opt/homebrew/opt/rustup/bin" \
   "$HOME/.composio" \
-  "$HOME/.opencode/bin" \
   "$HOME/.bun/bin" \
   "$HOME/.cargo/bin" \
   ${JAVA_HOME:+"$JAVA_HOME/bin"} \
@@ -323,6 +326,14 @@ __path_append /usr/local/bin /usr/bin /bin /usr/sbin /sbin
 # Appended, so packaged tools (e.g. Bun's `bd`) take priority over these.
 __path_append "$HOME/go/bin" "$HOME/.dotnet/tools"
 
+# A long-lived parent (an agent session started before the SDK moved off the USB drive,
+# 2026-10-11) can pass down a stale path; replace any value that is not a directory.
+# Set before the append below: a default set after it reached PATH only in child
+# shells, so PATH grew by one entry per nesting level (2026-10-13).
+if [ -z "${ANDROID_HOME-}" ] || [ ! -d "$ANDROID_HOME" ]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+fi
+
 # Android SDK tools go LAST (2026-10-06). Prepended, the SDK's older sqlite3
 # (3.50) shadowed macOS's (3.54); adb is the same release in Homebrew's cask,
 # which also stays put when the USB stick is unmounted. Strip any inherited copy
@@ -338,11 +349,6 @@ fi
 # -----------------------------------
 
 export COMPOSIO_INSTALL_DIR="$HOME/.composio"
-# A long-lived parent (an agent session started before the SDK moved off the USB drive,
-# 2026-10-11) can pass down a stale path; replace any value that is not a directory.
-if [ -z "${ANDROID_HOME-}" ] || [ ! -d "$ANDROID_HOME" ]; then
-    export ANDROID_HOME="$HOME/Library/Android/sdk"
-fi
 
 # Superset desktop app home. Agent notify hooks (Grok/Claude/Codex) call
 # $SUPERSET_HOME_DIR/hooks/notify.sh. A live Superset terminal injects this;
@@ -595,18 +601,25 @@ __opencode_tui() {
 agy()          { __agent_default_flag agy          --dangerously-skip-permissions "$@"; }
 claude()       { __agent_default_flag claude       --dangerously-skip-permissions "$@"; }
 cursor-agent() { __agent_default_flag cursor-agent --yolo                         "$@"; }
+# OpenCode v2 (npm @opencode/cli, ~/.local/bin; 2026-10-13): --auto is a root
+# flag for the TUI and a `run` flag, and must follow `run` -- before any
+# subcommand it makes the CLI exit 1. `mini` takes no --auto.
 opencode() {
+  local arg
   case ${1:-} in
-    completion|acp|mcp|debug|providers|auth|agent|upgrade|uninstall|serve|web|models|stats|export|import|github|session|plugin|db)
+    acp|api|auth|debug|mcp|models|plugin|service|session|stats|uninstall|update|upgrade)
       command opencode "$@" ;;
     run)
-      __agent_default_flag opencode --auto "$@" ;;
-    attach|pr)
+      shift
+      for arg in "$@"; do
+        [[ $arg == --auto ]] && { command opencode run "$@"; return; }
+      done
+      command opencode run --auto "$@" ;;
+    mini)
       __opencode_tui "$@" ;;
     *)
       # OpenCode/OpenTUI can lose the foreground process group under Bash
       # job control, suspending itself and leaving mouse reporting enabled.
-      local arg
       for arg in "$@"; do
         [[ $arg == --auto ]] && { __opencode_tui "$@"; return; }
       done
