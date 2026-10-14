@@ -69,6 +69,24 @@ for a in "$@"; do
     gradle|gradlew) is_gradle=1 ;;
   esac
 done
+# Plektra is built only on forgejo.mit.edu (djbclark, 2026-10-14): refuse a Gradle command in a
+# Plektra checkout (from its cwd, or a gradlew path into one). BG_ALLOW_LOCAL_PLEKTRA=1 overrides
+# it on djbclark's say only (don't advertise it in messages agents see).
+if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
+  plektra_dirs=("$PWD")
+  for a in "$@"; do
+    case "$a" in */gradlew|*/gradle) plektra_dirs+=("$(dirname "$a")") ;; esac
+  done
+  for d in "${plektra_dirs[@]}"; do
+    top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || continue
+    if grep -qs 'namespace = "rocks.pkb.plektra"' "$top/app/build.gradle.kts"; then
+      echo "bg: Plektra is built on forgejo.mit.edu only, never on this Mac ($top)." >&2
+      echo "bg: tests or any Gradle task: scripts/djb-ci-run REF [GRADLE_ARGS...]; an APK: push plk/main" >&2
+      echo "bg: (a release is built), then scripts/djb-install-latest. See the repo's AGENTS.md." >&2
+      exit 3
+    fi
+  done
+fi
 is_test=0
 for a in "$@"; do
   case "$a" in
