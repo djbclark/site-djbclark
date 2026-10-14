@@ -1,0 +1,40 @@
+// Plektra is built on forgejo.mit.edu only, never on this Mac (djbclark, 2026-10-14).
+//
+// Linked into every Gradle home's init.d by `gradle-limits link`. In a project whose
+// app/build.gradle.kts declares namespace "rocks.pkb.plektra", a build that requests real tasks
+// is refused before any project is configured: plain ./gradlew, the repo's scripts/build-*.sh
+// and an IDE Run/Build all stop here (bg refuses earlier, before a JVM starts). Android Studio
+// sync (idea.sync.active) and informational tasks (help, tasks, dependencies, ...) still run, so
+// code navigation keeps working. Instead, in the checkout: scripts/djb-ci-run REF [GRADLE_ARGS...]
+// for tests or any task; push plk/main to the forgejo remote for an APK, then
+// scripts/djb-install-latest. Details: the checkout's AGENTS.md, item 4.
+//
+//   BG_ALLOW_LOCAL_PLEKTRA=1   allow one local build (djbclark's say only; bg honours it too)
+
+def plektraInfoTasks = ['help', 'tasks', 'projects', 'properties', 'dependencies', 'dependencyInsight',
+                        'buildEnvironment', 'outgoingVariants', 'javaToolchains',
+                        'prepareKotlinBuildScriptModel']
+
+gradle.settingsEvaluated { settings ->
+    if (System.getenv('BG_ALLOW_LOCAL_PLEKTRA') == '1') return
+    if (System.getProperty('idea.sync.active') == 'true') return
+    def app = new File(settings.rootDir, 'app/build.gradle.kts')
+    if (!app.isFile() || !app.text.contains('namespace = "rocks.pkb.plektra"')) return
+
+    // Task names, without task options and the values of those that take one (`help --task X`).
+    def valueOptions = ['--tests', '--task', '--configuration', '--dependency']
+    def requested = []
+    def skipValue = false
+    for (String arg : gradle.startParameter.taskNames) {
+        if (skipValue) { skipValue = false; continue }
+        if (arg.startsWith('-')) { skipValue = valueOptions.contains(arg); continue }
+        requested << arg
+    }
+    def refused = requested.findAll { !plektraInfoTasks.contains(it.tokenize(':').last()) }
+    if (refused.isEmpty()) return
+
+    throw new GradleException(
+        "Plektra is built on forgejo.mit.edu only, never on this Mac (${settings.rootDir}; refused: ${refused.join(' ')}).\n" +
+        "Tests or any Gradle task: scripts/djb-ci-run REF [GRADLE_ARGS...]. An APK: push plk/main to the forgejo remote " +
+        "(a release is built), then scripts/djb-install-latest. See the checkout's AGENTS.md, item 4.")
+}
