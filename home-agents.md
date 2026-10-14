@@ -30,7 +30,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Always the GNU `g*` tools (brew); BSD only when needed; install
    as needed** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`).
+2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.
    (`memory/feedback_always_use_default_browser_orion.md`)

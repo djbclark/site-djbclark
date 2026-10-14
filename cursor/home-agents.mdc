@@ -299,7 +299,7 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    needed; install what is missing** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`).
    `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq` (rtk compacts
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in
+2. **Replace shared scripts atomically** (temp file, then `mv -f`, on the `realpath`: a symlink gets clobbered, 2026-10-14), never edit in
    place (a running bash dies). (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome. (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
