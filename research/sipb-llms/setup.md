@@ -149,6 +149,13 @@ paths are appended to, never replaced, so `context_paths` cannot exclude `CLAUDE
 Not proven: that the missing `pattern` argument comes from the full window (the failing calls were at 69-72k
 chars, but one call at 72.6k chars did carry `pattern`).
 
+Update 2026-10-14: the dedupe bug is upstream issue #4018 with fix PR #4022 (open, CLA unsigned); the missing
+ask/opt-out is filed as charmbracelet/crush#4070. Local stopgap: `~/src/djbclark-ade/bin/crush-context-check`, called by
+the `crush()` shell function before the TUI starts: lists the files Crush will load (sizes, token estimate against the
+summarize trigger, symlink pairs shown as sent twice) and asks y / always-for-this-directory / N. `CRUSH_CONTEXT_OK=1
+crush` skips it. Free workaround: start Crush from a subdirectory with none of these files (verified: 34,960 chars,
+the base prompt only). The only global paths are `~/.config/crush/CRUSH.md` and `~/.config/AGENTS.md`.
+
 Options: (a) upstream patch, dedupe context files by `filepath.EvalSymlinks`; (b) keep each project's
 `AGENTS.md` under ~6 KB where Crush runs; (c) `disable_auto_summarize` only hides the loop (the prompt still
 overflows).
