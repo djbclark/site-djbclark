@@ -37,8 +37,10 @@ athena_sock="$HOME/.ssh/cm/athena"
 # ssh forwards a non-renewable TGT, so the dialup's copy would die in 10h.
 # Overwrite the cache that every session on the athena-master connection
 # shares, and the private copies SIPB's mosh-server makes per session
-# (/tmp/krb5cc-mosh_<uid>_*), with the local renewable TGT. Uses the open
-# master only (-F /dev/null: never opens a connection, so never sends Duo).
+# (/tmp/krb5cc-mosh_<uid>_*) that a live process still names in its
+# KRB5CCNAME (dead sessions' leftovers are not refilled), with the local
+# renewable TGT. Uses the open master only (-F /dev/null: never opens a
+# connection, so never sends Duo).
 push_to_athena() {
   ssh -F /dev/null -S "$athena_sock" -O check athena >/dev/null 2>&1 || return 0
   local cc t rc
@@ -48,7 +50,9 @@ push_to_athena() {
   if (umask 077; kcc copy_cred_cache --krbtgt-only "$cc" "FILE:$t"); then
     ssh -F /dev/null -S "$athena_sock" -o BatchMode=yes athena \
       'umask 077; t=$(mktemp) && cat > "$t" &&
-       for f in "${KRB5CCNAME#FILE:}" /tmp/krb5cc-mosh_$(id -u)_*; do
+       live=$(for e in /proc/[0-9]*/environ; do [ -O "$e" ] && tr "\0" "\n" < "$e" 2>/dev/null; done |
+         sed -n "s|^KRB5CCNAME=FILE:\(/tmp/krb5cc-mosh_$(id -u)_[^/]*\)$|\1|p" | sort -u)
+       for f in "${KRB5CCNAME#FILE:}" $live; do
          [ -O "$f" ] && cp "$t" "$f.new" && mv -f "$f.new" "$f"
        done; rm -f "$t"' < "$t"
     rc=$?

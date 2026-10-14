@@ -11,6 +11,8 @@
 # and hourly from the athena-kinit agent, the local renewable TGT is copied
 # into it (ssh forwards a non-renewable one); the master's remote command
 # renews it every 50 minutes, so sessions (mosh-server included) keep tickets.
+# With no pty the loop gets no SIGHUP, so it polls its sshd ($PPID) and exits
+# when the connection is gone.
 set -uo pipefail
 here="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 sock="$HOME/.ssh/cm/athena"
@@ -27,7 +29,9 @@ open_master() {
   ATHENA_MASTER_CHILD=1 SSH_ASKPASS="$here/athena-duo-askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" \
     ssh -M -S "$sock" -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
       -o LogLevel=VERBOSE -E "$HOME/Library/Logs/athena-master.log" \
-      -f -n -T "$host" 'while :; do kinit -R >/dev/null 2>&1; sleep 3000; done' </dev/null >/dev/null 2>>"$HOME/Library/Logs/athena-master.log" \
+      -f -n -T "$host" 'p=$PPID; n=0; while kill -0 "$p" 2>/dev/null; do
+        [ $((n % 10)) = 0 ] && kinit -R >/dev/null 2>&1; n=$((n + 1)); sleep 300; done' \
+      </dev/null >/dev/null 2>>"$HOME/Library/Logs/athena-master.log" \
     && "$here/athena-kinit" push >/dev/null 2>&1
   local rc=$?
   rm -f "${TMPDIR:-/tmp}"/athena-duo-askpass.*
