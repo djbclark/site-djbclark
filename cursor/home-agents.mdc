@@ -254,7 +254,9 @@ Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
 pattern, your own wrapper included (2026-10-10). Kill the saved PID.
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
 status is the last stage's. Write to a file, print the status, then read:
-`cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`.
+`cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`. Likewise never feed a
+`--body-file` from a pipeline: write the file, check `[ -s f ]`, then use it
+(macOS BSD `sed` rejects `1{/x/d}`; use `gsed`, GNU sed, installed).
 (`memory/feedback_exit_status_through_pipe.md`)
 
 ## Code discovery — symbol tools before `cat`/`rg` (2026-10-03)

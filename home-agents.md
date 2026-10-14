@@ -60,11 +60,10 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     confirmations included**; never tell djbclark to type `! <command>`
     (2026-10-06; `memory/feedback_run_commands_yourself.md`).
 11. **A tool-calling mistake of a kind that can recur: fix the instructions that
-    would have prevented it in the same turn, unasked**, and say what you
-    changed (2026-10-06;
-    `memory/feedback_fix_instructions_after_tool_mistake.md`). **An
-    agent-harness failure** **gets a root-cause fix in `~/src/djbclark-ade`,
-    code not just docs**, not a re-route (2026-10-10;
+    would have prevented it in the same turn, unasked**, and say what you changed
+    (2026-10-06; `memory/feedback_fix_instructions_after_tool_mistake.md`). **An
+    agent-harness failure** **gets a root-cause fix in `~/src/djbclark-ade`, code
+    not just docs**, not a re-route (2026-10-10;
     `memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
 12. **When a task completes or something needs djbclark**, also run
     `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`):
@@ -183,13 +182,14 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     "opus"`), never `fable-deep`. Keep the last few percent for a judgment call
     djbclark names. Delete this item after the reset.
 33. **Anything likely to take over ~10-15 s starts with `run_in_background:
-    true`** (2026-10-04); wait on the notification, never poll; kill your
-    strays. **Exception: an Agent-tool sub-agent** waits in bounded foreground
-    calls (2026-10-08). (`memory/feedback_start_slow_commands_in_background.md`)
-    **Wait on a file or a PID**, **never `until ! pgrep -f '<pattern>'`; never
-    `pkill -f '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill your
-    saved `$!`. **Never read a result through a pipe**: `cmd > out.log 2>&1;
-    echo "rc=$?"; tail -5 out.log`. (`memory/feedback_exit_status_through_pipe.md`)
+    true`** (2026-10-04); wait on the notification, never poll; kill your strays.
+    **Exception: an Agent-tool sub-agent** waits in bounded foreground calls
+    (2026-10-08). (`memory/feedback_start_slow_commands_in_background.md`) **Wait
+    on a file or a PID**, **never `until ! pgrep -f '<pattern>'`; never `pkill -f
+    '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill your saved
+    `$!`. **Never read a result through a pipe** or feed `--body-file` from one
+    (`[ -s f ]` first; use `gsed`, not BSD `sed`): `cmd > out.log 2>&1; echo
+    "rc=$?"; tail -5 out.log`. (`memory/feedback_exit_status_through_pipe.md`)
 34. Run builds and tests via `~/ops/site-private/bin/bg` (**always the full path:
     bare `bg` is the shell builtin**). **Tests (pytest, tox, nox, `run_tests*.py`)
     must go through bg**. **Never set `BG_LOAD_WAIT=0` on a build or Gradle
