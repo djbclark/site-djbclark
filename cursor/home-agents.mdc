@@ -152,8 +152,10 @@ speaks [ACP](https://agentclientprotocol.com/) (`acp-run --list`; zcode via
 `zcode-acp-server`, the one run **without** `--model`).
 
 **Delegation route, in order:** (1) headless to an ACP agent: **`acp-run <agent>
--C <dir> -p '<prompt>' --model <m> [--perm scoped:<owned paths>|deny]`**
-(**always `--model`**; exit 0 is not success, verify tests/diff); (2) supervised
+-C <dir> -p '<prompt>' --model <m> [--perm deny]`**
+(**always `--model`**; acp-run is yolo-only since 2026-10-14, `--perm deny` is
+for review-only slices and `scoped:` is gone; exit 0 is not success, verify
+tests/diff); (2) supervised
 in an Orca repo: `orca orchestration worker-start --agent …`; (3) interactive
 work djbclark watches, and Hermes's TUI: a Herdr pane; (4) non-ACP CLIs: their
 own headless recipe. cline (ClinePass) is a reserve pool, never bulk; copilot
@@ -350,7 +352,8 @@ trade-off and ask.
 ## Agents run in yolo (auto-approve) mode by default (2026-10-03)
 
 **Every agent, however launched, runs in its yolo-or-equivalent mode** unless a
-stated reason gates it (review-only slices, bigteam's `--perm scoped:`). Flags:
+stated reason gates it (review-only slices: `--perm deny`, acp-run's only gate
+since 2026-10-14; bigteam checks file ownership from the diff). Flags:
 the `model-routing` skill. Yolo does not skip hooks, file-ownership rules, reserve
 pools, or asking before hard-to-reverse actions. Detail:
 `site-private/memory/feedback_yolo_default_for_all_agents.md`.

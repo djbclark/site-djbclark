@@ -48,9 +48,8 @@ key in plain text (mode 600).
    small-context models only.
 4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo` to the stock Homebrew
    Crush (v0.98.1; the fork is not used for the TUI), and crushrc ends with a `PreToolUse` hook:
-   `hook add PreToolUse --name auto-allow --command ~/.config/crush/hooks/auto-allow.sh` (copy: `bench/auto-allow.sh`; it prints `{"decision":"allow"}` unconditionally). acp-run runs crush yolo only
-   (operator, 2026-10-14): `--perm scoped:` and `ask` are refused for crush (exit 2) because the hook makes
-   crush skip the permission requests they rely on; `--perm deny` still works (tools off, hook stripped). The hook
+   `hook add PreToolUse --name auto-allow --command ~/.config/crush/hooks/auto-allow.sh` (copy: `bench/auto-allow.sh`; it prints `{"decision":"allow"}` unconditionally). acp-run runs every agent yolo (operator, 2026-10-14): `--perm scoped:` and `ask` are deprecated, warn once and run as
+   `all`; `--perm deny` still works for crush (tools off, hook stripped). The hook
    pre-approves every tool call (upstream `docs/hooks/README.md`), so bare launches (Orca, herdr, zsh)
    and tools added upstream later do not prompt either. Verified in the real TUI under tmux: `bash`,
    `view`, a `write` outside the project and the `agent` tool all ran silently ("Hook auto-allow -> OK"
@@ -59,11 +58,13 @@ key in plain text (mode 600).
    Yolo in the TUI. Skills: press `/` (opens the palette), type `skill`, Enter, fill SKILL and TASK.
    Do NOT use `permissions yolo` in crushrc: it is a fork-only verb; brew crush v0.98.1 aborts config
    load with `unknown subcommand "yolo"` (hit and reverted 2026-10-14).
-4b. `web-digest` shown as text (2026-10-14, session in ~/src/aiuse): once, Qwen answered a search request by
-   typing `web-digest "..."` as its reply instead of calling the bash tool, so nothing ran. Not
-   reproduced in 7 later single-turn and 3 two-turn TUI trials (all made the bash call); rule 6 of
-   `CRUSH.md` now says it is a shell command, not a tool, and to always make the bash call (4 of 4
-   trials after the change). If it recurs, reply `run it` or consider an MCP wrapper.
+4b. `web-digest` shown as text (2026-10-14): twice in the real TUI Qwen answered a search request by typing
+   `web-digest "..."` (once inside `<tool_use>...</tool_use>`) as its reply instead of calling bash, so
+   nothing ran. Rewording rule 6 did not stop it (the second failure came after), and 11 single-turn
+   trials had not reproduced it, so the model evidently treats `web-digest` as a tool of its own.
+   Fix: `web-digest-mcp` (djbclark-ade `bin/`, stdlib stdio MCP server, one tool) registered in
+   crushrc with `mcp add web --type stdio --command ~/.local/bin/web-digest-mcp`; the model now calls
+   `mcp_web_web_search` (4 of 4 TUI trials, sidebar shows `web 1 tools`). Small-context models only.
 5. `acp-run crush -C <dir> -p '...' [--verify 'python3 -m unittest discover']` runs the PR #2450
    build `crush-acp` with `--yolo`. Run it without `--model`. The entry sets
    `CRUSH_GLOBAL_DATA=~/.local/share/crush-acp` because the shared data dir
