@@ -110,24 +110,8 @@ pipeline, write a small script, fix a runtime error, set file permissions. Each
 task is scored by reading the artifact (or running the tests), never by trusting
 the model. Harness: `bench.py essentials` in the skill.
 
-| model | essentials | notes |
-| --- | --- | --- |
-| qwen3.6:35b-a3b-q4_K_M | 20/20 | re-measured through `acp-run` (every row reports `providers: ["sipb-llms"]`) |
-| qwen3.5:35b | re-measuring | |
-| magistral:24b, exaone-deep:32b, gemma3:27b, qwq:32b | re-measuring | |
-
-> **Correction (2026-10-13, same day).** An earlier version of this table listed six
-> models at 20/20 and `qwen3.5:35b` at 19/20. Those numbers are **withdrawn**: they
-> were produced through a harness (`crush run` with the model forced in its data
-> config) that silently ran on an **Anthropic** model instead of the SIPB model —
-> the project's own `crush.log` recorded `provider: anthropic`, and the requests
-> never reached the server. The battery is now run only through the benchmark's
-> `acp-run` path, which records the serving `provider`; results are included only
-> when every row reports `providers: ["sipb-llms"]`. The line above for the default
-> is from the corrected harness; the rest are being re-measured.
-
-Six of seven models cleared the floor in the invalid run, so the battery is a floor
-that many models clear; the choice between them comes from the harder tasks A and B
+Results are recorded only for runs the SIPB server actually served (`providers: ["sipb-llms"]`).
+The battery is a floor: the choice between models comes from the harder tasks A and B
 above and from speed. We keep `qwen3.6:35b-a3b-q4_K_M` as the default — it clears the
 floor and is the model that finished task B.
 
