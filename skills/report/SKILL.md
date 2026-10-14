@@ -6,7 +6,7 @@ description: Format a long Markdown report (research paper, spec, review) so it 
 # report — make a long Markdown document readable in Marked 2
 
 Canonical copy: `~/src/djbclark-ade/skills/report/` (git: `~/src/djbclark-ade`);
-every TUI reaches it through the skill-everywhere hub `~/ops/site-private/skills/report`.
+every TUI reaches it via a direct skill-everywhere link `~/src/djbclark-ade/skills/report`.
 Born 2026-10-10 from the `hiwymi/research/ai-heaven` delivery, where the operator
 rejected three formats in a row (see "Why", below). Apply it before the first
 `open -a "Marked 2"`, not after a complaint.

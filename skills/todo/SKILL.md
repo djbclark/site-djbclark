@@ -64,7 +64,7 @@ the server itself is fine: the client gave up during a restart and does not retr
 4. To read the list without MCP: `bm tool search-notes "todo-item"`, or
    `grep -l 'status: open' ~/ops/site-private/memory/todo/*.md`.
 5. **Keyword search over every project's todo notes** (exact, FTS5, no MCP,
-   since 2026-10-09): `python3 -I ~/ops/site-private/skills/session-finder/session-history.py
+   since 2026-10-09): `python3 -I ~/src/djbclark-ade/skills/session-finder/session-history.py
    --agent todo <words>` — prints `OPEN`/`closed`, title and note path; without
    `--agent todo` the todos rank next to the agent sessions that worked on the
    topic (the `session-finder` skill).
