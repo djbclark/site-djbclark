@@ -110,10 +110,25 @@ pipeline, write a small script, fix a runtime error, set file permissions. Each
 task is scored by reading the artifact (or running the tests), never by trusting
 the model. Harness: `bench.py essentials` in the skill.
 
-Results are recorded only for runs the SIPB server actually served (`providers: ["sipb-llms"]`).
-The battery is a floor: the choice between models comes from the harder tasks A and B
-above and from speed. We keep `qwen3.6:35b-a3b-q4_K_M` as the default — it clears the
-floor and is the model that finished task B.
+Results (2026-10-13; one pass per model, `--modes think`, with the agent rules file
+`CRUSH.md` that our agent uses; every row below reports `providers: ["sipb-llms"]`, i.e.
+the SIPB server served it):
+
+| model | essentials | advanced |
+| --- | --- | --- |
+| qwen3.6:35b-a3b-q4_K_M | 20/20 | 8/8 |
+| qwen3.5:35b | 17/20 | - |
+| magistral:24b | 7/20 | - |
+| exaone-deep:32b | 0/20 | - |
+| gemma3:27b | 0/20 | - |
+| qwq:32b | 0/20 | - |
+
+`qwen3.6:35b-a3b-q4_K_M` is the clear choice: the only model that clears both the
+essentials battery and the harder advanced set. `qwen3.5:35b` is a partial fallback
+(misses `add_function_and_test`, `mkdir_tree`, `git_commit`); `magistral:24b` cannot edit
+a config value or fix a bug; `exaone-deep:32b` and `gemma3:27b` get the over-long `null`
+back for their own prompts (a small effective server context) and do nothing; `qwq:32b`
+cannot finish a task at all (section 4.8). We keep `qwen3.6:35b-a3b-q4_K_M` as the default.
 
 ## 4. Server-side problems and requests
 
