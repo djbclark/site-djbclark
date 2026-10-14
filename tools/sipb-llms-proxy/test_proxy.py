@@ -149,6 +149,9 @@ class ProxyTests(unittest.TestCase):
         proxy.LOG_PATH = os.path.join(TMP, self._testMethodName + ".jsonl")
         if os.path.exists(proxy.LOG_PATH):
             os.remove(proxy.LOG_PATH)
+        proxy.CAPTURE_PATH = os.path.join(TMP, self._testMethodName + ".capture.jsonl")
+        if os.path.exists(proxy.CAPTURE_PATH):
+            os.remove(proxy.CAPTURE_PATH)
         proxy.RULES_FILE = os.path.join(TMP, self._testMethodName + ".rules.md")
         if os.path.exists(proxy.RULES_FILE):
             os.remove(proxy.RULES_FILE)
@@ -491,6 +494,94 @@ class ProxyTests(unittest.TestCase):
         self.assertFalse(calls)  # a bare fence is illustrative: not executed
         self.assertEqual(finish, "stop")
         self.assertIn(b"touch /tmp/x", data)
+
+
+    # --- 8. markup-free text calls, offered-tool aware (2026-10-14) ----------
+
+    TOOLS = [
+        {"type": "function", "function": {"name": "bash", "parameters": {
+            "type": "object", "properties": {"command": {}, "description": {}}, "required": ["command"]}}},
+        {"type": "function", "function": {"name": "mcp_web_web_search", "parameters": {
+            "type": "object", "properties": {"question": {}, "url": {}}, "required": ["question"]}}},
+    ]
+
+    def read_capture(self):
+        try:
+            with open(proxy.CAPTURE_PATH) as f:
+                return [json.loads(l) for l in f if l.strip()]
+        except (OSError, ValueError):
+            return []
+
+    def _post_stream(self, text):
+        STATE.handler = lambda *a: self._stream_text(text)
+        status, headers, data = post_json({"model": "m", "stream": True, "messages": [], "tools": self.TOOLS})
+        self.assertEqual(status, 200)
+        return data
+
+    def test_parse_python_call_and_alias_fix(self):
+        tools = proxy.tool_index(self.TOOLS)
+        calls = proxy.text_toolcalls('[mcp_web_web_search(query="hyades.mit.edu")]', tools)
+        self.assertEqual(calls, [{"name": "mcp_web_web_search", "arguments": {"question": "hyades.mit.edu"}}])
+        calls = proxy.text_toolcalls('mcp_web_web_search("a b")', tools)
+        self.assertEqual(calls[0]["arguments"], {"question": "a b"})
+
+    def test_parse_refuses_unoffered_and_plain(self):
+        tools = proxy.tool_index(self.TOOLS)
+        self.assertIsNone(proxy.text_toolcalls('[rm_rf(path="/")]', tools))
+        self.assertIsNone(proxy.text_toolcalls('[mcp_web_web_search(__import__("os").system("x"))]', tools))
+        self.assertIsNone(proxy.text_toolcalls("The answer is 42.", tools))
+        self.assertIsNone(proxy.text_toolcalls('[mcp_web_web_search(query="x")]', {}))  # no tools offered
+
+    def test_stream_python_call_split_across_chunks(self):
+        data = self._post_stream(["[mcp_web", "_web_search(query=", '"hyades.mit.edu")]'])
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(calls[0]["function"]["name"], "mcp_web_web_search")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"question": "hyades.mit.edu"})
+        self.assertNotIn(b"hyades.mit.edu\")]", data)  # the pseudo-call text is replaced, not leaked
+        rec = self.read_capture()
+        self.assertEqual([(r["outcome"], r["form"]) for r in rec], [("converted", "mcp_web_web_search")])
+        self.assertIn("hyades.mit.edu", rec[0]["text"])
+        self.assertEqual(os.stat(proxy.CAPTURE_PATH).st_mode & 0o777, 0o600)
+
+    def test_stream_tool_use_without_name_wraps_a_cli(self):
+        data = self._post_stream('<tool_use>\nweb-digest "MIT SIPB Hyper macos"\n</tool_use>')
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(calls[0]["function"]["name"], "bash")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"])["command"], 'web-digest "MIT SIPB Hyper macos"')
+
+    def test_stream_bare_cli_reply_runs_through_bash(self):
+        data = self._post_stream(['web-digest "', 'MIT SIPB hyper"'])
+        calls, finish = self._collect_toolcalls(data)
+        self.assertEqual(finish, "tool_calls")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"])["command"], 'web-digest "MIT SIPB hyper"')
+
+    def test_plain_text_that_starts_like_a_call_is_kept(self):
+        for text in ("[docs](http://x.example/a) explain it.", "bash is a shell, and web-digest is a script."):
+            data = self._post_stream([text[:5], text[5:]])
+            calls, finish = self._collect_toolcalls(data)
+            self.assertFalse(calls, text)
+            self.assertEqual(finish, "stop", text)
+            got = "".join((ch.get("delta") or {}).get("content") or ""
+                          for ev in (sse_event(l) for l in data.split(b"\n")) if ev
+                          for ch in ev.get("choices") or [])
+            self.assertEqual(got, text)  # forwarded whole once the start proved to be prose
+
+    def test_suspect_reply_is_captured_but_forwarded(self):
+        data = self._post_stream("I will call the tool_use now, using web-digest.")
+        calls, finish = self._collect_toolcalls(data)
+        self.assertFalse(calls)
+        self.assertIn(b"tool_use now", data)
+        self.assertEqual([r["outcome"] for r in self.read_capture()], ["suspect"])
+
+    def test_capture_off(self):
+        proxy.CAPTURE = False
+        try:
+            self._post_stream('[mcp_web_web_search(query="x")]')
+            self.assertEqual(self.read_capture(), [])
+        finally:
+            proxy.CAPTURE = True
 
 
 if __name__ == "__main__":

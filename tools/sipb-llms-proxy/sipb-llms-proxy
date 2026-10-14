@@ -40,6 +40,7 @@ Usage:
 Then point Crush at it, e.g. in ~/.config/crush/crushrc:
     --base-url "http://127.0.0.1:8890/api"
 """
+import ast
 import datetime
 import http.server
 import json
@@ -71,6 +72,16 @@ LOG_MAX_BYTES = 20 * 1024 * 1024
 # (Open WebUI 0.6.30 did not translate it). See text_toolcalls(). On by default.
 NORMALIZE_TOOLCALLS = os.environ.get("SIPB_NORMALIZE_TOOLCALLS", "1").lower() not in (
     "0", "false", "no", "off", "")
+
+# Capture of tool calls the model wrote as text (2026-10-14): one JSON line per converted, unmatched or
+# suspect message, WITH the text (<= 2000 chars; the file is 0600), so the converter can be tuned on
+# real samples. Off with SIPB_CAPTURE=0.
+CAPTURE_PATH = os.path.expanduser(
+    os.environ.get("SIPB_CAPTURE_PATH", "~/.local/state/sipb-llms-proxy/toolcall-capture.jsonl"))
+CAPTURE = os.environ.get("SIPB_CAPTURE", "1").lower() not in ("0", "false", "no", "off", "")
+# Shell commands the model sometimes types as its reply, as if they were tools (2026-10-14: `web-digest "q"`,
+# once inside <tool_use>). Converted to a call of the offered `bash` tool.
+CLI_TOOLS = tuple(x for x in os.environ.get("SIPB_CLI_TOOLS", "web-digest,skill-get").split(",") if x)
 
 MESSAGE = (
     "SIPB LLMs returned no completion. This is what Open WebUI does when the "
@@ -208,16 +219,171 @@ def _map_tag(tool, tag):
     return tag
 
 
-def text_toolcalls(text):
+def tool_index(tools):
+    """Offered OpenAI `tools` -> {name: {"props": [...], "required": [...]}} (names only matter
+    for the forms that carry no markup: they are converted only when the name was offered)."""
+    out = {}
+    for t in tools or []:
+        fn = (t or {}).get("function") or {}
+        if fn.get("name"):
+            params = fn.get("parameters") or {}
+            props = list((params.get("properties") or {}).keys())
+            out[fn["name"]] = {"props": props, "required": list(params.get("required") or [])}
+    return out
+
+
+def _first_param(info):
+    return (info["required"] or info["props"] or [None])[0]
+
+
+def _fix_args(calls, tools):
+    """Rename a call's one unknown argument to the tool's one missing required one (a model that
+    sends `query` to a tool that wants `question`; seen 2026-10-14)."""
+    for c in calls:
+        info = (tools or {}).get(c["name"])
+        if not info:
+            continue
+        args = c["arguments"]
+        missing = [p for p in info["required"] if p not in args]
+        extra = [k for k in args if k not in info["props"]]
+        if len(missing) == 1 and len(extra) == 1:
+            args[missing[0]] = args.pop(extra[0])
+    return calls
+
+
+def _py_calls(s, tools):
+    """`[name(k="v")]`, `name(k="v")` or a list of them, python-call style -> calls, only for offered tools."""
+    s = s.strip()
+    if not tools or not s or s[-1] not in ")]" or not re.match(r"\[?\s*[\w.\-]+\s*\(", s):
+        return None
+    try:
+        node = ast.parse(s, mode="eval").body
+    except SyntaxError:
+        return None
+    elts = node.elts if isinstance(node, ast.List) else [node]
+    calls = []
+    for e in elts:
+        if not (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in tools):
+            return None
+        try:
+            args = {k.arg: ast.literal_eval(k.value) for k in e.keywords if k.arg}
+            pos = [ast.literal_eval(a) for a in e.args]
+        except (ValueError, SyntaxError):
+            return None
+        first = _first_param(tools[e.func.id])
+        if pos and first and first not in args:
+            args[first] = pos[0]
+        calls.append({"name": e.func.id, "arguments": args})
+    return calls or None
+
+
+def _cli_call(command, tools):
+    """`web-digest "q"` (a CLI typed as the reply) -> a call of the offered bash tool running it."""
+    command = command.strip()
+    m = re.match(r"(?:```(?:bash|sh)?\s*)?([\w.\-]+)(?:\s|$)", command)
+    if not m or m.group(1) not in CLI_TOOLS or "bash" not in (tools or {}):
+        return None
+    command = re.sub(r"^```(?:bash|sh)?\s*|\s*```$", "", command).strip()
+    if "\n" in command or not command.startswith(m.group(1)):
+        return None
+    return [{"name": "bash", "arguments": {"command": command, "description": "Run " + m.group(1)}}]
+
+
+def _tool_use_bare(text, tools):
+    """`<tool_use>\nNAME "arg" key=value\n</tool_use>` (no name attribute) -> a call."""
+    m = re.fullmatch(r"\s*<tool_use>\s*(.*?)\s*</tool_use>\s*", text, re.S)
+    if not m or not tools:
+        return None
+    inner = m.group(1)
+    cli = _cli_call(inner, tools)
+    if cli:
+        return cli
+    head = re.match(r"([\w.\-]+)\s*(.*)", inner, re.S)
+    if not head or head.group(1) not in tools:
+        return None
+    import shlex
+    try:
+        toks = shlex.split(head.group(2))
+    except ValueError:
+        return None
+    args = {}
+    pos = []
+    for t in toks:
+        kv = re.fullmatch(r"([A-Za-z_]\w*)=(.*)", t, re.S)
+        if kv:
+            args[kv.group(1)] = _coerce(kv.group(2))
+        else:
+            pos.append(t)
+    first = _first_param(tools[head.group(1)])
+    if pos and first and first not in args:
+        args[first] = pos[0]
+    return [{"name": head.group(1), "arguments": args}]
+
+
+def could_be_call(text, tools):
+    """True while the (start of the) reply could still turn out to be a markup-free tool call:
+    it starts with `[`, a code fence, or (a prefix of) an offered tool or CLI name followed by
+    `(`, space, a quote or a newline. The stream is held, not forwarded, until this settles."""
+    t = text.lstrip()
+    if not t:
+        return False
+    if t[0] in "[`":
+        return True
+    for n in list(tools or {}) + list(CLI_TOOLS):
+        if n.startswith(t):
+            return True
+        if t.startswith(n) and (len(t) == len(n) or t[len(n)] in "( \"'\n\t"):
+            return True
+    return False
+
+
+def suspect_text(text, tools):
+    """A short reply that names an offered tool or CLI, or has tool-call markup, but was not converted."""
+    if not text or len(text) > 800:
+        return False
+    names = [n for n in list(tools or {}) + list(CLI_TOOLS) if len(n) >= 5]
+    return bool(re.search(r"tool_use|tool_call|<function|<invoke", text)) or any(n in text for n in names)
+
+
+def _capture(model, outcome, form, text, tools):
+    if not CAPTURE:
+        return
+    try:
+        d = os.path.dirname(CAPTURE_PATH)
+        if d:
+            os.makedirs(d, mode=0o700, exist_ok=True)
+        if os.path.exists(CAPTURE_PATH) and os.path.getsize(CAPTURE_PATH) > LOG_MAX_BYTES:
+            os.replace(CAPTURE_PATH, CAPTURE_PATH + ".1")
+        fd = os.open(CAPTURE_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(json.dumps({
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), "model": model,
+                "outcome": outcome, "form": form, "chars": len(text or ""), "text": (text or "")[:2000],
+                "tools_offered": sorted(tools or {})[:40]}) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def text_toolcalls(text, tools=None):
     """Parse a model's text-form tool call into [{"name":…, "arguments":{…}}].
 
     Returns None when the text is not a recognised tool call, so a plain answer
     is never rewritten. Handles the encodings seen on the SIPB server:
     `<tool_calls><invoke name=…><parameter name=…>…`, `<function=NAME>…`,
-    `<tool_use name=…>…`, and a bare `<view><location>…</view>`.
+    `<tool_use name=…>…`, and a bare `<view><location>…</view>`; and, when `tools` (the
+    request's offered tools, see tool_index) is given, the markup-free forms seen 2026-10-14:
+    `<tool_use>NAME "arg"</tool_use>`, `[name(k="v")]` and a CLI typed as the reply
+    (`web-digest "q"`, run through the offered bash tool).
     """
-    if not text or "<" not in text:
+    if not text:
         return None
+    calls = _text_toolcalls_xml(text) if "<" in text else None
+    if not calls and tools:
+        calls = _tool_use_bare(text, tools) or _py_calls(text, tools) or _cli_call(text, tools)
+    return _fix_args(calls, tools) if calls else None
+
+
+def _text_toolcalls_xml(text):
     calls = []
     spans = []  # text spans consumed by the first two forms, to avoid double-count
 
@@ -280,7 +446,7 @@ def _stream_toolcall_sse(calls):
     return out
 
 
-def normalize_json_body(data):
+def normalize_json_body(data, tools=None, model=None):
     """Same rewrite for a non-streamed completion (no native tool_calls)."""
     if not NORMALIZE_TOOLCALLS or b"tool_calls" in data:
         return data
@@ -293,12 +459,16 @@ def normalize_json_body(data):
         msg = choice.get("message") or {}
         if msg.get("tool_calls"):
             continue
-        calls = text_toolcalls(msg.get("content") or "")
+        text = msg.get("content") or ""
+        calls = text_toolcalls(text, tools)
         if calls:
+            _capture(model, "converted", calls[0]["name"], text, tools)
             msg["tool_calls"] = _native_tool_calls(calls)
             msg["content"] = ""
             choice["finish_reason"] = "tool_calls"
             changed = True
+        elif suspect_text(text, tools):
+            _capture(model, "suspect", None, text, tools)
     return json.dumps(body).encode() if changed else data
 
 
@@ -370,6 +540,8 @@ def _append_log(record):
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    _tools = {}     # the request's offered tools (tool_index), set per request in _proxy
+    _model = None
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *args):
@@ -444,7 +616,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return "sent"
             metrics["finish_reason_raw"] = _finish_json(data)
             data = fix_json_body(data)
-            data = normalize_json_body(data)
+            data = normalize_json_body(data, self._tools, self._model)
             metrics["finish_reason_sent"] = _finish_json(data)
             metrics["ttft_s"] = time.time() - start
             self.send_response(status)
@@ -470,6 +642,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         norm = []           # accumulated assistant text (for text_toolcalls)
         holding = False     # a tool-call marker was seen; buffer the remainder
         held = []           # raw lines withheld while holding
+        start_decided = False  # the reply's start was judged not to be a markup-free call
+        tools = self._tools
         try:
             while True:
                 line = resp.readline()
@@ -496,6 +670,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if (NORMALIZE_TOOLCALLS and not saw_tool_calls and not holding
                         and _TOOLCALL_MARKER.search("".join(norm))):
                     holding = True
+                elif NORMALIZE_TOOLCALLS and not saw_tool_calls and not holding and not start_decided:
+                    head = "".join(norm)
+                    if head.strip():
+                        if could_be_call(head, tools):
+                            holding = True
+                        else:
+                            start_decided = True
                 if holding:
                     held.append(line)
                     continue
@@ -516,9 +697,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
+        full = "".join(norm)
         if holding and not saw_tool_calls:
-            calls = text_toolcalls("".join(norm))
+            calls = text_toolcalls(full, tools)
             if calls:
+                _capture(self._model, "converted", calls[0]["name"], full, tools)
                 saw_tool_calls = True
                 if not committed:
                     committed = True
@@ -530,10 +713,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.flush()
                 metrics["finish_reason_sent"] = "tool_calls"
                 held = []  # replaced by the tool_calls delta
-            elif not committed:
-                # Not a real tool call: keep the text we held.
-                committed = True
-                self._send_stream_headers(resp)
+            else:
+                # Held but not convertible: keep the text, and capture it for tuning.
+                if _TOOLCALL_MARKER.search(full) or suspect_text(full, tools):
+                    _capture(self._model, "unmatched", None, full, tools)
+                if not committed:
+                    committed = True
+                    self._send_stream_headers(resp)
+
+        elif NORMALIZE_TOOLCALLS and not saw_tool_calls and suspect_text(full, tools):
+            _capture(self._model, "suspect", None, full, tools)  # forwarded as text; kept for tuning
 
         if not committed and is_post and allow_retry:
             return "retry"
@@ -603,6 +792,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         model = None
         stream = False
         n_messages = 0
+        self._tools, self._model = {}, None
         prompt_chars = len(body) if body else 0
 
         if is_chat and body:
@@ -612,6 +802,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 j = None
             if isinstance(j, dict):
                 model = j.get("model")
+                self._tools, self._model = tool_index(j.get("tools")), model
                 stream = bool(j.get("stream"))
                 msgs = j.get("messages")
                 if isinstance(msgs, list):

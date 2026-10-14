@@ -73,3 +73,28 @@ opencode's `sipb` provider still goes direct. Reboots: it is a LaunchAgent with
 `RunAtLoad` and `KeepAlive`, so it starts at login and restarts if killed (checked
 2026-10-12 by bootout/bootstrap and `kill -9`); it needs no network to start. Like the
 other agents on this machine it does not run before anyone has logged in.
+
+### Markup-free text calls and capture (added 2026-10-14)
+
+Three more shapes of the same failure, all seen from Qwen3.6 in the Crush TUI (the second and third are not
+Qwen's `qwen3_coder` XML, so the upstream Ollama parser fix, PR ollama/ollama#15011, would not catch them):
+
+| text the model wrote | converted to |
+|---|---|
+| `[mcp_web_web_search(query="hyades.mit.edu")]` (python-call style; a list of calls too) | native call of that tool, `query` renamed to the tool's one missing required argument (`question`) |
+| `<tool_use>\nweb-digest "q"\n</tool_use>` (no `name=` attribute) | the offered `bash` tool running `web-digest "q"` |
+| `web-digest "q"` as the whole reply | the offered `bash` tool running it |
+
+Rules that keep it from rewriting prose: these forms are converted **only** for tool names the request
+offered (`tools[].function.name`; the python-call form parses with `ast`, values by `literal_eval`, never
+`eval`), and the CLI form only for the commands in `SIPB_CLI_TOOLS` (default `web-digest,skill-get`) and only
+when `bash` is offered. While a reply could still be such a call (it starts with `[`, a code fence, or an
+offered tool/CLI name followed by `(`, a space or a quote) the stream is held, then flushed whole if it
+turns out to be prose.
+
+**Capture** (`SIPB_CAPTURE=0` to turn off): `~/.local/state/sipb-llms-proxy/toolcall-capture.jsonl` (mode 0600,
+rotated at 20 MB) gets one line per `converted`, `unmatched` (held but not convertible) or `suspect` (a short
+reply that names an offered tool or contains tool markup, forwarded as text) message: ts, model, outcome,
+form, the text (first 2000 chars) and the offered tool names. It holds message text, unlike `requests.jsonl`.
+Tune the converter from these lines: `jq -c 'select(.outcome!="converted")' toolcall-capture.jsonl`.
+
