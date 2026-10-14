@@ -1,1 +1,0 @@
-/Users/djbclark/src/djbclark-ade/claude/commands/herdr-tidy.md

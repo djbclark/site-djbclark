@@ -201,17 +201,25 @@ merge conflict, STOP and report it.
 
 djbclark moved everything out of `site-private` that did not have to be
 private. It sits here at the same relative path it had there: `home-agents.md`,
-`skills/`, `claude/`, `codex/`, `cursor/`, `zcode/`, `shell/`, `macos/`,
-`gradle/`, and files added to `bin/`, `docs/` and `tests/`. `site-private` keeps
-a symlink at each old path, so `~/ops/site-private/bin/bg`,
-`site-private/skills/<name>` and the like still work and existing references
-were left alone. New work uses the `site-djbclark` path.
+`codex/`, `cursor/`, `zcode/` (skills-related pieces of these moved on to
+djbclark-ade, see below), `shell/`, `macos/`,
+`gradle/`, and files added to `bin/`, `docs/` and `tests/`.
+
+**2026-10-14 skill chain collapse:** skills no longer route through the ops
+repos at all. Every agent TUI links its skills dir directly at
+`~/src/djbclark-ade/skills/<name>` (public) or
+`~/ops/site-private/skills/<name>` (private: `1password`). The `skills/`
+symlink layer here and in `site-private` was retired; `claude/agents`,
+`claude/commands`, `claude/hooks` and `zcode/commands` moved to
+`~/src/djbclark-ade/claude/` and `~/src/djbclark-ade/zcode/`. Only
+`claude/local-marketplace` (the local-lsp Claude Code plugin marketplace,
+registered in `~/.claude/settings.json`) remains under `claude/` here.
 
 1. This repo is public. These directories describe one machine's agent setup;
    credentials, tokens and vault or item identifiers still never go in them.
 2. What stayed private (the list in `site-private/.githooks/private-paths`):
    `memory/`, `web/`, `1password/`, `skills/1password/`,
-   `skills/tell-chief-of-staff/`, and that repo's own top-level files.
+   and that repo's own top-level files.
 3. `site-private` enforces this with a pre-commit hook (`.githooks/pre-commit`
    there): a regular file outside its private list is rejected.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,

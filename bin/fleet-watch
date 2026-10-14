@@ -164,7 +164,7 @@ except subprocess.TimeoutExpired:
   fi
 }
 
-HELM="${FLEET_WATCH_HELM:-$HOME/ops/site-private/skills/helm/helm.py}"
+HELM="${FLEET_WATCH_HELM:-$HOME/src/djbclark-ade/skills/helm/helm.py}"
 
 waiting() {
   # "N:project@id/mark,..." for sessions blocked on the operator; "unknown" if helm is missing.

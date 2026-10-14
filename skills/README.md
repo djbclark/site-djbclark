@@ -1,74 +1,22 @@
-# Local agent skills (tracked here, reached through `site-private/skills/`)
+# Skills: retired hub layer (2026-10-14)
 
-These are the operator's **local, hand-maintained** skills. Since 2026-10-06
-the content lives in git here, in `site-djbclark/skills/<name>/` (public).
-`site-private/skills/<name>` is a symlink to it, and every agent TUI links to
-that `site-private` path (`~/.claude/skills/<name>` and the rest), so one root
-serves public and private skills alike. Same pattern as `~/CLAUDE.md`:
-content-in-git + symlink.
+This directory is no longer part of the skill path. Every skill now lives in
+exactly one place and every agent TUI links it **directly** — no hub, no
+chained symlinks:
 
-**Orchestration and session-hygiene skills live in djbclark-ade (2026-10-08).**
-`bigteam`, `model-routing`, `effort-routing`, `helm`, `session-finder`,
-`ralph-tui-orchestration`, `cow-workspaces`, `handoff`,
-`baton`, `session-handoff`, `steps` and `loose`, plus `autorename` and
-`herdr-tidy` (moved or added there later on 2026-10-08), are absolute symlinks here into `~/src/djbclark-ade/skills/<name>/`
-(github.com/djbclark/djbclark-ade, whose README describes them as one
-project). On 2026-10-08 `resume` was folded into `baton`, `helm-all` into
-`helm`, `session-finder-all` into `session-finder` (their old names survive
-as command wrappers), and `skill-everywhere` moved to
-`~/src/djbclark-ade/bin/skill-everywhere` with its README in
-`~/src/djbclark-ade/docs/skill-everywhere.md`. Edit and commit it there; the chain `site-private/skills/<name>`
-→ here → djbclark-ade is unchanged for every TUI. A new skill of that kind goes
-in djbclark-ade too, with the same symlink here.
+- **Public skills** (the default): `~/src/djbclark-ade/skills/<name>/`
+  (git: github.com/djbclark/djbclark-ade). Create, edit and commit them there.
+- **Private skills**: `~/ops/site-private/skills/<name>/` (real directory,
+  listed in `.githooks/private-paths` there). Only `1password` today.
 
-Two skills are private and are real directories in `site-private/skills/`:
-`1password` and `tell-chief-of-staff`. This repo is public: no credentials,
-tokens, vault or item identifiers in a skill here.
+`~/src/djbclark-ade/bin/skill-everywhere <name>` links a skill into every
+TUI (Claude Code, Codex, Copilot, opencode, zcode, Qwen, Grok, agy, Devin,
+Cline, Muse, Antigravity, Hermes, omp); its README is
+`~/src/djbclark-ade/docs/skill-everywhere.md`. Never copy a skill into a
+TUI's dir — copies drift.
 
-**Since 2026-10-09 every skill here is a symlink into `~/src/djbclark-ade/skills/`, and a new skill goes there, not here** (see `djbclark-ade/docs/skills.md`). Only hand-maintained local skills belong in that chain. **Tool-managed skills stay where
-their tool put them** and are NOT tracked here:
-
-- Symlinks in `~/.claude/skills/` pointing into `~/.agents/skills/`,
-  `~/.bailian/skills/`, `/opt/homebrew/...` (bailian-*, composio-cli,
-  computer-use, herdr, orca-*, orchestration, sudo-secretspec, ...).
-- Anything listed in `~/.agents/.skill-lock.json` (e.g. `ralph-tui-create-*`,
-  `ralph-tui-prd`).
-- Anything carrying an installer/marketplace marker: a `.origin`,
-  `marketplace.json`, `.claude-plugin/`, `.superset-managed`, a `PROVENANCE.md`
-  that says "installed ... unmodified" from a named source (e.g. `ln-11-*`,
-  `ln-21-*`), or a synced-bucket dir (`synced/`).
-
-## Add a new local skill
-
-1. Ask djbclark whether it is public or private (standing rule, 2026-10-06).
-2. **Public** (the default): create `~/ops/site-djbclark/skills/<name>/SKILL.md`
-   (plus any support files), then add the link that puts it under the one root:
-   `ln -s ../../site-djbclark/skills/<name> ~/ops/site-private/skills/<name>`.
-   **Private**: create it as a real directory in
-   `~/ops/site-private/skills/<name>/` and add `skills/<name>/` to
-   `~/ops/site-private/.githooks/private-paths`; the pre-commit hook there
-   rejects it otherwise.
-3. Link it into every agent TUI (Claude Code, Codex, Copilot, Hermes, …):
-   `~/src/djbclark-ade/bin/skill-everywhere <name>`. Never copy a skill folder
-   into another TUI's dir: copies go stale (11 had, until 2026-10-03). The
-   script's README, [`djbclark-ade/docs/skill-everywhere.md`](https://github.com/djbclark/djbclark-ade/blob/main/docs/skill-everywhere.md),
-   says which TUIs this covers and how to verify.
-4. Commit + push both repos (direct to `master`, `git pull --rebase` first —
-   see `../AGENTS.md`): the skill here, the symlink in `site-private`.
-
-## Move an existing local skill under version control
-
-```sh
-name=<skill>
-cp -a ~/.claude/skills/$name ~/ops/site-djbclark/skills/$name
-diff -r ~/.claude/skills/$name ~/ops/site-djbclark/skills/$name   # must be clean
-ln -s ../../site-djbclark/skills/$name ~/ops/site-private/skills/$name
-rm -rf ~/.claude/skills/$name
-ln -s ~/ops/site-private/skills/$name ~/.claude/skills/$name
-```
-
-That is the public case. For a private skill copy it to
-`~/ops/site-private/skills/$name` instead, skip the first `ln -s`, and add it
-to `.githooks/private-paths` there.
-
-Never move a symlinked or tool-managed skill; when unsure, leave it in place.
+History: until 2026-10-14 the TUIs linked through this repo
+(`site-private/skills/<name>` → `site-djbclark/skills/<name>` →
+djbclark-ade), so git churn here could break skill loading machine-wide;
+that chain was collapsed to direct links. The symlinks under this path were
+removed; nothing should link here any more.

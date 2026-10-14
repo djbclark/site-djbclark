@@ -1,1 +1,0 @@
-/Users/djbclark/src/djbclark-ade/claude/commands/session-finder-all.md
