@@ -100,6 +100,32 @@ network call, extend it with 4+ tests, write notes and commit), 600-900 s cap.
 
 One run per cell unless noted; treat the B column as indicative.
 
+### 3.1 Essentials battery — basic coding and sysadmin
+
+Added 2026-10-13. A floor test for ordinary agent work, distinct from tasks A/B:
+about twenty small tasks — create and append to a file, edit one value in a TOML,
+JSON, YAML, nginx, systemd-unit or `.env` config, fix a bug, add a function with a
+test, rename a file, `mkdir -p`, find/replace, make a git commit, run a shell
+pipeline, write a small script, fix a runtime error, set file permissions. Each
+task is scored by reading the artifact (or running the tests), never by trusting
+the model. Harness: `bench.py essentials` in the skill.
+
+| model | essentials | notes |
+| --- | --- | --- |
+| qwen3.6:35b-a3b-q4_K_M | 20/20 | default |
+| qwen3-coder:30b | 20/20 | |
+| qwq:32b | 20/20 | ~2x faster per task than qwen3.6 |
+| magistral:24b | 20/20 | ~2x faster per task than qwen3.6 |
+| exaone-deep:32b | 20/20 | |
+| gemma3:27b | 20/20 | |
+| qwen3.5:35b | 19/20 | fails "read a value and write it"; 2-5x slower per task |
+
+Six of the seven models did every task, so this battery is a floor that many
+models clear; the choice between them comes from the harder tasks A and B above
+and from speed. We keep `qwen3.6:35b-a3b-q4_K_M` as the default — it clears the
+floor and is the model that finished task B. The others are usable for light
+work; `qwq:32b` and `magistral:24b` are the fastest.
+
 ## 4. Server-side problems and requests
 
 4.1 **Tool-call streams end with `finish_reason: "stop"`.** A streamed response (every model we tried, `qwen3.5:27b` included) that
@@ -297,7 +323,7 @@ Code in other repositories:
 8. Our Crush build with the ACP bridge and an auto-approve mode (upstream pull requests):
    <https://github.com/charmbracelet/crush/pull/2450> and <https://github.com/charmbracelet/crush/pull/3909>.
 9. Index of all our SIPB-related material, including the quota collector: [README.md](README.md).
-10. **The benchmark as a skill, so you can test other models** (one model at a time, with an etiquette section and the steps to update this report on a branch): <https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench> (its [SKILL.md](https://github.com/djbclark/djbclark-ade/blob/master/skills/sipb-llm-bench/SKILL.md)). Run `bench.py run --models MODEL`, then `bench.py summary`.
+10. **The benchmark as a skill, so you can test other models** (one model at a time, with an etiquette section and the steps to update this report on a branch): <https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench> (its [SKILL.md](https://github.com/djbclark/djbclark-ade/blob/master/skills/sipb-llm-bench/SKILL.md)). Run `bench.py run --models MODEL`, then `bench.py summary`. The same skill also carries an `essentials` battery — about twenty small, objectively scored coding and sysadmin tasks (create/append a file, edit TOML/JSON/YAML/nginx/systemd/.env configs, fix a bug, add a function + test, git commit, file permissions, a multi-step script) — as a floor test: `bench.py essentials --models MODEL` (see REPORT.md section 3.1).
 
 ## 9. Test another model yourself
 
