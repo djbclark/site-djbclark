@@ -48,9 +48,9 @@ key in plain text (mode 600).
    small-context models only.
 4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo` to the stock Homebrew
    Crush (v0.98.1; the fork is not used for the TUI), and crushrc ends with a `PreToolUse` hook:
-   `hook add PreToolUse --name auto-allow --command ~/.config/crush/hooks/auto-allow.sh` (copy: `bench/auto-allow.sh`; it
-   prints `{"decision":"allow"}` unless `ACP_RUN_CRUSH` is set, which acp-run sets so its `--perm scoped:` and
-   `deny` policies still get asked; without that marker a write outside the scope ran unasked, perm=0+/0-). The hook
+   `hook add PreToolUse --name auto-allow --command ~/.config/crush/hooks/auto-allow.sh` (copy: `bench/auto-allow.sh`; it prints `{"decision":"allow"}` unconditionally). acp-run runs crush yolo only
+   (operator, 2026-10-14): `--perm scoped:` and `ask` are refused for crush (exit 2) because the hook makes
+   crush skip the permission requests they rely on; `--perm deny` still works (tools off, hook stripped). The hook
    pre-approves every tool call (upstream `docs/hooks/README.md`), so bare launches (Orca, herdr, zsh)
    and tools added upstream later do not prompt either. Verified in the real TUI under tmux: `bash`,
    `view`, a `write` outside the project and the `agent` tool all ran silently ("Hook auto-allow -> OK"
