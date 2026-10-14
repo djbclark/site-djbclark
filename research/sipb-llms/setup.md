@@ -41,9 +41,17 @@ key in plain text (mode 600).
    of the 32k window and a turn took ~34 s; lean turns take ~5 s.
 3. `option request-timeout 600`: Crush's default 2-minute idle timeout aborted turns while the
    shared server was queueing.
-4. `~/.config/crush/CRUSH.md` (copy: `bench/rules.md`): five short rules for small models
-   (no todo tools, one write per file, chain shell commands, act instead of describing, finish
-   before stopping).
+4. `~/.config/crush/CRUSH.md` (copy: `bench/rules.md`): seven short rules for small models
+   (no todo tools, one write per file with a relative path, chain shell commands, act instead of
+   describing, finish before stopping, `web-digest` before digging, skills on demand through
+   `skill-get` including the typed `/skill <name>` form). `web-digest` and `skill-get` are for
+   small-context models only.
+4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo`, and crushrc ends with
+   `permissions allow bash edit multiedit write view ls grep glob` so a launch that skips the
+   wrapper (Orca, herdr, zsh, bare `/opt/homebrew/bin/crush`) still does not prompt for them.
+   Do NOT use `permissions yolo` in crushrc: it exists only in the `~/src/crush-acp` source fork;
+   brew crush v0.98.1 aborts config load with `unknown subcommand "yolo"` (hit and reverted
+   2026-10-14, which broke every launch for a minute).
 5. `acp-run crush -C <dir> -p '...' [--verify 'python3 -m unittest discover']` runs the PR #2450
    build `crush-acp` with `--yolo`. Run it without `--model`. The entry sets
    `CRUSH_GLOBAL_DATA=~/.local/share/crush-acp` because the shared data dir
