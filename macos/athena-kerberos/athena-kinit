@@ -1,0 +1,88 @@
+#!/bin/bash
+# Keep a forwardable, renewable ATHENA.MIT.EDU TGT in the default (KCM) cache.
+#   athena-kinit init    ask for the password in a hidden-text dialog, kinit,
+#                        and save it in the login Keychain (kinit --keychain)
+#   athena-kinit [renew] what the LaunchAgent runs: renew the TGT; if it is
+#                        missing, expired or past its renewable life, get a new
+#                        one from the Keychain password (no prompt); then push
+#   athena-kinit push    copy the TGT to the open athena-master connection
+#   athena-kinit status  klist
+# Principal: $ATHENA_PRINCIPAL, default <login>@ATHENA.MIT.EDU.
+set -euo pipefail
+principal="${ATHENA_PRINCIPAL:-$(id -un)@ATHENA.MIT.EDU}"
+kopts=(-f -r 7d)
+
+log() { printf '%s athena-kinit: %s\n' "$(date '+%F %T')" "$*"; }
+
+have_tgt() { klist -s 2>/dev/null && klist 2>/dev/null | grep -q "krbtgt/ATHENA.MIT.EDU@ATHENA.MIT.EDU"; }
+
+kdc_reachable() { nc -z -G 5 kerberos.mit.edu 88 >/dev/null 2>&1 || nc -zu -w 5 kerberos.mit.edu 88 >/dev/null 2>&1; }
+
+init() {
+  set -o pipefail
+  osascript -e "text returned of (display dialog \"Kerberos password for $principal\" default answer \"\" with hidden answer with title \"athena-kinit\" with icon caution)" \
+    | kinit --keychain "${kopts[@]}" --password-file=STDIN "$principal"
+  log "initial ticket for $principal saved, password stored in Keychain"
+}
+
+from_keychain() {
+  # No tty and no --password-file: Apple's kinit uses the Keychain password
+  # that `kinit --keychain` stored.
+  kinit "${kopts[@]}" "$principal" </dev/null
+}
+
+failed_flag="$HOME/.local/state/athena-kinit/failed"
+athena_sock="$HOME/.ssh/cm/athena"
+
+# ssh forwards a non-renewable TGT, so the dialup's copy would die in 10h.
+# Overwrite the cache that every session on the athena-master connection
+# shares, and the private copies SIPB's mosh-server makes per session
+# (/tmp/krb5cc-mosh_<uid>_*), with the local renewable TGT. Uses the open
+# master only (-F /dev/null: never opens a connection, so never sends Duo).
+push_to_athena() {
+  ssh -F /dev/null -S "$athena_sock" -O check athena >/dev/null 2>&1 || return 0
+  local cc t rc
+  cc=$(klist 2>/dev/null | sed -n 's/^Credentials cache: //p')
+  t=$(umask 077; mktemp "${TMPDIR:-/tmp}/athena-tgt.XXXXXX") || return 1
+  rm -f "$t"
+  if (umask 077; kcc copy_cred_cache --krbtgt-only "$cc" "FILE:$t"); then
+    ssh -F /dev/null -S "$athena_sock" -o BatchMode=yes athena \
+      'umask 077; t=$(mktemp) && cat > "$t" &&
+       for f in "${KRB5CCNAME#FILE:}" /tmp/krb5cc-mosh_$(id -u)_*; do
+         [ -O "$f" ] && cp "$t" "$f.new" && mv -f "$f.new" "$f"
+       done; rm -f "$t"' < "$t"
+    rc=$?
+  else
+    rc=1
+  fi
+  rm -f "$t"
+  [ "$rc" = 0 ] && log "pushed TGT to athena master" || log "push to athena master failed (rc=$rc)"
+  return "$rc"
+}
+
+renew() {
+  if ! kdc_reachable; then
+    log "KDC unreachable, skipping"; return 0
+  fi
+  if have_tgt && kinit -R 2>/dev/null; then
+    log "renewed"; rm -f "$failed_flag"; push_to_athena || true; return 0
+  fi
+  if from_keychain; then
+    log "new ticket from Keychain"; rm -f "$failed_flag"; push_to_athena || true; return 0
+  fi
+  log "FAILED: no ticket; run: athena-kinit init"
+  # One notice per outage, not one per hourly run.
+  if [ ! -e "$failed_flag" ]; then
+    mkdir -p "${failed_flag%/*}" && touch "$failed_flag"
+    [ -x "$HOME/.local/bin/hermes-ping" ] && "$HOME/.local/bin/hermes-ping" "athena-kinit: renewal failed, run athena-kinit init" || true
+  fi
+  return 1
+}
+
+case "${1:-renew}" in
+  init) init ;;
+  renew) renew ;;
+  push) push_to_athena ;;
+  status) klist ;;
+  *) echo "usage: athena-kinit [init|renew|push|status]" >&2; exit 2 ;;
+esac

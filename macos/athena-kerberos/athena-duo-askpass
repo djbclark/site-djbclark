@@ -1,0 +1,24 @@
+#!/bin/bash
+# SSH_ASKPASS for the athena master connection: answers Duo's
+# "Passcode or option" prompt with $ATHENA_DUO_OPTION (default 1, a push);
+# any other prompt (password, host key) goes to a dialog.
+prompt="${1:-}"
+printf '%s askpass prompt: %q\n' "$(date '+%F %T')" "$prompt" >> "$HOME/Library/Logs/athena-master.log"
+case "$prompt" in
+  *[Dd]enied*|*[Ff]raud*) exit 1 ;;
+  *"Passcode or option"*)
+    # Duo re-asks after a push times out (60 s): push again, at most 3 per
+    # connection attempt ($PPID is the ssh asking).
+    n_file="${TMPDIR:-/tmp}/athena-duo-askpass.$PPID"
+    n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$n_file"
+    [ "$n" -le 3 ] || { rm -f "$n_file"; exit 1; }
+    echo "${ATHENA_DUO_OPTION:-1}"
+    ;;
+  *)
+    hidden=""
+    case "$prompt" in *[Pp]assword*|*[Pp]assphrase*) hidden="with hidden answer" ;; esac
+    p=${prompt//\\/\\\\}; p=${p//\"/\\\"}
+    osascript -e "text returned of (display dialog \"$p\" default answer \"\" $hidden with title \"ssh athena\")"
+    ;;
+esac

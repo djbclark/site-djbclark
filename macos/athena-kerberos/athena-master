@@ -1,0 +1,60 @@
+#!/bin/bash
+# Shared SSH master connection to athena.dialup.mit.edu, opened on demand.
+# MIT requires Duo after Kerberos on the dialups; this pays it once per
+# connection: ~/.ssh/config.d/mit runs `athena-master ensure` (Match exec) on
+# every ssh/mosh/et to athena, and later sessions multiplex over the master.
+#   athena-master ensure  open the master if it is not up (Duo push, answered
+#                         by athena-duo-askpass), wait for it
+#   athena-master status  ssh -O check
+#   athena-master stop    ssh -O exit
+# All sessions on the master share one ticket cache on the dialup. On open,
+# and hourly from the athena-kinit agent, the local renewable TGT is copied
+# into it (ssh forwards a non-renewable one); the master's remote command
+# renews it every 50 minutes, so sessions (mosh-server included) keep tickets.
+set -uo pipefail
+here="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+sock="$HOME/.ssh/cm/athena"
+host=athena
+lock="$sock.lock"
+
+ctl() { ssh -F /dev/null -o ControlPath="$sock" -O "$1" "$host" 2>&1; }
+up() { ctl check >/dev/null; }
+
+open_master() {
+  "$here/athena-kinit" renew >/dev/null 2>&1 || true
+  rm -f "$sock"
+  echo "athena-master: opening shared connection, approve the Duo push (option ${ATHENA_DUO_OPTION:-1})" >&2
+  ATHENA_MASTER_CHILD=1 SSH_ASKPASS="$here/athena-duo-askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" \
+    ssh -M -S "$sock" -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+      -o LogLevel=VERBOSE -E "$HOME/Library/Logs/athena-master.log" \
+      -f -n -T "$host" 'while :; do kinit -R >/dev/null 2>&1; sleep 3000; done' </dev/null >/dev/null 2>>"$HOME/Library/Logs/athena-master.log" \
+    && "$here/athena-kinit" push >/dev/null 2>&1
+  local rc=$?
+  rm -f "${TMPDIR:-/tmp}"/athena-duo-askpass.*
+  return "$rc"
+}
+
+ensure() {
+  # The master's own ssh parses this config too.
+  [ -n "${ATHENA_MASTER_CHILD:-}" ] && return 0
+  up && return 0
+  mkdir -p "${sock%/*}" && chmod 700 "${sock%/*}"
+  if [ -d "$lock" ] && [ $(( $(date +%s) - $(stat -f %m "$lock") )) -gt 120 ]; then
+    rmdir "$lock" 2>/dev/null
+  fi
+  if mkdir "$lock" 2>/dev/null; then
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
+    open_master
+  else
+    # Another ssh is opening it: wait for that one's Duo.
+    for _ in $(seq 90); do up && return 0; [ -d "$lock" ] || break; sleep 1; done
+  fi
+  up
+}
+
+case "${1:-ensure}" in
+  ensure) ensure; exit 0 ;;
+  status) ctl check ;;
+  stop) ctl exit ;;
+  *) echo "usage: athena-master [ensure|status|stop]" >&2; exit 2 ;;
+esac
