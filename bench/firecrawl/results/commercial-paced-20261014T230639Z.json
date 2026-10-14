@@ -1,0 +1,88 @@
+{
+  "target": "commercial-paced",
+  "base_url": "https://api.firecrawl.dev",
+  "started": "2026-10-14T23:06:39+00:00",
+  "credits_before": 1007,
+  "scrape": [
+    {
+      "id": "reddit",
+      "category": "bot-guarded",
+      "url": "https://www.reddit.com/r/programming/",
+      "ok": false,
+      "http": 403,
+      "page_status": null,
+      "secs": 0.16,
+      "retries_429": 0,
+      "md_chars": 0,
+      "markers": "0/1",
+      "error": "We apologize for the inconvenience but we do not support this site. If you are part of an enterprise and want to have a further conversation about this, please contact our sales team here: https://www.firecrawl.dev/contact-sales"
+    },
+    {
+      "id": "medium",
+      "category": "paywall/JS",
+      "url": "https://karpathy.medium.com/software-2-0-a64152b37c35",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 2.91,
+      "retries_429": 0,
+      "md_chars": 20774,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "cloudflare",
+      "category": "CDN-fronted",
+      "url": "https://www.cloudflare.com/learning/ddos/what-is-a-ddos-attack/",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 1.73,
+      "retries_429": 0,
+      "md_chars": 3372,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "whatwg",
+      "category": "very large page",
+      "url": "https://html.spec.whatwg.org/multipage/parsing.html",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 1.91,
+      "retries_429": 0,
+      "md_chars": 559976,
+      "markers": "2/2",
+      "error": null
+    },
+    {
+      "id": "pdf",
+      "category": "PDF (4 pages)",
+      "url": "https://www.irs.gov/pub/irs-pdf/fw4.pdf",
+      "ok": false,
+      "http": 200,
+      "page_status": 200,
+      "secs": 0.9,
+      "retries_429": 0,
+      "md_chars": 25054,
+      "markers": "0/1",
+      "error": null
+    },
+    {
+      "id": "http-404",
+      "category": "error page",
+      "url": "https://httpbin.org/status/404",
+      "ok": true,
+      "http": 200,
+      "page_status": 404,
+      "secs": 0.63,
+      "retries_429": 0,
+      "md_chars": 0,
+      "markers": "0/0",
+      "error": null
+    }
+  ],
+  "credits_after": 998,
+  "finished": "2026-10-14T23:06:47+00:00"
+}

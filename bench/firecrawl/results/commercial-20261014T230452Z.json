@@ -1,0 +1,292 @@
+{
+  "target": "commercial",
+  "base_url": "https://api.firecrawl.dev",
+  "started": "2026-10-14T23:04:52+00:00",
+  "credits_before": 1025,
+  "scrape": [
+    {
+      "id": "static",
+      "category": "static HTML",
+      "url": "https://example.com",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 0.85,
+      "md_chars": 959,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "python-docs",
+      "category": "docs",
+      "url": "https://docs.python.org/3/library/json.html",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 1.09,
+      "md_chars": 42122,
+      "markers": "2/2",
+      "error": null
+    },
+    {
+      "id": "wikipedia",
+      "category": "wiki",
+      "url": "https://en.wikipedia.org/wiki/Web_scraping",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 0.6,
+      "md_chars": 52343,
+      "markers": "2/2",
+      "error": null
+    },
+    {
+      "id": "github",
+      "category": "app page",
+      "url": "https://github.com/firecrawl/firecrawl",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 6.31,
+      "md_chars": 36250,
+      "markers": "2/2",
+      "error": null
+    },
+    {
+      "id": "hn",
+      "category": "news list",
+      "url": "https://news.ycombinator.com/",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 1.04,
+      "md_chars": 15398,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "bbc",
+      "category": "news site",
+      "url": "https://www.bbc.com/news",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 8.27,
+      "md_chars": 17111,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "books",
+      "category": "e-commerce",
+      "url": "https://books.toscrape.com/",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 1.87,
+      "md_chars": 9116,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "js-render",
+      "category": "client-side JS",
+      "url": "https://quotes.toscrape.com/js/",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 0.93,
+      "md_chars": 1505,
+      "markers": "2/2",
+      "error": null
+    },
+    {
+      "id": "js-delayed",
+      "category": "JS, 10 s delay",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 12.99,
+      "md_chars": 1505,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "stackoverflow",
+      "category": "Q&A, bot-guarded",
+      "url": "https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 6.2,
+      "md_chars": 161404,
+      "markers": "1/1",
+      "error": null
+    },
+    {
+      "id": "reddit",
+      "category": "bot-guarded",
+      "url": "https://www.reddit.com/r/programming/",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.08,
+      "md_chars": 0,
+      "markers": "0/1",
+      "error": "Rate limit exceeded. Consumed (req/min): 11, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    },
+    {
+      "id": "medium",
+      "category": "paywall/JS",
+      "url": "https://karpathy.medium.com/software-2-0-a64152b37c35",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.08,
+      "md_chars": 0,
+      "markers": "0/1",
+      "error": "Rate limit exceeded. Consumed (req/min): 12, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    },
+    {
+      "id": "cloudflare",
+      "category": "CDN-fronted",
+      "url": "https://www.cloudflare.com/learning/ddos/what-is-a-ddos-attack/",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.08,
+      "md_chars": 0,
+      "markers": "0/1",
+      "error": "Rate limit exceeded. Consumed (req/min): 13, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    },
+    {
+      "id": "whatwg",
+      "category": "very large page",
+      "url": "https://html.spec.whatwg.org/multipage/parsing.html",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.08,
+      "md_chars": 0,
+      "markers": "0/2",
+      "error": "Rate limit exceeded. Consumed (req/min): 14, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    },
+    {
+      "id": "pdf",
+      "category": "PDF (4 pages)",
+      "url": "https://www.irs.gov/pub/irs-pdf/fw4.pdf",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.08,
+      "md_chars": 0,
+      "markers": "0/1",
+      "error": "Rate limit exceeded. Consumed (req/min): 15, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    },
+    {
+      "id": "http-404",
+      "category": "error page",
+      "url": "https://httpbin.org/status/404",
+      "ok": false,
+      "http": 429,
+      "page_status": null,
+      "secs": 0.1,
+      "md_chars": 0,
+      "markers": "0/0",
+      "error": "Rate limit exceeded. Consumed (req/min): 16, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+    }
+  ],
+  "burst": {
+    "wall_secs": 0.11,
+    "ok": 0,
+    "http_429": 5,
+    "rows": [
+      {
+        "id": "burst-1",
+        "category": "burst",
+        "url": "https://quotes.toscrape.com/page/1/",
+        "ok": false,
+        "http": 429,
+        "page_status": null,
+        "secs": 0.09,
+        "md_chars": 0,
+        "markers": "0/1",
+        "error": "Rate limit exceeded. Consumed (req/min): 19, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+      },
+      {
+        "id": "burst-2",
+        "category": "burst",
+        "url": "https://quotes.toscrape.com/page/2/",
+        "ok": false,
+        "http": 429,
+        "page_status": null,
+        "secs": 0.09,
+        "md_chars": 0,
+        "markers": "0/1",
+        "error": "Rate limit exceeded. Consumed (req/min): 17, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+      },
+      {
+        "id": "burst-3",
+        "category": "burst",
+        "url": "https://quotes.toscrape.com/page/3/",
+        "ok": false,
+        "http": 429,
+        "page_status": null,
+        "secs": 0.09,
+        "md_chars": 0,
+        "markers": "0/1",
+        "error": "Rate limit exceeded. Consumed (req/min): 18, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+      },
+      {
+        "id": "burst-4",
+        "category": "burst",
+        "url": "https://quotes.toscrape.com/page/4/",
+        "ok": false,
+        "http": 429,
+        "page_status": null,
+        "secs": 0.09,
+        "md_chars": 0,
+        "markers": "0/1",
+        "error": "Rate limit exceeded. Consumed (req/min): 21, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+      },
+      {
+        "id": "burst-5",
+        "category": "burst",
+        "url": "https://quotes.toscrape.com/page/5/",
+        "ok": false,
+        "http": 429,
+        "page_status": null,
+        "secs": 0.09,
+        "md_chars": 0,
+        "markers": "0/1",
+        "error": "Rate limit exceeded. Consumed (req/min): 20, Remaining (req/min): 0. Upgrade your plan at https://firecrawl.dev/pricing for increased rate limits or please retry after 20s, resets at Wed Oct 14 2026 23:05:52 GMT+0000 (Coordinated Universal Time)"
+      }
+    ]
+  },
+  "map": {
+    "http": 200,
+    "ok": true,
+    "links": 156,
+    "secs": 9.42,
+    "error": null
+  },
+  "crawl": {
+    "http": 200,
+    "ok": true,
+    "status": "completed",
+    "pages": 5,
+    "pages_with_content": 4,
+    "secs": 6.76,
+    "error": null
+  },
+  "search": {
+    "http": 200,
+    "ok": true,
+    "results": 5,
+    "secs": 0.78,
+    "error": null
+  },
+  "credits_after": 1007,
+  "finished": "2026-10-14T23:05:50+00:00"
+}

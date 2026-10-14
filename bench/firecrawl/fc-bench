@@ -1,0 +1,196 @@
+#!/usr/bin/env -S python3 -I
+"""fc-bench: one fixed test suite against a Firecrawl v2 API, commercial or self-hosted.
+
+    fc-bench --target commercial                        # https://api.firecrawl.dev, FIRECRAWL_API_KEY
+    fc-bench --target selfhost --base-url URL --key-var VAR
+    fc-bench ... --only scrape                          # scrape | burst | map | crawl | search
+
+Run it under `sudo-secretspec run --reason ... --` so the key arrives in the
+environment. Writes results/<target>-<UTC timestamp>.json next to this script
+and prints a summary table. Every scrape sends maxAge 0, so the commercial
+cache cannot flatter it. Credit cost on the commercial API: about 35.
+"""
+import argparse
+import concurrent.futures as cf
+import datetime as dt
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+# (id, category, url, markers that must all appear in the markdown, extra options)
+SCRAPES = [
+    ("static", "static HTML", "https://example.com", ["documentation examples"], {}),
+    ("python-docs", "docs", "https://docs.python.org/3/library/json.html", ["json.dumps", "JSONDecoder"], {}),
+    ("wikipedia", "wiki", "https://en.wikipedia.org/wiki/Web_scraping", ["Web scraping", "crawler"], {}),
+    ("github", "app page", "https://github.com/firecrawl/firecrawl", ["Firecrawl", "self-host"], {}),
+    ("hn", "news list", "https://news.ycombinator.com/", ["comments"], {}),
+    ("bbc", "news site", "https://www.bbc.com/news", ["BBC"], {}),
+    ("books", "e-commerce", "https://books.toscrape.com/", ["A Light in the Attic"], {}),
+    ("js-render", "client-side JS", "https://quotes.toscrape.com/js/", ["Albert Einstein", "The world as we have created it"], {}),
+    ("js-delayed", "JS, 10 s delay", "https://quotes.toscrape.com/js-delayed/", ["Albert Einstein"], {"waitFor": 12000}),
+    ("stackoverflow", "Q&A, bot-guarded", "https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array", ["branch predict"], {}),
+    ("reddit", "bot-guarded", "https://www.reddit.com/r/programming/", ["programming"], {}),
+    ("medium", "paywall/JS", "https://karpathy.medium.com/software-2-0-a64152b37c35", ["Software 2.0"], {}),
+    ("cloudflare", "CDN-fronted", "https://www.cloudflare.com/learning/ddos/what-is-a-ddos-attack/", ["DDoS"], {}),
+    ("whatwg", "very large page", "https://html.spec.whatwg.org/multipage/parsing.html", ["tokenization", "tree construction"], {}),
+    ("pdf", "PDF (4 pages)", "https://www.irs.gov/pub/irs-pdf/fw4.pdf", ["Social security number", "Multiple Jobs"], {}),
+    ("http-404", "error page", "https://httpbin.org/status/404", [], {"expect_status": 404}),
+]
+BURST = [f"https://quotes.toscrape.com/page/{n}/" for n in range(1, 6)]
+MAP_URL = "https://books.toscrape.com/"
+IDS = set()
+RETRY_429 = 0
+CRAWL = {"url": "https://quotes.toscrape.com/", "limit": 5}
+SEARCH = {"query": "firecrawl self-hosted docker compose", "limit": 5}
+
+
+def call(base, key, method, path, body=None, timeout=180):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "fc-bench/1 (djbclark-ade)")
+    if key:
+        req.add_header("Authorization", f"Bearer {key}")
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, raw = e.code, e.read()
+    except Exception as e:  # timeouts, DNS, TLS, refused
+        return 0, {"error": f"{type(e).__name__}: {e}"}, time.monotonic() - t0
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        payload = {"error": raw[:300].decode("utf-8", "replace")}
+    return status, payload, time.monotonic() - t0
+
+
+def scrape_one(base, key, tid, cat, url, markers, opts, retry=None):
+    opts = dict(opts)
+    expect = opts.pop("expect_status", 200)
+    body = {"url": url, "formats": ["markdown"], "onlyMainContent": True, "maxAge": 0, "timeout": 90000, **opts}
+    retries = 0
+    while True:
+        status, p, secs = call(base, key, "POST", "/v2/scrape", body)
+        if status != 429 or retries >= (RETRY_429 if retry is None else retry):
+            break
+        m = re.search(r"retry after (\d+)s", str(p.get("error", "")))
+        time.sleep(int(m.group(1)) + 1 if m else 30)
+        retries += 1
+    d = p.get("data") or {}
+    md = d.get("markdown") or ""
+    page_status = (d.get("metadata") or {}).get("statusCode")
+    found = [m for m in markers if m.lower() in md.lower()]
+    ok = status == 200 and bool(p.get("success")) and page_status == expect and len(found) == len(markers)
+    return {
+        "id": tid, "category": cat, "url": url, "ok": ok, "http": status, "page_status": page_status,
+        "secs": round(secs, 2), "retries_429": retries, "md_chars": len(md), "markers": f"{len(found)}/{len(markers)}",
+        "error": None if p.get("success") else str(p.get("error") or p.get("details") or p)[:300],
+    }
+
+
+def run_scrapes(base, key):
+    return [scrape_one(base, key, *s) for s in SCRAPES if not IDS or s[0] in IDS]
+
+
+def run_burst(base, key):
+    t0 = time.monotonic()
+    with cf.ThreadPoolExecutor(len(BURST)) as ex:
+        futs = [ex.submit(scrape_one, base, key, f"burst-{i}", "burst", u, ["quote"], {}, 0) for i, u in enumerate(BURST, 1)]
+        rows = [f.result() for f in futs]
+    return {"wall_secs": round(time.monotonic() - t0, 2), "ok": sum(r["ok"] for r in rows),
+            "http_429": sum(r["http"] == 429 for r in rows), "rows": rows}
+
+
+def run_map(base, key):
+    status, p, secs = call(base, key, "POST", "/v2/map", {"url": MAP_URL, "limit": 200})
+    links = p.get("links") or []
+    return {"http": status, "ok": status == 200 and len(links) >= 20, "links": len(links), "secs": round(secs, 2),
+            "error": None if p.get("success") else str(p.get("error") or p)[:300]}
+
+
+def run_crawl(base, key):
+    body = {**CRAWL, "scrapeOptions": {"formats": ["markdown"], "maxAge": 0}}
+    status, p, secs = call(base, key, "POST", "/v2/crawl", body)
+    if status != 200 or not p.get("id"):
+        return {"http": status, "ok": False, "secs": round(secs, 2), "error": str(p.get("error") or p)[:300]}
+    t0 = time.monotonic() - secs
+    while time.monotonic() - t0 < 300:
+        time.sleep(3)
+        s2, q, _ = call(base, key, "GET", f"/v2/crawl/{p['id']}")
+        if q.get("status") in ("completed", "failed", "cancelled"):
+            break
+    pages = q.get("data") or []
+    good = sum(1 for d in pages if len(d.get("markdown") or "") > 200)
+    return {"http": s2, "ok": q.get("status") == "completed" and good >= CRAWL["limit"] - 1,
+            "status": q.get("status"), "pages": len(pages), "pages_with_content": good,
+            "secs": round(time.monotonic() - t0, 2), "error": q.get("error")}
+
+
+def run_search(base, key):
+    status, p, secs = call(base, key, "POST", "/v2/search", SEARCH)
+    d = p.get("data")
+    web = d.get("web", []) if isinstance(d, dict) else (d or [])
+    return {"http": status, "ok": status == 200 and len(web) >= 3, "results": len(web), "secs": round(secs, 2),
+            "error": None if p.get("success") else str(p.get("error") or p)[:300]}
+
+
+def credits(base, key):
+    status, p, _ = call(base, key, "GET", "/v2/team/credit-usage", timeout=30)
+    return (p.get("data") or {}).get("remainingCredits") if status == 200 else None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--target", required=True, help="label: commercial | selfhost | ...")
+    ap.add_argument("--base-url", default="https://api.firecrawl.dev")
+    ap.add_argument("--key-var", default="FIRECRAWL_API_KEY", help="env var holding the bearer key ('' = none)")
+    ap.add_argument("--only", choices=["scrape", "burst", "map", "crawl", "search"], action="append")
+    ap.add_argument("--ids", help="comma-separated scrape ids to run (default: all)")
+    ap.add_argument("--retry-429", type=int, default=0, metavar="N",
+                    help="on HTTP 429 wait the advertised time and retry up to N times (secs excludes the wait)")
+    a = ap.parse_args()
+    global IDS, RETRY_429
+    IDS = set(a.ids.split(",")) if a.ids else set()
+    RETRY_429 = a.retry_429
+    key = os.environ.get(a.key_var) if a.key_var else None
+    if a.key_var and not key:
+        sys.exit(f"fc-bench: ${a.key_var} is empty (run under sudo-secretspec run)")
+    parts = a.only or ["scrape", "burst", "map", "crawl", "search"]
+    started = dt.datetime.now(dt.timezone.utc)
+    out = {"target": a.target, "base_url": a.base_url, "started": started.isoformat(timespec="seconds"),
+           "credits_before": credits(a.base_url, key)}
+    fns = {"scrape": run_scrapes, "burst": run_burst, "map": run_map, "crawl": run_crawl, "search": run_search}
+    for part in parts:
+        print(f"== {part}", file=sys.stderr, flush=True)
+        out[part] = fns[part](a.base_url, key)
+    out["credits_after"] = credits(a.base_url, key)
+    out["finished"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    res = HERE / "results"
+    res.mkdir(exist_ok=True)
+    path = res / f"{a.target}-{started.strftime('%Y%m%dT%H%M%SZ')}.json"
+    path.write_text(json.dumps(out, indent=2) + "\n")
+    if "scrape" in out:
+        print(f"{'id':14} {'ok':3} {'http':4} {'page':4} {'secs':>6} {'md':>7} mark  error")
+        for r in out["scrape"]:
+            print(f"{r['id']:14} {'Y' if r['ok'] else 'n':3} {r['http']:<4} {str(r['page_status']):4} {r['secs']:6.1f} "
+                  f"{r['md_chars']:7} {r['markers']:5} {(r['error'] or '')[:60]}")
+        n = sum(r["ok"] for r in out["scrape"])
+        print(f"scrape: {n}/{len(out['scrape'])} ok, median {sorted(r['secs'] for r in out['scrape'])[len(out['scrape'])//2]:.1f} s")
+    for part in ("burst", "map", "crawl", "search"):
+        if part in out:
+            print(f"{part}: " + json.dumps({k: v for k, v in out[part].items() if k != "rows"}))
+    print(f"credits: {out['credits_before']} -> {out['credits_after']}")
+    print(f"results: {path}")
+
+
+if __name__ == "__main__":
+    main()
