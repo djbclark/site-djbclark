@@ -20,7 +20,7 @@
 
 Date: 2026-10-12 (updated the same evening with `qwen3.5:27b`; updated 2026-10-13 with the
 text-form tool-call problem and the client workarounds). Author: a SIPB LLMs user (djbclark), measurements run by an AI
-coding agent (Claude Code) through a local logging proxy. No credentials, prompts
+coding agent through a local logging proxy. No credentials, prompts
 or responses are included here.
 
 Server as observed: Open WebUI 0.6.30 in front of Ollama 0.32.13 at
