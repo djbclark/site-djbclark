@@ -112,3 +112,21 @@ and a second request for the same model queues behind it in the proxy (`queue_wa
    restart after `kill -9` both checked.
 4. opencode through the proxy: `opencode run --model sipb/qwen3.5:9b "Reply with exactly: OK"` printed `OK` and
    appears in the proxy log (2026-10-12).
+
+## Base-prompt measurement and trims (2026-10-14)
+
+Captured a real Crush request (fake local upstream on :8899, `crush run` in an empty dir, config copy with the
+base URL swapped): **39,877 chars, ~10k tokens, before any project `AGENTS.md`** (the aiuse sessions started
+at 16k with a 16.5 KB one). System prompt 23.9k chars (Crush's built-in template: critical_rules, editing_files,
+decision_making, workflow ...; not editable), 10 tool schemas 14.7k chars (`bash` alone 8.5k: its git/PR guidance).
+Trims, now 35,382 chars (-11%, about 1.1k tokens), 8 tools, no skills section:
+1. `permissions deny agent multiedit` (sub-agent and multiedit schemas, 1.4k chars).
+2. `option disable-skill crush-config`, `crush-hooks` (the builtin skills) and `forgejo-ci` (a new skill had
+   leaked into every request: the old lean profile disabled skills by name, so each new skill cost context).
+3. `~/.bashrc` `crush()` sets `CRUSH_SKILLS_DIR=~/.config/crush/skills-none` (an empty dir): no global skill is
+   listed, whatever is added later; the disable lines remain the fallback for launches that skip the wrapper
+   (Orca, herdr, bare binary). Skills load through `skill-get` and the `/` palette.
+Not trimmed (not ours or not safe): the built-in system template and the `bash` description (upstream text),
+the project's `AGENTS.md` (project-specific: keep it short in repos you run Crush in), CRUSH.md (7 rules, ~2.3k chars).
+Backups: `~/.bashrc.bak-2026-10-14`, `~/.config/crush/crushrc.bak2-2026-10-14`.
+
