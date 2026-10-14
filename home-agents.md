@@ -28,8 +28,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing matched, also when the
    glob is absolute**, 2026-10-11; FIND starting with `-`: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
-   for edits**. **GNU `g*` tools (brew) over BSD; install as needed**
-   (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
+   for edits**. **Always the GNU `g*` tools (brew); BSD only when needed; install
+   as needed** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.
