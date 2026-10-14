@@ -291,6 +291,8 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    **REPL turns backslash escapes into control characters** (`\b` became a
    backspace, 2026-10-10): REPL with `\` goes through Python with an assert).
    **`sd` is retired for edits** (exit 0 on no match; it lost an edit).
+   **Prefer brew GNU tools (`gsed`, `gawk`, `gfind`, `gtar`) over the macOS BSD ones; install
+   what is missing** (2026-10-14).
    `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq` (rtk compacts
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), never edit in

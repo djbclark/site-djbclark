@@ -24,11 +24,12 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 1. **Fast tools:** `rg` **always with a path** (2026-10-09), `fd`, `ast-grep`,
    `uv` not `pip`, **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11:
    `du`/`find` over `~/.cache` timed out; `dust` sizes it in seconds). **Literal
-   replace: `srgn -L --fail-none --stdin-detection force-unreadable
-   --glob RELPATH 'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing
-   matched, also when the glob is absolute**, 2026-10-11; FIND starting with
-   `-`: the Edit tool; **REPL with `\` goes through Python with an assert**,
-   2026-10-10); **`sd` is retired for edits**. (`memory/feedback_modern_cli_tools.md`)
+   replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH
+   'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing matched, also when the
+   glob is absolute**, 2026-10-11; FIND starting with `-`: the Edit tool; **REPL
+   with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
+   for edits**. **GNU `g*` tools (brew) over BSD; install as needed**
+   (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.
@@ -93,9 +94,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 18. `litellm`/`xai-oauth-bridge`: **change site-djbclark's Ansible role (`just
     litellm-apply-secrets`), never the live plist**. **Check `memory/` before
     "repairing" a stopped or `launchctl`-disabled service; a deliberate disable
-    looks like a fault and the override must not be cleared** (2026-10-11).
-    Carbon Copy Cloner backs up `~`
-    ([[reference_agent_rules_ops_housekeeping]]).
+    looks like a fault and the override must not be cleared** (2026-10-11). Carbon
+    Copy Cloner backs up `~` ([[reference_agent_rules_ops_housekeeping]]).
 19. Memory/docs policy has no canonical copy: read all three
     `${OPS_ROOT:-~/ops}/{stayturgid,site-djbclark,site-private}/AGENTS.md`.
 
