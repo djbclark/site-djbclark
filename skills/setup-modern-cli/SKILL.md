@@ -138,7 +138,8 @@ scheduled `brew-fast-upgrade` job owns updating.
 7. **BSD vs GNU flags are the trap, not age.** `sort -h`, `sed -i`, `date -d`,
    `readlink -f`, `grep -P`, `xargs -r` and `stat -c` differ or do not exist in
    macOS's BSD userland. Use the `g`-prefixed GNU tool (`gsort`, `gsed`,
-   `gdate`) or `uu-*`, and check it exists before relying on it.
+   `gdate`, `ggrep`) or a newer search tool (`rg`). Bare `grep` is BSD and
+   only when a BSD flag is required. Check the binary exists before relying on it.
 8. **Do not reach for `sed`/`awk` to transform structured data.** Named-field
    work (CSV/TSV/JSON) is `mlr`, `jq`, `yq`/`dasel` or `qsv`, and *aggregation*
    (group-by, join, count, window) over files is `duckdb` — it reads CSV, JSON
