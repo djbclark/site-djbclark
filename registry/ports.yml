@@ -129,6 +129,8 @@ hosts:
          note: "2026-10-12: com.djbclark.arxiv-mcp launchd (roles/shared_mcp). arxiv-mcp-server TRANSPORT=http, path /mcp"}
       - {port: 18802, bind: "127.0.0.1", owner: site, service: paper-search-mcp, status: active,
          note: "2026-10-12: com.djbclark.paper-search-mcp launchd (roles/shared_mcp). mcp-proxy -> paper-search-mcp (stdio only), path /mcp"}
+      - {port: 18804, bind: "127.0.0.1", owner: site, service: firecrawl-mcp, status: active,
+         note: "2026-10-14: com.djbclark.firecrawl-mcp launchd (roles/shared_mcp). firecrawl-mcp HTTP_STREAMABLE_SERVER, path /mcp, backend = self-hosted Firecrawl on Hyades (djbclark-firecrawl.sipb.cloud)"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same

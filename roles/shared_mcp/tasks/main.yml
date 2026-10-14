@@ -7,6 +7,14 @@
       - (shared_mcp_logpipe_kill_after | int) < (shared_mcp_exit_timeout | int)
     fail_msg: Shared MCP servers stay loopback-only on the managed macOS host, and kill_after must be below exit_timeout.
 
+# no_log hides fail_msg too, so the task name carries the fix.
+- name: Require FIRECRAWL_SELFHOST_API_KEY for the firecrawl server (run `just shared-mcp-apply-secrets`)
+  ansible.builtin.assert:
+    that:
+      - shared_mcp_firecrawl_api_key | length >= 32
+  when: shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list | length > 0
+  no_log: true
+
 - name: Locate each shared MCP server binary
   ansible.builtin.stat:
     path: "{{ item.argv[0] }}"
@@ -38,6 +46,8 @@
   loop: "{{ shared_mcp_servers }}"
   loop_control: {label: "{{ item.name }}"}
   register: _shared_mcp_plists
+  # The firecrawl plist holds the Hyades gate token; keep it out of --diff output.
+  diff: false
 
 - name: Probe shared MCP LaunchAgents
   ansible.builtin.command:

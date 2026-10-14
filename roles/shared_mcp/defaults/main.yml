@@ -81,3 +81,27 @@ shared_mcp_servers:
       - "{{ shared_mcp_bin_dir }}/paper-search-mcp"
     env:
       PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: "{{ shared_mcp_unpaywall_email }}"
+  # firecrawl (2026-10-14): the official firecrawl-mcp (npm, pinned:
+  # `npm i -g firecrawl-mcp@3.23.7`, lands in ~/.local/bin) in its own
+  # Streamable HTTP mode, pointed at OUR self-hosted Firecrawl on SIPB Hyades
+  # (six microVMs; djbclark-ade skills/hyades-docker/examples/firecrawl) instead
+  # of the commercial api.firecrawl.dev. Path /mcp. The Hyades gate wants a
+  # bearer token, which firecrawl-mcp sends as its API key: see
+  # shared_mcp_firecrawl_api_key below. Apply with `just shared-mcp-apply-secrets`.
+  - name: firecrawl
+    port: 18804
+    argv:
+      - "{{ shared_mcp_bin_dir }}/firecrawl-mcp"
+    env:
+      HTTP_STREAMABLE_SERVER: "true"
+      HOST: "{{ shared_mcp_bind }}"
+      PORT: "18804"
+      FIRECRAWL_API_URL: "{{ shared_mcp_firecrawl_api_url }}"
+      FIRECRAWL_API_KEY: "{{ shared_mcp_firecrawl_api_key }}"
+
+# The self-hosted Firecrawl and its gate token. The token is a real secret (the
+# gate is on the public internet): it comes from sudo-secretspec
+# (FIRECRAWL_SELFHOST_API_KEY) via `just shared-mcp-apply-secrets`, is rendered
+# only into the 0600 LaunchAgent, and tasks/main.yml fails closed without it.
+shared_mcp_firecrawl_api_url: "https://djbclark-firecrawl.sipb.cloud"
+shared_mcp_firecrawl_api_key: "{{ lookup('env', 'FIRECRAWL_SELFHOST_API_KEY') | default('', true) }}"
