@@ -26,7 +26,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    `du`/`find` over `~/.cache` timed out; `dust` sizes it in seconds). **Literal
    replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH
    'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing matched, also when the
-   glob is absolute**, 2026-10-11; FIND starting with `-`: the Edit tool; **REPL
+   glob is absolute**, 2026-10-11, **or the file is gitignored**, 2026-10-14; FIND starting with `-` or a
+   gitignored file: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Always the GNU `g*` tools (brew); BSD only when needed; install
    as needed** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
