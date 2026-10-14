@@ -44,11 +44,15 @@ key in plain text (mode 600).
 4. `~/.config/crush/CRUSH.md` (copy: `bench/rules.md`): seven short rules for small models
    (no todo tools, one write per file with a relative path, chain shell commands, act instead of
    describing, finish before stopping, `web-digest` before digging, skills on demand through
-   `skill-get` including the typed `/skill <name>` form). `web-digest` and `skill-get` are for
+   `skill-get`). `web-digest` and `skill-get` are for
    small-context models only.
 4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo`, and crushrc ends with
-   `permissions allow bash edit multiedit write view ls grep glob` so a launch that skips the
-   wrapper (Orca, herdr, zsh, bare `/opt/homebrew/bin/crush`) still does not prompt for them.
+   `permissions allow bash edit multiedit write view ls grep glob agent`, so a launch that skips the
+   wrapper (Orca, herdr, zsh, bare `/opt/homebrew/bin/crush`) does not prompt either. Verified in
+   the real TUI under tmux: with the line, `bash touch`, `view /etc/hosts`, a `write` outside the
+   project and `bash ls /` run silently; without it `bash` shows "Permission Required". A tool
+   missing from the list (a new upstream tool) would prompt: add it. `ctrl+y` toggles Yolo in the
+   TUI. Skills: press `/` (opens the palette), type `skill`, Enter, fill SKILL and TASK.
    Do NOT use `permissions yolo` in crushrc: it exists only in the `~/src/crush-acp` source fork;
    brew crush v0.98.1 aborts config load with `unknown subcommand "yolo"` (hit and reverted
    2026-10-14, which broke every launch for a minute).
