@@ -65,6 +65,12 @@ key in plain text (mode 600).
    Fix: `web-digest-mcp` (djbclark-ade `bin/`, stdlib stdio MCP server, one tool) registered in
    crushrc with `mcp add web --type stdio --command ~/.local/bin/web-digest-mcp`; the model now calls
    `mcp_web_web_search` (4 of 4 TUI trials, sidebar shows `web 1 tools`). Small-context models only.
+   Third failure (`[mcp_web_web_search(query="hyades.mit.edu")]` as text, wrong argument name) led to the
+   proxy fix: `sipb-llms-proxy` now converts that form, `<tool_use>NAME "arg"</tool_use>` and a bare
+   `web-digest "q"` reply into native calls for tools the request offered, and writes every converted,
+   unmatched or suspect message to `~/.local/state/sipb-llms-proxy/toolcall-capture.jsonl` (0600) so the
+   converter can be tuned. Details: `tools/sipb-llms-proxy/README.md`; prior art and the LLMLingua test:
+   `prior-art-small-context.md`.
 5. `acp-run crush -C <dir> -p '...' [--verify 'python3 -m unittest discover']` runs the PR #2450
    build `crush-acp` with `--yolo`. Run it without `--model`. The entry sets
    `CRUSH_GLOBAL_DATA=~/.local/share/crush-acp` because the shared data dir
