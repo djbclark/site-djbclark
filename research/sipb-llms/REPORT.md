@@ -34,7 +34,7 @@ at a time, models run serially so we never asked the server for two models at on
 
 1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
 2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `qwen3.5:27b` (dense) works but is slower (36 chunks/s): small task 4 of 4, 5-phase task 2 of 2 with the verify loop (541 and 572 s), 0 of 3 without it. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
-3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy. A fifth appeared on 2026-10-13: on some turns a model writes its tool call as **text** rather than a `tool_calls` delta and the agent then runs nothing (`deepseek-r1:32b` does this every time); see section 4.7 and the proxy workaround in section 5.
+3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy. A fifth appeared on 2026-10-13: on some turns a model writes its tool call as **text** rather than a `tool_calls` delta and the agent then runs nothing (`deepseek-r1:32b` does this every time); see section 4.7 and the proxy workaround in section 5. A sixth, under sustained load: streamed completions that end early with `unexpected EOF` and no `finish_reason` (section 4.8).
 4. **Test other models yourselves:** the whole harness is a skill you can run (install and use: section 9), [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
 
 **Server-side improvements, most to least useful** (hardware fixed). "Human" is hands-on admin time (reading, deciding, approving, checking), not time the AI works or the server spends downloading or restarting. "AI tokens" is the estimated total an AI assistant would spend doing the work. Both are our estimates, not measurements.
@@ -211,6 +211,23 @@ Requests:
    reliable tool-calling model is worth more to a coding agent than a larger menu.
 
 Client-side workarounds we shipped are in section 5 (items 5 and 6).
+
+4.8 **A streamed completion can end early under load (`unexpected EOF`).** (Observed
+2026-10-13.) During a spell of sustained testing — many consecutive requests, repeated
+model swaps, and the shared server also serving other users — a streamed completion
+sometimes stopped before it finished. The client saw exactly:
+
+    RequestError: Internal error {"error": "retry error: stream transport error: unexpected EOF"}
+
+In our proxy log the same request has `upstream_status: 200` but **no `finish_reason`**
+(the stream ended after partial output, before the final chunk), so the turn is lost with
+no error at the HTTP level. It struck two consecutive runs of one model (`qwq:32b`), which
+are counted as invalid rather than as model failures. It is load/robustness, the same
+family as 4.2 (a stream can end without a signal), not a per-model defect. Requests:
+(a) end every streamed response with a `finish_reason` (or an explicit SSE error event)
+rather than a bare EOF, so a truncation is distinguishable from a normal stop; (b) a
+`503` + `Retry-After` when a long generation is dropped under memory pressure, so clients
+back off instead of receiving a half answer; (c) the keep-alive guidance in 4.2/7.6.
 
 ## 5. What we changed on our side
 

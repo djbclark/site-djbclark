@@ -44,10 +44,13 @@ model add sipb-llms/qwen3.5:35b \
 #   --context-window 32768 \
 #   --default-max-tokens 8192
 
-model add sipb-llms/qwen3-coder:30b \
-  --name "Qwen3 Coder 30B" \
-  --context-window 32768 \
-  --default-max-tokens 8192
+# Only the default and the fallback are kept enabled (2026-10-13); qwen3-coder:30b
+# passed the battery (20/20) but is commented out to keep the picker short.
+#
+# model add sipb-llms/qwen3-coder:30b \
+#   --name "Qwen3 Coder 30B" \
+#   --context-window 32768 \
+#   --default-max-tokens 8192
 
 model add sipb-llms/qwen3.6:35b-a3b-q4_K_M \
   --name "Qwen3.6 35B A3B" \
@@ -55,8 +58,10 @@ model add sipb-llms/qwen3.6:35b-a3b-q4_K_M \
   --context-window 32768 \
   --default-max-tokens 8192
 
-# Default model 2026-10-12: qwen3.6:35b-a3b was the only one that finished the 5-phase task
-# (benchmark in ~/.local/state/bigteam/sipb-bench); qwen3.5:35b is the fallback.
+# Default model 2026-10-12: qwen3.6:35b-a3b was the only one that finished the 5-phase
+# task (benchmark in ~/.local/state/bigteam/sipb-bench); qwen3.5:35b is the fallback.
+# 2026-10-13: six models clear the essentials battery (bench.py essentials); qwen3.6
+# (20/20) stays the default, qwen3.5:35b (19/20) the fallback.
 model large sipb-llms/qwen3.6:35b-a3b-q4_K_M --think
 model small sipb-llms/qwen3.6:35b-a3b-q4_K_M
 
