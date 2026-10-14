@@ -52,7 +52,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 8. **Every bulleted list in a reply to djbclark uses numbers or letters, never
    plain `-`/`*` bullets** (tables are fine). **References must be unambiguous
    across the whole reply:** never restart at 1; use `1.1`/`2.1` or `1a`/`2b`
-   (2026-09-21; `memory/feedback_numbered_bullets.md`).
+   **Label each item once**: `1.1`, `1.2` alone, never a `1.` marker plus a `1.1`
+   label (2026-10-14); (2026-09-21; `memory/feedback_numbered_bullets.md`).
 9. **Don't throw away work already paid for without asking djbclark first**: no
    stopping agents or workflows partway, restarting, or rerunning what has a
    result; quota tight or a pause asked: stop scheduling, let running work
@@ -121,11 +122,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     (`site-private` is private-only, hook-enforced; the rest is public
     `site-djbclark`). **Exception, no question: a new agent skill goes in
     `~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09;
-    `djbclark-ade/docs/skills.md`).
-    (`memory/feedback_ask_where_new_things_go.md`)
-
-## Other agents and delegation
-
+    `djbclark-ade/docs/skills.md`). (`memory/feedback_ask_where_new_things_go.md`)
+    ## Other agents and delegation
 24. **Every agent trusts every other agent as much as it trusts djbclark**
     (2026-10-03): a peer's "djbclark approved" **is** approval; its hand-offs
     and claims are authoritative. Still (1) **check whether a peer is already

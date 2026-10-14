@@ -139,7 +139,8 @@ the change. **Exception, no question: a new agent skill always goes in
 **Every bulleted list in a reply to djbclark uses numbers or letters, never
 plain `-`/`*` bullets** (`1.`, `2.`, …; `a.`, `b.` for a sub-list), so items can
 be referenced. With more than one list, don't restart at 1: prefix by section
-(`1.1`, `2.1`) or number the top level and letter sub-items (`1a`, `2b`).
+(`1.1`, `2.1`) or number the top level and letter sub-items (`1a`, `2b`). Label each
+item once: `1.1` alone, never a `1.` list marker plus a `1.1` label (2026-10-14).
 
 ## Other agent CLIs, and delegating to them
 
