@@ -130,3 +130,25 @@ Not trimmed (not ours or not safe): the built-in system template and the `bash` 
 the project's `AGENTS.md` (project-specific: keep it short in repos you run Crush in), CRUSH.md (7 rules, ~2.3k chars).
 Backups: `~/.bashrc.bak-2026-10-14`, `~/.config/crush/crushrc.bak2-2026-10-14`.
 
+
+## Context files load twice, and the 32k window summarizes every turn (2026-10-14)
+
+Symptom (aiuse repo): `missing required parameter: pattern` from `grep`, the model wandering into unrelated
+files, then an endless loop of "The previous session was interrupted because it got too long, the initial user
+request was: `The previous session ...`" (each turn nests one more level).
+
+Cause, measured: Crush loads every default context path (`AGENTS.md`, `CLAUDE.md`, ...) and dedupes by
+lower-cased path name, not real path (`internal/agent/prompt/prompt.go` `loadContextFiles`). Every repo here has
+`CLAUDE.md -> AGENTS.md`, so the file is sent twice. Test (`crush run` in a temp dir, 10 KB `AGENTS.md`):
+45,367 chars / 16,762 tokens without the symlink, 55,639 chars / 19,906 tokens with it. aiuse (16.5 KB
+`AGENTS.md`): 72.9k chars, about 27k tokens, above Crush's auto-summarize trigger for a 32,768 window
+(`smallContextWindowRatio` 0.2: summarize when under 6,553 tokens remain, i.e. above ~26.2k used). So every
+turn is followed by a summarize call, whose output re-enters as the next "initial request". Default context
+paths are appended to, never replaced, so `context_paths` cannot exclude `CLAUDE.md`.
+
+Not proven: that the missing `pattern` argument comes from the full window (the failing calls were at 69-72k
+chars, but one call at 72.6k chars did carry `pattern`).
+
+Options: (a) upstream patch, dedupe context files by `filepath.EvalSymlinks`; (b) keep each project's
+`AGENTS.md` under ~6 KB where Crush runs; (c) `disable_auto_summarize` only hides the loop (the prompt still
+overflows).
