@@ -46,16 +46,22 @@ key in plain text (mode 600).
    describing, finish before stopping, `web-digest` before digging, skills on demand through
    `skill-get`). `web-digest` and `skill-get` are for
    small-context models only.
-4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo`, and crushrc ends with
-   `permissions allow bash edit multiedit write view ls grep glob agent`, so a launch that skips the
-   wrapper (Orca, herdr, zsh, bare `/opt/homebrew/bin/crush`) does not prompt either. Verified in
-   the real TUI under tmux: with the line, `bash touch`, `view /etc/hosts`, a `write` outside the
-   project and `bash ls /` run silently; without it `bash` shows "Permission Required". A tool
-   missing from the list (a new upstream tool) would prompt: add it. `ctrl+y` toggles Yolo in the
-   TUI. Skills: press `/` (opens the palette), type `skill`, Enter, fill SKILL and TASK.
-   Do NOT use `permissions yolo` in crushrc: it exists only in the `~/src/crush-acp` source fork;
-   brew crush v0.98.1 aborts config load with `unknown subcommand "yolo"` (hit and reverted
-   2026-10-14, which broke every launch for a minute).
+4a. No permission prompts (2026-10-14): `~/.bashrc`'s `crush()` adds `--yolo` to the stock Homebrew
+   Crush (v0.98.1; the fork is not used for the TUI), and crushrc ends with a `PreToolUse` hook:
+   `hook add PreToolUse --name auto-allow --command "echo '{\"decision\":\"allow\"}'"`. The hook
+   pre-approves every tool call (upstream `docs/hooks/README.md`), so bare launches (Orca, herdr, zsh)
+   and tools added upstream later do not prompt either. Verified in the real TUI under tmux: `bash`,
+   `view`, a `write` outside the project and the `agent` tool all ran silently ("Hook auto-allow -> OK"
+   in the transcript). `permissions allow <tool>` is NOT the way: it matches exact tool names only, so a
+   new tool prompts (the control run without the hook showed "Permission Required"). `ctrl+y` toggles
+   Yolo in the TUI. Skills: press `/` (opens the palette), type `skill`, Enter, fill SKILL and TASK.
+   Do NOT use `permissions yolo` in crushrc: it is a fork-only verb; brew crush v0.98.1 aborts config
+   load with `unknown subcommand "yolo"` (hit and reverted 2026-10-14).
+4b. `web-digest` shown as text (2026-10-14, session in ~/src/aiuse): once, Qwen answered a search request by
+   typing `web-digest "..."` as its reply instead of calling the bash tool, so nothing ran. Not
+   reproduced in 7 later single-turn and 3 two-turn TUI trials (all made the bash call); rule 6 of
+   `CRUSH.md` now says it is a shell command, not a tool, and to always make the bash call (4 of 4
+   trials after the change). If it recurs, reply `run it` or consider an MCP wrapper.
 5. `acp-run crush -C <dir> -p '...' [--verify 'python3 -m unittest discover']` runs the PR #2450
    build `crush-acp` with `--yolo`. Run it without `--model`. The entry sets
    `CRUSH_GLOBAL_DATA=~/.local/share/crush-acp` because the shared data dir

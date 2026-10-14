@@ -97,7 +97,7 @@ Public (GitHub, owner `djbclark`):
    "Crush over ACP" build recipe in
    [`docs/apply-toolchain-prompt.md`](https://github.com/djbclark/djbclark-ade/blob/master/docs/apply-toolchain-prompt.md).
 4. **crush** (fork of charmbracelet/crush): the `--yolo` work in
-   [PR #3909](https://github.com/charmbracelet/crush/pull/3909); the ACP server it runs on is the
+   [PR #3909](https://github.com/charmbracelet/crush/pull/3909) (withdrawn 2026-10-14; the interactive TUI is stock Homebrew Crush, only `crush-acp` for `acp-run` carries it); the ACP server it runs on is the
    unmerged upstream [PR #2450](https://github.com/charmbracelet/crush/pull/2450).
 
 Private (`site-private`, visible to the author only): `memory/basic-memory/hermes/sipb-llms-hermes-provider.md`
