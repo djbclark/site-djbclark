@@ -29,8 +29,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    glob is absolute**, 2026-10-11, **or the file is gitignored**, 2026-10-14; FIND starting with `-` or a
    gitignored file: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
-   for edits**. **Always the GNU `g*` tools (brew); BSD only when needed; install
-   as needed** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
+   for edits**. **GNU `g*` (brew), including `ggrep`; bare `grep` is BSD and only
+   when needed** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.
