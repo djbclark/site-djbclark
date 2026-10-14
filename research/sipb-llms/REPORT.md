@@ -34,7 +34,7 @@ at a time, models run serially so we never asked the server for two models at on
 
 1. Idle, the server is fast: a 10k-token prompt prefills in about 2 s (0.6 s repeat), decode 60-200 chunks/s, a model swap costs 7-19 s.
 2. A real tool-using coding agent works on it: `qwen3.6:35b-a3b` was best (small bug-fix task 24-67 s; 5-phase task 3 of 3 with a verify loop, 198-539 s). `qwen3.5:35b`, `qwen3-coder:30b` and `gemma4:26b` are usable. `qwen3.5:27b` (dense) works but is slower (36 chunks/s): small task 4 of 4, 5-phase task 2 of 2 with the verify loop (541 and 572 s), 0 of 3 without it. `gpt-oss:20b` (0 of 9) and `devstral:24b` (0 of 4) do not work.
-3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy. A fifth appeared on 2026-10-13: on some turns a model writes its tool call as **text** rather than a `tool_calls` delta and the agent then runs nothing (`deepseek-r1:32b` does this every time); see section 4.7 and the proxy workaround in section 5. A sixth, under sustained load: streamed completions that end early with `unexpected EOF` and no `finish_reason` (section 4.8).
+3. What hurt reliability: `qwen3.5:27b` has an effective context of about 16k tokens and silently truncates longer prompts, tool calls end with `finish_reason: "stop"`, silent 2+ minute queueing, two models with broken tool calls, and `null` bodies for over-long prompts. We worked around the first four in a local proxy. A fifth appeared on 2026-10-13: on some turns a model writes its tool call as **text** rather than a `tool_calls` delta and the agent then runs nothing (`deepseek-r1:32b` does this every time); see section 4.7 and the proxy workaround in section 5. A sixth: `qwq:32b` ends every agent-sized stream early with `unexpected EOF` and no `finish_reason`, while no other model does (section 4.8).
 4. **Test other models yourselves:** the whole harness is a skill you can run (install and use: section 9), [skills/sipb-llm-bench](https://github.com/djbclark/djbclark-ade/tree/master/skills/sipb-llm-bench) (probes, tool-call conformance check, two scored tasks, one model at a time), including the steps to update this report on a branch.
 
 **Server-side improvements, most to least useful** (hardware fixed). "Human" is hands-on admin time (reading, deciding, approving, checking), not time the AI works or the server spends downloading or restarting. "AI tokens" is the estimated total an AI assistant would spend doing the work. Both are our estimates, not measurements.
@@ -112,19 +112,24 @@ the model. Harness: `bench.py essentials` in the skill.
 
 | model | essentials | notes |
 | --- | --- | --- |
-| qwen3.6:35b-a3b-q4_K_M | 20/20 | default |
-| qwen3-coder:30b | 20/20 | |
-| qwq:32b | 20/20 | ~2x faster per task than qwen3.6 |
-| magistral:24b | 20/20 | ~2x faster per task than qwen3.6 |
-| exaone-deep:32b | 20/20 | |
-| gemma3:27b | 20/20 | |
-| qwen3.5:35b | 19/20 | fails "read a value and write it"; 2-5x slower per task |
+| qwen3.6:35b-a3b-q4_K_M | 20/20 | re-measured through `acp-run` (every row reports `providers: ["sipb-llms"]`) |
+| qwen3.5:35b | re-measuring | |
+| magistral:24b, exaone-deep:32b, gemma3:27b, qwq:32b | re-measuring | |
 
-Six of the seven models did every task, so this battery is a floor that many
-models clear; the choice between them comes from the harder tasks A and B above
-and from speed. We keep `qwen3.6:35b-a3b-q4_K_M` as the default — it clears the
-floor and is the model that finished task B. The others are usable for light
-work; `qwq:32b` and `magistral:24b` are the fastest.
+> **Correction (2026-10-13, same day).** An earlier version of this table listed six
+> models at 20/20 and `qwen3.5:35b` at 19/20. Those numbers are **withdrawn**: they
+> were produced through a harness (`crush run` with the model forced in its data
+> config) that silently ran on an **Anthropic** model instead of the SIPB model —
+> the project's own `crush.log` recorded `provider: anthropic`, and the requests
+> never reached the server. The battery is now run only through the benchmark's
+> `acp-run` path, which records the serving `provider`; results are included only
+> when every row reports `providers: ["sipb-llms"]`. The line above for the default
+> is from the corrected harness; the rest are being re-measured.
+
+Six of seven models cleared the floor in the invalid run, so the battery is a floor
+that many models clear; the choice between them comes from the harder tasks A and B
+above and from speed. We keep `qwen3.6:35b-a3b-q4_K_M` as the default — it clears the
+floor and is the model that finished task B.
 
 ## 4. Server-side problems and requests
 
@@ -212,22 +217,24 @@ Requests:
 
 Client-side workarounds we shipped are in section 5 (items 5 and 6).
 
-4.8 **A streamed completion can end early under load (`unexpected EOF`).** (Observed
-2026-10-13.) During a spell of sustained testing — many consecutive requests, repeated
-model swaps, and the shared server also serving other users — a streamed completion
-sometimes stopped before it finished. The client saw exactly:
+4.8 **`qwq:32b` streams end early (`unexpected EOF`); other models do not.** (2026-10-13.)
+Asked to run an agent task, `qwq:32b`'s streamed completions end without a `finish_reason`;
+the client reports exactly:
 
     RequestError: Internal error {"error": "retry error: stream transport error: unexpected EOF"}
 
-In our proxy log the same request has `upstream_status: 200` but **no `finish_reason`**
-(the stream ended after partial output, before the final chunk), so the turn is lost with
-no error at the HTTP level. It struck two consecutive runs of one model (`qwq:32b`), which
-are counted as invalid rather than as model failures. It is load/robustness, the same
-family as 4.2 (a stream can end without a signal), not a per-model defect. Requests:
-(a) end every streamed response with a `finish_reason` (or an explicit SSE error event)
-rather than a bare EOF, so a truncation is distinguishable from a normal stop; (b) a
-`503` + `Retry-After` when a long generation is dropped under memory pressure, so clients
-back off instead of receiving a half answer; (c) the keep-alive guidance in 4.2/7.6.
+In our proxy log every agent-sized `qwq:32b` stream (prompt > ~5k characters) ended with
+`upstream_status: 200` and **no** `finish_reason` — 18 of 18 — while every other model we
+send agent traffic to ended with a normal `finish_reason` (0 of ~640 across qwen3.6,
+qwen3.5, qwen3-coder and deepseek-r1). So this is **not** load or contention (the server
+is used only by us, per the admins) and not a general server fault: it is specific to
+`qwq:32b`. Short `qwq:32b` turns (under ~5k characters, e.g. a one-line prompt) complete,
+which is why it answers a question but cannot run a task.
+
+Request: check the `qwq:32b` template/serving path (a reasoning model may stream a very
+long reasoning channel that the stack truncates), and have the server end a stream with a
+`finish_reason` or an explicit SSE error rather than a bare EOF, so a truncation is
+distinguishable from a normal stop.
 
 ## 5. What we changed on our side
 
