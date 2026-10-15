@@ -296,8 +296,8 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    **REPL turns backslash escapes into control characters** (`\b` became a
    backspace, 2026-10-10): REPL with `\` goes through Python with an assert).
    **`sd` is retired for edits** (exit 0 on no match; it lost an edit).
-   **Always use the brew GNU tools (`gsed`, `gawk`, `gfind`, `gtar`, `ggrep`); bare `grep` is BSD,
-   only when a BSD flag is required** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`).
+   **Always use the brew GNU tools (`gsed`, `gawk`, `gfind`, `gtar`, `ggrep`); bare `grep`, `sed` and
+   `awk` are BSD, only when a BSD flag is required** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`).
    `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq` (rtk compacts
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`, on the `realpath`: a symlink gets clobbered, 2026-10-14), never edit in
