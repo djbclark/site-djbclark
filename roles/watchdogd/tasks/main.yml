@@ -120,3 +120,45 @@
     - not ansible_check_mode
     - _watchdogd_loaded.rc != 0 or _watchdogd_plist.changed
   tags: [watchdogd, watchdogd_launchd]
+
+# shutdown-thaw: the persistent sibling LaunchAgent (defaults: watchdogd_thaw_*).
+- name: Render shutdown-thaw LaunchAgent
+  ansible.builtin.template:
+    src: shutdown-thaw.plist.j2
+    dest: "{{ watchdogd_thaw_plist_path }}"
+    mode: "0644"
+  register: _watchdogd_thaw_plist
+  tags: [watchdogd, watchdogd_launchd]
+
+- name: Probe shutdown-thaw LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ watchdogd_uid }}/{{ watchdogd_thaw_label }}"]
+  register: _watchdogd_thaw_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [watchdogd, watchdogd_launchd]
+
+- name: Boot out changed shutdown-thaw LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ watchdogd_uid }}/{{ watchdogd_thaw_label }}"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _watchdogd_thaw_plist.changed
+    - _watchdogd_thaw_loaded.rc == 0
+  tags: [watchdogd, watchdogd_launchd]
+
+- name: Bootstrap shutdown-thaw LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ watchdogd_uid }}", "{{ watchdogd_thaw_plist_path }}"]
+  register: _watchdogd_thaw_bootstrap
+  changed_when: _watchdogd_thaw_bootstrap.rc == 0
+  failed_when: _watchdogd_thaw_bootstrap.rc != 0
+  until: _watchdogd_thaw_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - _watchdogd_thaw_loaded.rc != 0 or _watchdogd_thaw_plist.changed
+  tags: [watchdogd, watchdogd_launchd]

@@ -20,3 +20,4 @@ docs/plans/*
 # tool would put user-writable /opt/homebrew/bin on root's PATH (2026-10-15:
 # commit 5c01b93 did exactly that; reverted). Root scripts keep /usr/bin tools.
 macos/neofinder/neofinder-spotlight-index
+roles/watchdogd/files/auxkc_heal_root.sh

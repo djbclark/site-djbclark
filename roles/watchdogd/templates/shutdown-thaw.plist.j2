@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ watchdogd_thaw_label }}</string>
+  {#- Persistent: it must be alive when launchd starts a logout/restart/
+      shutdown and SIGTERMs the gui session, which is when it thaws the
+      SIGSTOPped daemons (bin/shutdown-thaw.sh header). #}
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>{{ watchdogd_thaw_script }}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Standard</string>
+  {#- Thaw, TERM, 3 s, KILL stragglers: well under this. #}
+  <key>ExitTimeOut</key><integer>10</integer>
+  <key>StandardOutPath</key><string>{{ watchdogd_logs_dir }}/shutdown-thaw.launchd.log</string>
+  <key>StandardErrorPath</key><string>{{ watchdogd_logs_dir }}/shutdown-thaw.launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{ watchdogd_home }}</string>
+    <key>PATH</key><string>{{ watchdogd_service_path }}</string>
+  </dict>
+</dict>
+</plist>

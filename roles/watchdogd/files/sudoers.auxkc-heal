@@ -1,0 +1,6 @@
+# Root half of the watchdogd "auxkc-heal" rule:
+# /usr/local/libexec/djbclark/auxkc_heal_root.sh (source:
+# roles/watchdogd/files/auxkc_heal_root.sh). Exactly this path, no
+# arguments, no environment. Install root:wheel 0440 as
+# /etc/sudoers.d/auxkc-heal (roles/watchdogd/README.md).
+djbclark ALL=(root) NOPASSWD: /usr/local/libexec/djbclark/auxkc_heal_root.sh

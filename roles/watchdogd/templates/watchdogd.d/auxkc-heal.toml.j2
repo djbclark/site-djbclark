@@ -1,0 +1,22 @@
+# Re-stage a kernel-extension (AuxKC) rebuild that an unclean restart lost.
+# 2026-10-15: on Apple silicon the rebuild the operator approves in Privacy &
+# Security is built by kcgend during the next *clean* restart; a shutdown
+# stall → hard reset, a power loss or a panic drops it and the "System
+# software from Apple Inc. was updated, restart" dialog returns. The probe
+# (bin/auxkc_heal.sh + root helper files/auxkc_heal_root.sh) re-arms the
+# kcgen boot from the already-approved staging and pings the operator once
+# per boot; the shutdown-thaw LaunchAgent makes the restart itself clean.
+name = "auxkc-heal"
+interval_s = 60
+
+[probe]
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/auxkc_heal.sh"]
+timeout_s = 60
+
+[policy]
+# The heal happens inside the probe. A "down" verdict means the root half is
+# missing or failing — alert, don't act.
+action = "alert"
+down_before_action = 2
+grace_s = 120

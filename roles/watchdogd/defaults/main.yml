@@ -68,6 +68,15 @@ watchdogd_services:
   - provider-health
   - apple-daemons
   - neofinder-batch
+  - auxkc-heal
+
+# shutdown-thaw: a second, persistent LaunchAgent next to the watchdog
+# (2026-10-15). It thaws the SIGSTOPped Apple daemons when a logout, restart
+# or shutdown starts, so the shutdown completes instead of stalling into a
+# hard reset (bin/shutdown-thaw.sh header; README).
+watchdogd_thaw_label: "com.{{ site_ns }}.shutdown-thaw"
+watchdogd_thaw_script: "{{ watchdogd_repo_bin }}/shutdown-thaw.sh"
+watchdogd_thaw_plist_path: "{{ watchdogd_plist_dir }}/{{ watchdogd_thaw_label }}.plist"
 
 # Labels and ports of the watched services (owned by other roles; repeated here
 # because a role's defaults are not visible to another role).

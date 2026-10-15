@@ -33,6 +33,8 @@ kickstart that exited 0 counted as success.
 | nothing (new, 2026-10-11) | beeper-10000 used to count as up in the funnel probe even at 502 (Beeper's local API off); djbclark: report it on its own, keep Beeper off | `funnel-beeper.toml` (`funnel_probe.sh beeper-10000`, strict: 5xx = down; alert only) |
 | Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
 | nothing (new, 2026-10-10) | freeze/kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) SIGSTOPs the gui-domain jobs and TERMs the rest every pass | `apple-daemons.toml` |
+| nothing (new, 2026-10-15) | every restart stalled: the `apple-daemons` SIGSTOPped daemons cannot act on launchd's SIGTERM (`shutdown_stall_*.shutdownStall` lists them "(suspended)"), the Mac hard-reset ~4 min later, and that dropped the staged kernel-extension rebuild, so the "System software from Apple Inc. was updated, restart" dialog looped | `com.djbclark.shutdown-thaw` LaunchAgent (`bin/shutdown-thaw.sh`, persistent): on launchd's SIGTERM it CONTs + TERMs every stopped process of the user, KILLs stragglers after 3 s |
+| nothing (new, 2026-10-15) | the same rebuild is also lost by a power loss or panic (on Apple silicon kcgend builds the AuxKC only during a clean restart; kernelmanagerd then logs "Kcgen roundtrip failed: found an instruction plist but not a checkpoint plist") | `auxkc-heal.toml` (`bin/auxkc_heal.sh` + root helper `files/auxkc_heal_root.sh`): re-arms the kcgen boot with `kmutil load -z` for the bundle ids already in the staged instructions, pings once per boot |
 | nothing (new, 2026-10-15) | NeoFinder batch volume after a restart or a missed nightly: a shutdown at 00:03 and a boot at 05:00 skipped the 01:15 Jobber run, left the image detached, and macOS re-created Spotlight stores on the real volumes; the probe checks attached + indexed, every other volume off, last nightly < 26 h, and the heal re-attaches + runs the root applier, or starts a catch-up nightly detached | `neofinder-batch.toml` + `macos/neofinder/neofinder-batch-watch` |
 
 ## `apple-daemons`: freeze-on-sight with a root helper
@@ -81,6 +83,43 @@ make the sudoers grant a root shell), and re-run both `install` lines after
 editing `files/apple_daemon_ban_root.sh`. Label lists live in three places
 that must stay in step: `macos/sip-doit-with-sudo.sh` (the flags),
 `bin/apple_daemon_ban.sh` (gui half) and the root helper (system half).
+
+## `shutdown-thaw` and `auxkc-heal`: unclean restarts (2026-10-15)
+
+Found when the kext "restart needed" dialog survived a restart: the frozen
+daemons stalled the shutdown, the hard reset lost the staged rebuild. Two
+pieces, both in this role:
+
+1. **`shutdown-thaw`** is a second LaunchAgent, `com.djbclark.shutdown-thaw`,
+   kept alive by launchd (the watchdog itself is a StartInterval job, alive a
+   few seconds per minute, so it cannot see a shutdown). launchd SIGTERMs
+   every gui job when a logout, restart or shutdown begins; the script's TERM
+   trap SIGCONTs and SIGTERMs every stopped process of the user, SIGKILLs any
+   still alive after 3 s, logs to `~/Library/Logs/watchdogd/shutdown-thaw.log`
+   and exits. Test without rebooting: `sleep 1000 & kill -STOP $!`, then
+   `launchctl kill TERM gui/$(id -u)/com.djbclark.shutdown-thaw`; the sleep
+   is gone and KeepAlive has restarted the agent.
+2. **`auxkc-heal`** covers the restarts nothing can make clean (power loss,
+   panic, a stall from some other cause). The probe `bin/auxkc_heal.sh` runs
+   every minute; when a kcgen instructions plist is staged but the kcgen boot
+   is not armed (`nvram one-time-boot-command`), the machine has been up
+   over 2 min and this boot was not yet checked, it calls the root helper,
+   which confirms with `bputil -d` that no AuxKC exists and re-runs
+   `kmutil load -z -b <id>` for the bundle ids in the staged instructions
+   (only kexts the operator already approved; `-z` skips the approval check
+   that OK answered). That re-arms the kcgen boot; the probe pings once per
+   boot that a clean restart is needed. Same root-helper pattern and the same
+   one-time manual install as `apple-daemons`:
+
+```bash
+sudo install -o root -g wheel -m 0755 \
+  ~/ops/site-djbclark/roles/watchdogd/files/auxkc_heal_root.sh \
+  /usr/local/libexec/djbclark/auxkc_heal_root.sh
+sudo install -o root -g wheel -m 0440 \
+  ~/ops/site-djbclark/roles/watchdogd/files/sudoers.auxkc-heal \
+  /etc/sudoers.d/auxkc-heal
+sudo visudo -cf /etc/sudoers.d/auxkc-heal
+```
 
 ## Rules every service gets (bin/watchdogd.py `decide`)
 
