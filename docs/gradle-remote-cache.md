@@ -6,26 +6,32 @@ disk cache and carries on.
 
 ## Pieces
 
-1. **Node.** Develocity Build Cache Node `gradle/build-cache-node:21.2` in rootful Podman on
-   vps-primary (`nixos/vps-primary/configuration.nix`: `virtualisation.oci-containers`,
+1. **Node.** [FosterStack cache](https://github.com/fosterstack/cache) (MIT, one Go binary,
+   distroless image) `ghcr.io/fosterstack/cache:0.2.2`, pinned by index digest, in rootful
+   Podman on vps-primary (`nixos/vps-primary/configuration.nix`: `virtualisation.oci-containers`,
    container `gradle-cache`, unit `podman-gradle-cache.service`). Runs as uid/gid 5071
-   (`gradle-cache`), `--cap-drop=ALL`, `no-new-privileges`, 2 GB memory limit. Data in
-   `/var/lib/gradle-build-cache` (cache 10 GiB default, least-recently-used eviction).
+   (`gradle-cache`), read-only root filesystem, `--cap-drop=ALL`, `no-new-privileges`, 1 GiB
+   memory limit. Data in `/var/lib/gradle-cache` (8 GiB cap, `FSCACHE_MAX_BYTES`,
+   least-recently-used eviction; 256 MiB per entry). Replaced the Develocity Build Cache Node
+   on 2026-10-15 (see "Node choice").
 2. **Reachability.** The published port is bound to the VPS's tailnet address only:
    `100.125.249.107:5071`. **Do not rely on `networking.firewall` for this:** a published
    Podman port is DNAT-ed and never reaches the NixOS INPUT rules, so a `tailscale0`
    firewall rule would restrict nothing (checked against the `oci-containers` option docs).
    The unit waits (up to 120 s) for the tailnet address before starting, so a reboot does
    not race `tailscaled`. Port 6011 (Bazel) is not published.
-3. **Access control.** Anonymous access off (`anonymousLevel: "none"`), one `readwrite` user
-   `mac`, UI disabled. A cache write is code injection into your builds (Android release
-   builds included) and the tailnet has another person's device on it, so there is no
-   anonymous push. The config is `/var/lib/gradle-build-cache/conf/config.yaml` on the VPS
-   (owner 5071, mode 0640). It holds a password hash, so it is **not** in the Nix config
-   (the store is world-readable) and is not tracked; its content is in "Rebuild the node
-   config" below.
+3. **Access control.** HTTP Basic auth, one read-write user `mac`, no anonymous access. A
+   cache write is code injection into your builds (Android release builds included) and the
+   tailnet has another person's device on it, so there is no anonymous push. The
+   credentials are `FSCACHE_USERNAME=mac` and `FSCACHE_PASSWORD=...` in
+   `/var/lib/gradle-cache.env` on the VPS (root, mode 0600, outside the data mount). It
+   holds the password, so it is **not** in the Nix config (the store is world-readable) and
+   is not tracked. **With those unset the server runs with auth off**, so the unit's
+   `ExecStartPre` refuses to start unless both lines are present. `/healthz` and `/metrics`
+   answer without auth (tailnet only).
 4. **Password.** sudo-secretspec name `GRADLE_BUILD_CACHE_PASSWORD` (optional, a runtime
-   declaration). The node enforces 8+ characters with a digit and a special character.
+   declaration). The env file is a plain `KEY=value` file, read by Podman literally: no
+   quotes, no `#` or newline in the password.
 5. **Client.** `gradle/init.d/global-remote-cache.init.gradle.kts`, linked into every Gradle
    home's `init.d` by `bin/gradle-limits link` (like `machine-slot.gradle`).
 
@@ -44,7 +50,7 @@ disk cache and carries on.
 Switches: `GRADLE_REMOTE_CACHE=off` (skip everything), `GRADLE_REMOTE_CACHE_URL=...`,
 `GRADLE_REMOTE_CACHE_PUSH=false` (read-only).
 
-## Tested 2026-10-13
+## Tested 2026-10-13 (Develocity node; the client side still holds)
 
 1. Server: anonymous GET/PUT 403; wrong password 403; correct password PUT 200 / GET 200;
    miss 404; `/ping` 200; UI 404; the public address does not answer on 5071.
@@ -65,53 +71,45 @@ Switches: `GRADLE_REMOTE_CACHE=off` (skip everything), `GRADLE_REMOTE_CACHE_URL=
    or 21 (`/opt/homebrew/opt/openjdk@21` is installed). Do not read that failure as a cache
    problem.
 
-## Deprecated: replace before 2026-12-31
+## Node choice (2026-10-15)
 
 Gradle's manual says the Build Cache Node "will no longer be distributed, supported or
-available after December 31, 2026" and recommends Develocity Edge, which appears to need
-Develocity (not confirmed). The image is pinned to `21.2` and stays usable once pulled, but
-it will get no fixes. Before the end of the year pick a successor: an nginx WebDAV
-endpoint handling `GET`/`PUT` (Gradle's HTTP cache contract is only that: 200/404 on GET,
-any 2xx on PUT, anything else disables the remote cache for the build) fits this host with
-no container. Keep the access model (no anonymous write, tailnet-only bind).
+available after December 31, 2026" and points to Develocity Edge, which needs a Develocity
+server. Gradle's HTTP cache contract is small (200/404 on GET, any 2xx on PUT, anything else
+disables the remote cache for the build), so any server speaking it fits. Considered: the
+`get` nginx WebDAV module (`~/src/get/nixos/gradle-cache.nix`, no third-party code but ours
+to maintain), FosterStack cache, chrisjenx/silo (Kotlin/JVM, quieter since July 2026),
+woggioni/rbcs (Java). djbclark chose a prebuilt image, FosterStack: smallest, env-only
+config, signed releases with GitHub build provenance. Caveat: a young project (started
+2026-08, few users), hence the digest pin, the provenance check and a source review before
+each upgrade. The Mac uses this cache, not `get-cache.sipb.cloud` (decided with the SIPB
+session, 2026-10-15), so hits are not split across two caches.
 
 ## Operations
 
-1. Status: `ssh vps-ts 'systemctl status podman-gradle-cache; podman logs gradle-cache | tail'`.
+1. Status: `ssh vps-ts 'systemctl status podman-gradle-cache; podman logs gradle-cache | tail'`;
+   liveness `curl -s http://100.125.249.107:5071/healthz` (prints `ok`).
    `fleet-watch vps` already alerts on a failed unit (`units-failed`).
 2. Restart: `ssh vps-ts systemctl restart podman-gradle-cache`.
-3. Clear the cache: stop the unit, delete `/var/lib/gradle-build-cache/system/cache`, start.
-4. Rotate the password: generate a compliant one (8+ chars, a digit, a special character),
-   `sudo-secretspec set GRADLE_BUILD_CACHE_PASSWORD --reason ...` over stdin, hash it with
-   `podman run --rm -i docker.io/gradle/build-cache-node:21.2 hash --password -` on the VPS
-   (password on stdin), put the result in `config.yaml`, restart the unit.
-5. Rebuild the node config (lost `config.yaml`): the node writes none until something
-   changes. Layout (schema 5), `users` is a map keyed by username:
-
-   ```yaml
-   version: 5
-   cache:
-     accessControl:
-       anonymousLevel: "none"
-       users:
-         mac:
-           password: "<salt:hash from the hash subcommand>"
-           level: "readwrite"
-   uiAccess:
-     type: "disabled"
-   ```
-
-6. Update the image: change the tag in `configuration.nix` deliberately (it is pinned, and
-   the node is deprecated), commit, then promote and apply it as in
+3. Clear the cache: stop the unit, delete the contents of `/var/lib/gradle-cache`, start.
+4. Set or rotate the password: `sudo-secretspec set GRADLE_BUILD_CACHE_PASSWORD --reason ...`
+   over stdin, then write `/var/lib/gradle-cache.env` on the VPS (mode 0600, root) with the
+   two lines `FSCACHE_USERNAME=mac` and `FSCACHE_PASSWORD=<it>`, piping the password over
+   ssh stdin so it never appears in a command line, and restart the unit.
+5. Upgrade the image: pick the release, then on the Mac
+   `crane digest ghcr.io/fosterstack/cache:<ver>` and
+   `gh attestation verify oci://ghcr.io/fosterstack/cache@<digest> --repo fosterstack/cache
+   --signer-workflow fosterstack/cache/.github/workflows/stage-image.yml --source-ref
+   refs/tags/v<ver>` (must print a verified result naming that tag); read the release's
+   changes for anything touching auth, storage or network. Put the digest in
+   `configuration.nix`, commit, then promote and apply it as in
    [nixos-in-git.md](nixos-in-git.md) (`git push origin master:deploy-vps-primary`, then
    `systemctl start nixos-upgrade` on the VPS).
 
 ## Pitfalls met
 
-1. First `hash` attempt failed with "Password must be at least 8 characters long and contain
-   at least 1 number and 1 special character": an alphanumeric-only password is rejected.
-2. The node logs its generated UI username and password at first start (UI access defaults
-   to "generated"); `journalctl -u podman-gradle-cache` prints them. The UI is now disabled.
-3. A build's time includes waiting for the machine-wide Gradle slot
+1. Develocity node era (gone): it required 8+ character passwords with a digit and a special
+   character, and logged a generated UI password at first start.
+2. A build's time includes waiting for the machine-wide Gradle slot
    (`machine-slot.gradle`); a 7 min "build" was 467 s of queueing behind another build, not
    the cache.

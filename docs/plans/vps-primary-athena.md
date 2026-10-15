@@ -29,7 +29,10 @@ are about the machine, not about Hyades.
    password is locked; see `vps-primary-nixos-transition.md`).
 7. **Remote terminals:** mosh and et, both on the tailnet interface only.
 8. **Gradle cache:** replace the Develocity Build Cache Node (unsupported after
-   2026-12-31) with `get`'s nginx WebDAV module, tailnet-only. One cold cache.
+   2026-12-31), tailnet-only, one cold cache. Was `get`'s nginx WebDAV module;
+   changed 2026-10-15 by djbclark to the prebuilt FosterStack cache image
+   (`docs/gradle-remote-cache.md`, "Node choice"). The Mac uses this cache, not
+   `get-cache.sipb.cloud`.
 9. **Nix binary cache for nixathena:** not now; revisit if `get`'s CI build
    times say so.
 
@@ -69,10 +72,12 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 
 ### Phase D: services
 
-1. Gradle cache: nginx WebDAV module, data under `/var/lib/gradle-cache`, basic
-   auth file created by hand on the host (never in the store), bound to the
-   tailnet address; remove the podman container and its user once clients use
-   the new URL.
+1. Gradle cache: the podman container switches image to
+   `ghcr.io/fosterstack/cache` (digest-pinned, provenance-checked), data under
+   `/var/lib/gradle-cache`, credentials in a root-only env file created by hand
+   on the host (never in the store), same tailnet bind and port 5071 so the Mac
+   needs no change; remove `/var/lib/gradle-build-cache` once a cache hit is
+   verified.
 2. restic to `defeat` for `/var/lib` and `/home` (secrets on the host only).
    **Prerequisite: `defeat` is not on the tailnet yet** (also blocks `get`'s
    backup; `get` runbook 5.2).
@@ -123,3 +128,7 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    the host applies it at its nightly run. nixathena is tracked by the weekly
    bump on purpose (djbclark, 2026-10-15). `djbclark` keeps passwordless sudo
    (djbclark, 2026-10-15).
+8. Phase D Gradle cache (branch `vps-primary-athena`, c807614) checked 2026-10-15 on the
+   host with eval plus `nix build --dry-run`: evaluates; the unit's `podman run` carries
+   the env file, `--read-only`, the tailnet bind `100.125.249.107:5071:8080` and the
+   digest pin; the credentials guard runs before the tailnet wait.
