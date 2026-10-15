@@ -6,6 +6,7 @@
 #                        missing, expired or past its renewable life, get a new
 #                        one from the Keychain password (no prompt); then push
 #   athena-kinit push    copy the TGT to the open athena-master connection
+#                        and to vps-primary
 #   athena-kinit status  klist
 # Principal: $ATHENA_PRINCIPAL, default <login>@ATHENA.MIT.EDU.
 export PATH="/opt/homebrew/bin:$PATH"
@@ -65,15 +66,46 @@ push_to_athena() {
   return "$rc"
 }
 
+# vps-primary (site-djbclark nixos/modules/athena-afs.nix) takes the TGT over the
+# tailnet with a key whose authorized_keys entry can only run athena-tgt-receive,
+# which installs it and runs aklog. No key file: not set up here, skip quietly.
+vps_key="$HOME/.ssh/athena_tgt_push"
+vps_host="djbclark@100.125.249.107"
+push_to_vps() {
+  [ -r "$vps_key" ] || return 0
+  local cc t rc
+  cc=$(klist 2>/dev/null | gsed -n 's/^Credentials cache: //p')
+  t=$(umask 077; gmktemp "${TMPDIR:-/tmp}/athena-tgt.XXXXXX") || return 1
+  rm -f "$t"
+  if (umask 077; kcc copy_cred_cache --krbtgt-only "$cc" "FILE:$t"); then
+    ssh -F /dev/null -i "$vps_key" -o IdentitiesOnly=yes -o IdentityAgent=none \
+      -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes \
+      -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$vps_host" < "$t" >/dev/null
+    rc=$?
+  else
+    rc=1
+  fi
+  rm -f "$t"
+  [ "$rc" = 0 ] && log "pushed TGT to vps-primary" || log "push to vps-primary failed (rc=$rc)"
+  return "$rc"
+}
+
+push_all() {
+  local rc=0
+  push_to_athena || rc=1
+  push_to_vps || rc=1
+  return "$rc"
+}
+
 renew() {
   if ! kdc_reachable; then
     log "KDC unreachable, skipping"; return 0
   fi
   if have_tgt && kinit -R 2>/dev/null; then
-    log "renewed"; rm -f "$failed_flag"; push_to_athena || true; return 0
+    log "renewed"; rm -f "$failed_flag"; push_all || true; return 0
   fi
   if from_keychain; then
-    log "new ticket from Keychain"; rm -f "$failed_flag"; push_to_athena || true; return 0
+    log "new ticket from Keychain"; rm -f "$failed_flag"; push_all || true; return 0
   fi
   log "FAILED: no ticket; run: athena-kinit init"
   # One notice per outage, not one per hourly run.
@@ -87,7 +119,7 @@ renew() {
 case "${1:-renew}" in
   init) init ;;
   renew) renew ;;
-  push) push_to_athena ;;
+  push) push_all ;;
   status) klist ;;
   *) echo "usage: athena-kinit [init|renew|push|status]" >&2; exit 2 ;;
 esac

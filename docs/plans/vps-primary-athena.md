@@ -98,3 +98,13 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    login (`~/.ssh/id_ed25519` is passphrase-protected and not in an agent).
 5. `security.sudo.wheelNeedsPassword = false` for `djbclark`: no local password
    exists, and root is already reachable with a key.
+6. **Phase B deployed 2026-10-15** (63fc0b8): OpenAFS 1.8.16.1 loaded without a
+   reboot, `/afs/athena.mit.edu` mounted, 2.9 GiB cache. The Mac's `athena-kinit`
+   pushes the TGT hourly with `~/.ssh/athena_tgt_push`, whose authorized_keys entry
+   is `restrict`, `from=` the Mac's tailnet address and forced to
+   `athena-tgt-receive`; tickets live in `FILE:/var/lib/krb5cc/<uid>/tgt` (nixathena's
+   keyring default is overridden). Verified: renewable TGT, rxkad tokens,
+   `~/Private` readable, `athena-tgt-renew` (every 4 h) succeeds.
+7. Seen during phase B: root logs in over the **public** address
+   (137.83.218.121) with the automation key, alongside the tailnet logins. Find
+   that client before phase C closes port 22 publicly.
