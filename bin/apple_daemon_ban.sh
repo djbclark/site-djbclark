@@ -94,6 +94,7 @@ FREEZE_LABELS=(
   "com.apple.spotlightknowledged"
   "com.apple.spotlightknowledged.updater"
   "com.apple.spotlightknowledged.importer"
+  "com.apple.siriactionsd"   # Shortcuts/App Intents backend; long-lived, respawns on kill (2026-10-15)
 )
 TERM_LABELS=(
   "com.apple.triald"

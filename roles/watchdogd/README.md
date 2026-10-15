@@ -46,6 +46,8 @@ undeliverable to a stopped process; the KILL escalation destroyed App
 Tamer's freezes and forced respawns). A frozen job burns no CPU and never
 exits, so launchd never respawns it — the only burn window is the ≤60 s
 after login/boot, and `--revert` in the sip script CONTs what it froze.
+siriactionsd (the Shortcuts / App Intents backend) joined the frozen set
+2026-10-15; App Tamer had been stopping it with no visible side effect.
 triald/helpd/sirittsd (short one-shots) and the system-domain half (cloudd, triald.system, spindump,
 tailspind run as root; modelmanagerd and modelcatalogd are flag-only, never killed) are TERMed. The five Apple Intelligence daemons (generativeexperiencesd,
 intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are flag-only:

@@ -82,6 +82,12 @@
 #     triald + triald.system = no Apple experiment-treatment updates;
 #     sirittsd (Siri text-to-speech agent, added 2026-10-12) = no Siri voices
 #     for Spoken Content/VoiceOver; it idle-exits on its own, so it is TERMed.
+#     siriactionsd (Shortcuts / App Intents backend, VoiceShortcuts.framework;
+#     added 2026-10-15) = no Shortcuts automations, App Shortcuts or Spotlight
+#     actions. It is long-lived (launched by an XPC event at login, never
+#     exits, re-triggered by every LaunchServices app-state notification), so
+#     it is frozen, not TERMed: App Tamer had been SIGSTOPping it with no
+#     visible side effect, and a kill would just respawn it.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
@@ -159,6 +165,7 @@ GUI_DAEMONS=(
   "com.apple.triald"
   "com.apple.helpd"
   "com.apple.sirittsd"
+  "com.apple.siriactionsd"
   "com.apple.generativeexperiencesd"
   "com.apple.intelligencecontextd"
   "com.apple.intelligenceflowd"
