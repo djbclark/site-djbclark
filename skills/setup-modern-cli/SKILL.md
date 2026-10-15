@@ -140,6 +140,8 @@ scheduled `brew-fast-upgrade` job owns updating.
    macOS's BSD userland. Use the `g`-prefixed GNU tool (`gsort`, `gsed`,
    `gdate`, `ggrep`) or a newer search tool (`rg`). Bare `grep` is BSD and
    only when a BSD flag is required. Check the binary exists before relying on it.
+   On this Mac always run `gsed`, never bare `sed`, unless BSD sed is
+   specifically required (2026-10-15: a BSD `sed -i` broke an edit).
 8. **Do not reach for `sed`/`awk` to transform structured data.** Named-field
    work (CSV/TSV/JSON) is `mlr`, `jq`, `yq`/`dasel` or `qsv`, and *aggregation*
    (group-by, join, count, window) over files is `duckdb` — it reads CSV, JSON

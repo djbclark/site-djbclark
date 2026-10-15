@@ -109,7 +109,9 @@ On macOS the real problem is **BSD vs GNU flags**, not old vs new: `sort -h`,
 Rule: prefer the single-purpose tool (`rg`, `fd`, `bat`, `srgn`, `mlr`, `jq`) for
 the job in front of you; reach for `g`-prefixed GNU or `uu-` when a script needs
 portability or a flag BSD lacks. Never write a GNU-only flag without the prefix,
-and never assume the BSD form either — check `command -v gsort` first.
+and never assume the BSD form either — check `command -v gsort` first. On
+this Mac `sed` is always `gsed` (`gsed -i`, not `sed -i ''`) unless BSD sed is
+specifically required (2026-10-15); code that runs off the Mac keeps bare `sed`.
 
 ## B. Human-interactive: install for yourself, never call from an agent
 
