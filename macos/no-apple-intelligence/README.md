@@ -24,6 +24,7 @@ Deliberately not touched: Xcode code completion, Photos Clean Up, Spatial Photos
 inline text predictions.
 
 Install: `open no-apple-intelligence.mobileconfig`, then approve it in System
-Settings > Privacy & Security > Profiles. Check: `profiles list` shows
-`com.djbclark.no-apple-intelligence`. Remove: delete it in the same pane; that
+Settings > Privacy & Security > Profiles. Check: `sudo profiles list` shows
+`com.djbclark.no-apple-intelligence` (it installs at computer level; the
+user-level `profiles list` does not show it, verified 2026-10-15). Remove: delete it in the same pane; that
 undoes everything.
