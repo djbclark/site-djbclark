@@ -181,12 +181,13 @@ shared_mcp_hosts := env_var_or_default("SHARED_MCP_HOSTS", "mac")
 
 # One shared crawl4ai / arxiv / paper-search / firecrawl MCP server each
 # (roles/shared_mcp). firecrawl needs FIRECRAWL_SELFHOST_API_KEY (the Hyades
-# gate token), so apply and check through the -secrets / secretspec wrappers.
+# gate token) and, for its commercial fallback, FIRECRAWL_API_KEY, so apply
+# and check through the -secrets / secretspec wrappers.
 shared-mcp-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}
 
 shared-mcp-apply-secrets *args:
-    sudo-secretspec run --reason "apply shared MCP servers (firecrawl gate token)" -- just shared-mcp-apply {{ args }}
+    sudo-secretspec run --reason "apply shared MCP servers (firecrawl gate token and fallback key)" -- just shared-mcp-apply {{ args }}
 
 shared-mcp-check *args:
     sudo-secretspec run --reason "check shared MCP apply (dry run)" -- env ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}

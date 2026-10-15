@@ -85,19 +85,27 @@ shared_mcp_servers:
   # `npm i -g firecrawl-mcp@3.23.7`, lands in ~/.local/bin) in its own
   # Streamable HTTP mode, pointed at OUR self-hosted Firecrawl on SIPB Hyades
   # (six microVMs; djbclark-ade skills/hyades-docker/examples/firecrawl) instead
-  # of the commercial api.firecrawl.dev. Path /mcp. The Hyades gate wants a
-  # bearer token, which firecrawl-mcp sends as its API key: see
-  # shared_mcp_firecrawl_api_key below. Apply with `just shared-mcp-apply-secrets`.
+  # of the commercial api.firecrawl.dev. Path /mcp. firecrawl-router
+  # (djbclark-ade bin/, symlinked into ~/.local/bin; 2026-10-14) runs
+  # firecrawl-mcp as its child on an ephemeral loopback port with a per-process
+  # token, sends each request to the self-hosted instance and retries it on the
+  # commercial API when self-hosted fails (5xx, unreachable, bot wall, empty
+  # map or search). Report: djbclark-ade
+  # docs/firecrawl-commercial-vs-selfhosted-2026-10-14.md. Both keys come from
+  # sudo-secretspec via `just shared-mcp-apply-secrets`.
   - name: firecrawl
     port: 18804
     argv:
+      - "{{ shared_mcp_bin_dir }}/firecrawl-router"
+      - --
       - "{{ shared_mcp_bin_dir }}/firecrawl-mcp"
     env:
       HTTP_STREAMABLE_SERVER: "true"
       HOST: "{{ shared_mcp_bind }}"
       PORT: "18804"
-      FIRECRAWL_API_URL: "{{ shared_mcp_firecrawl_api_url }}"
-      FIRECRAWL_API_KEY: "{{ shared_mcp_firecrawl_api_key }}"
+      FIRECRAWL_SELFHOST_URL: "{{ shared_mcp_firecrawl_api_url }}"
+      FIRECRAWL_SELFHOST_API_KEY: "{{ shared_mcp_firecrawl_api_key }}"
+      FIRECRAWL_API_KEY: "{{ shared_mcp_firecrawl_fallback_api_key }}"
 
 # The self-hosted Firecrawl and its gate token. The token is a real secret (the
 # gate is on the public internet): it comes from sudo-secretspec
@@ -105,3 +113,6 @@ shared_mcp_servers:
 # only into the 0600 LaunchAgent, and tasks/main.yml fails closed without it.
 shared_mcp_firecrawl_api_url: "https://djbclark-firecrawl.sipb.cloud"
 shared_mcp_firecrawl_api_key: "{{ lookup('env', 'FIRECRAWL_SELFHOST_API_KEY') | default('', true) }}"
+# The commercial key (sudo-secretspec FIRECRAWL_API_KEY) for the router's
+# fallback; empty turns the fallback off.
+shared_mcp_firecrawl_fallback_api_key: "{{ lookup('env', 'FIRECRAWL_API_KEY') | default('', true) }}"
