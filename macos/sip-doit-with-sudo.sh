@@ -117,7 +117,8 @@
 #     to completion (2026-10-15: 8.5 min of CPU on visualintelligenced's model
 #     after the freeze; the owner shows in `sudo lsof -p <pid>` as a
 #     ...e5bundlecache/.../*.tmp.<client pid>_*.bundle path). Killing that
-#     pid is harmless: aned returns an error to a client that is frozen anyway.
+#     pid is harmless (it ignores TERM, use KILL): aned returns an error to a
+#     client that is frozen anyway, and nothing re-requested the compile.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
