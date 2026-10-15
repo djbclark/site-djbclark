@@ -54,15 +54,18 @@
     openFirewall = true;
   };
 
-  # Shared Gradle remote build cache (2026-10-13): Develocity Build Cache Node,
-  # pinned. Gradle deprecated it ("no longer distributed, supported or available
-  # after 2026-12-31"; the replacement, Develocity Edge, needs Develocity), so the
-  # image is pinned and a replacement is due by then. Reachable only on the tailnet:
-  # a published Podman port is DNAT-ed and bypasses networking.firewall, so a
-  # tailscale0 firewall rule would restrict nothing; the bind address does. Access
-  # control lives in /var/lib/gradle-build-cache/conf/config.yaml (anonymous none,
-  # one readwrite user, UI off); that file holds a password hash, so it is not
-  # managed here (the Nix store is world-readable).
+  # Shared Gradle remote build cache: FosterStack cache (github.com/fosterstack/cache,
+  # MIT, Go), replacing the Develocity Build Cache Node on 2026-10-15 (Gradle ends
+  # that node after 2026-12-31; its successor, Develocity Edge, needs Develocity).
+  # The image is pinned by index digest, v0.2.2; its build provenance was checked
+  # with `gh attestation verify` (docs/gradle-remote-cache.md, "Upgrade the node").
+  # Reachable only on the tailnet: a published Podman port is DNAT-ed and bypasses
+  # networking.firewall, so a tailscale0 firewall rule would restrict nothing; the
+  # bind address does. Host port stays 5071, so the Mac's init script is unchanged.
+  # Credentials (FSCACHE_USERNAME/FSCACHE_PASSWORD, one read-write user `mac`) come
+  # from a root-only env file created by hand, never the Nix store (world-readable).
+  # Without them the server would start with auth OFF, which would make the cache an
+  # anonymous code-injection point, so the unit refuses to start unless both are set.
   users.groups.gradle-cache.gid = 5071;
   users.users.gradle-cache = {
     isSystemUser = true;
@@ -70,20 +73,28 @@
     group = "gradle-cache";
   };
   systemd.tmpfiles.rules = [
-    "d /var/lib/gradle-build-cache 0750 gradle-cache gradle-cache -"
+    "d /var/lib/gradle-cache 0750 gradle-cache gradle-cache -"
   ];
 
   virtualisation.podman.enable = true;
   virtualisation.oci-containers = {
     backend = "podman";
     containers.gradle-cache = {
-      image = "gradle/build-cache-node:21.2";
-      cmd = [ "start" ];
+      # ghcr.io/fosterstack/cache:0.2.2
+      image = "ghcr.io/fosterstack/cache@sha256:f2b330cf27b3814405230cc001a771909ae5bbf3b1e223a90ee7a9ee5d0e53dd";
       user = "5071:5071";
-      ports = [ "100.125.249.107:5071:5071" ];
-      volumes = [ "/var/lib/gradle-build-cache:/data" ];
+      ports = [ "100.125.249.107:5071:8080" ];
+      volumes = [ "/var/lib/gradle-cache:/data" ];
+      environment = {
+        FSCACHE_ADDR = ":8080";
+        FSCACHE_DATA_DIR = "/data";
+        FSCACHE_MAX_BYTES = toString (8 * 1024 * 1024 * 1024);
+        FSCACHE_MAX_BODY_BYTES = toString (256 * 1024 * 1024);
+      };
+      environmentFiles = [ "/var/lib/gradle-cache.env" ];
       extraOptions = [
-        "--memory=2g"
+        "--memory=1g"
+        "--read-only"
         "--cap-drop=ALL"
         "--security-opt=no-new-privileges"
       ];
@@ -95,6 +106,7 @@
     wants = [ "tailscaled.service" ];
     serviceConfig = {
       ExecStartPre = [
+        "${pkgs.bash}/bin/sh -c '${pkgs.gnugrep}/bin/grep -q \"^FSCACHE_USERNAME=.\" /var/lib/gradle-cache.env && ${pkgs.gnugrep}/bin/grep -q \"^FSCACHE_PASSWORD=.\" /var/lib/gradle-cache.env || { echo \"gradle-cache: /var/lib/gradle-cache.env lacks FSCACHE_USERNAME/FSCACHE_PASSWORD; refusing to start with auth off\" >&2; exit 1; }'"
         "${pkgs.coreutils}/bin/timeout 120 ${pkgs.bash}/bin/sh -c 'until ${pkgs.tailscale}/bin/tailscale ip -4 | ${pkgs.gnugrep}/bin/grep -qx 100.125.249.107; do sleep 1; done'"
       ];
       RestartSec = "10s";
