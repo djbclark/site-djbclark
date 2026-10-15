@@ -1,0 +1,142 @@
+#!/bin/bash
+#
+# neofinder-batch-watch — keep the NeoFinder batch volume searchable across
+# restarts and downtime (watchdogd rule "neofinder-batch", roles/watchdogd).
+#
+# 2026-10-15: the Mac was shut down at 00:03 and booted at 05:00. The 01:15
+# nightly never ran (Jobber does not catch up a missed run), nothing
+# re-attached the image, and at boot macOS created fresh Spotlight stores on
+# Data and mac256usb and started indexing them. The nightly design had no
+# step that reacts to a boot or to a run cut off part way; this script is
+# that step, run from the watchdog's passes.
+#
+#   probe   exit 0 healthy, or a nightly / catch-up is running right now;
+#           1 something to heal; 75 not set up on this Mac (no image or no
+#           root applier: skip). One stdout line = the watchdogd detail.
+#   heal    the action. A missed nightly starts `nightly --index` detached
+#           (compact, retag, stub dates, index on; ~12 min, bounded by
+#           CATCHUP_TIMEOUT_S). Otherwise it attaches the image if needed
+#           and runs the root applier `on` (every other volume off). Never
+#           starts a second nightly while one runs.
+#
+# Healthy means: the image is attached at $MOUNT and indexed, no other
+# volume has indexing enabled, and the last nightly finished less than
+# MAX_NIGHTLY_AGE_S ago (26 h: one missed 01:15 run). Every nightly step is
+# idempotent, so a catch-up after an interruption at any stage is safe.
+# Actions are logged to ~/Library/Logs/watchdogd/neofinder-batch.log, the
+# catch-up's own output to neofinder-batch-catchup.log beside it.
+
+export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+set -u
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+EXPORTER="$HERE/neofinder-stub-export.py"
+PYTHON=/opt/homebrew/bin/python3.12     # has PyObjC, same as the Jobber job
+APPLIER=/usr/local/libexec/neofinder-spotlight-index
+MOUNT=/Volumes/NeoFinderBatch
+IMAGE=${NEOFINDER_IMAGE:-$HOME/nfbatch.sparseimage}
+SUBLOG=$HOME/Library/Logs/neofinder-stub-export/subcommands.log
+LOG_DIR=$HOME/Library/Logs/watchdogd
+LOG=$LOG_DIR/neofinder-batch.log
+MAX_NIGHTLY_AGE_S=${MAX_NIGHTLY_AGE_S:-93600}
+CATCHUP_TIMEOUT_S=${CATCHUP_TIMEOUT_S:-7200}
+# Jobber's job and our catch-up share this command line; one check sees both.
+NIGHTLY_PATTERN='neofinder-stub-export.py nightly'
+
+log() { mkdir -p "$LOG_DIR"; printf '%s %s\n' "$(gdate -Is)" "$*" >> "$LOG"; }
+
+nightly_pid() { pgrep -f "$NIGHTLY_PATTERN" 2>/dev/null | ghead -n 1; }
+
+attached() { mount | ggrep -q " on $MOUNT "; }
+
+# Seconds since the last completed nightly (its closing "nightly: retag=" line),
+# empty when there is none on record.
+last_nightly_age() {
+  local line ts
+  line=$(ggrep 'nightly: retag=' "$SUBLOG" 2>/dev/null | gtail -n 1) || return 0
+  ts=${line%% *}
+  [ -n "$ts" ] || return 0
+  echo $(( $(gdate +%s) - $(gdate -d "$ts" +%s) ))
+}
+
+# Volumes other than $MOUNT that report "Indexing enabled", space separated.
+other_indexing() {
+  mdutil -s -a 2>/dev/null | gawk -v m="$MOUNT:" '
+    /^\// { vol = $0; next }
+    /Indexing enabled/ && vol != m { sub(/:$/, "", vol); printf "%s%s", sep, vol; sep = " " }'
+}
+
+setup_or_skip() {
+  if [ ! -e "$IMAGE" ] || [ ! -x "$APPLIER" ]; then
+    echo "skip: not set up (image $IMAGE, applier $APPLIER)"
+    exit 75
+  fi
+}
+
+probe() {
+  setup_or_skip
+  local pid age others st bad=""
+  pid=$(nightly_pid)
+  if [ -n "$pid" ]; then
+    echo "nightly running (pid $pid)"
+    exit 0
+  fi
+  if attached; then
+    st=$(sudo -n "$APPLIER" status 2>&1 | gtr -d '\n')
+    case "$st" in *"Indexing enabled"*) ;; *) bad="$bad; not indexed ($st)" ;; esac
+  else
+    bad="$bad; not attached"
+  fi
+  others=$(other_indexing)
+  [ -z "$others" ] || bad="$bad; Spotlight on $others"
+  age=$(last_nightly_age)
+  if [ -z "$age" ]; then
+    bad="$bad; no nightly on record"
+  elif [ "$age" -gt "$MAX_NIGHTLY_AGE_S" ]; then
+    bad="$bad; nightly missed, last $((age / 3600)) h ago"
+  fi
+  if [ -z "$bad" ]; then
+    echo "ok: attached, indexed, every other volume off, nightly $((age / 3600)) h ago"
+    exit 0
+  fi
+  echo "${bad#; }"
+  exit 1
+}
+
+heal() {
+  setup_or_skip
+  local pid age out rc=0
+  pid=$(nightly_pid)
+  if [ -n "$pid" ]; then
+    echo "nightly already running (pid $pid)"
+    exit 0
+  fi
+  age=$(last_nightly_age)
+  if [ -z "$age" ] || [ "$age" -gt "$MAX_NIGHTLY_AGE_S" ]; then
+    mkdir -p "$LOG_DIR"
+    nohup timeout -k 60 "$CATCHUP_TIMEOUT_S" "$PYTHON" "$EXPORTER" nightly --index \
+      >> "$LOG_DIR/neofinder-batch-catchup.log" 2>&1 < /dev/null &
+    pid=$!
+    log "catch-up nightly started, pid $pid (last nightly ${age:-never} s ago)"
+    echo "catch-up nightly started (pid $pid)"
+    exit 0
+  fi
+  if ! attached; then
+    if ! out=$(hdiutil attach -mountpoint "$MOUNT" "$IMAGE" 2>&1); then
+      log "attach $IMAGE failed: $out"
+      echo "attach failed: $out"
+      exit 1
+    fi
+    log "attached $IMAGE at $MOUNT"
+  fi
+  out=$(sudo -n "$APPLIER" on 2>&1) || rc=$?
+  log "applier on rc=$rc: $out"
+  echo "applier on rc=$rc: $out"
+  exit "$rc"
+}
+
+case "${1:-}" in
+  probe) probe ;;
+  heal) heal ;;
+  *) echo "usage: neofinder-batch-watch probe|heal" >&2; exit 2 ;;
+esac

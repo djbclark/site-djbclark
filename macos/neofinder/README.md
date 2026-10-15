@@ -104,6 +104,29 @@ root without a prompt through one narrow path.
 checks the sudoers line with `visudo -c` first, and it does nothing when
 everything is already current.
 
+## Restarts and downtime
+
+A restart at any point breaks the resting state: the image is detached,
+a nightly in flight dies, a missed 01:15 is never re-run by Jobber, and
+macOS 27 creates fresh Spotlight stores on the real volumes and starts
+indexing them (seen 2026-10-15 after a shutdown at 00:03 and a boot at
+05:00). The site watchdog (`roles/watchdogd`, rule `neofinder-batch`)
+runs `neofinder-batch-watch probe` every two minutes:
+
+1. **Healthy:** image attached and indexed, every other volume off, last
+   nightly under 26 hours old. A nightly or catch-up in progress counts
+   as healthy.
+2. **Heal** (`neofinder-batch-watch heal`, after two failed probes, at
+   most every 15 minutes): a missed nightly starts `nightly --index`
+   detached (about 12 minutes; every step is idempotent, so a run cut
+   off part way is simply redone); anything else is `attach` plus the
+   root applier `on`.
+3. **Where to look:** `just status` (the `watch:` line is the probe's
+   verdict), `~/Library/Logs/watchdogd/neofinder-batch.log` (actions),
+   `neofinder-batch-catchup.log` beside it (a catch-up's output).
+
+`just watchdogd-apply` at the repo root installs or updates the rule.
+
 ## Files
 
 | File | Role |
@@ -112,6 +135,7 @@ everything is already current.
 | `neofinder-spotlight-batch.sh` | Hands-on search window: index, hold, tear down |
 | `neofinder-spotlight-index` | The root-owned applier (`on`/`off`/`status`) |
 | `neofinder-index-setup.sh` | Installs the applier, its config and the sudoers line, idempotently |
+| `neofinder-batch-watch` | watchdogd `probe`/`heal`: re-attach, re-index and catch up a missed nightly after a restart |
 | `nf-recents.savedSearch` | The NF Recents saved search |
 | `neofinder-stub-export.example.toml` | Example exporter config |
 | `neofinder-stub-export.plist.template` | The exporter's LaunchAgent template |
@@ -126,8 +150,9 @@ The Jobber job lives in `roles/site_agents/templates/jobber.yaml.j2`.
    comment says where the real file is, and NeoFinder knows the rest.
 2. **Media metadata isn't copied yet.** EXIF, music, GPS and text content
    aren't on the entries; only names, kinds, sizes, tags and dates are.
-3. **After a reboot,** the batch volume stays detached until the next
-   01:15 run, or until `just attach && just index-on`.
+3. **A restart detaches the batch volume** and, on this macOS, brings
+   Spotlight back on the real volumes. The watchdog heals both within a
+   few minutes ("Restarts and downtime" above).
 4. **Finder's Recents can't list aliases.** The NF Recents saved search
    stands in for it.
    Its list view, newest-opened first, is kept in Finder's own preferences

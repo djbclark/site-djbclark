@@ -1,0 +1,32 @@
+# NeoFinder batch volume: keep it searchable across restarts and downtime.
+# 2026-10-15: a shutdown at 00:03 and a boot at 05:00 skipped the 01:15
+# nightly (Jobber does not catch up), left the image detached, and macOS
+# re-created Spotlight stores on Data and mac256usb at boot and started
+# indexing them. The probe checks attached + indexed, every other volume
+# off, last nightly under 26 h; a nightly or catch-up in flight counts as
+# healthy. The heal re-attaches and runs the root applier `on`, or starts a
+# catch-up nightly detached (~12 min). Script and README section "Restarts
+# and downtime": macos/neofinder/neofinder-batch-watch. Rendered by
+# roles/watchdogd; edit the role.
+name = "neofinder-batch"
+interval_s = 120
+
+[probe]
+# Exit 0 healthy, 1 something to heal, 75 not set up on this Mac (skip).
+kind = "command"
+command = ["{{ watchdogd_neofinder_dir }}/neofinder-batch-watch", "probe"]
+skip_exit_codes = [75]
+timeout_s = 60
+
+[policy]
+down_before_action = 2
+grace_s = 120
+action = "command"
+command = ["{{ watchdogd_neofinder_dir }}/neofinder-batch-watch", "heal"]
+timeout_s = 120
+min_action_interval_s = 900
+max_restarts = 6
+
+[notify]
+down = "{name} DOWN: batch volume not searchable ({detail}; {counts}){tail}"
+recovered = "{name} RECOVERED: {detail}"

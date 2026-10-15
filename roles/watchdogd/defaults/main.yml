@@ -11,6 +11,8 @@ watchdogd_uid: "{{ ansible_facts['user_uid'] }}"
 watchdogd_label: "com.{{ site_ns }}.watchdogd"
 watchdogd_repo_bin: "{{ playbook_dir | dirname }}/bin"
 watchdogd_script: "{{ watchdogd_repo_bin }}/watchdogd.py"
+# The NeoFinder batch-volume watch lives with the rest of that work.
+watchdogd_neofinder_dir: "{{ watchdogd_repo_bin | dirname }}/macos/neofinder"
 watchdogd_config_dir: "{{ watchdogd_home }}/.config/{{ site_ns }}"
 watchdogd_conf_d: "{{ watchdogd_config_dir }}/watchdogd.d"
 watchdogd_state_dir: "{{ watchdogd_home }}/.local/state/watchdogd"
@@ -65,6 +67,7 @@ watchdogd_services:
   - funnel-beeper
   - provider-health
   - apple-daemons
+  - neofinder-batch
 
 # Labels and ports of the watched services (owned by other roles; repeated here
 # because a role's defaults are not visible to another role).

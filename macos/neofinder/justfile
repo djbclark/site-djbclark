@@ -32,6 +32,7 @@ status:
     @echo "items:   $(mdfind -onlyin {{mount}} -count 'kMDItemContentType == "*"' 2>/dev/null || echo 0) indexed"
     @echo "search:  $([ -f '{{saved}}' ] && echo 'NF Recents saved search installed' || echo 'NF Recents missing (just saved-search)')"
     @echo "last:    $(ggrep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | gtail -n 1 | gcut -c1-160 || true)"
+    @echo "watch:   $({{here}}/neofinder-batch-watch probe 2>&1 || true)"
     @echo "services: $({{services}} --check >/dev/null 2>&1 && echo 'Apple background daemons still disabled' || echo 'REGRESSED or unchecked (just services-status)')"
 
 # Create the batch sparse image if it is missing (4 GB APFS, grows on demand).
