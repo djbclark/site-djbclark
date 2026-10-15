@@ -132,3 +132,11 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    host with eval plus `nix build --dry-run`: evaluates; the unit's `podman run` carries
    the env file, `--read-only`, the tailnet bind `100.125.249.107:5071:8080` and the
    digest pin; the credentials guard runs before the tailnet wait.
+9. Trial run 2026-10-15 on the host (throwaway container on 127.0.0.1, production flags,
+   temp password and data dir, removed after): anonymous PUT/GET and a wrong password 401,
+   miss 404, authenticated PUT 201 then GET 200 with identical bytes, `/healthz` ok, files
+   owned 5071:5071, read-only rootfs, log `"auth":"enabled"`. Source review of v0.2.2
+   (commit 0ac0586): no outbound network code, auth gates every method, keys confined by
+   `os.Root`; auth is OFF when both credential variables are empty (hence the unit guard);
+   no content integrity, so the read-write credential can replace any entry (inherent to
+   Gradle's HTTP cache).
