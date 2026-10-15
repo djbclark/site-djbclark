@@ -4,6 +4,9 @@ Security review of github.com/fosterstack/cache at tag v0.2.2 (commit 0ac0586), 
 2026-10-15 before deploying it as vps-primary's Gradle cache
 ([gradle-remote-cache.md](../gradle-remote-cache.md)). Read-only review by an agent;
 the source was never built or run. Kept as the baseline for reviewing later upgrades.
+M1 (auth off when credentials are unset) and L2 (length leak vs the comment at
+server.go:200) were reported upstream as
+[fosterstack/cache#367](https://github.com/fosterstack/cache/issues/367) on 2026-10-15.
 
 ```text
 VERDICT: APPROVE for deployment as described, with 2 deployment conditions. No critical or high findings. Findings, ranked:
