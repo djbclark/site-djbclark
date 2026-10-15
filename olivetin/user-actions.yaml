@@ -22,7 +22,7 @@ actions:
       ls -la "${HOME}/.config/herdr/herdr.sock" 2>&1 || true
       echo
       echo "=== launchctl (homebrew.mxcl.herdr) ==="
-      launchctl print "gui/$(id -u)/homebrew.mxcl.herdr" 2>&1 | head -40 || true
+      launchctl print "gui/$(id -u)/homebrew.mxcl.herdr" 2>&1 | /opt/homebrew/bin/ghead -40 || true
 
   - id: user_herdr_start
     title: "Herdr — brew services start"
@@ -73,7 +73,7 @@ actions:
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       echo "=== launchctl print gui/$(id -u)/com.djbclark.litellm ==="
-      launchctl print "gui/$(id -u)/com.djbclark.litellm" 2>&1 | head -30 || true
+      launchctl print "gui/$(id -u)/com.djbclark.litellm" 2>&1 | /opt/homebrew/bin/ghead -30 || true
       echo
       # Unauthenticated probes only (#83): the master key is a secret now,
       # and /health would also call every model upstream.
@@ -83,7 +83,7 @@ actions:
       echo "=== models in ~/.litellm/config.yaml ==="
       # `a | b | head || echo` takes head's status, so test readability first.
       if [ -r "$HOME/.litellm/config.yaml" ]; then
-        grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | head -30
+        /opt/homebrew/bin/ggrep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | /opt/homebrew/bin/gawk '{print $3}' | /opt/homebrew/bin/ghead -30
       else
         echo "config not readable"
       fi
@@ -105,7 +105,7 @@ actions:
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
       echo "=== launchctl print gui/$(id -u)/com.djbclark.open-webui ==="
-      launchctl print "gui/$(id -u)/com.djbclark.open-webui" 2>&1 | head -30 || true
+      launchctl print "gui/$(id -u)/com.djbclark.open-webui" 2>&1 | /opt/homebrew/bin/ghead -30 || true
       echo
       echo "=== http://127.0.0.1:8085/health ==="
       curl -s -m 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"

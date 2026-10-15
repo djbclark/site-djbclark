@@ -35,11 +35,11 @@ status:
 
 # Print the farm as a tree (directories and link names only).
 tree:
-    @cd {{ quote(farm) }} && find . -mindepth 1 -not -name '.*' | sort -f | sed -e 's|^\./||' -e 's|[^/]*/|    |g'
+    @cd {{ quote(farm) }} && gfind . -mindepth 1 -not -name '.*' | gsort -f | gsed -e 's|^\./||' -e 's|[^/]*/|    |g'
 
 # Print the farm path(s) and the real path of every entry whose name contains NAME.
 where name:
-    @find {{ quote(farm) }} -type l -iname {{ quote("*" + name + "*") }} -not -path '*/by-*' -exec sh -c 'printf "%s -> %s\n" "$1" "$(readlink "$1")"' _ {} \;
+    @gfind {{ quote(farm) }} -type l -iname {{ quote("*" + name + "*") }} -not -path '*/by-*' -exec sh -c 'printf "%s -> %s\n" "$1" "$(greadlink "$1")"' _ {} \;
 
 # Open the layout rules in $EDITOR.
 layout:

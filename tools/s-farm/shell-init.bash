@@ -20,7 +20,7 @@ _sfarm_just() {
     unset _sfarm_noglob
     local dest
     if [[ $# -eq 1 && $1 != -* && $1 != *=* ]] &&
-        ! command just --summary 2>/dev/null | tr ' ' '\n' | grep -qxF -- "$1"; then
+        ! command just --summary 2>/dev/null | gtr ' ' '\n' | ggrep -qxF -- "$1"; then
         dest=$("$_sfarm_tool/go.py" --src "${SFARM_SRC:-$HOME/src}" --farm "${SFARM_FARM:-$HOME/s}" "$1") || return
         cd -- "$dest" && pwd
         return

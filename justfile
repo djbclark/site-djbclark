@@ -159,7 +159,7 @@ litellm-status:
       echo "service: not loaded on this host"; \
     fi
     @curl -fsS --max-time 5 http://127.0.0.1:4000/health/readiness | jq -r '"readiness: " + .status + ", db: " + (.db // "n/a")'
-    @grep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | awk '{print $3}' | paste -sd, - | sed 's/^/models (config): /'
+    @ggrep -E '^ *- model_name:' "$HOME/.litellm/config.yaml" | gawk '{print $3}' | paste -sd, - | gsed 's/^/models (config): /'
 
 # Reload a LaunchAgent after editing its plist (bootout + wait + bootstrap
 # with retry; `kickstart` alone does NOT re-read the plist). Optional health URL.
@@ -222,8 +222,8 @@ watchdogd-dry-run *args:
     bin/watchdogd.py --once --dry-run --all-due {{ args }}
 
 watchdogd-status:
-    @launchctl print "gui/$(id -u)/com.djbclark.watchdogd" 2>/dev/null | grep -E '^\s+(state|pid|runs|last exit code) =' || echo "launchd: not loaded (com.djbclark.watchdogd)"
-    @tail -n 20 "$HOME/Library/Logs/watchdogd/watchdogd.log" 2>/dev/null || echo "no log yet"
+    @launchctl print "gui/$(id -u)/com.djbclark.watchdogd" 2>/dev/null | ggrep -E '^\s+(state|pid|runs|last exit code) =' || echo "launchd: not loaded (com.djbclark.watchdogd)"
+    @gtail -n 20 "$HOME/Library/Logs/watchdogd/watchdogd.log" 2>/dev/null || echo "no log yet"
 
 
 # Install/configure Open WebUI.
@@ -263,11 +263,11 @@ mac-dns-check *args:
 mac-dns-status:
     @echo "applier:  $(ls -l /usr/local/libexec/mac-dns-apply 2>/dev/null || echo 'not installed — run just mac-dns-setup')"
     @echo "sudoers:  $(sudo -n -l /usr/local/libexec/mac-dns-apply >/dev/null 2>&1 && echo 'NOPASSWD ok' || echo 'missing — run just mac-dns-setup')"
-    @for f in /etc/resolver/*; do [ -e "$f" ] && echo "resolver: $f -> $(tr '\n' ' ' < "$f")"; done; true
-    @echo "Wi-Fi search domains: $(networksetup -getsearchdomains Wi-Fi | tr '\n' ' ')"
-    @echo "tailscale: $(tailscale dns status 2>/dev/null | grep -m1 '^Tailscale DNS:' || echo unknown)"
-    @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | grep ip_address || echo 'NO ANSWER')"
-    @echo "probe example.com: $(dscacheutil -q host -a name example.com | grep -m1 ip_address || echo 'NO ANSWER')"
+    @for f in /etc/resolver/*; do [ -e "$f" ] && echo "resolver: $f -> $(gtr '\n' ' ' < "$f")"; done; true
+    @echo "Wi-Fi search domains: $(networksetup -getsearchdomains Wi-Fi | gtr '\n' ' ')"
+    @echo "tailscale: $(tailscale dns status 2>/dev/null | ggrep -m1 '^Tailscale DNS:' || echo unknown)"
+    @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | ggrep ip_address || echo 'NO ANSWER')"
+    @echo "probe example.com: $(dscacheutil -q host -a name example.com | ggrep -m1 ip_address || echo 'NO ANSWER')"
 
 # launchd's per-user PATH = the login-shell PATH (roles/launchd_path). Takes
 # effect at the next reboot. `launchd-path-setup` is the one privileged step
@@ -324,7 +324,7 @@ site-agents-status:
       echo "launchd: not loaded (com.djbclark.hermes-dashboard)"; \
     fi
     @if launchctl print "gui/$(id -u)/com.djbclark.s1-ingest" >/dev/null 2>&1; then \
-      echo "launchd: loaded (com.djbclark.s1-ingest; last: $(tail -1 ~/.local/share/s1-evidence/cycle.log 2>/dev/null))"; \
+      echo "launchd: loaded (com.djbclark.s1-ingest; last: $(gtail -1 ~/.local/share/s1-evidence/cycle.log 2>/dev/null))"; \
     else \
       echo "launchd: not loaded (com.djbclark.s1-ingest; site_agents_s1_ingest_enabled)"; \
     fi

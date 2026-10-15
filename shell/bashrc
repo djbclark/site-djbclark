@@ -249,7 +249,7 @@ USB_DRIVE="/Volumes/mac256usb"
 # the directory test, and every cache below would then be redirected onto the
 # very disk this block exists to keep free. Absolute /sbin/mount because this
 # runs before the PATH is assembled further down.
-if /sbin/mount | grep -q " on ${USB_DRIVE} "; then
+if /sbin/mount | ggrep -q " on ${USB_DRIVE} "; then
     export HOMEBREW_CACHE="$USB_DRIVE/Caches/Homebrew"
     export YARN_CACHE_FOLDER="$USB_DRIVE/Caches/yarn"
     export PIP_CACHE_DIR="$USB_DRIVE/Caches/pip"
@@ -439,7 +439,7 @@ if [[ -r ~/.config/bash/bash_profile.expected ]] &&
     printf '\033[1;31m%s\033[0m\n' \
       '  something (an installer?) edited the deliberately-stub profile.' \
       '  diff vs blessed copy (~/.config/bash/bash_profile.expected):'
-    diff ~/.config/bash/bash_profile.expected ~/.bash_profile 2>&1 | sed 's/^/    /'
+    diff ~/.config/bash/bash_profile.expected ~/.bash_profile 2>&1 | gsed 's/^/    /'
     printf '\033[1;31m%s\033[0m\n' \
       '  if intentional:  cp ~/.bash_profile ~/.config/bash/bash_profile.expected' \
       '  otherwise: revert it (see the WATCH OUT note in that file).'
@@ -494,9 +494,9 @@ __bashrc_tamper_alarm() {
         | delta --paging=never 2>/dev/null
     elif command -v git >/dev/null 2>&1; then
       git --no-pager diff --no-index --color=always -- "$expected" "$current" \
-        | tail -n +5 | sed 's/^/    /'
+        | gtail -n +5 | gsed 's/^/    /'
     else
-      diff -u "$expected" "$current" | tail -n +3 | sed 's/^/    /'
+      diff -u "$expected" "$current" | gtail -n +3 | gsed 's/^/    /'
     fi
   } >&2
 
@@ -518,7 +518,7 @@ __bashrc_tamper_alarm() {
         return 0 ;;
       [Rr][Ee][Vv][Ee][Rr][Tt])
         local qdir="$HOME/.config/bash/quarantine" stamp
-        stamp=$(date +%Y%m%d-%H%M%S)
+        stamp=$(gdate +%Y%m%d-%H%M%S)
         if mkdir -p "$qdir" \
            && cp "$current" "$qdir/bashrc.rejected.$stamp" \
            && cp "$expected" "$current"; then
@@ -540,7 +540,7 @@ __bashrc_tamper_alarm
 
 alias tgh='tg read "Hermes Mac" --limit 12 --chrono'
 
-alias brew-fast-upgrade='brew update && brew outdated --json | jq -r ".formulae + .casks | .[].name" | xargs -P0 -L1 brew fetch && brew upgrade -y'
+alias brew-fast-upgrade='brew update && brew outdated --json | jq -r ".formulae + .casks | .[].name" | gxargs -P0 -L1 brew fetch && brew upgrade -y'
 
 # Disk usage: dua over the whole boot volume with nothing counted twice.
 # -x drops the genuinely separate volumes reached from / (/System/Volumes/VM,

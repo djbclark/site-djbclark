@@ -15,6 +15,7 @@
 # Deliberately uses only `env -i` clean shells: it must test the CONFIG, not
 # whatever environment the caller happens to have inherited.
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
 
 pass=0 fail=0
@@ -39,7 +40,7 @@ printf '\nshell config self-test\n\n'
 for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bashrc.local"; do
   [ -f "$f" ] || continue
   if bash -n "$f" 2>/dev/null; then ok "syntax: ${f/#$HOME/\~}"
-  else bad "syntax: ${f/#$HOME/\~}"; bash -n "$f" 2>&1 | sed 's/^/       /'; fi
+  else bad "syntax: ${f/#$HOME/\~}"; bash -n "$f" 2>&1 | gsed 's/^/       /'; fi
 done
 
 # -- 1b. Pure ASCII -------------------------------------------------------
@@ -51,11 +52,11 @@ done
 for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bashrc.local" \
          "$HOME/.config/bash/selftest.sh"; do
   [ -f "$f" ] || continue
-  hits=$(LC_ALL=C grep -n $'[^\t -~]' "$f" 2>/dev/null | head -3)
+  hits=$(LC_ALL=C ggrep -n $'[^\t -~]' "$f" 2>/dev/null | ghead -3)
   if [ -z "$hits" ]; then ok "pure ASCII: ${f/#$HOME/\~}"
   else
     bad "non-ASCII characters in ${f/#$HOME/\~} (first hits below)"
-    printf '%s\n' "$hits" | sed 's/^/       > /'
+    printf '%s\n' "$hits" | gsed 's/^/       > /'
   fi
 done
 
@@ -68,7 +69,7 @@ if [ -r "$HOME/.config/bash/bash_profile.expected" ]; then
     ok "~/.bash_profile matches its blessed copy"
   else
     bad "~/.bash_profile DRIFTED from its blessed copy"
-    diff "$HOME/.config/bash/bash_profile.expected" "$HOME/.bash_profile" 2>&1 | sed 's/^/       > /'
+    diff "$HOME/.config/bash/bash_profile.expected" "$HOME/.bash_profile" 2>&1 | gsed 's/^/       > /'
     note "intentional? re-bless: cp ~/.bash_profile ~/.config/bash/bash_profile.expected"
   fi
 fi
@@ -80,7 +81,7 @@ out=$("${CLEAN_BASHENV[@]}" true 2>/dev/null)
 if [ -z "$out" ]; then ok "tier 1 is silent on stdout"
 else
   bad "tier 1 PRINTS TO STDOUT -- this corrupts Claude Code hook JSON"
-  note "offending output:"; printf '%s\n' "$out" | sed 's/^/       > /'
+  note "offending output:"; printf '%s\n' "$out" | gsed 's/^/       > /'
 fi
 
 # -- 3. Tier 1 does not change parsing behavior ---------------------------
@@ -100,7 +101,7 @@ if [ -x "$HOME/.herdr-wrapper/bin/herdr" ]; then
     case $flavor in
       login)   got=$("${CLEAN_LOGIN[@]}"   'command -v herdr' 2>/dev/null) ;;
       bashenv) got=$("${CLEAN_BASHENV[@]}" 'command -v herdr' 2>/dev/null) ;;
-      interactive) got=$("${CLEAN_INTERACTIVE[@]}" 'type -P herdr' 2>/dev/null </dev/null | tail -1) ;;
+      interactive) got=$("${CLEAN_INTERACTIVE[@]}" 'type -P herdr' 2>/dev/null </dev/null | gtail -1) ;;
     esac
     if [ "$got" = "$HOME/.herdr-wrapper/bin/herdr" ]; then
       ok "herdr resolves to the wrapper ($flavor shell)"
@@ -142,17 +143,17 @@ if [ -x "$HOME/.herdr-wrapper/bin/herdr" ]; then
 fi
 
 # -- 5. No duplicate PATH entries -----------------------------------------
-dups=$("${CLEAN_LOGIN[@]}" 'printf %s "$PATH"' 2>/dev/null | tr ':' '\n' | sort | uniq -d)
+dups=$("${CLEAN_LOGIN[@]}" 'printf %s "$PATH"' 2>/dev/null | gtr ':' '\n' | gsort | guniq -d)
 if [ -z "$dups" ]; then ok "login PATH has no duplicate entries"
 else
   bad "login PATH has duplicate entries -- __path_dedup is not running last"
-  printf '%s\n' "$dups" | sed 's/^/       > /'
+  printf '%s\n' "$dups" | gsed 's/^/       > /'
 fi
 
 # -- 6. PATH and INFOPATH are stable under nesting ------------------------
 # herdr panes spawn login shells inside login shells; neither may grow.
-n1=$("${CLEAN_LOGIN[@]}" 'printf %s "$PATH"' 2>/dev/null | tr ':' '\n' | wc -l | tr -d ' ')
-n2=$("${CLEAN_LOGIN[@]}" 'bash -lc "printf %s \"\$PATH\""' 2>/dev/null | tr ':' '\n' | wc -l | tr -d ' ')
+n1=$("${CLEAN_LOGIN[@]}" 'printf %s "$PATH"' 2>/dev/null | gtr ':' '\n' | gwc -l | gtr -d ' ')
+n2=$("${CLEAN_LOGIN[@]}" 'bash -lc "printf %s \"\$PATH\""' 2>/dev/null | gtr ':' '\n' | gwc -l | gtr -d ' ')
 if [ "$n1" = "$n2" ] && [ "$n1" -gt 0 ] 2>/dev/null; then
   ok "PATH stable under nesting ($n1 entries at both depths)"
 else
@@ -191,7 +192,7 @@ for probe in \
   "env -i HOME=$HOME TERM=xterm /bin/bash -ic" \
   "env -i HOME=$HOME BASH_ENV=$HOME/.bashrc /bin/bash -c"
 do
-  label=$(printf '%s' "$probe" | sed 's/.*bash //')
+  label=$(printf '%s' "$probe" | gsed 's/.*bash //')
   missing=
   for sysdir in /usr/bin /bin /usr/sbin; do
     $probe "case \":\$PATH:\" in *:$sysdir:*) exit 0;; *) exit 1;; esac" 2>/dev/null \
@@ -272,7 +273,7 @@ check_resolves opencode "$HOME/.local/bin"   # OpenCode v2 (npm @opencode/cli), 
 check_resolves codex "$HOME/.opencodex/bin"   # opencodex 2.78+ shim beats the native launcher
 check_resolves aiuse "$HOME/.local/bin"
 # codex is a shell function in interactive bash, so ask for the binary path.
-got=$("${CLEAN_INTERACTIVE[@]}" 'type -P codex' 2>/dev/null </dev/null | tail -1)
+got=$("${CLEAN_INTERACTIVE[@]}" 'type -P codex' 2>/dev/null </dev/null | gtail -1)
 case $got in
   "$HOME/.opencodex/bin/"*) ok "codex -> $got (interactive shell)" ;;
   *) bad "codex -> ${got:-nothing} in interactive bash (expected under ~/.opencodex/bin)"
