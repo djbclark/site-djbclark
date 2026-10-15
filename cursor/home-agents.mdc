@@ -315,7 +315,8 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    skill before scripting it** (every subcommand, `set` included, needs `--reason`;
    2026-10-11). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search and page fetch go through the failover ladder** (2026-10-11): each client's
-   MCP rungs (Exa, Parallel, Jina, Crawl4AI for JavaScript pages, Firecrawl where present),
+   MCP rungs (**search: the shared `firecrawl` MCP's `firecrawl_search` first**, self-hosted
+   SearXNG, free, 2026-10-14; then Exa, Parallel, Jina; fetch adds Crawl4AI and Firecrawl),
    its built-in tools, then `~/src/djbclark-ade/bin/web-get search|fetch` (exit 5 = every
    provider failed); ladder per client in the `fallback-chains` skill, `references/web-access.md`.
    **Every page the task needs is eventually fetched**: on an error fall back (next rung,
