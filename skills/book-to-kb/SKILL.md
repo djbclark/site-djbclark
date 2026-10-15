@@ -76,9 +76,9 @@ output. Check all four:
 ```bash
 slug=<slug>; d=~/kb/md/$slug
 python3 -c "import json;m=json.load(open('$d/meta.json'));print(m['title'],'|',m['chapters'],'chapters |',m['tokens'],'tokens')"
-echo "fences: $(cat $d/chapters/*.md | grep -c '^\`\`\`')"
-for f in $d/chapters/*.md; do echo $(( $(wc -c < "$f") / 4 )); done | sort -n \
-  | awk '{a[NR]=$1} END{print "tokens/chapter: p50="a[int(NR*0.5)], "max="a[NR]}'
+echo "fences: $(cat $d/chapters/*.md | ggrep -c '^\`\`\`')"
+for f in $d/chapters/*.md; do echo $(( $(gwc -c < "$f") / 4 )); done | gsort -n \
+  | gawk '{a[NR]=$1} END{print "tokens/chapter: p50="a[int(NR*0.5)], "max="a[NR]}'
 ```
 
 1. **Title** is the book's title — not "Table of Contents", "License" or the
