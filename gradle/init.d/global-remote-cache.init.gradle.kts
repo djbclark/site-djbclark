@@ -1,7 +1,7 @@
 // Machine-wide Gradle remote build cache (2026-10-13).
 //
 // Every build on this Mac pulls from and pushes to the shared cache on vps-primary
-// (Develocity Build Cache Node in Podman, reachable only on the tailnet; see
+// (FosterStack cache in Podman, reachable only on the tailnet; see
 // nixos/vps-primary/configuration.nix and docs/gradle-remote-cache.md). Linked into every
 // Gradle home's init.d by `gradle-limits link`, like machine-slot.gradle.
 //
