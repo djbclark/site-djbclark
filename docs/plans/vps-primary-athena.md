@@ -77,10 +77,18 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    **Prerequisite: `defeat` is not on the tailnet yet** (also blocks `get`'s
    backup; `get` runbook 5.2).
 
-## 3. Open checks
+## 3. Checks
 
-1. Does `nixathena` (tested by SIPB on nixos-unstable) evaluate and build on
-   nixos-26.05?
-2. Which slim-list attributes are missing on 26.05 (the `get` list was checked
-   against unstable)?
-3. The real closure growth from the dry-run, against the 2 GiB estimate.
+1. Phase A is on branch `vps-primary-athena` (903360c), checked 2026-10-15 on the
+   host with eval plus `nix build --dry-run` (no build): nixathena `99ddc9fe`
+   evaluates on nixos-26.05; every slim-list attribute exists; 1.4 GiB unpacked
+   to fetch, and the host would build moira, remctl, athrun, hesiod and
+   claude-code from source (small; helix was dropped because it compiled Rust).
+2. Differences from `get` found on 26.05: `services.eternal-terminal.telemetry`
+   does not exist; `services.openafsClient.enable` must be a plain value
+   (nixathena's `mkDefault` collides with another `mkDefault`).
+3. The host has no `git` on root's PATH outside the upgrade service; the
+   `git+https` nixathena input is fetched by `nixos-upgrade`, which has its own
+   git. Manual checks use `nix build nixpkgs#gitMinimal`.
+4. `security.sudo.wheelNeedsPassword = false` for `djbclark`: no local password
+   exists, and root is already reachable with a key.
