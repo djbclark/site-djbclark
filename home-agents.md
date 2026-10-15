@@ -140,11 +140,11 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p
     '<prompt>' --model <m>`** (**always `--model`**, bar zcode; exit 0 is not
-    success: verify); then (2) Orca `worker-start`, (3) a Herdr pane, (4)
-    `model-routing` headless. **the grok vendor is back** (2026-10-09; small
-    slices; `aiuse` cannot see its window). **agy only via `acp-run agy`; gemini
-    is deprecated and not installed;** all but muse speak ACP (`acp-run
-    --list`). Binary names differ from provider ids
+    success: verify); (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing`
+    headless. **grok vendor is back** (2026-10-09; small slices; `aiuse` can't see
+    its window). **agy only via `acp-run agy`; gemini deprecated, not installed;
+    omp never without djbclark's explicit yes for that run** (2026-10-15); all but
+    muse speak ACP (`acp-run --list`). Binary names differ from provider ids
     ([[reference_agent_rules_code_discovery_and_cli_table]]).
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling,
     fix it there** (2026-10-11; skills since 2026-10-05;

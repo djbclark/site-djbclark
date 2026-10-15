@@ -161,7 +161,10 @@ work djbclark watches, and Hermes's TUI: a Herdr pane; (4) non-ACP CLIs: their
 own headless recipe. cline (ClinePass) is a reserve pool, never bulk; copilot
 small GitHub-shaped slices only; **the grok vendor is back** (excluded 2026-10-06,
 re-admitted 2026-10-09: `acp-run grok --model grok-4.7`, small slices, GrokBot
-shares the window, `aiuse` cannot see it).
+shares the window, `aiuse` cannot see it). **omp (oh-my-pi), by any route
+(`omp`, `omp acp`, acp-run, Orca, Herdr), never without djbclark's specific,
+explicit approval for that run** (2026-10-15; acp-run and acp-dispatch refuse it
+unless `ACP_OPERATOR_APPROVED=omp`).
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
