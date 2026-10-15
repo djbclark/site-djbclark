@@ -139,8 +139,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     --report <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p
-    '<prompt>' --model <m>`** (**always `--model`**, bar zcode; exit 0 is not
-    success: verify); (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing`
+    '<prompt>' --model <m>`** (**always `--model`**, zcode too since 2026-10-15;
+    `--effort`/`--context` too, check its `applied:` line; exit 0 is not success); (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing`
     headless. **grok vendor is back** (2026-10-09; small slices; `aiuse` can't see
     its window). **agy only via `acp-run agy`; gemini deprecated, not installed;
     omp never without djbclark's explicit yes for that run** (2026-10-15); all but

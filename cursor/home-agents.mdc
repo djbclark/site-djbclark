@@ -152,7 +152,9 @@ Binary names do not match `aiuse`/Orca provider ids: antigravity → `agy`, zai 
 desktop app), copilot → `copilot` (`copilot-fix-writer-lock` if it misbehaves),
 codex/claude match; gemini is deprecated and not installed. Every agent but muse
 speaks [ACP](https://agentclientprotocol.com/) (`acp-run --list`; zcode via
-`zcode-acp-server`, the one run **without** `--model`).
+`zcode-acp-server`, which takes `--model` since 2026-10-15 when acp-run started
+setting `ZCODE_BIN`; `--effort`/`--context` select effort and window, and the
+`acp-run: applied:` line shows what the agent actually used).
 
 **Delegation route, in order:** (1) headless to an ACP agent: **`acp-run <agent>
 -C <dir> -p '<prompt>' --model <m> [--perm deny]`**
