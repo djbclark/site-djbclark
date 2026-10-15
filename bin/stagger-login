@@ -21,8 +21,19 @@
 # enable -> kickstart (works if loaded-but-not-running) -> bootstrap
 # (RunAtLoad fires) if kickstart couldn't find the service.
 #
-# Flags: --dry-run (log the plan, do nothing), --now (skip base wait+gate).
-# Env: STAGGER_BASE (default 150) seconds before first target.
+# Heal pass: STAGGER_HEAL seconds after the last target, re-disable any
+# launchd target found enabled and delete any login item named after an
+# app target. Vendors undo the login skip after a late launch (first real
+# boot, 2026-10-15: Default Folder X re-added its login item, Logi's
+# updater re-enabled cp-dev-mgr). Login items go through System Events:
+# needs Automation consent for the responsible process, Homebrew's
+# gtimeout, which TCC keys by its Cellar path, so a coreutils upgrade asks
+# once more (granted 2026-10-15 for coreutils 9.12).
+#
+# Flags: --dry-run (log the plan, do nothing), --now (skip base wait+gate),
+# --heal (run only the heal pass, now).
+# Env: STAGGER_BASE (default 150) seconds before first target;
+# STAGGER_HEAL (default 120) seconds from last target to the heal pass.
 # Log: ~/Library/Logs/stagger-login.log
 #
 # Installed 2026-10-05 by zcode; LaunchAgent com.djbclark.stagger-login.
@@ -33,12 +44,14 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
 CONF="${STAGGER_CONF:-$HOME/.config/stagger-login/apps}"
 LOG="$HOME/Library/Logs/stagger-login.log"
 BASE="${STAGGER_BASE:-150}"
+HEAL="${STAGGER_HEAL:-120}"
 UID_=$(id -u)
-DRY=0; NOW=0; tries=0
+DRY=0; NOW=0; HEAL_ONLY=0; tries=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY=1 ;;
         --now) NOW=1; BASE=0 ;;
+        --heal) HEAL_ONLY=1; BASE=0 ;;
         *) printf 'unknown flag: %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
@@ -52,10 +65,59 @@ if [ -f "$LOG" ] && [ "$(gwc -c < "$LOG")" -gt 65536 ]; then
     : > "$LOG"
 fi
 gtouch "$LOG"
-log "=== stagger-login start (pid $$, base=${BASE}s, dry=$DRY, conf=$CONF)"
+log "=== stagger-login start (pid $$, base=${BASE}s, dry=$DRY, heal_only=$HEAL_ONLY, conf=$CONF)"
 
 if [ ! -f "$CONF" ]; then
     log "no config at $CONF — nothing to do"
+    exit 0
+fi
+
+entries() {
+    ggrep -v '^[[:space:]]*#' "$CONF" | ggrep -v '^[[:space:]]*$' | gsort -n
+}
+
+is_disabled() {
+    launchctl print-disabled "gui/$UID_" 2>/dev/null | ggrep -qF "\"$1\" => disabled"
+}
+
+heal() {
+    log "heal: checking login skips"
+    items_ok=1
+    items=$(timeout 30 osascript -e \
+        'tell application "System Events" to get the name of every login item' 2>>"$LOG") \
+        || { log "heal: could not list login items (osascript rc=$?)"; items_ok=0; }
+    entries | while IFS="$(printf '\t')" read -r delay kind a b; do
+        case "$kind" in
+            launchd)
+                if is_disabled "${a##*/}"; then
+                    log "heal ok (disabled): $a"
+                elif [ "$DRY" = 1 ]; then
+                    log "heal would re-disable: $a"
+                else
+                    launchctl disable "$a" && log "heal: re-disabled $a (was re-enabled)"
+                fi ;;
+            app)
+                name=$(basename "$a" .app)
+                if [ "$items_ok" = 0 ]; then
+                    log "heal skipped (login items unreadable): $name"
+                elif ! printf '%s\n' "$items" | gtr ',' '\n' | gsed 's/^ *//' | ggrep -qxF "$name"; then
+                    log "heal ok (no login item): $name"
+                elif [ "$DRY" = 1 ]; then
+                    log "heal would delete login item: $name"
+                elif timeout 30 osascript -e \
+                    "tell application \"System Events\" to delete login item \"$name\"" \
+                    > /dev/null 2>>"$LOG"; then
+                    log "heal: deleted login item $name (app re-added it)"
+                else
+                    log "heal FAILED to delete login item: $name"
+                fi ;;
+        esac
+    done
+}
+
+if [ "$HEAL_ONLY" = 1 ]; then
+    heal
+    log "=== stagger-login done"
     exit 0
 fi
 
@@ -126,7 +188,7 @@ do_launchd() {
 # Entries sorted by delay; delays are absolute seconds-from-login, so credit
 # the base wait (+ any gate extension) already slept before the first entry.
 prev=$((BASE + tries * 15))
-ggrep -v '^[[:space:]]*#' "$CONF" | ggrep -v '^[[:space:]]*$' | gsort -n | {
+entries | {
     while IFS="$(printf '\t')" read -r delay kind a b; do
         case "$kind" in
             app) target="app $a" ;;
@@ -141,5 +203,11 @@ ggrep -v '^[[:space:]]*#' "$CONF" | ggrep -v '^[[:space:]]*$' | gsort -n | {
         log "t+${prev}s $target"
         [ "$kind" = "app" ] && do_app "$a" || do_launchd "$a" "$b"
     done
-    log "=== stagger-login done"
 }
+
+if [ "$DRY" = 0 ]; then
+    log "sleeping ${HEAL}s before heal pass"
+    sleep "$HEAL"
+fi
+heal
+log "=== stagger-login done"

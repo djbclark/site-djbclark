@@ -1,7 +1,8 @@
 # macOS 27.0.1 boot-time TCC race — apps re-ask for permissions after every reboot, and a staggered-login fix
 
 **Date:** 2026-10-05 · **Status:** diagnosed and worked around; root cause is
-Apple's (not fixed as of 27.0.1 — no point release available yet)
+Apple's (not fixed as of 27.0.1 — no point release available yet). Workaround
+verified across a real reboot on 2026-10-15, see "First real reboot" below.
 
 ## TL;DR
 
@@ -383,19 +384,42 @@ and delete its line from the config.
 4. Expect the gate's `log show` probe to cost a few seconds; that only
    ever shifts launches later, never earlier — the safe direction.
 
+## First real reboot (2026-10-15)
+
+1. The race was still there on 27.0.1: 214 "Failed to get code
+   reference" lines, all between 05:02:00 and 05:02:40 (login at about
+   05:02). stagger-login's base wait ended at 05:05:16, the gate found no
+   failures, and the five targets came up at t+150…225 s. None of them
+   had a TCC request refused; the only post-launch "Prompting" lines were
+   the known hardened-runtime missing-entitlement noise.
+2. Two of the predicted watch items fired on that first boot: Default
+   Folder X re-added its login item when launched, and the Logi agent was
+   `enabled` again in `launchctl print-disabled` a minute after its late
+   start (Logi's updater started alongside it). Either would have put that
+   app back inside the race on the next boot.
+3. Fix: a heal pass at the end of every run (`STAGGER_HEAL`, default
+   120 s after the last target; `--heal` runs it alone). It re-disables
+   any `launchd` target found enabled and deletes any login item named
+   after an `app` target. Listing and deleting login items goes through
+   System Events, so the first run raises one Automation dialog for the
+   responsible process (here Homebrew's `gtimeout`, keyed by its Cellar
+   path, so a coreutils upgrade asks once more). It comes up after the
+   race window, so it is answered normally and sticks. Current script:
+   `bin/stagger-login` in this repo.
+
 ## Caveats and watch items
 
-1. The Logi updater may re-enable its agent on update; re-run the
-   `launchctl disable`. Logi mouse/keyboard remaps are also simply absent
-   for the first `delay` seconds after login.
+1. The Logi updater may re-enable its agent on update; the heal pass
+   re-disables it (or re-run the `launchctl disable`). Logi mouse/keyboard
+   remaps are also simply absent for the first `delay` seconds after login.
 2. Default Folder X's open/save enhancements and BetterStage's window
    management are likewise inactive until their delay elapses — that is
    the trade you are making.
 3. Apps with no "launch at login" pref key (Warden, DFX here) may re-add
    their login item when the stagger launches them; the script's
    running-check prevents double processes, but that app would return to
-   launching early. Re-delete the item if a boot-time storm returns for
-   just one app.
+   launching early. DFX did exactly that on the first real boot; the heal
+   pass now deletes the item each run.
 4. System-extension-based tools (Karabiner-Elements class) cannot be
    delayed this way and were not attempted.
 5. When Apple ships the fix (watch point releases; 27.0.1 was current and
