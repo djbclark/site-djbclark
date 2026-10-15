@@ -29,6 +29,10 @@ disk cache and carries on.
    is not tracked. **With those unset the server runs with auth off**, so the unit's
    `ExecStartPre` refuses to start unless both lines are present. `/healthz` and `/metrics`
    answer without auth (tailnet only).
+   No read-only login (djbclark, 2026-10-15): the Mac is the only client, and a build able
+   to steal the write password could equally tamper with the local `~/.gradle` cache.
+   Revisit (`FSCACHE_RO_USERNAME`/`FSCACHE_RO_PASSWORD`, push off) if CI or a second
+   machine starts using the cache.
 4. **Password.** sudo-secretspec name `GRADLE_BUILD_CACHE_PASSWORD` (optional, a runtime
    declaration). The env file is a plain `KEY=value` file, read by Podman literally: no
    quotes, no `#` or newline in the password.
