@@ -90,5 +90,11 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 3. The host has no `git` on root's PATH outside the upgrade service; the
    `git+https` nixathena input is fetched by `nixos-upgrade`, which has its own
    git. Manual checks use `nix build nixpkgs#gitMinimal`.
-4. `security.sudo.wheelNeedsPassword = false` for `djbclark`: no local password
+5. **Phase A deployed 2026-10-15** (107fa94 promoted; `nixos-upgrade` 1m34s, peak
+   1.7 GiB RAM, root 20 GB free after). Verified: user `djbclark` (zsh, passwordless
+   sudo), claude-code 2.1.223, kinit/moira/remctl/athrun on PATH, etserver on 2022
+   and mosh-server start, firewall opening 2022/tcp and 60000-61000/udp only on
+   `tailscale0` (public 2022 closed). Not verified by an agent: djbclark's own key
+   login (`~/.ssh/id_ed25519` is passphrase-protected and not in an agent).
+6. `security.sudo.wheelNeedsPassword = false` for `djbclark`: no local password
    exists, and root is already reachable with a key.
