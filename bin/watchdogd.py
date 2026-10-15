@@ -136,6 +136,10 @@ class ServiceCfg:
     max_restarts: int = 3
     healthy_reset_s: float = 21600.0
     renotify_s: float = 21600.0
+    # Act even while the machine is stressed (load/swap/pressure over the
+    # global thresholds). For heals that post-boot load would otherwise defer
+    # for several passes (neofinder-batch: Spotlight indexing IS the load).
+    ignore_stress: bool = False
     stall_log: str = ""
     stall_pattern: str = ""
     stall_min_count: int = 1
@@ -739,7 +743,7 @@ def _condition(state: dict, key: str, active: bool) -> bool:
 def decide(svc: ServiceCfg, state: dict, obs: Obs) -> Decision:
     now = obs.now
     d = Decision(verdict="")
-    stressed = obs.stress.get("stressed", False)
+    stressed = obs.stress.get("stressed", False) and not svc.ignore_stress
 
     # Budget decay: only an unbroken healthy stretch gives restarts back.
     if (

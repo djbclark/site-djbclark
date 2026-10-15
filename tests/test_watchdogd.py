@@ -145,6 +145,12 @@ class StressTests(unittest.TestCase):
         d = wd.decide(cfg, st, obs("down", now=NOW + 120))
         self.assertEqual(kinds(d), ["kickstart"])
 
+    def test_ignore_stress_acts_under_stress(self) -> None:
+        cfg, st = svc(down_before_action=1, ignore_stress=True), wd.fresh_state()
+        d = wd.decide(cfg, st, obs("down", stress=STRESSED))
+        self.assertEqual(kinds(d), ["kickstart"])
+        self.assertNotIn("DEFER", d.verdict)
+
     def test_strays_are_killed_under_stress(self) -> None:
         cfg, st = svc(), wd.fresh_state()
         stray = wd.Proc(777, 1, 99, "litellm")

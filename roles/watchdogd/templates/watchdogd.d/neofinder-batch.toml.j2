@@ -33,6 +33,10 @@ timeout_s = 120
 min_action_interval_s = 900
 max_restarts = 6
 healthy_reset_s = 3600
+# Post-boot load (Spotlight indexing the real volumes, the thing this heal
+# quiets) is over the stress threshold for minutes; one heal was deferred
+# for it on 2026-10-15. Heal anyway.
+ignore_stress = true
 
 [notify]
 down = "{name} DOWN: batch volume not searchable ({detail}; {counts}){tail}"

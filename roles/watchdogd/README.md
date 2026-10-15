@@ -126,7 +126,10 @@ sudo visudo -cf /etc/sudoers.d/auxkc-heal
 1. **Cold-start grace** (`policy.grace_s`): no restart while the launchd
    instance, or the last action, is younger than that. An ORPHAN is still killed.
 2. **Stress** (`watchdogd.toml`): restarts are deferred while load per CPU or
-   swap is over the threshold. Strays and port orphans are still killed.
+   swap is over the threshold. Strays and port orphans are still killed. A
+   rule with `policy.ignore_stress = true` acts anyway: for a heal that the
+   post-boot load would otherwise defer for several passes (neofinder-batch,
+   2026-10-15: Spotlight indexing is that load).
 3. **Real probe**: a timeout is *slow*, refused or 5xx is *down*, each with its
    own consecutive threshold. An unexpected 4xx means the probe is wrong, not
    the service: alerted once, never a restart. A log stall signature counts
@@ -175,6 +178,7 @@ min_action_interval_s = 0
 max_restarts = 3
 healthy_reset_s = 21600
 renotify_s = 21600        # repeat BUDGET EXHAUSTED at most this often
+ignore_stress = false     # true: act even under machine stress (rule 2)
 
 [stall]                   # optional
 log = "~/Library/Logs/litellm/litellm.log"
