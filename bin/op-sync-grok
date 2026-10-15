@@ -9,6 +9,8 @@
 # from the target; do that by hand. Attachments and passkeys are not copied
 # (the op JSON template does not carry them).
 set -euo pipefail
+# GNU tools where present (macOS ships BSD sed/grep); the plain ones elsewhere.
+SED=$(command -v gsed || echo sed); GREP=$(command -v ggrep || echo grep)
 target="Shared with Grok Bot"
 dry=0
 [[ ${1:-} == -n || ${1:-} == --dry-run ]] && { dry=1; shift; }
@@ -25,7 +27,7 @@ norm='{title, category, tags: ((.tags // []) | sort),
 
 n_ok=0 n_new=0 n_upd=0 n_err=0
 while IFS= read -r line || [[ -n $line ]]; do
-  line="${line%%#*}"; line="$(sed 's/[[:space:]]*$//' <<<"$line")"
+  line="${line%%#*}"; line="$("$SED" 's/[[:space:]]*$//' <<<"$line")"
   [[ -z $line ]] && continue
   vault="${line%%/*}" title="${line#*/}"
   if [[ $vault == "$line" || $vault == "$target" ]]; then
@@ -38,7 +40,7 @@ while IFS= read -r line || [[ -n $line ]]; do
   fi
   ids="$(op item list --vault "$target" --format json \
          | jq -r --arg t "$title" '.[] | select(.title == $t) | .id')"
-  count=$(grep -c . <<<"$ids" || true)
+  count=$("$GREP" -c . <<<"$ids" || true)
   if (( count > 1 )); then
     echo "error: $line: $count items titled '$title' in $target; fix by hand" >&2
     n_err=$((n_err+1)); continue

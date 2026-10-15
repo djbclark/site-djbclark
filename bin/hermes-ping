@@ -26,6 +26,8 @@ case "$1" in
 esac
 msg="$*"
 t() { timeout 3 "$@" 2>/dev/null; }
+# GNU tools where present (macOS ships BSD sed/head); the plain ones on Linux and in cloud sessions.
+SED=$(command -v gsed || echo sed); HEAD=$(command -v ghead || echo head)
 short() { case "$1" in "$HOME"*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
 
 where="" link="" focus=""
@@ -45,7 +47,7 @@ elif [ -n "${HERDR_ENV:-}" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
   where="herdr${sess:+ session $sess} · ws ${ws:-$HERDR_WORKSPACE_ID} · tab ${tab:-$HERDR_TAB_ID} · pane ${pane:-$HERDR_PANE_ID}"
   focus="herdr tab focus $HERDR_TAB_ID"
 elif [ -n "${ORCA_PANE_KEY:-}" ] || [ "${TERM_PROGRAM:-}" = Orca ]; then
-  wt=$(t orca worktree current --json | jq -r '.. | .name? // empty' 2>/dev/null | head -1)
+  wt=$(t orca worktree current --json | jq -r '.. | .name? // empty' 2>/dev/null | "$HEAD" -1)
   [ -n "$wt" ] || wt=$(basename "${ORCA_WORKSPACE_ROOT:-$PWD}")
   where="Orca · worktree $wt${ORCA_TAB_ID:+ · tab $ORCA_TAB_ID}"
   [ -n "${ORCA_TERMINAL_HANDLE:-}" ] && focus="orca terminal switch --terminal $ORCA_TERMINAL_HANDLE"
@@ -78,7 +80,7 @@ else
       if [ -n "${XPC_SERVICE_NAME:-}" ] && [ "$XPC_SERVICE_NAME" != 0 ]; then
         where="launchd ${XPC_SERVICE_NAME}"
       else
-        where="${TERM_PROGRAM:-script $(ps -o comm= -p "$PPID" 2>/dev/null | sed 's#.*/##')}"
+        where="${TERM_PROGRAM:-script $(ps -o comm= -p "$PPID" 2>/dev/null | "$SED" 's#.*/##')}"
       fi ;;
   esac
 fi
