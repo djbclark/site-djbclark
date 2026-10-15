@@ -141,10 +141,12 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p
     '<prompt>' --model <m>`** (**always `--model`**, zcode too since 2026-10-15;
     `--effort`/`--context` too, check its `applied:` line; exit 0 is not success); (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing`
-    headless. **grok vendor is back** (2026-10-09; small slices; `aiuse` can't see
-    its window). **agy only via `acp-run agy`; gemini deprecated, not installed;
-    omp never without djbclark's explicit yes for that run** (2026-10-15); all but
-    muse speak ACP (`acp-run --list`). Binary names differ from provider ids
+    headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice.
+    grok and copilot are reserves: floor 60% left, one small slice, only when that
+    vendor is the point. agy only via `acp-run agy`; gemini deprecated, not
+    installed; hermes never a target; omp never without djbclark's explicit yes for
+    that run** (2026-10-15; acp-run/acp-dispatch gate both); all but muse speak ACP
+    (`acp-run --list`). Binary names differ from provider ids
     ([[reference_agent_rules_code_discovery_and_cli_table]]).
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling,
     fix it there** (2026-10-11; skills since 2026-10-05;
@@ -162,25 +164,27 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     each batch. **agy: only via `acp-run agy`, never `agy -p`** (hidden burst
     limit; no probe loops; [[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by
-    default** (2026-10-08, 2026-10-10). When `context_size_nudge.py` says
-    delegate, delegate; when it says ask, **ask djbclark at the next natural
-    boundary: `/compact`, `/handoff` then `/new`, or continue and delegate.**
-    **Compaction is not free**. **In a herdr pane or Orca terminal, compact
-    yourself instead**, once, then end the turn (`/quit` too):
-    `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`
-    (`memory/feedback_self_compact.md`); **it refuses on input-line text — then
-    ask, never over a draft.** (`memory/feedback_context_prompts_early.md`)
+    default** (2026-10-08, 2026-10-10), **at the minimum model × effort × context
+    that does it well, unasked** (2026-10-15). When `context_size_nudge.py` says
+    delegate, delegate. **Compaction is automatic, never a question to djbclark**
+    (2026-10-15): Claude Code compacts at 400k (`autoCompactWindow`); **in a herdr
+    pane or Orca terminal compact yourself earlier** at a natural boundary, once,
+    then end the turn (`/quit`, `/new` too): `~/src/djbclark-ade/bin/self-slash
+    "/compact <focus>"`; a topic change: `handoff` skill, then `/new`
+    (`memory/feedback_self_compact.md`); **it refuses on input-line text — only
+    then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).
 31. Basic Memory (2026-10-03) is one shared MCP server
     (`http://127.0.0.1:18796/mcp`; **zcode, opencode and Cursor cannot** call
     it); never register a per-client stdio `basic-memory mcp`. **If it is down,
     fix it** (`todo` skill), then `/mcp` reconnect. **`main`** is the shared
     default project. **A semantic search result is not a match**: use `find` or
     an exact `read_note` ([[reference_agent_rules_basic_memory_pools]]).
-32. Fable reserve until 2026-10-16 06:00 (2026-10-10, temporary): **Fable 5.1's
-    weekly cap is nearly spent (9% left at 19:50; resets Oct 16 06:00). Until
-    then route Claude work to Opus 5.5:** `claude-opus-5-5` (sub-agents `model:
-    "opus"`), never `fable-deep`. Keep the last few percent for a judgment call
-    djbclark names. Delete this item after the reset.
+32. **Routing policy (2026-10-15, every TUI, any directory): minimise cost,
+    maximise code quality, not tokens.** Fable 5.1 (`xhigh`) and codex `gpt-6-astra`
+    **used fully for serious work**; everyday work on the other pools. **Fable is a
+    <=50% sublimit of the one Claude weekly and bills the 5h window** (the 2026-10-10
+    "9% left" was 9% used). One copy: `skills/model-routing/SKILL.md` *Routing
+    policy*; `route_agent.py plan` (`memory/feedback_routing_policy_cost_quality.md`).
 33. **Anything likely to take over ~10-15 s starts with `run_in_background:
     true`** (2026-10-04); wait on the notification, never poll; kill your strays.
     **Exception: an Agent-tool sub-agent** waits in bounded foreground calls
