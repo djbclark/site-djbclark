@@ -12,6 +12,7 @@
 #      command succeeds a moment later (see roles/basic_memory_mcp/tasks/main.yml).
 # This script waits for teardown to finish and retries bootstrap, mirroring the
 # Ansible roles' `until rc == 0` loop.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 
 label="${1:?usage: launchd_reload.sh <label> [health-url] [timeout]}"
@@ -27,14 +28,14 @@ plutil -lint "$plist" >/dev/null || { echo "plist failed lint: $plist" >&2; exit
 if launchctl print "$domain/$label" >/dev/null 2>&1; then
   launchctl bootout "$domain/$label" || true
   # Wait until launchd has really forgotten the job (max ~30s).
-  for _ in $(seq 1 30); do
+  for _ in $(gseq 1 30); do
     launchctl print "$domain/$label" >/dev/null 2>&1 || break
     sleep 1
   done
 fi
 
 ok=0
-for attempt in $(seq 1 10); do
+for attempt in $(gseq 1 10); do
   if launchctl bootstrap "$domain" "$plist" 2>/dev/null; then ok=1; break; fi
   echo "bootstrap attempt $attempt failed (teardown race?); retrying in 3s" >&2
   sleep 3

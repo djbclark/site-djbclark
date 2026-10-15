@@ -54,6 +54,7 @@
 #
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
+export PATH="/opt/homebrew/bin:$PATH"
 if [ "$#" -eq 0 ]; then
   echo "usage: bg <command> [args...]" >&2
   exit 2
@@ -79,7 +80,7 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
   done
   for d in "${plektra_dirs[@]}"; do
     top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || continue
-    if grep -qs 'namespace = "rocks.pkb.plektra"' "$top/app/build.gradle.kts"; then
+    if ggrep -qs 'namespace = "rocks.pkb.plektra"' "$top/app/build.gradle.kts"; then
       echo "bg: Plektra is built on forgejo.mit.edu only, never on this Mac ($top)." >&2
       echo "bg: tests or any Gradle task: scripts/djb-ci-run REF [GRADLE_ARGS...]; an APK: push plk/main" >&2
       echo "bg: (a release is built), then scripts/djb-install-latest. See the repo's AGENTS.md." >&2
@@ -153,8 +154,8 @@ if [ "$wait_s" -gt 0 ]; then
   cores=$(sysctl -n hw.ncpu)
   waited=0
   while :; do
-    load1=$(sysctl -n vm.loadavg | awk '{print $2}')
-    over=$(awk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
+    load1=$(sysctl -n vm.loadavg | gawk '{print $2}')
+    over=$(gawk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
     [ "$over" = 1 ] || break
     if [ "$waited" -ge "$wait_s" ]; then
       echo "bg: load $load1 still above $max_per_core per core after ${waited}s; starting anyway" >&2
@@ -173,7 +174,7 @@ take_slot() {
   mkdir -p "$dir"
   while :; do
     got=
-    for i in $(seq 1 "$slots"); do
+    for i in $(gseq 1 "$slots"); do
       if shlock -f "$dir/slot.$i" -p $$ 2>/dev/null; then got=$i; break; fi
     done
     [ -n "$got" ] && return 0
@@ -182,7 +183,7 @@ take_slot() {
       return 0
     fi
     if [ "$waited" -eq 0 ]; then
-      held=$(cat "$dir"/slot.* 2>/dev/null | tr '\n' ' ')
+      held=$(cat "$dir"/slot.* 2>/dev/null | gtr '\n' ' ')
       echo "bg: waiting for a machine-wide $label slot (held by pid $held); this is normal, do not kill or retry" >&2
     fi
     sleep 10

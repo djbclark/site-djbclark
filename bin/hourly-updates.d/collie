@@ -6,6 +6,7 @@
 # Never crosses a major (Collie refuses that itself, and this matches it). A
 # failed check is treated as "no update": fail closed, log nothing, retry next
 # hour.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 
 json="$(collie update --check --local --json 2>/dev/null || true)"
@@ -18,7 +19,7 @@ reason="$(printf '%s' "$json" | jq -r '.checks[]? | select(.id == "upstream") | 
 
 case "$reason" in
   *"an update would take it"*)
-    target="$(printf '%s' "$reason" | sed -n 's/^v\([0-9][0-9.]*\) resolves on .*/\1/p')"
+    target="$(printf '%s' "$reason" | gsed -n 's/^v\([0-9][0-9.]*\) resolves on .*/\1/p')"
     before="$(collie version 2>/dev/null || true)"
     collie update --plain
     echo "UPDATED from ${before:-unknown} to v${target:-unknown}"

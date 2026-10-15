@@ -61,6 +61,7 @@
 # $STATE_DIR/load-high; one recovery notice when the condition clears. Notice only: it never
 # kills or stops anything. `fleet-watch load` runs just this check.
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
 
 LABEL=com.djbclark.fleet-watch
@@ -120,12 +121,12 @@ notify() {
   # Returns non-zero on failure so a once-per-incident notice can be retried.
   if ! HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" \
        "$HOME/.local/bin/hermes-ping" "$1: $2" >>"$STATE_DIR/hermes.log" 2>&1; then
-    printf '%s hermes send FAILED for: %s\n' "$(date '+%F %T')" "$2" >>"$LOG"
+    printf '%s hermes send FAILED for: %s\n' "$(gdate '+%F %T')" "$2" >>"$LOG"
     return 1
   fi
 }
 
-count() { pgrep -f "$1" 2>/dev/null | wc -l | tr -d ' '; }
+count() { pgrep -f "$1" 2>/dev/null | gwc -l | gtr -d ' '; }
 
 runb() {
   # Bounded run (2026-10-10): coreutils timeout when available; otherwise use
@@ -185,15 +186,15 @@ phone() {
     return
   }
   local status now mtime shz auth
-  status=$(printf '%s\n' "$line" | sed -n 1p)
-  now=$(printf '%s\n' "$line" | sed -n 3p)
-  mtime=$(printf '%s\n' "$line" | sed -n 4p)
+  status=$(printf '%s\n' "$line" | gsed -n 1p)
+  now=$(printf '%s\n' "$line" | gsed -n 3p)
+  mtime=$(printf '%s\n' "$line" | gsed -n 4p)
   if [[ -n "$now" && -n "$mtime" ]] && ((now - mtime > 2400)); then
     echo "stale"
     return
   fi
-  shz=$(grep -o 'shizuku=[a-z]*' <<<"$status" | head -1 | cut -d= -f2)
-  auth=$(grep -o 'shizuku_auth=[a-z]*' <<<"$status" | head -1 | cut -d= -f2)
+  shz=$(ggrep -o 'shizuku=[a-z]*' <<<"$status" | ghead -1 | gcut -d= -f2)
+  auth=$(ggrep -o 'shizuku_auth=[a-z]*' <<<"$status" | ghead -1 | gcut -d= -f2)
   echo "${shz:-unknown}${auth:+$([[ $auth == unanswered ]] && echo +unanswered)}"
 }
 
@@ -201,7 +202,7 @@ adb_up() {
   # True when adb lists the phone (serial <ip>:5555) in state "device": reachable
   # on adb even though its sshd may not be answering. Read-only.
   runb "$ADB_TIMEOUT" adb devices 2>/dev/null |
-    grep "^$1:5555[[:space:]][[:space:]]*device$" >/dev/null
+    ggrep "^$1:5555[[:space:]][[:space:]]*device$" >/dev/null
 }
 
 ss_ev() {
@@ -210,12 +211,12 @@ ss_ev() {
   # t2e), a healthy one 0. adb or ss unavailable -> say so, not silence.
   local l
   l=$(runb "$ADB_TIMEOUT" adb -s "$1:5555" shell ss -ltn 2>/dev/null |
-    grep ":$2[[:space:]]" | tr -s '[:space:]' ' ')
+    ggrep ":$2[[:space:]]" | gtr -s '[:space:]' ' ')
   printf '%s' "${l:-"no :$2 line from ss -ltn (adb or ss unavailable)"}"
 }
 
 sshd_ev() {
-  sed -n 1p "$SSHD_EV_PREFIX-$1" 2>/dev/null
+  gsed -n 1p "$SSHD_EV_PREFIX-$1" 2>/dev/null
 }
 
 sshd_probe() {
@@ -236,7 +237,7 @@ sshd_probe() {
     ip=${h%%:*}; port=${h##*:}
   else
     read -r ip port <<<"$(runb "$ADB_TIMEOUT" ssh -G "$h" 2>/dev/null |
-      awk '/^hostname /{printf "%s ", $2} /^port /{printf "%s ", $2}')"
+      gawk '/^hostname /{printf "%s ", $2} /^port /{printf "%s ", $2}')"
     ip=${ip:-}; port=${port:-}
   fi
   if [[ -z "$ip" || -z "$port" ]]; then
@@ -334,15 +335,15 @@ PYEOF
 repo() {
   # "<head sha>/<releases>" for a GitHub repo, from a cache refreshed at most every REPO_INTERVAL.
   local r=$1 cache="$STATE_DIR/repo-${1//\//_}" now sha rels
-  now=$(date +%s)
-  if [[ -f "$cache" ]] && ((now - $(stat -f %m "$cache") < REPO_INTERVAL)); then
+  now=$(gdate +%s)
+  if [[ -f "$cache" ]] && ((now - $(gstat -c %Y "$cache") < REPO_INTERVAL)); then
     cat "$cache"
     return
   fi
   sha=$(runb "$GH_TIMEOUT" gh api "repos/$r/commits?per_page=1" --jq '.[0].sha[0:7]' 2>/dev/null)
   rels=$(runb "$GH_TIMEOUT" gh api "repos/$r/releases?per_page=100" --jq 'length' 2>/dev/null)
   if [[ -n "$sha" && -n "$rels" ]]; then
-    echo "$sha/$rels" | tee "$cache"
+    echo "$sha/$rels" | gtee "$cache"
   elif [[ -f "$cache" ]]; then
     cat "$cache"
   else
@@ -405,12 +406,12 @@ s1_watch() {
   for p in $S1_PRODUCERS; do [[ "$p" == hindsight ]] || producers+="$p "; done
   if [[ ! -f "$S1_DB" ]] || ! ages=$(s1_ages "$producers" 2>>"$LOG"); then
     S1_STATE=unknown
-    printf '%s s1: cannot read %s\n' "$(date '+%F %T')" "$S1_DB" >>"$LOG"
+    printf '%s s1: cannot read %s\n' "$(gdate '+%F %T')" "$S1_DB" >>"$LOG"
     return
   fi
   S1_AGES=""
   for p in $producers; do
-    age=$(awk -v p="$p" '$1 == p { print $2 }' <<<"$ages")
+    age=$(gawk -v p="$p" '$1 == p { print $2 }' <<<"$ages")
     flag="$STATE_DIR/s1-stale-$p"
     if [[ "$age" == none ]]; then
       words=never
@@ -424,7 +425,7 @@ s1_watch() {
       stale+=("$p")
       [[ -f "$flag" ]] && continue
       notify "s1-evidence" "$p stale ${words/#never/(no events)}" &&
-        printf '%s age=%s\n' "$(date '+%F %T')" "$age" >"$flag"
+        printf '%s age=%s\n' "$(gdate '+%F %T')" "$age" >"$flag"
     elif [[ -f "$flag" ]]; then
       notify "s1-evidence" "$p fresh again (newest event $words old)" && rm -f "$flag"
     fi
@@ -436,7 +437,7 @@ s1_watch() {
 agent_of() {
   local pid=$1 i comm
   for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | gtr -d ' ')
     [[ -n "$pid" && "$pid" -gt 1 ]] || break
     comm=$(ps -o command= -p "$pid" 2>/dev/null)
     case "$comm" in
@@ -452,13 +453,13 @@ agent_of() {
 load_watch() {
   local flag="$STATE_DIR/load-high" cores load1 used total over pct now mtime
   cores=$(sysctl -n hw.ncpu 2>/dev/null) || return 0
-  load1=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')
-  read -r used total <<<"$(sysctl -n vm.swapusage 2>/dev/null | awk '{gsub("M",""); print $6, $3}')"
+  load1=$(sysctl -n vm.loadavg 2>/dev/null | gawk '{print $2}')
+  read -r used total <<<"$(sysctl -n vm.swapusage 2>/dev/null | gawk '{gsub("M",""); print $6, $3}')"
   [[ -n "$cores" && -n "$load1" && -n "$used" && -n "$total" ]] || return 0
-  over=$(awk -v l="$load1" -v c="$cores" -v m="$LOAD_MULT" -v u="$used" -v t="$total" -v p="$SWAP_PCT" \
+  over=$(gawk -v l="$load1" -v c="$cores" -v m="$LOAD_MULT" -v u="$used" -v t="$total" -v p="$SWAP_PCT" \
     'BEGIN { print (l > c * m && t > 0 && u * 100 / t >= p) ? 1 : 0 }')
-  pct=$(awk -v u="$used" -v t="$total" 'BEGIN { printf "%d", (t > 0) ? u * 100 / t : 0 }')
-  now=$(date +%s)
+  pct=$(gawk -v u="$used" -v t="$total" 'BEGIN { printf "%d", (t > 0) ? u * 100 / t : 0 }')
+  now=$(gdate +%s)
   if [[ "$over" != 1 ]]; then
     if [[ -f "$flag" ]]; then
       notify "load" "back to normal: load $load1 on $cores cores, swap ${pct}% used" && rm -f "$flag"
@@ -466,11 +467,11 @@ load_watch() {
     return 0
   fi
   if [[ -f "$flag" ]]; then
-    mtime=$(stat -f %m "$flag" 2>/dev/null || echo 0)
+    mtime=$(gstat -c %Y "$flag" 2>/dev/null || echo 0)
     ((now - mtime < LOAD_COOLDOWN)) && return 0
   fi
   local top5 line pid mem cmd who parts=()
-  top5=$(top -l 1 -o mem -n 5 -stats pid,mem,command 2>/dev/null | awk '/^PID/ {go=1; next} go && NF >= 3 {print}')
+  top5=$(top -l 1 -o mem -n 5 -stats pid,mem,command 2>/dev/null | gawk '/^PID/ {go=1; next} go && NF >= 3 {print}')
   while read -r pid mem cmd; do
     [[ -n "$pid" ]] || continue
     who=$(agent_of "$pid")
@@ -486,7 +487,7 @@ vps_probe() {
   runb "$VPS_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=8 -o IdentitiesOnly=yes \
     -o IdentityAgent=none -i "$VPS_KEY" -o StrictHostKeyChecking=accept-new "root@$1" \
     'r=$(systemctl show nixos-upgrade.service -p Result --value); a=$(systemctl show nixos-upgrade.service -p ActiveState --value); f=$(systemctl --failed --plain --no-legend | wc -l); echo "$r $a $f"' 2>/dev/null |
-    tail -1
+    gtail -1
 }
 
 vps_watch() {
@@ -564,18 +565,18 @@ check() {
   fi
   local now_line="${parts[*]}"
   local prev_line=""
-  [[ -f "$LAST" ]] && prev_line=$(sed -n 2p "$LAST")
-  printf '%s\n%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$now_line" >"$LAST"
+  [[ -f "$LAST" ]] && prev_line=$(gsed -n 2p "$LAST")
+  printf '%s\n%s\n' "$(gdate '+%Y-%m-%d %H:%M:%S')" "$now_line" >"$LAST"
   echo "$now_line"
 
   [[ -z "$prev_line" || "$prev_line" == "$now_line" ]] && return 0
-  printf '%s %s -> %s\n' "$(date '+%F %T')" "$prev_line" "$now_line" >>"$LOG"
+  printf '%s %s -> %s\n' "$(gdate '+%F %T')" "$prev_line" "$now_line" >>"$LOG"
 
   # Say what changed in words, one notification per run.
   local msgs=() key old new
   for key in agents builds deploy helm $HOSTS $sshdk $REPOS; do
-    old=$(tr ' ' '\n' <<<"$prev_line" | grep "^$key=" | cut -d= -f2)
-    new=$(tr ' ' '\n' <<<"$now_line" | grep "^$key=" | cut -d= -f2)
+    old=$(gtr ' ' '\n' <<<"$prev_line" | ggrep "^$key=" | gcut -d= -f2)
+    new=$(gtr ' ' '\n' <<<"$now_line" | ggrep "^$key=" | gcut -d= -f2)
     [[ "$old" == "$new" ]] && continue
     case $key in
       agents | builds | deploy)
@@ -585,7 +586,7 @@ check() {
         # Only what is newly waiting: a token absent from the previous check.
         [[ "$new" == *:* ]] || continue  # helm could not be read: say nothing
         local gained=() tok
-        for tok in $(tr ',' ' ' <<<"${new#*:}"); do
+        for tok in $(gtr ',' ' ' <<<"${new#*:}"); do
           [[ ",${old#*:}," == *",$tok,"* ]] || gained+=("${tok%%@*}")
         done
         ((${#gained[@]})) && msgs+=("helm: ${new%%:*} waiting on you, new: ${gained[*]} (send /helm)")
@@ -628,7 +629,7 @@ case "${1:-check}" in
     vps_watch
     echo "vps=$VPS_STATE"
     ;;
-  test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && tail -2 "$STATE_DIR/hermes.log" ;;
+  test-notify) notify "fleet-watch" "test notice: change notices from fleet-watch now arrive here" && gtail -2 "$STATE_DIR/hermes.log" ;;
   install)
     cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -661,7 +662,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    sed -n '2,10p' "$0"
+    gsed -n '2,10p' "$0"
     exit 1
     ;;
 esac

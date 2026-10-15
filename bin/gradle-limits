@@ -10,6 +10,7 @@
 # Every Gradle home's gradle.properties links to ~/.local/state/gradle-limits/gradle.properties,
 # which links to the active profile, so a switch is one relink. Only daemons started after a
 # switch use the new settings; a running build keeps its own.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 repo="$HOME/ops/site-private"
 profiles="$repo/gradle/profiles"
@@ -18,7 +19,7 @@ live="$state/gradle.properties"
 expires_file="$state/expires"
 mkdir -p "$state"
 
-active() { basename "$(readlink "$live" 2>/dev/null || echo low.properties)" .properties; }
+active() { basename "$(greadlink "$live" 2>/dev/null || echo low.properties)" .properties; }
 
 activate() {
   local name="$1"
@@ -34,10 +35,10 @@ link_homes() {
   [ -d "$HOME/.cache/gradle" ] && homes+=("$HOME/.cache/gradle")
   [ -L "$live" ] || activate low
   local h dst
-  for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
+  for h in $(printf '%s\n' "${homes[@]}" | gsort -u); do
     mkdir -p "$h"
     dst="$h/gradle.properties"
-    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$live" ]; then echo "ok      $dst"; continue; fi
+    if [ -L "$dst" ] && [ "$(greadlink "$dst")" = "$live" ]; then echo "ok      $dst"; continue; fi
     if [ -e "$dst" ] && [ ! -L "$dst" ]; then echo "SKIP    $dst is a real file; merge it into a profile first" >&2; continue; fi
     ln -sfn "$live" "$dst" && echo "linked  $dst"
   done
@@ -47,10 +48,10 @@ link_homes() {
   local init src
   for init in machine-slot.gradle global-remote-cache.init.gradle.kts plektra-remote-only.gradle; do
     src="$repo/gradle/init.d/$init"
-    for h in $(printf '%s\n' "${homes[@]}" | sort -u); do
+    for h in $(printf '%s\n' "${homes[@]}" | gsort -u); do
       mkdir -p "$h/init.d"
       dst="$h/init.d/$init"
-      if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then echo "ok      $dst"; continue; fi
+      if [ -L "$dst" ] && [ "$(greadlink "$dst")" = "$src" ]; then echo "ok      $dst"; continue; fi
       ln -sfn "$src" "$dst" && echo "linked  $dst"
     done
   done
@@ -58,21 +59,21 @@ link_homes() {
 
 until_epoch() { # HH:MM today, or tomorrow if already past
   local t now
-  t=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%Y-%m-%d) $1" +%s) || exit 2
-  now=$(date +%s)
+  t=$(gdate -d "$(gdate +%Y-%m-%d) $1" +%s) || exit 2
+  now=$(gdate +%s)
   [ "$t" -le "$now" ] && t=$((t + 86400))
   echo "$t"
 }
 
 for_epoch() { # 8h, 90m
   local n="${1%[hm]}" unit="${1: -1}"
-  case "$unit" in h) echo $(( $(date +%s) + n * 3600 ));; m) echo $(( $(date +%s) + n * 60 ));;
+  case "$unit" in h) echo $(( $(gdate +%s) + n * 3600 ));; m) echo $(( $(gdate +%s) + n * 60 ));;
     *) echo "gradle-limits: --for takes e.g. 8h or 90m" >&2; exit 2;; esac
 }
 
 check() {
   [ -f "$expires_file" ] || return 0
-  if [ "$(date +%s)" -ge "$(cat "$expires_file")" ]; then
+  if [ "$(gdate +%s)" -ge "$(cat "$expires_file")" ]; then
     activate low
     rm -f "$expires_file"
     echo "gradle-limits: profile expired; back to low" >&2
@@ -84,8 +85,8 @@ case "$cmd" in
   status)
     check
     echo "profile: $(active)"
-    [ -f "$expires_file" ] && echo "expires: $(date -r "$(cat "$expires_file")" '+%Y-%m-%d %H:%M')"
-    echo "load:    $(sysctl -n vm.loadavg | tr -d '{}' | xargs) on $(sysctl -n hw.ncpu) cores"
+    [ -f "$expires_file" ] && echo "expires: $(gdate -d "@$(cat "$expires_file")" '+%Y-%m-%d %H:%M')"
+    echo "load:    $(sysctl -n vm.loadavg | gtr -d '{}' | gxargs) on $(sysctl -n hw.ncpu) cores"
     ;;
   set)
     name="${2:?usage: gradle-limits set <profile> [--until HH:MM | --for 8h]}"

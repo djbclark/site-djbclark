@@ -402,7 +402,7 @@ def cleanup_script(problems, include_stale, include_apps):
         rows = sorted((t for t in targets if t["db"] == db), key=lambda x: (x["service"], x["client"]))
         lines += [
             f"DB={shlex.quote(db)}",
-            'BACKUP=$(mktemp "$DB.bak-XXXXXXXX")',
+            'BACKUP=$(/opt/homebrew/bin/gmktemp "$DB.bak-XXXXXXXX")',
             'sqlite3 "$DB" ".backup \\"$BACKUP\\""',
             '[ "$(sqlite3 "$BACKUP" "PRAGMA integrity_check")" = ok ] || '
             '{ echo "backup failed integrity check; nothing deleted" >&2; exit 1; }',

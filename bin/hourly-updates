@@ -17,6 +17,7 @@
 # log, and — only when at least one app printed `UPDATED` — sends one Hermes
 # notice. It always exits 0: the runner is just the loop, the apps report
 # themselves.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,10 +46,10 @@ for app in "$dir"/*; do
   name="$(basename "$app")"
   case "$name" in .*|*~|*.bak|*.disabled) continue ;; esac
 
-  out="$(mktemp "$state/.$name.XXXXXX")"
+  out="$(gmktemp "$state/.$name.XXXXXX")"
   if run_app "$app" "$out"; then rc=0; else rc=$?; fi
   {
-    printf '\n=== %s %s (exit %s) ===\n' "$name" "$(date '+%F %T')" "$rc"
+    printf '\n=== %s %s (exit %s) ===\n' "$name" "$(gdate '+%F %T')" "$rc"
     cat "$out"
   } >>"$state/$name.log"
 

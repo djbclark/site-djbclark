@@ -14,6 +14,7 @@
 # Run it when the machine is otherwise quiet, or the other work lands in the same
 # clusters and muddies the residency. Test hooks (no root, canned data):
 #   POWERMETRICS=/path/to/fake  ALLOW_NONROOT=1
+export PATH="/opt/homebrew/bin:$PATH"
 set -u
 LOOPS="${1:-4}"
 SECS="${2:-5}"
@@ -47,7 +48,7 @@ start_loops() { # $@ = optional policy prefix
 
 cputime_s() { # total cputime of PIDS in seconds
   ps -o time= -p "$(IFS=,; echo "${PIDS[*]}")" 2>/dev/null |
-    awk '{n=split($1,a,":"); s=0; for(i=1;i<=n;i++) s=s*60+a[i]; t+=s} END{printf "%.2f", t}'
+    gawk '{n=split($1,a,":"); s=0; for(i=1;i<=n;i++) s=s*60+a[i]; t+=s} END{printf "%.2f", t}'
 }
 
 run_phase() { # $1 = label, rest = policy prefix
@@ -57,20 +58,20 @@ run_phase() { # $1 = label, rest = policy prefix
   start_loops "$@"
   sleep 3 # let QoS settle and the scheduler place the threads
   local out c0 c1 w0 w1
-  out="$(mktemp -t verify-ecores)"
-  c0="$(cputime_s)"; w0="$(date +%s)"
+  out="$(gmktemp -t verify-ecores.XXXXXX)"
+  c0="$(cputime_s)"; w0="$(gdate +%s)"
   "$POWERMETRICS" --samplers cpu_power,tasks -n 1 -i "$((SECS * 1000))" >"$out" 2>&1
-  c1="$(cputime_s)"; w1="$(date +%s)"
+  c1="$(cputime_s)"; w1="$(gdate +%s)"
   echo "-- clusters (active residency / frequency):"
-  grep -E 'Cluster (HW )?active (residency|frequency)|Cluster Power' "$out" | sed 's/^/   /'
+  ggrep -E 'Cluster (HW )?active (residency|frequency)|Cluster Power' "$out" | gsed 's/^/   /'
   echo "-- per-CPU active residency:"
-  grep -E '^CPU [0-9]+ (active residency|frequency)|^CPU [0-9]+ active residency' "$out" | sed 's/^/   /' | head -40
+  ggrep -E '^CPU [0-9]+ (active residency|frequency)|^CPU [0-9]+ active residency' "$out" | gsed 's/^/   /' | ghead -40
   echo "-- the ${LOOPS} test loops (powermetrics 'tasks' rows, by pid; CPU ms/s):"
   local p
   for p in "${PIDS[@]}"; do
-    grep -E "^[^ ].*[[:space:]]${p}[[:space:]]" "$out" | head -1 | sed 's/^/   /'
+    ggrep -E "^[^ ].*[[:space:]]${p}[[:space:]]" "$out" | ghead -1 | gsed 's/^/   /'
   done
-  awk -v c0="$c0" -v c1="$c1" -v w="$((w1 - w0))" -v n="$LOOPS" \
+  gawk -v c0="$c0" -v c1="$c1" -v w="$((w1 - w0))" -v n="$LOOPS" \
     'BEGIN { if (w > 0) printf "-- ps cputime cross-check: %.2f cores per loop (%.2fs over ~%ds)\n", (c1-c0)/w/n, c1-c0, w }'
   rm -f "$out"
   cleanup

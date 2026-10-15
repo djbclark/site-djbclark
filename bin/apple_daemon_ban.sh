@@ -30,30 +30,31 @@
 # ~/Library/Logs/watchdogd/apple-daemon-ban.log. Labels must stay in step
 # with macos/sip-doit-with-sudo.sh and the root helper's system half.
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -u
 
 LOG_DIR="$HOME/Library/Logs/watchdogd"
 LOG="$LOG_DIR/apple-daemon-ban.log"
 ROOT_HELPER=/usr/local/libexec/djbclark/apple_daemon_ban_root.sh
 
-CONSOLE_UID=$(stat -f %u /dev/console 2>/dev/null || true)
+CONSOLE_UID=$(gstat -c %u /dev/console 2>/dev/null || true)
 if [ -z "${CONSOLE_UID:-}" ] || [ "$CONSOLE_UID" = "0" ]; then
   echo "skip: no console user"
   exit 75
 fi
 
 mkdir -p "$LOG_DIR"
-say() { echo "$(date '+%F %T') $*" >>"$LOG"; }
+say() { echo "$(gdate '+%F %T') $*" >>"$LOG"; }
 
 # job_pid <domain> <label>: the pid launchd reports, or empty. pgrep -x is
 # wrong here (macos/sip-doit-with-sudo.sh, 2026-10-10): triald's process
 # name is the truncated path "/usr/libexec/tri", and cloudd matches across
 # the gui and system domains. launchd's pid is per-domain and per-label.
 job_pid() {
-  launchctl print "$1/$2" 2>/dev/null | awk '/^\tpid =/{print $3; exit}'
+  launchctl print "$1/$2" 2>/dev/null | gawk '/^\tpid =/{print $3; exit}'
 }
 
-stat_of() { ps -o stat= -p "$1" 2>/dev/null | tr -d ' '; }
+stat_of() { ps -o stat= -p "$1" 2>/dev/null | gtr -d ' '; }
 
 # freeze <domain> <label>: SIGSTOP on sight. Already stopped (by App Tamer
 # or an earlier pass) means nothing to do — this must never fight or undo

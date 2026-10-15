@@ -28,7 +28,7 @@
 # Installed 2026-10-05 by zcode; LaunchAgent com.djbclark.stagger-login.
 
 set -u
-PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
 
 CONF="${STAGGER_CONF:-$HOME/.config/stagger-login/apps}"
 LOG="$HOME/Library/Logs/stagger-login.log"
@@ -43,15 +43,15 @@ for arg in "$@"; do
     esac
 done
 
-ts() { date '+%Y-%m-%d %H:%M:%S'; }
+ts() { gdate '+%Y-%m-%d %H:%M:%S'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG"; }
 
 # Rotate if over 64 KB so launchd-opened fds stay sane-ish.
-if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 65536 ]; then
-    tail -n 200 "$LOG" > "$LOG.1"
+if [ -f "$LOG" ] && [ "$(gwc -c < "$LOG")" -gt 65536 ]; then
+    gtail -n 200 "$LOG" > "$LOG.1"
     : > "$LOG"
 fi
-touch "$LOG"
+gtouch "$LOG"
 log "=== stagger-login start (pid $$, base=${BASE}s, dry=$DRY, conf=$CONF)"
 
 if [ ! -f "$CONF" ]; then
@@ -68,7 +68,7 @@ if [ "$DRY" = 0 ] && [ "$NOW" = 0 ]; then
     while [ "$tries" -lt 6 ]; do
         n=$(/usr/bin/log show --last 20s --style compact \
              --predicate 'process == "tccd" AND eventMessage CONTAINS "Failed to get code reference"' \
-             2>/dev/null | grep -c 'Failed to get code reference')
+             2>/dev/null | ggrep -c 'Failed to get code reference')
         [ "${n:-0}" -gt 0 ] 2>/dev/null || break
         log "gate: tccd still failing ($n hits in last 20s); +15s (try $((tries+1))/6)"
         sleep 15
@@ -82,7 +82,7 @@ app_running() {
 }
 
 svc_state() {
-    launchctl print "$1" 2>/dev/null | awk -F' = ' '/^[[:space:]]*state =/ { print $2; exit }'
+    launchctl print "$1" 2>/dev/null | gawk -F' = ' '/^[[:space:]]*state =/ { print $2; exit }'
 }
 
 do_app() {
@@ -107,7 +107,7 @@ do_launchd() {
             if ! launchctl kickstart "$svc" 2>/dev/null; then
                 # Service not loaded in the session (e.g. bootout'd or never
                 # bootstrapped): bootstrap it; RunAtLoad in the plist fires.
-                launchctl bootstrap "gui/$UID_" "$plist" 2>&1 | head -1 >> "$LOG"
+                launchctl bootstrap "gui/$UID_" "$plist" 2>&1 | ghead -1 >> "$LOG"
             fi
             sleep 2
             if [ "$(svc_state "$svc")" = "running" ]; then
@@ -126,7 +126,7 @@ do_launchd() {
 # Entries sorted by delay; delays are absolute seconds-from-login, so credit
 # the base wait (+ any gate extension) already slept before the first entry.
 prev=$((BASE + tries * 15))
-grep -v '^[[:space:]]*#' "$CONF" | grep -v '^[[:space:]]*$' | sort -n | {
+ggrep -v '^[[:space:]]*#' "$CONF" | ggrep -v '^[[:space:]]*$' | gsort -n | {
     while IFS="$(printf '\t')" read -r delay kind a b; do
         case "$kind" in
             app) target="app $a" ;;

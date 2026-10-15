@@ -10,6 +10,7 @@
 # The real `sudo` is not shadowed, so launchd/ansible/scripts are unaffected.
 # Every decision is appended to ~/.local/state/sudo-ask/log.
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -u
 [ $# -gt 0 ] || { echo "usage: sudo-ask <command...>" >&2; exit 64; }
 
@@ -23,7 +24,7 @@ cmd=${cmd% }
 shown=$cmd
 [ ${#shown} -gt 700 ] && shown="${shown:0:700}... [truncated, ${#cmd} chars]"
 
-log() { printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
+log() { printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
 
 # Enter and Esc must never decide: the default button is "Wait" (a no-op that
 # re-shows the dialog), and Esc is mapped to it too. Wait is also the leftmost

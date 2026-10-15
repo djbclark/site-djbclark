@@ -21,6 +21,7 @@
 #
 # Idempotent: exits 0 with "nothing to do" when the ids already match.
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 
 BINDING="${COPILOT_BINDING:-$HOME/.copilot/.mcp-writer.binding}"
@@ -32,7 +33,7 @@ if [ ! -f "$BINDING" ]; then
   exit 0
 fi
 
-current_dev="$(stat -f '%d' "$TARGET_DIR")"
+current_dev="$(gstat -c '%d' "$TARGET_DIR")"
 
 read -r root_dev lock_dev <<<"$(
   python3 - "$BINDING" <<'PY'
@@ -47,7 +48,7 @@ if [ "$root_dev" = "$current_dev" ] && [ "$lock_dev" = "$current_dev" ]; then
   exit 0
 fi
 
-backup="$BINDING.bak-$(date -u +%Y%m%d-%H%M%S)"
+backup="$BINDING.bak-$(gdate -u +%Y%m%d-%H%M%S)"
 cp -p "$BINDING" "$backup"
 
 python3 - "$BINDING" "$current_dev" <<'PY'
