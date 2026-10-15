@@ -8,6 +8,12 @@
 # catch-up nightly detached (~12 min). Script and README section "Restarts
 # and downtime": macos/neofinder/neofinder-batch-watch. Rendered by
 # roles/watchdogd; edit the role.
+# Hard offs (2026-10-15: restarts here often end in a forced reset after a
+# shutdown stall): the probe keys on live state and logs only, so nothing
+# stale survives a power loss; a nightly that died part way counts as
+# missed. Each boot costs one or two actions, so the budget comes back
+# after 1 h of health instead of the default 6 h: several resets in a
+# morning must not leave the volume unhealed until someone looks.
 name = "neofinder-batch"
 interval_s = 120
 
@@ -26,6 +32,7 @@ command = ["{{ watchdogd_neofinder_dir }}/neofinder-batch-watch", "heal"]
 timeout_s = 120
 min_action_interval_s = 900
 max_restarts = 6
+healthy_reset_s = 3600
 
 [notify]
 down = "{name} DOWN: batch volume not searchable ({detail}; {counts}){tail}"

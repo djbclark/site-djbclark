@@ -264,6 +264,11 @@ History:
     last opened, `stub-dates` and `nightly` (R).
   - 2026-10-11: `.sql` entries are named `<name>.sql.nf` so Spotlight
     indexes them (S).
+  - 2026-10-15: `nightly` holds an flock (CTRL_DIR/nightly.lock; a second
+    nightly exits 0 at once) and logs `nightly: start pid=N` before its
+    passes, so neofinder-batch-watch can tell a run killed by a hard off
+    (start, no closing line) from one that finished; a pass a SIGTERM cut
+    short logs -1 instead of 0.
 """
 
 import sys
@@ -282,6 +287,7 @@ import ctypes
 import dataclasses
 import datetime as dt
 import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -3257,6 +3263,11 @@ def cmd_stub_dates(args):
     return 1 if failed else 3 if stopped else 0
 
 
+# The closing line of a nightly that stopped on purpose before its passes, so
+# neofinder-batch-watch does not take it for one that died part way.
+_NIGHTLY_GAVE_UP = "nightly: retag=-1 stub-dates=-1 attached=0 indexed=0 detach=0"
+
+
 def cmd_nightly(args):
     """Compact and attach the batch image, retag, stub-dates, then index or detach (R)."""
     mount = Path(args.mount)
@@ -3269,6 +3280,22 @@ def cmd_nightly(args):
     deadline = _next_occurrence(local_now(), stop_min).timestamp()
     if args.index:
         deadline -= INDEX_MARGIN_S
+    # One nightly at a time (2026-10-15): a watchdog catch-up after a restart
+    # can still be running at 01:15 when Jobber starts its own. flock is held
+    # by the kernel and dies with the process, so a hard off or a SIGKILL never
+    # leaves a stale lock behind (the file itself carries no meaning).
+    CTRL_DIR.mkdir(parents=True, exist_ok=True)
+    lock_fh = open(CTRL_DIR / "nightly.lock", "a+")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("nightly: another nightly is running; nothing done")
+        subcmd_log("nightly: skipped, another nightly holds the lock")
+        return 0  # not an error: Jobber's Backoff would re-run it in seconds
+    # Start marker: a start with no closing "nightly: retag=" line after it
+    # means the run died without unwinding (hard off, SIGKILL), and
+    # neofinder-batch-watch starts a catch-up for it.
+    subcmd_log(f"nightly: start pid={os.getpid()}")
     # SIGTERM (Jobber's timeout backstop) unwinds through `finally`.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
     attached = indexed = False
@@ -3287,6 +3314,7 @@ def cmd_nightly(args):
         if not image.exists():
             eprint(f"nightly: no image {image}")
             subcmd_log(f"nightly: no image {image}")
+            subcmd_log(_NIGHTLY_GAVE_UP)
             return 2
         _compact_image(image)
         r = subprocess.run(
@@ -3300,9 +3328,12 @@ def cmd_nightly(args):
             msg = (r.stderr or r.stdout).strip()
             eprint(f"nightly: attach failed: {msg}")
             subcmd_log(f"nightly: attach {image} failed: {msg}")
+            subcmd_log(_NIGHTLY_GAVE_UP)
             return 2
         attached = True
-    rt = sd = det = 0
+    # -1 = not reached (a SIGTERM unwound the run before that pass finished).
+    rt = sd = -1
+    det = 0
     try:
         common = dict(path=str(mount), dry_run=False, deadline=deadline)
         rt = cmd_retag(argparse.Namespace(**common))

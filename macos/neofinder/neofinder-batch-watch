@@ -23,6 +23,17 @@
 # volume has indexing enabled, and the last nightly finished less than
 # MAX_NIGHTLY_AGE_S ago (26 h: one missed 01:15 run). Every nightly step is
 # idempotent, so a catch-up after an interruption at any stage is safe.
+#
+# Hard offs (2026-10-15: restarts here often end in a forced reset after a
+# shutdown stall, so nothing runs at shutdown): every check reads live state
+# or a log, never a pid or lock file. A nightly that died without unwinding
+# leaves a "nightly: start" line with no closing "nightly: retag=" line after
+# it; that counts as missed even when the previous nightly is under 26 h old.
+# Only a closing line with indexed=1 counts as a finished nightly. Logs are
+# read with grep -a: a power loss can leave NUL bytes in an appended log, and
+# GNU grep then reports "binary file matches" instead of the line. The
+# exporter holds an flock (released by the kernel on any death) so Jobber's
+# 01:15 run and a catch-up never overlap.
 # Actions are logged to ~/Library/Logs/watchdogd/neofinder-batch.log, the
 # catch-up's own output to neofinder-batch-catchup.log beside it.
 
@@ -41,7 +52,12 @@ LOG=$LOG_DIR/neofinder-batch.log
 MAX_NIGHTLY_AGE_S=${MAX_NIGHTLY_AGE_S:-93600}
 CATCHUP_TIMEOUT_S=${CATCHUP_TIMEOUT_S:-7200}
 # Jobber's job and our catch-up share this command line; one check sees both.
-NIGHTLY_PATTERN='neofinder-stub-export.py nightly'
+NIGHTLY_PATTERN='python[0-9.]* [^ ]*neofinder-stub-export\.py nightly'
+# subcommands.log lines: "<ISO time> nightly: start pid=N" and the closing
+# "<ISO time> nightly: retag=R stub-dates=S attached=A indexed=I detach=D".
+# Not anchored at ^: after a power loss the first line appended can follow
+# the NUL bytes on the same line.
+TS_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{2}:[0-9]{2} '
 
 log() { mkdir -p "$LOG_DIR"; printf '%s %s\n' "$(gdate -Is)" "$*" >> "$LOG"; }
 
@@ -49,14 +65,25 @@ nightly_pid() { pgrep -f "$NIGHTLY_PATTERN" 2>/dev/null | ghead -n 1; }
 
 attached() { mount | ggrep -q " on $MOUNT "; }
 
-# Seconds since the last completed nightly (its closing "nightly: retag=" line),
-# empty when there is none on record.
+# Seconds since the last nightly that finished and indexed (closing line with
+# indexed=1), empty when there is none on record. Never negative.
 last_nightly_age() {
-  local line ts
-  line=$(ggrep 'nightly: retag=' "$SUBLOG" 2>/dev/null | gtail -n 1) || return 0
+  local line ts t age
+  line=$(ggrep -a -E "${TS_RE}nightly: retag=.* indexed=1( |\$)" "$SUBLOG" 2>/dev/null | gtail -n 1)
   ts=${line%% *}
   [ -n "$ts" ] || return 0
-  echo $(( $(gdate +%s) - $(gdate -d "$ts" +%s) ))
+  t=$(gdate -d "$ts" +%s 2>/dev/null) || return 0
+  age=$(( $(gdate +%s) - t ))
+  [ "$age" -ge 0 ] || age=0
+  echo "$age"
+}
+
+# True when the newest nightly start has no closing line after it: that run
+# died without unwinding (hard off, SIGKILL). Only meaningful while no nightly
+# is running.
+nightly_interrupted() {
+  ggrep -a -E "${TS_RE}nightly: (start pid=|retag=)" "$SUBLOG" 2>/dev/null \
+    | gtail -n 1 | ggrep -q 'nightly: start pid='
 }
 
 # Volumes other than $MOUNT that report "Indexing enabled", space separated.
@@ -90,8 +117,10 @@ probe() {
   others=$(other_indexing)
   [ -z "$others" ] || bad="$bad; Spotlight on $others"
   age=$(last_nightly_age)
-  if [ -z "$age" ]; then
-    bad="$bad; no nightly on record"
+  if nightly_interrupted; then
+    bad="$bad; last nightly died part way (hard off?)"
+  elif [ -z "$age" ]; then
+    bad="$bad; no finished nightly on record"
   elif [ "$age" -gt "$MAX_NIGHTLY_AGE_S" ]; then
     bad="$bad; nightly missed, last $((age / 3600)) h ago"
   fi
@@ -103,35 +132,60 @@ probe() {
   exit 1
 }
 
-heal() {
-  setup_or_skip
-  local pid age out rc=0
-  pid=$(nightly_pid)
-  if [ -n "$pid" ]; then
-    echo "nightly already running (pid $pid)"
-    exit 0
-  fi
-  age=$(last_nightly_age)
-  if [ -z "$age" ] || [ "$age" -gt "$MAX_NIGHTLY_AGE_S" ]; then
-    mkdir -p "$LOG_DIR"
-    nohup timeout -k 60 "$CATCHUP_TIMEOUT_S" "$PYTHON" "$EXPORTER" nightly --index \
-      >> "$LOG_DIR/neofinder-batch-catchup.log" 2>&1 < /dev/null &
-    pid=$!
-    log "catch-up nightly started, pid $pid (last nightly ${age:-never} s ago)"
-    echo "catch-up nightly started (pid $pid)"
-    exit 0
-  fi
+# Attach the image if needed, then the root applier `on`: every other volume
+# off, the batch volume indexed. Sets rc; logs what it did.
+attach_and_index() {
+  local out
+  rc=0
   if ! attached; then
     if ! out=$(hdiutil attach -mountpoint "$MOUNT" "$IMAGE" 2>&1); then
       log "attach $IMAGE failed: $out"
       echo "attach failed: $out"
-      exit 1
+      rc=1
+      return
     fi
     log "attached $IMAGE at $MOUNT"
   fi
   out=$(sudo -n "$APPLIER" on 2>&1) || rc=$?
   log "applier on rc=$rc: $out"
   echo "applier on rc=$rc: $out"
+}
+
+heal() {
+  setup_or_skip
+  local pid age why="" others stop_by rc=0
+  pid=$(nightly_pid)
+  if [ -n "$pid" ]; then
+    echo "nightly already running (pid $pid)"
+    exit 0
+  fi
+  age=$(last_nightly_age)
+  if nightly_interrupted; then
+    why="last nightly died part way"
+  elif [ -z "$age" ] || [ "$age" -gt "$MAX_NIGHTLY_AGE_S" ]; then
+    why="last finished nightly ${age:-never} s ago"
+  fi
+  if [ -n "$why" ]; then
+    # After a boot macOS may be indexing the real volumes; the catch-up only
+    # turns them off at its very end, so quiet them first (a few seconds).
+    others=$(other_indexing)
+    if [ -n "$others" ]; then
+      log "Spotlight on $others before the catch-up: attach + applier on first"
+      attach_and_index > /dev/null   # logged; the catch-up line is the detail
+    fi
+    # Its own window: the passes stop 15 min before --stop-by, so they end
+    # before the timeout and the volume is still indexed. Jobber's 05:45 would
+    # leave a catch-up started after 05:30 no time at all.
+    stop_by=$(gdate -d "@$(( $(gdate +%s) + CATCHUP_TIMEOUT_S ))" +%H:%M)
+    mkdir -p "$LOG_DIR"
+    nohup timeout -k 60 "$CATCHUP_TIMEOUT_S" "$PYTHON" "$EXPORTER" nightly --index \
+      --stop-by "$stop_by" >> "$LOG_DIR/neofinder-batch-catchup.log" 2>&1 < /dev/null &
+    pid=$!
+    log "catch-up nightly started, pid $pid, stop by $stop_by ($why)"
+    echo "catch-up nightly started (pid $pid; $why)"
+    exit 0
+  fi
+  attach_and_index
   exit "$rc"
 }
 

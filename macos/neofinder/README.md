@@ -124,6 +124,17 @@ runs `neofinder-batch-watch probe` every two minutes:
 3. **Where to look:** `just status` (the `watch:` line is the probe's
    verdict), `~/Library/Logs/watchdogd/neofinder-batch.log` (actions),
    `neofinder-batch-catchup.log` beside it (a catch-up's output).
+4. **Hard offs** (a forced reset after a shutdown stall, power loss, a
+   panic) are healed the same way, because nothing depends on a clean
+   shutdown. The probe reads live state and the logs, never a pid or lock
+   file. A nightly that died part way leaves a `nightly: start` line with
+   no closing `nightly: retag=` line, and that counts as missed. Only a
+   closing line with `indexed=1` counts as a finished nightly. Logs are
+   read with `grep -a`, so NUL bytes left by a power loss do not hide
+   them. Before a catch-up, the heal turns off Spotlight on the real
+   volumes if a boot turned it on. The exporter holds an `flock` for the
+   whole nightly, which the kernel drops on any death, so Jobber's 01:15
+   run skips while a catch-up is still running.
 
 `just watchdogd-apply` at the repo root installs or updates the rule.
 
