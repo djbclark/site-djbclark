@@ -28,7 +28,20 @@
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
       AuthenticationMethods = "publickey";
+      # Phase C of docs/plans/vps-primary-athena.md (2026-10-15).
+      AllowUsers = [
+        "root"
+        "djbclark"
+      ];
+      MaxAuthTries = 3;
+      LoginGraceTime = 30;
     };
+    # OpenSSH's default PerSourcePenalties stay on for the public address; the
+    # tailnet (the Mac's fleet-watch probes and pushes) is never penalised. No
+    # backticks or $ here: the module pastes this through a shell heredoc.
+    extraConfig = ''
+      PerSourcePenaltyExemptList 100.64.0.0/10
+    '';
   };
 
   environment.systemPackages = [ pkgs.vim pkgs.python3 ];
