@@ -104,6 +104,7 @@
 #     With SIP on, launchd may drop the flags at
 #     reboot (reported on 26.5/27): --check will then say "flag not set".
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -u
 
 MODE=apply
@@ -114,11 +115,11 @@ case "${1:-}" in
   --check) MODE=check ;;
   --sip-disable) MODE=sip-disable ;;
   --sip-enable) MODE=sip-enable ;;
-  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) gsed -n '2,/^$/p' "$0" | gsed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "Unknown argument: $1 (use --status, --check, --revert, --sip-disable, --sip-enable, or none)" >&2; exit 2 ;;
 esac
 
-sip_enabled() { csrutil status 2>/dev/null | grep -q 'status: enabled'; }
+sip_enabled() { csrutil status 2>/dev/null | ggrep -q 'status: enabled'; }
 
 case "$MODE" in
   sip-disable|sip-enable)
@@ -140,14 +141,14 @@ if [ "$MODE" != status ] && [ "$MODE" != check ] && [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-CONSOLE_USER=$(stat -f "%Su" /dev/console)
-CONSOLE_UID=$(stat -f "%u" /dev/console)
+CONSOLE_USER=$(gstat -c "%U" /dev/console)
+CONSOLE_UID=$(gstat -c "%u" /dev/console)
 if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = root ] || [ -z "$CONSOLE_UID" ]; then
   [ "$MODE" = check ] && exit 0   # login window: nothing to verify, stay silent
   echo "Error: no logged-in console user (got '${CONSOLE_USER}'); log in at the console and retry." >&2
   exit 1
 fi
-CONSOLE_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+CONSOLE_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | gawk '{print $2}')
 
 GUI_DOMAIN="gui/$CONSOLE_UID"
 
@@ -194,7 +195,7 @@ FAILED=0
 # is_disabled <domain> <label>: 0 if the persistent disable flag is set.
 is_disabled() {
   launchctl print-disabled "$1" 2>/dev/null \
-    | grep -Eq "\"$2\" => (disabled|true)"
+    | ggrep -Eq "\"$2\" => (disabled|true)"
 }
 
 # is_loaded <domain> <label>: 0 if launchd currently has the job loaded.
@@ -209,21 +210,21 @@ is_loaded() {
 # per-label. Non-root callers can read the system domain too (verified
 # 2026-10-10), so the Hermes-run --check sees everything.
 job_pid() {
-  launchctl print "$1/$2" 2>/dev/null | awk '/^\tpid =/{print $3; exit}'
+  launchctl print "$1/$2" 2>/dev/null | gawk '/^\tpid =/{print $3; exit}'
 }
 
 # is_frozen <pid>: 0 if the process is SIGSTOPped (stat T). The watchdogd
 # "apple-daemons" rule freezes the gui-domain daemons on sight; a frozen
 # instance is the intended end state — desired here, not a problem.
 is_frozen() {
-  case "$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" in T*) return 0 ;; *) return 1 ;; esac
+  case "$(ps -o stat= -p "$1" 2>/dev/null | gtr -d ' ')" in T*) return 0 ;; *) return 1 ;; esac
 }
 
 # age_s <pid>: seconds since process start, from ps etime ([[dd-]hh:]mm:ss).
 # Prints nothing and fails if the pid is gone.
 age_s() {
   local t parts d=0 h=0 m=0 s=0
-  t=$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')
+  t=$(ps -o etime= -p "$1" 2>/dev/null | gtr -d ' ')
   [ -n "$t" ] || return 1
   case "$t" in *-*) d=${t%%-*}; t=${t##*-} ;; esac
   read -r -a parts <<<"${t//:/ }"
@@ -341,7 +342,7 @@ if [ "$MODE" = check ]; then
     fi
   done
   for rel in "${SEMANTIC_STORES[@]}"; do
-    kb=$(du -sk "$CONSOLE_HOME/$rel" 2>/dev/null | awk '{print $1}')
+    kb=$(gdu -sk "$CONSOLE_HOME/$rel" 2>/dev/null | gawk '{print $1}')
     [ "${kb:-0}" -gt "$MAX_STORE_KB" ] && PROBLEMS+=("semantic store regrew to $((kb / 1024)) MB: ~/$rel")
   done
   STATE_DIR="$CONSOLE_HOME/.local/state/macos-daemon-guard"
@@ -351,9 +352,9 @@ if [ "$MODE" = check ]; then
     exit 0
   fi
   OSV="$(sw_vers -productVersion) ($(sw_vers -buildVersion))"
-  SIG=$(printf '%s\n' "$OSV" "${PROBLEMS[@]}" | shasum | awk '{print $1}')
-  if [ -f "$STATE_FILE" ] && [ "$(head -1 "$STATE_FILE")" = "$SIG" ] \
-     && [ -z "$(find "$STATE_FILE" -mmin +1440 2>/dev/null)" ]; then
+  SIG=$(printf '%s\n' "$OSV" "${PROBLEMS[@]}" | shasum | gawk '{print $1}')
+  if [ -f "$STATE_FILE" ] && [ "$(ghead -1 "$STATE_FILE")" = "$SIG" ] \
+     && [ -z "$(gfind "$STATE_FILE" -mmin +1440 2>/dev/null)" ]; then
     exit 0
   fi
   if [ "$EUID" -ne 0 ]; then mkdir -p "$STATE_DIR" && echo "$SIG" > "$STATE_FILE"; fi
@@ -371,7 +372,7 @@ if [ "$MODE" = status ]; then
   echo ""
   echo "Semantic-search stores under $CONSOLE_HOME:"
   for rel in "${SEMANTIC_STORES[@]}"; do
-    du -sh "$CONSOLE_HOME/$rel" 2>/dev/null || echo "  (absent) $rel"
+    gdu -sh "$CONSOLE_HOME/$rel" 2>/dev/null || echo "  (absent) $rel"
   done
   exit 0
 fi
@@ -386,7 +387,7 @@ if [ "$MODE" = revert ]; then
   for d in "${GUI_DAEMONS[@]}"; do
     pid=$(job_pid "$GUI_DOMAIN" "$d")
     case "$pid" in ''|*[!0-9]*|0) continue ;; esac
-    case "$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')" in
+    case "$(ps -o stat= -p "$pid" 2>/dev/null | gtr -d ' ')" in
       T*) kill -CONT "$pid" 2>/dev/null && echo "  $d: continued pid $pid" ;;
     esac
   done
@@ -413,9 +414,9 @@ case "$CONSOLE_HOME" in
     for rel in "${SEMANTIC_STORES[@]}"; do
       dir="$CONSOLE_HOME/$rel"
       if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
-        echo "  $rel: $(du -sh "$dir" | awk '{print $1}') — emptying..."
+        echo "  $rel: $(gdu -sh "$dir" | gawk '{print $1}') — emptying..."
         # Empty the directory, keep the directory itself (macOS recreates it anyway).
-        find "$dir" -mindepth 1 -delete 2>/dev/null || { echo "  $rel: FAILED to empty." >&2; FAILED=1; }
+        gfind "$dir" -mindepth 1 -delete 2>/dev/null || { echo "  $rel: FAILED to empty." >&2; FAILED=1; }
       else
         echo "  $rel: already empty or absent."
       fi
@@ -428,7 +429,7 @@ report_state
 
 echo ""
 echo "Top CPU consumers right now (for the record):"
-ps -Arco pcpu,time,comm | head -8
+ps -Arco pcpu,time,comm | ghead -8
 
 if sip_enabled; then
   echo ""

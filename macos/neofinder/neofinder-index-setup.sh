@@ -9,6 +9,7 @@
 #
 # Usage: neofinder-index-setup.sh [--status | --remove]
 #   NEOFINDER_IMAGE overrides the image path (default ~/nfbatch.sparseimage).
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/neofinder-spotlight-index"
@@ -22,7 +23,7 @@ run_root() {
   if command -v sudo-ask >/dev/null 2>&1; then sudo-ask "$@"; else sudo "$@"; fi
 }
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(gmktemp -d); trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/sudoers" <<SUDO
 # Managed by site-djbclark macos/neofinder (installed by \`just setup\`).
 # Lets the 01:15 Jobber job index the NeoFinder batch volume through ONE

@@ -13,8 +13,9 @@
 # renews it every 50 minutes, so sessions (mosh-server included) keep tickets.
 # With no pty the loop gets no SIGHUP, so it polls its sshd ($PPID) and exits
 # when the connection is gone.
+export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
-here="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+here="$(cd "$(dirname "$(grealpath "$0")")" && pwd)"
 sock="$HOME/.ssh/cm/athena"
 host=athena
 lock="$sock.lock"
@@ -43,7 +44,7 @@ ensure() {
   [ -n "${ATHENA_MASTER_CHILD:-}" ] && return 0
   up && return 0
   mkdir -p "${sock%/*}" && chmod 700 "${sock%/*}"
-  if [ -d "$lock" ] && [ $(( $(date +%s) - $(stat -f %m "$lock") )) -gt 120 ]; then
+  if [ -d "$lock" ] && [ $(( $(gdate +%s) - $(gstat -c %Y "$lock") )) -gt 120 ]; then
     rmdir "$lock" 2>/dev/null
   fi
   if mkdir "$lock" 2>/dev/null; then
@@ -51,7 +52,7 @@ ensure() {
     open_master
   else
     # Another ssh is opening it: wait for that one's Duo.
-    for _ in $(seq 90); do up && return 0; [ -d "$lock" ] || break; sleep 1; done
+    for _ in $(gseq 90); do up && return 0; [ -d "$lock" ] || break; sleep 1; done
   fi
   up
 }

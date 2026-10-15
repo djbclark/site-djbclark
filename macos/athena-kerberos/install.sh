@@ -7,6 +7,7 @@
 #   ~/.local/bin/mosh                      -> mosh wrapper
 #   LaunchAgent com.djbclark.athena-kinit  hourly renew + push to the dialup
 # First run only: `athena-kinit init` (password dialog, saved to Keychain).
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 uid=$(id -u)
@@ -17,7 +18,7 @@ mkdir -p "$HOME/.ssh/config.d" "$HOME/.ssh/cm" "$HOME/.local/bin"
 chmod 700 "$HOME/.ssh/cm"
 ln -sfn "$here/ssh_config.mit" "$HOME/.ssh/config.d/mit"
 ln -sfn "$here/mosh" "$HOME/.local/bin/mosh"
-grep -q 'config.d/mit' "$HOME/.ssh/config" 2>/dev/null ||
+ggrep -q 'config.d/mit' "$HOME/.ssh/config" 2>/dev/null ||
   echo "add near the top of ~/.ssh/config: Include ~/.ssh/config.d/mit" >&2
 
 cp "$here/$label.plist" "$HOME/Library/LaunchAgents/$label.plist"

@@ -2,8 +2,9 @@
 # SSH_ASKPASS for the athena master connection: answers Duo's
 # "Passcode or option" prompt with $ATHENA_DUO_OPTION (default 1, a push);
 # any other prompt (password, host key) goes to a dialog.
+export PATH="/opt/homebrew/bin:$PATH"
 prompt="${1:-}"
-printf '%s askpass prompt: %q\n' "$(date '+%F %T')" "$prompt" >> "$HOME/Library/Logs/athena-master.log"
+printf '%s askpass prompt: %q\n' "$(gdate '+%F %T')" "$prompt" >> "$HOME/Library/Logs/athena-master.log"
 case "$prompt" in
   *[Dd]enied*|*[Ff]raud*) exit 1 ;;
   *"Passcode or option"*)

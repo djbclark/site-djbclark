@@ -137,6 +137,7 @@
 #     went), then the count went flat; the window was closed by a watcher
 #     and teardown ran clean (rc 0).
 
+export PATH="/opt/homebrew/bin:$PATH"
 set -u
 
 MDS_SERVICE=system/com.apple.metadata.mds
@@ -195,7 +196,7 @@ while [ $# -gt 0 ]; do
       SUDO_CMD=$2; shift 2 ;;
     --_exported) EXPORT_DONE=1; shift ;;          # internal, added by the re-exec
     --_image-attached) IMAGE_ATTACHED=1; shift ;; # internal, added by the re-exec
-    -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) gsed -n '2,/^$/p' "$0" | gsed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Error: unknown argument: $1 (use --staging, --image, --export, --catalog, --python, --sudo, --keep-mds, --restore-root, --dry-run, --verbose, --status or --help)" >&2; exit 2 ;;
   esac
 done
@@ -215,7 +216,7 @@ run() {
   "$@"
 }
 
-sip_enabled() { csrutil status 2>/dev/null | grep -q 'status: enabled'; }
+sip_enabled() { csrutil status 2>/dev/null | ggrep -q 'status: enabled'; }
 
 # mds_loaded: 0 when launchd has the mds service loaded (the launchctl query
 # works unprivileged on this machine, so --status/--dry-run can use it too).
@@ -228,13 +229,13 @@ mds_loaded() { launchctl print "$MDS_SERVICE" >/dev/null 2>&1; }
 is_mountpoint() {
   [ -d "$1" ] || return 1
   [ "$1" = "/" ] && return 0
-  [ "$(stat -f %d "$1")" != "$(stat -f %d "$1/..")" ]
+  [ "$(gstat -c %d "$1")" != "$(gstat -c %d "$1/..")" ]
 }
 
 # volumes_indexing_on: print the mount points `mdutil -s -a` reports as
 # "Indexing enabled", one per line, staging excluded (read-only).
 volumes_indexing_on() {
-  mdutil -s -a 2>/dev/null | awk -v skip="$STAGING" '
+  mdutil -s -a 2>/dev/null | gawk -v skip="$STAGING" '
     /:$/ { v = $0; sub(/:$/, "", v); next }
     /Indexing enabled/ { if (v != skip) print v }'
 }
@@ -244,9 +245,9 @@ volumes_indexing_on() {
 is_system_volume() {
   case "$1" in /|/System/Volumes/Data) return 0 ;; esac
   local dev root_dev data_dev
-  dev=$(stat -f %d "$1" 2>/dev/null) || return 1
-  root_dev=$(stat -f %d / 2>/dev/null)
-  data_dev=$(stat -f %d /System/Volumes/Data 2>/dev/null || echo "$root_dev")
+  dev=$(gstat -c %d "$1" 2>/dev/null) || return 1
+  root_dev=$(gstat -c %d / 2>/dev/null)
+  data_dev=$(gstat -c %d /System/Volumes/Data 2>/dev/null || echo "$root_dev")
   [ "$dev" = "$root_dev" ] || [ "$dev" = "$data_dev" ]
 }
 
@@ -324,7 +325,7 @@ export_stubs() {
       if [ "$DRY_RUN" -eq 0 ] && ! is_mountpoint "$STAGING"; then
         echo "Error: the image did not mount at $STAGING (its volume name differs from the staging basename); detaching. Pass --staging /Volumes/<volume name>, or let this script create the image." >&2
         hdiutil detach "$STAGING" >/dev/null 2>&1; IMAGE_ATTACHED=0
-        hdiutil info | grep -F "$IMAGE" >&2 || true
+        hdiutil info | ggrep -F "$IMAGE" >&2 || true
         exit 2
       fi
     fi
@@ -348,7 +349,7 @@ export_stubs() {
   # A `neofinder-stub-export.py pause` from another terminal makes the exporter
   # finish its page and exit 0 with the run marked paused; do not index that.
   if [ "$rc" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] \
-     && ${as_user[@]+"${as_user[@]}"} "$PYTHON" "$exporter" status 2>/dev/null | grep -q '^paused: *yes'; then
+     && ${as_user[@]+"${as_user[@]}"} "$PYTHON" "$exporter" status 2>/dev/null | ggrep -q '^paused: *yes'; then
     rc=130
   fi
   if [ "$rc" -ne 0 ]; then
@@ -374,7 +375,7 @@ preflight() {
   else
     echo "  running unprivileged (--dry-run): privileged commands below are printed, not run"
   fi
-  echo "  SIP: $(csrutil status 2>/dev/null | head -n 1)"
+  echo "  SIP: $(csrutil status 2>/dev/null | ghead -n 1)"
   if [ -n "$IMAGE" ] && [ "$IMAGE_ATTACHED" -eq 1 ]; then
     echo "  --image $IMAGE: attached in the export phase; teardown will detach it"
   elif [ -n "$IMAGE" ]; then
@@ -399,7 +400,7 @@ preflight() {
     exit 2
   fi
   echo "  staging mount point: $STAGING — ok"
-  SAMPLE_FILE=$(find "$STAGING" -type f -not -path '*/.*' 2>/dev/null | head -n 1)
+  SAMPLE_FILE=$(gfind "$STAGING" -type f -not -path '*/.*' 2>/dev/null | ghead -n 1)
   if [ -z "$SAMPLE_FILE" ]; then
     echo "Error: no regular files under $STAGING; put the NeoFinder EXPORT data there first, or pass --export [--catalog NAME] to have neofinder-stub-export.py do it (raw catalogs are not Spotlight-searchable — header, known limit D)." >&2
     exit 2
@@ -476,9 +477,9 @@ search_window() {
   else
     # Indexing continues in the background after mdimport returns, so the
     # count is a snapshot; it is re-shown at teardown for comparison.
-    INDEXED=$(mdfind -onlyin "$STAGING" -count 'kMDItemFSName != ""' 2>/dev/null | tr -d ' ')
+    INDEXED=$(mdfind -onlyin "$STAGING" -count 'kMDItemFSName != ""' 2>/dev/null | gtr -d ' ')
     echo "  machine-side check: mdfind -onlyin $STAGING -count -> ${INDEXED:-?} item(s) indexed so far"
-    MATCHES=$(mdfind -onlyin "$STAGING" -name Computers 2>/dev/null | wc -l | tr -d ' ')
+    MATCHES=$(mdfind -onlyin "$STAGING" -name Computers 2>/dev/null | gwc -l | gtr -d ' ')
     echo "  machine-side check: mdfind -onlyin $STAGING -name Computers -> $MATCHES match(es)"
     echo "  (a name that exists here for a Finder search: ${SAMPLE_FILE##*/})"
   fi
@@ -539,7 +540,7 @@ bootout_mds() {
     esac
     echo "  Staging indexing is off and '/' was handled above (restored, or left off"
     echo "  left off by policy). Still running:"
-    pgrep -l 'mds|mds_stores|mdworker' | sed 's/^/    /'
+    pgrep -l 'mds|mds_stores|mdworker' | gsed 's/^/    /'
   fi
 }
 
@@ -608,25 +609,25 @@ on_signal() {
 }
 
 status_mode() {
-  echo "SIP:     $(csrutil status 2>/dev/null | head -n 1)"
+  echo "SIP:     $(csrutil status 2>/dev/null | ghead -n 1)"
   if mds_loaded; then
     echo "mds:     $MDS_SERVICE is loaded"
   else
     echo "mds:     $MDS_SERVICE is NOT loaded (mdutil/mdimport fail until it is up)"
   fi
-  ROOT_LINE=$(mdutil -s / 2>/dev/null | tail -n 1 | tr -d '\t')
+  ROOT_LINE=$(mdutil -s / 2>/dev/null | gtail -n 1 | gtr -d '\t')
   echo "/:       ${ROOT_LINE:-(mdutil -s / failed — is mds up?)}"
   if is_mountpoint "$STAGING"; then
-    STAGING_LINE=$(mdutil -s "$STAGING" 2>/dev/null | tail -n 1 | tr -d '\t')
+    STAGING_LINE=$(mdutil -s "$STAGING" 2>/dev/null | gtail -n 1 | gtr -d '\t')
     echo "staging: $STAGING is a mount point; ${STAGING_LINE:-(mdutil -s failed)}"
   else
     echo "staging: $STAGING is NOT a mount point (nothing to report)"
   fi
   IMPORTERS=$(mdimport -L 2>/dev/null)
-  IMPORTER_COUNT=$(printf '%s\n' "$IMPORTERS" | grep -c '"')
-  NEO_COUNT=$(printf '%s\n' "$IMPORTERS" | grep -ci neofinder)
+  IMPORTER_COUNT=$(printf '%s\n' "$IMPORTERS" | ggrep -c '"')
+  NEO_COUNT=$(printf '%s\n' "$IMPORTERS" | ggrep -ci neofinder)
   echo "importers: mdimport -L lists $IMPORTER_COUNT; $NEO_COUNT mention NeoFinder:"
-  printf '%s\n' "$IMPORTERS" | sed 's/^/  /'
+  printf '%s\n' "$IMPORTERS" | gsed 's/^/  /'
 }
 
 if [ "$STATUS_ONLY" -eq 1 ]; then

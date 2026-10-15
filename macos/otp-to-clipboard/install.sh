@@ -12,6 +12,7 @@
 #                           must run THAT binary directly: FDA is checked against
 #                           the process launchd starts, and /usr/bin/python3 is a
 #                           shim that never gets the grant.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 uid=$(id -u)
@@ -24,7 +25,7 @@ DEVELOPER_DIR="$dev" swiftc -O "$here/otp-banner-watch.swift" -o "$bin"
 codesign --force --timestamp=none -i com.djbclark.otp-banner-watch \
   -s "Apple Development: djbclark@gmail.com (R7NDWQV585)" "$bin"
 
-py=$(sed -n 's#.*<string>\(/Applications/Xcode.app[^<]*/MacOS/Python\)</string>.*#\1#p' \
+py=$(gsed -n 's#.*<string>\(/Applications/Xcode.app[^<]*/MacOS/Python\)</string>.*#\1#p' \
   "$here/com.djbclark.otp-to-clipboard.plist")
 [ -x "$py" ] || echo "warning: $py missing (Xcode moved?): fix the DB plist and re-grant Full Disk Access" >&2
 

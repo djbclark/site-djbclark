@@ -1,6 +1,7 @@
 #!/bin/bash
 # Install the graft hook-timeout fixer: a LaunchAgent that re-runs the fixer
 # whenever ~/.claude/settings.json changes (see graft-hook-timeout-fix.py).
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 label=com.djbclark.graft-hook-timeout-fix
@@ -22,7 +23,7 @@ cat >"$plist" <<EOF
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string><string>-c</string>
-    <string>for py in $PY_CANDIDATES; do [ -x "\$py" ] || continue; "\$py" -c pass 2>/dev/null || continue; exec "\$py" "$here/graft-hook-timeout-fix.py"; done; printf '%s no usable python3 interpreter (tried: $PY_CANDIDATES)\n' "\$(date '+%Y-%m-%d %H:%M:%S')" >>"$HOME/.local/state/graft-hook-timeout-fix.log"; exit 1</string>
+    <string>for py in $PY_CANDIDATES; do [ -x "\$py" ] || continue; "\$py" -c pass 2>/dev/null || continue; exec "\$py" "$here/graft-hook-timeout-fix.py"; done; printf '%s no usable python3 interpreter (tried: $PY_CANDIDATES)\n' "\$(/opt/homebrew/bin/gdate '+%Y-%m-%d %H:%M:%S')" >>"$HOME/.local/state/graft-hook-timeout-fix.log"; exit 1</string>
   </array>
   <key>WatchPaths</key><array><string>$HOME/.claude/settings.json</string></array>
   <key>RunAtLoad</key><true/>

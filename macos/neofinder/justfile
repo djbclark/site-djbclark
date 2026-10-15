@@ -25,13 +25,13 @@ install: image setup jobber saved-search
 # Read-only overview of every piece.
 status:
     @{{here}}/neofinder-index-setup.sh --status
-    @echo "jobber:  $(jobber list 2>/dev/null | awk '$1 == "neofinder-nightly" { print $2, "next", $9, $10, $11 }' || true)"
-    @echo "image:   $(ls -lh '{{image}}' 2>/dev/null | awk '{ print $5, $NF }' || echo 'missing (just image)')"
-    @echo "mount:   $(mount | grep -q ' on {{mount}} ' && echo 'attached at {{mount}}' || echo 'not attached')"
+    @echo "jobber:  $(jobber list 2>/dev/null | gawk '$1 == "neofinder-nightly" { print $2, "next", $9, $10, $11 }' || true)"
+    @echo "image:   $(ls -lh '{{image}}' 2>/dev/null | gawk '{ print $5, $NF }' || echo 'missing (just image)')"
+    @echo "mount:   $(mount | ggrep -q ' on {{mount}} ' && echo 'attached at {{mount}}' || echo 'not attached')"
     @echo "index:   $(sudo -n {{applier}} status 2>/dev/null || echo 'unknown (just setup)')"
     @echo "items:   $(mdfind -onlyin {{mount}} -count 'kMDItemContentType == "*"' 2>/dev/null || echo 0) indexed"
     @echo "search:  $([ -f '{{saved}}' ] && echo 'NF Recents saved search installed' || echo 'NF Recents missing (just saved-search)')"
-    @echo "last:    $(grep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | tail -n 1 | cut -c1-160 || true)"
+    @echo "last:    $(ggrep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | gtail -n 1 | gcut -c1-160 || true)"
     @echo "services: $({{services}} --check >/dev/null 2>&1 && echo 'Apple background daemons still disabled' || echo 'REGRESSED or unchecked (just services-status)')"
 
 # Create the batch sparse image if it is missing (4 GB APFS, grows on demand).
@@ -61,11 +61,11 @@ nightly *args:
 
 # Attach the batch image (browsable, so Spotlight indexes it); no-op if attached.
 attach:
-    @mount | grep -q ' on {{mount}} ' && echo "attach: already at {{mount}}" || hdiutil attach -mountpoint {{mount}} '{{image}}'
+    @mount | ggrep -q ' on {{mount}} ' && echo "attach: already at {{mount}}" || hdiutil attach -mountpoint {{mount}} '{{image}}'
 
 # Turn indexing off, then detach the batch image; no-op if not attached.
 detach:
-    @if mount | grep -q ' on {{mount}} '; then sudo -n {{applier}} off; hdiutil detach {{mount}}; else echo "detach: not attached"; fi
+    @if mount | ggrep -q ' on {{mount}} '; then sudo -n {{applier}} off; hdiutil detach {{mount}}; else echo "detach: not attached"; fi
 
 # Hand the sparse image's freed space back to the disk; detaches first if attached.
 compact: detach
