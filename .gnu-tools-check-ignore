@@ -14,3 +14,5 @@ tools/herdr/pane-grep
 codex/herdr-agent-state.sh
 # Historical experiment
 research/*
+# Dated plans: records, not current instructions
+docs/plans/*

@@ -159,7 +159,7 @@ curl -sS http://127.0.0.1:4000/v1/chat/completions \
   | jq -r '.choices[0].message.content // .error.message'
 
 # Decision log (tiers should differ for SIMPLE vs REASONING)
-rg 'ComplexityRouter: routing decision' ~/Library/Logs/litellm/stderr.log | tail
+rg 'ComplexityRouter: routing decision' ~/Library/Logs/litellm/stderr.log | gtail
 
 # COMPLEX path works with ANTHROPIC alone (E4 proven):
 curl -sS http://127.0.0.1:4000/v1/chat/completions \

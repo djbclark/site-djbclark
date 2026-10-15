@@ -191,7 +191,7 @@ Check after every update:
 collie version                 # the new version is the one being served
 collie doctor
 collie devices list            # since 1.18.0 every /api/* call needs a paired device
-grep COLLIE_SERVE_PORT ~/.config/herdr/plugins/config/herdr.collie/.env   # still 8788
+ggrep COLLIE_SERVE_PORT ~/.config/herdr/plugins/config/herdr.collie/.env   # still 8788
 ```
 
 `COLLIE_SERVE_PORT` must stay set: without it Collie republishes on tailnet

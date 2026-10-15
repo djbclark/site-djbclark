@@ -160,7 +160,7 @@ just site-agents-apply    # second run: changed=0
 just site-agents-status
 ~/.local/bin/system-state-backup.sh
 ~/.local/bin/hibernate-disk-check
-tail ~/.local/state/cswap-auto.log    # check it's polling
+gtail ~/.local/state/cswap-auto.log    # check it's polling
 ```
 
 Expected: all four labels loaded in `gui/<uid>`; system-state LAST_RUN.txt updated;

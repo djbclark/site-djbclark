@@ -115,7 +115,7 @@ map rather than spot-checking:
 env -i HOME="$HOME" TERM=xterm bash -lc '
   IFS=:; for d in $PATH; do [ -d "$d" ] || continue
     for f in "$d"/*; do [ -x "$f" ] && [ ! -d "$f" ] && basename "$f"; done
-  done' | sort -u > /tmp/names.txt
+  done' | gsort -u > /tmp/names.txt
 env -i HOME="$HOME" TERM=xterm bash -lc '
   while read -r n; do echo "$n -> $(command -v "$n")"; done < /tmp/names.txt'
 ```

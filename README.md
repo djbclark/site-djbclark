@@ -117,7 +117,7 @@ architecture improvement without changing the current route contract.
 
 ## Local MTA / Postfix (System Utilities)
 
-macOS provides a built-in Postfix MTA managed by launchd. It is configured to run on-demand for local mail delivery, supporting system utilities like `cron` and `jobber`. The launchd label is `com.apple.postfix.master` on current macOS (older releases through El Capitan used `org.postfix.master`) — confirmed on this control node via `ls /System/Library/LaunchDaemons/ | grep postfix`.
+macOS provides a built-in Postfix MTA managed by launchd. It is configured to run on-demand for local mail delivery, supporting system utilities like `cron` and `jobber`. The launchd label is `com.apple.postfix.master` on current macOS (older releases through El Capitan used `org.postfix.master`) — confirmed on this control node via `ls /System/Library/LaunchDaemons/ | ggrep postfix`.
 
 - **Service Status**: Active on-demand, managed by the system LaunchDaemon (not user-configurable without a custom override).
 - **Verification**: `echo "Test" | mail -s "Test" $USER` and check `/var/mail/$USER`.

@@ -60,7 +60,7 @@ test -d ~/src/ops-worktrees/.store && echo OK-store
 test -d ~/ops/site-private/memory && echo OK-memory
 command -v git >/dev/null && echo OK-git
 test -f ~/.claude/settings.json && echo OK-settings
-grep -q "ops-memory-sync" ~/ops/site-djbclark/justfile && echo OK-sync
+ggrep -q "ops-memory-sync" ~/ops/site-djbclark/justfile && echo OK-sync
 python3 -c 'import sys; assert sys.version_info >= (3,10)' && echo OK-python
 command -v claude >/dev/null && echo OK-claude-cli
 ```

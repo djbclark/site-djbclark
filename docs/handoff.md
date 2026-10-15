@@ -695,7 +695,7 @@ com.wispr.flowapp/com.wispr.flowapp.service.FlowAccessibilityService
 org.autojs.autojs6/org.autojs.autojs.core.accessibility.AccessibilityServiceUsher
 ```
 
-Verify: `adb shell settings get secure enabled_accessibility_services | tr ':' '\n'`. Note: `dumpsys accessibility` "Bound services:" lists by **friendly label** (`label=AutoJs6`), not class name — grepping the class miscounts binding. Force-stopping an a11y app unbinds/drops it from the list (re-add is append-only via repair).
+Verify: `adb shell settings get secure enabled_accessibility_services | gtr ':' '\n'`. Note: `dumpsys accessibility` "Bound services:" lists by **friendly label** (`label=AutoJs6`), not class name — grepping the class miscounts binding. Force-stopping an a11y app unbinds/drops it from the list (re-add is append-only via repair).
 
 ---
 
