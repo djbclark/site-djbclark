@@ -90,6 +90,9 @@
         FSCACHE_DATA_DIR = "/data";
         FSCACHE_MAX_BYTES = toString (8 * 1024 * 1024 * 1024);
         FSCACHE_MAX_BODY_BYTES = toString (256 * 1024 * 1024);
+        # Disk can overshoot the cap by body size x uploads in flight before
+        # eviction runs: 8 x 256 MiB = 2 GiB, not the default 32 x (8 GiB).
+        FSCACHE_MAX_CONCURRENT_UPLOADS = "8";
       };
       environmentFiles = [ "/var/lib/gradle-cache.env" ];
       extraOptions = [
