@@ -116,3 +116,10 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    closing 22 publicly, waits a few days of clean tailnet-only use. It will also
    make `bin/fleet-watch`'s public-address fallback probe (`VPS_PUBLIC`) fail
    whenever the tailnet is down, which is the intended signal.
+9. **The weekly lock-update path works with nixathena and claude-code** (run
+   38779609242, started by hand 2026-10-15): the GitHub runner fetched
+   nixathena from forgejo.mit.edu, built the whole host including the unfree
+   claude-code, bumped nixpkgs 7993f34 -> a033e66 (7137b77) and promoted it;
+   the host applies it at its nightly run. nixathena is tracked by the weekly
+   bump on purpose (djbclark, 2026-10-15). `djbclark` keeps passwordless sudo
+   (djbclark, 2026-10-15).
