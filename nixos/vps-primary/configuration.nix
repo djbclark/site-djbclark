@@ -1,7 +1,13 @@
 { pkgs, ... }:
 
 {
-  imports = [ ./hardware-configuration.nix ];
+  imports = [
+    ./hardware-configuration.nix
+    ../modules/athena.nix
+    ../modules/packages.nix
+    ../modules/terminals.nix
+    ../modules/users.nix
+  ];
 
   boot.loader.grub.enable = true;
   boot.loader.grub.device = "/dev/sda";
