@@ -372,9 +372,11 @@ trade-off and ask.
 
 ## Agents run in yolo (auto-approve) mode by default (2026-10-03)
 
-**Every agent, however launched, runs in its yolo-or-equivalent mode** unless a
-stated reason gates it (review-only slices: `--perm deny`, acp-run's only gate
-since 2026-10-14; bigteam checks file ownership from the diff). Flags:
+**Every agent, every TUI, however launched, runs in its yolo-or-equivalent mode**;
+`--perm deny` only for a security-sensitive slice (prompt-injection exposure;
+operator 2026-10-15; cursor cannot deny at all, acp-run refuses it). A read-only
+review runs yolo with a read-only brief and a diff check (bigteam checks file
+ownership from the diff). Flags:
 the `model-routing` skill. Yolo does not skip hooks, file-ownership rules, reserve
 pools, or asking before hard-to-reverse actions. Detail:
 `site-private/memory/feedback_yolo_default_for_all_agents.md`.

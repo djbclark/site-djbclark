@@ -86,10 +86,10 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     unasked** (2026-10-06; `memory/feedback_prompts_go_to_clipboard.md`). Save
     and restore the pasteboard around tests (2026-10-03;
     [[reference_pbcopy_needs_lc_ctype_utf8]]).
-16. **Every agent, however launched, runs in its yolo-or-equivalent mode**
-    unless a stated reason gates it; yolo never skips hooks, ownership contracts
-    or asking before hard-to-reverse or outward-facing actions (2026-10-03;
-    `memory/feedback_yolo_default_for_all_agents.md`).
+16. **Every agent, every TUI, however launched, runs in its yolo-or-equivalent
+    mode**; `--perm deny` only for a security-sensitive slice (prompt-injection
+    exposure; 2026-10-15); yolo never skips hooks, ownership contracts or asking before
+    hard-to-reverse or outward-facing actions (2026-10-03; `memory/feedback_yolo_default_for_all_agents.md`).
 17. Books: `~/ops/site-private/bin/book-kb`, cheapest first. **Never read
     `~/kb/raw/<slug>.md`.** (2026-10-03;
     [[reference_agent_rules_ops_housekeeping]])
