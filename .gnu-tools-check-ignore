@@ -16,3 +16,7 @@ codex/herdr-agent-state.sh
 research/*
 # Dated plans: records, not current instructions
 docs/plans/*
+# Runs as root through a NOPASSWD sudoers line, with its own fixed PATH. A g*
+# tool would put user-writable /opt/homebrew/bin on root's PATH (2026-10-15:
+# commit 5c01b93 did exactly that; reverted). Root scripts keep /usr/bin tools.
+macos/neofinder/neofinder-spotlight-index

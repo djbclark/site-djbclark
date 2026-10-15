@@ -30,7 +30,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    gitignored file: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Mac code uses GNU `g*` (brew) where BSD differs (`ggrep`, `gsed`, `gawk`, `gtr`, `gdate`, `gstat`, ...) or for a GNU-only flag;
-   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). (`memory/feedback_modern_cli_tools.md`)
+   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.

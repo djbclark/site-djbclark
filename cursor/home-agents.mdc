@@ -297,7 +297,7 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    backspace, 2026-10-10): REPL with `\` goes through Python with an assert).
    **`sd` is retired for edits** (exit 0 on no match; it lost an edit).
    **Mac code uses the brew GNU tools where BSD differs (`gsed`, `gawk`, `gtr`, `gfind`, `gtar`, `ggrep`, `gdate`, `gstat`, ...) or for a GNU-only flag;
-   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`).
+   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15).
    `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq` (rtk compacts
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`, on the `realpath`: a symlink gets clobbered, 2026-10-14), never edit in
