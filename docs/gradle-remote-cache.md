@@ -114,7 +114,8 @@ session, 2026-10-15), so hits are not split across two caches.
    `gh attestation verify oci://ghcr.io/fosterstack/cache@<digest> --repo fosterstack/cache
    --signer-workflow fosterstack/cache/.github/workflows/stage-image.yml --source-ref
    refs/tags/v<ver>` (must print a verified result naming that tag); read the release's
-   changes for anything touching auth, storage or network. Put the digest in
+   changes for anything touching auth, storage or network (baseline:
+   [reviews/fosterstack-cache-v0.2.2.md](reviews/fosterstack-cache-v0.2.2.md)). Put the digest in
    `configuration.nix`, commit, then promote and apply it as in
    [nixos-in-git.md](nixos-in-git.md) (`git push origin master:deploy-vps-primary`, then
    `systemctl start nixos-upgrade` on the VPS).
