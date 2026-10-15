@@ -92,11 +92,16 @@ shared_mcp_servers:
   # commercial API when self-hosted fails (5xx, unreachable, bot wall, empty
   # map or search). Report: djbclark-ade
   # docs/firecrawl-commercial-vs-selfhosted-2026-10-14.md. Both keys come from
-  # sudo-secretspec via `just shared-mcp-apply-secrets`.
+  # sudo-secretspec via `just shared-mcp-apply-secrets`. The router itself also
+  # listens on 127.0.0.1:18805 without a token (--open) for Hermes' firecrawl
+  # web backend, whose searches then reach SearXNG on Hyades (2026-10-14).
   - name: firecrawl
     port: 18804
     argv:
       - "{{ shared_mcp_bin_dir }}/firecrawl-router"
+      - --listen
+      - "127.0.0.1:18805"
+      - --open
       - --
       - "{{ shared_mcp_bin_dir }}/firecrawl-mcp"
     env:
