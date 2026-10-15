@@ -12,5 +12,5 @@ set +e
 err=$(python3 "$discover" --health-check 2>&1 >/dev/null)
 rc=$?
 set -e
-printf '%s\n' "$err" | grep -v 'site directory' >&2 || true
+printf '%s\n' "$err" | ggrep -v 'site directory' >&2 || true
 exit "$rc"

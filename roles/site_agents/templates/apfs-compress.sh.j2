@@ -22,7 +22,7 @@ uv_keep='{{ site_agents_apfs_compress_uv_keep }}'
 uv_busy() {
   local pid
   for pid in $(pgrep -x uv || true); do
-    ps -o command= -p "$pid" | grep -Eq "$uv_keep" || return 0
+    ps -o command= -p "$pid" | ggrep -Eq "$uv_keep" || return 0
   done
   return 1
 }
@@ -54,18 +54,18 @@ cold_dirs=(
 cold_pass() {
   command -v fd >/dev/null 2>&1 || { echo "apfs-compress: fd missing; skipping cold transcripts"; return 0; }
   local open_list file_list d before after
-  open_list="$(mktemp)"; file_list="$(mktemp)"
+  open_list="$(gmktemp)"; file_list="$(gmktemp)"
   # Paths currently open for write (lsof access mode w or u), one lsof call total.
-  lsof -w -F an 2>/dev/null | awk '/^a/{m=substr($0,2)} /^n\//{if(m=="w"||m=="u")print substr($0,2)}' | sort -u > "$open_list" || true
+  lsof -w -F an 2>/dev/null | gawk '/^a/{m=substr($0,2)} /^n\//{if(m=="w"||m=="u")print substr($0,2)}' | gsort -u > "$open_list" || true
   for d in "${cold_dirs[@]}"; do
     [ -d "$d" ] || continue
-    before="$(du -skL "$d" 2>/dev/null | awk '{print $1}')"
+    before="$(gdu -skL "$d" 2>/dev/null | gawk '{print $1}')"
     fd --follow --type f --hidden --no-ignore --changed-before 7d -e jsonl -e json -e log -e txt --absolute-path . "$d" 2>/dev/null \
-      | grep -vxFf "$open_list" > "$file_list" || true
+      | ggrep -vxFf "$open_list" > "$file_list" || true
     if [ -s "$file_list" ]; then
-      tr '\n' '\0' < "$file_list" | xargs -0 nice -n 15 afsctool -c -j2 -s 10 >/dev/null 2>&1 || true
+      gtr '\n' '\0' < "$file_list" | gxargs -0 nice -n 15 afsctool -c -j2 -s 10 >/dev/null 2>&1 || true
     fi
-    after="$(du -skL "$d" 2>/dev/null | awk '{print $1}')"
+    after="$(gdu -skL "$d" 2>/dev/null | gawk '{print $1}')"
     echo "apfs-compress: cold $d ${before:-0} KiB -> ${after:-0} KiB"
   done
   rm -f "$open_list" "$file_list"

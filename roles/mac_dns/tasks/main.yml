@@ -64,7 +64,7 @@
   check_mode: false
 
 - name: List this Mac's network services
-  ansible.builtin.shell: networksetup -listallnetworkservices | tail -n +2 | sed 's/^\*//'
+  ansible.builtin.shell: networksetup -listallnetworkservices | /opt/homebrew/bin/gtail -n +2 | /opt/homebrew/bin/gsed 's/^\*//'
   register: _mac_dns_services_raw
   changed_when: false
   check_mode: false

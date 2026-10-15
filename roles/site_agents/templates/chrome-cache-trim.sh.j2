@@ -57,8 +57,8 @@ for root in "${cache_roots[@]}"; do
     for rel in "${cache_subdirs[@]}"; do
       d="${profile}${rel}"
       [ -d "$d" ] || continue
-      before="$(du -sk "$d" 2>/dev/null | awk '{print $1}' || echo 0)"
-      find "$d" -mindepth 1 -delete 2>/dev/null || true
+      before="$(gdu -sk "$d" 2>/dev/null | gawk '{print $1}' || echo 0)"
+      gfind "$d" -mindepth 1 -delete 2>/dev/null || true
       if [ "${before:-0}" -gt 0 ]; then
         cleared=$((cleared + before))
       fi

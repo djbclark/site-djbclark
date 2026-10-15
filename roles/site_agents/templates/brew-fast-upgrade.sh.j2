@@ -22,7 +22,7 @@ export PATH="{{ site_agents_homebrew_prefix }}/bin:{{ site_agents_homebrew_prefi
 # boot disk also satisfies; that would silently put the cache back on the disk
 # we are trying to keep free. A mount-table check cannot be fooled that way.
 BREW_CACHE_VOLUME="{{ site_agents_brew_cache_volume }}"
-if [ -n "$BREW_CACHE_VOLUME" ] && mount | grep -q " on ${BREW_CACHE_VOLUME} "; then
+if [ -n "$BREW_CACHE_VOLUME" ] && mount | ggrep -q " on ${BREW_CACHE_VOLUME} "; then
   export HOMEBREW_CACHE="$BREW_CACHE_VOLUME/Caches/Homebrew"
 else
   BREW_CACHE_VOLUME=""
@@ -32,15 +32,15 @@ LOG_DIR="{{ site_agents_state_dir }}/brew-fast-upgrade"
 LOG_FILE="$LOG_DIR/run.log"
 mkdir -p "$LOG_DIR"
 # Keep at most four 5 MiB files (~20 MiB total), including the active log.
-if [ -f "$LOG_FILE" ] && [ "$(stat -f '%z' "$LOG_FILE")" -ge 5242880 ]; then
+if [ -f "$LOG_FILE" ] && [ "$(gstat -c '%s' "$LOG_FILE")" -ge 5242880 ]; then
   for n in 3 2 1; do
     [ -f "$LOG_FILE.$n" ] && mv -f "$LOG_FILE.$n" "$LOG_FILE.$((n + 1))"
   done
   mv -f "$LOG_FILE" "$LOG_FILE.1"
 fi
-exec > >(tee -a "$LOG_FILE") 2>&1
-STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-trap 'rc=$?; echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc"' EXIT
+exec > >(gtee -a "$LOG_FILE") 2>&1
+STARTED_AT="$(gdate -u '+%Y-%m-%dT%H:%M:%SZ')"
+trap 'rc=$?; echo "[$(gdate -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc"' EXIT
 echo "[$STARTED_AT] started; scheduled/manual Jobber invocation"
 
 LOCK_BIN="{{ site_agents_home }}/ops/site-djbclark/bin/brew_flock.py"
@@ -101,7 +101,7 @@ brew_remaining_outdated() {
   [ -z "$all_outdated" ] && return 0
   # macOS's awk chokes on multiline `-v` values, so pass the pinned set as a
   # file (process substitution) and use the standard two-file NR==FNR idiom.
-  awk '
+  gawk '
     NR == FNR { pinset[$0] = 1; next }
     {
       short = $0
@@ -123,7 +123,7 @@ unquarantine_casks() {
   root="$(brew --caskroom 2>/dev/null)" || return 0
   for cask in ${BREW_FAST_UPGRADE_UNQUARANTINE_CASKS:-kotlin-lsp}; do
     [ -d "$root/$cask" ] || continue
-    if xattr -rl "$root/$cask" 2>/dev/null | grep -q com.apple.quarantine; then
+    if xattr -rl "$root/$cask" 2>/dev/null | ggrep -q com.apple.quarantine; then
       xattr -dr com.apple.quarantine "$root/$cask" 2>/dev/null || true
       echo "[brew-fast-upgrade] cleared Gatekeeper quarantine on cask: $cask"
     fi
@@ -136,7 +136,7 @@ run_brew_pass() {
   local rc=0
 
   # Pre-check: is google-chrome cask outdated?
-  if brew outdated --cask google-chrome 2>/dev/null | grep -q "google-chrome"; then
+  if brew outdated --cask google-chrome 2>/dev/null | ggrep -q "google-chrome"; then
     chrome_outdated=1
   fi
 
@@ -200,7 +200,7 @@ restart_stale_brew_services() {
     [ -n "$pid" ] || continue
     # First Cellar/Caskroom-resident text segment = the service executable as
     # actually running (opt/ symlinks already resolved by the loader).
-    exe="$(lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | grep -m1 -E '/(Cellar|Caskroom)/' || true)"
+    exe="$(lsof -a -p "$pid" -d txt -Fn 2>/dev/null | gsed -n 's/^n//p' | ggrep -m1 -E '/(Cellar|Caskroom)/' || true)"
     [ -n "$exe" ] || continue
     [ -e "$exe" ] && continue
     if [ "$skip" -eq 1 ]; then
@@ -327,7 +327,7 @@ verify_clean() {
 run_upgrade_and_restart_apps() {
   local attempt stale_rc=0
 
-  for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+  for attempt in $(gseq 1 "$MAX_ATTEMPTS"); do
     echo "[brew-fast-upgrade] attempt $attempt/$MAX_ATTEMPTS"
 
     if ! run_brew_pass; then
@@ -376,8 +376,8 @@ else
 fi
 downloads_cache="$HOME/Library/Caches/Homebrew/downloads"
 if [ -d "$downloads_cache" ]; then
-  before_size="$(du -sh "$downloads_cache" 2>/dev/null | cut -f1)"
-  find "$downloads_cache" -mindepth 1 -delete
+  before_size="$(gdu -sh "$downloads_cache" 2>/dev/null | gcut -f1)"
+  gfind "$downloads_cache" -mindepth 1 -delete
   echo "[brew-fast-upgrade] purged $downloads_cache (was $before_size)"
 fi
 

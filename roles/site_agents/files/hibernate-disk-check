@@ -3,20 +3,21 @@
 # hibernation write (which can need up to RAM size, 16GB on this Mac).
 # Site-managed: roles/site_agents (Phase F1). Run by LaunchAgent
 # com.<site_ns>.hibernate-disk-check.plist
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 
 THRESHOLD_GB="${HIBERNATE_DISK_THRESHOLD_GB:-25}"
 RENOTIFY_SECS=$((6 * 3600))
 STATE="$HOME/.local/state/hibernate-disk-check.last"
 
-FREE_GB=$(df -g / | awk 'NR==2 {print $4}')
+FREE_GB=$(df -g / | gawk 'NR==2 {print $4}')
 
 if (( FREE_GB >= THRESHOLD_GB )); then
     rm -f "$STATE"
     exit 0
 fi
 
-now=$(date +%s)
+now=$(gdate +%s)
 if [[ -f "$STATE" ]]; then
     last=$(cat "$STATE")
     (( now - last < RENOTIFY_SECS )) && exit 0

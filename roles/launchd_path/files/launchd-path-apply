@@ -25,7 +25,7 @@
 # "would-change" / "unchanged"). Exit 2 = invalid input, 1 = runtime failure.
 set -eu
 set -f # no globbing: PATH entries are split on ':' below and must stay literal
-PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
 export PATH
 CONFIG_FILE=/private/var/db/com.apple.xpc.launchd/config/user.plist
 
@@ -54,7 +54,7 @@ seen=:
 old_ifs=$IFS
 IFS=:
 for entry in $want; do
-  printf '%s' "$entry" | grep -Eq '^/[A-Za-z0-9._@+/-]*$' \
+  printf '%s' "$entry" | ggrep -Eq '^/[A-Za-z0-9._@+/-]*$' \
     || die "invalid PATH entry '$entry': must be an absolute path of [A-Za-z0-9._@+/-]" 2
   case "/$entry/" in */../*|*/./*) die "invalid PATH entry '$entry': no . or .. components" 2 ;; esac
   case "$seen" in *":$entry:"*) die "invalid PATH: duplicate entry '$entry'" 2 ;; esac

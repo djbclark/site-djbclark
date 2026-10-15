@@ -3,6 +3,7 @@
 # roles/mac_dns: copies the applier to a root-owned path and installs the
 # narrow sudoers rule that lets the daily unattended run call it. Uses
 # sudo-ask (Touch ID, shows the exact command) when available.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/mac-dns-apply"
@@ -12,7 +13,7 @@ allow=${MAC_DNS_ALLOW_FILE:-/etc/mac-dns.allow}
 groupvars="$here/../../../inventory/group_vars/all.yml"
 operator=$(id -un)
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(gmktemp -d); trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/sudoers" <<SUDO
 # Managed by site-djbclark roles/mac_dns (installed by \`just mac-dns-setup\`).
 # Lets the daily unattended \`just mac-dns-apply\` refresh /etc/resolver and the
@@ -37,6 +38,6 @@ run_root() {
 }
 run_root sh -c "install -o root -g wheel -m 0755 '$src' '$bin' && install -o root -g wheel -m 0440 '$tmp/sudoers' '$sudoers' && install -o root -g wheel -m 0644 '$tmp/allow' '$allow'"
 echo "mac-dns-setup: installed $bin, $sudoers and $allow for $operator"
-first_domain=$(awk '$1 == "resolver" { print $2; exit }' "$tmp/allow")
-first_ns=$(awk '$1 == "nameserver" { print $2; exit }' "$tmp/allow")
+first_domain=$(gawk '$1 == "resolver" { print $2; exit }' "$tmp/allow")
+first_ns=$(gawk '$1 == "nameserver" { print $2; exit }' "$tmp/allow")
 sudo -n "$bin" --check resolver "$first_domain" "$first_ns" >/dev/null && echo "mac-dns-setup: sudo -n works"

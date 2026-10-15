@@ -4,6 +4,7 @@
 # narrow sudoers rule that lets `just launchd-path-apply` / `just deploy-mac`
 # call it without a password. Uses sudo-ask (Touch ID, shows the exact command)
 # when available.
+export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/launchd-path-apply"
@@ -11,7 +12,7 @@ bin=${LAUNCHD_PATH_APPLY_BIN:-/usr/local/libexec/launchd-path-apply}
 sudoers=${LAUNCHD_PATH_SUDOERS_FILE:-/etc/sudoers.d/launchd-path}
 operator=$(id -un)
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(gmktemp -d); trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/sudoers" <<SUDO
 # Managed by site-djbclark roles/launchd_path (installed by \`just launchd-path-setup\`).
 # Lets \`just launchd-path-apply\` / \`just deploy-mac\` keep launchd's per-user PATH

@@ -18,7 +18,7 @@ LOG="{{ site_agents_system_state_log }}"
 
 mkdir -p "$VAR_DIR"
 
-ts() { date '+%Y-%m-%d %H:%M:%S'; }
+ts() { gdate '+%Y-%m-%d %H:%M:%S'; }
 
 # capture <output-file> <cmd...>
 # Runs the command, atomically replacing the target only on success, so a
@@ -26,7 +26,7 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 capture() {
     local out="$VAR_DIR/$1"; shift
     local tmp
-    tmp="$(mktemp "${TMPDIR:-/tmp}/state.XXXXXX")" || return 1
+    tmp="$(gmktemp "${TMPDIR:-/tmp}/state.XXXXXX")" || return 1
     if "$@" >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
         mv -f "$tmp" "$out"
     else
@@ -79,7 +79,7 @@ command -v pipx >/dev/null && capture pipx-list.txt   pipx list
 command -v code >/dev/null && capture vscode-extensions.txt code --list-extensions
 command -v gem  >/dev/null && capture gem-list.txt    gem list
 
-date '+%Y-%m-%d %H:%M:%S' > "$VAR_DIR/LAST_RUN.txt"
+gdate '+%Y-%m-%d %H:%M:%S' > "$VAR_DIR/LAST_RUN.txt"
 
 # --- Mirror to home ---------------------------------------------------------
 if rsync -a --delete "$VAR_DIR/" "$HOME_DIR/" 2>>"$LOG"; then
@@ -90,7 +90,7 @@ else
 fi
 
 if [ "$FAILED" -eq 0 ]; then
-    echo "$(ts) OK  wrote $(ls "$VAR_DIR" | wc -l | tr -d ' ') files to $VAR_DIR and mirrored to $HOME_DIR" >>"$LOG"
+    echo "$(ts) OK  wrote $(ls "$VAR_DIR" | gwc -l | gtr -d ' ') files to $VAR_DIR and mirrored to $HOME_DIR" >>"$LOG"
 else
     echo "$(ts) PARTIAL one or more core captures failed; see WARN lines above" >>"$LOG"
     exit 1
