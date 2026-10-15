@@ -33,6 +33,7 @@ kickstart that exited 0 counted as success.
 | nothing (new, 2026-10-11) | beeper-10000 used to count as up in the funnel probe even at 502 (Beeper's local API off); djbclark: report it on its own, keep Beeper off | `funnel-beeper.toml` (`funnel_probe.sh beeper-10000`, strict: 5xx = down; alert only) |
 | Hermes cron `Provider Health Watchdog` (`8486ce778b40`) | Hermes provider probe, every 12 h | `provider-health.toml` (alert only) |
 | nothing (new, 2026-10-10) | freeze/kill-on-sight for the Apple daemons `macos/sip-doit-with-sudo.sh` disables: their launchd disable flags do not stop XPC/event activation and bootout is SIP-refused, so the probe (`bin/apple_daemon_ban.sh` + root helper) SIGSTOPs the gui-domain jobs and TERMs the rest every pass | `apple-daemons.toml` |
+| nothing (new, 2026-10-15) | NeoFinder batch volume after a restart or a missed nightly: a shutdown at 00:03 and a boot at 05:00 skipped the 01:15 Jobber run, left the image detached, and macOS re-created Spotlight stores on the real volumes; the probe checks attached + indexed, every other volume off, last nightly < 26 h, and the heal re-attaches + runs the root applier, or starts a catch-up nightly detached | `neofinder-batch.toml` + `macos/neofinder/neofinder-batch-watch` |
 
 ## `apple-daemons`: freeze-on-sight with a root helper
 

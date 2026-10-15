@@ -24,4 +24,5 @@ __pycache__/
 .secrets/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
-/graft/
+# Any depth: the graft MCP server builds one in whatever directory a session starts in.
+graft/
