@@ -30,7 +30,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    gitignored file: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Mac code uses GNU `g*` (brew) where BSD differs (`ggrep`, `gsed`, `gawk`, `gtr`, `gdate`, `gstat`, ...) or for a GNU-only flag;
-   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
+   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14).
    (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome.
@@ -47,7 +47,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains` skill, `web-get`);
    **search first with the shared `firecrawl` MCP's `firecrawl_search`**
-   (self-hosted SearXNG, free; 2026-10-14). **Every needed page is eventually
+   (`mcp__firecrawl__*`, self-hosted SearXNG, free; 2026-10-14; **never the paid cloud `mcp__claude_ai_Firecrawl__*`** unless djbclark asks: credits ran out 2026-10-15). **Every needed page is eventually
    fetched**: on an error fall back (next rung, another URL form), fix the tool,
    or pause (checkpoint, `hermes-ping` the URLs, fix it with djbclark); never
    accept "unfetchable" and move on (2026-10-11; `memory/feedback_web_failover_pause.md`).
