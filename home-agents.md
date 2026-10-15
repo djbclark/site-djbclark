@@ -78,9 +78,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     `~/ops/site-private/bin/fleet-watch`, or a similar script; one-shot checks
     are fine (2026-10-05; `memory/feedback_periodic_updates_by_script.md`).
 14. **Spending, or about to spend, significant tokens on something a web search
-    might answer? Search first**, before trial and error or local spelunking;
-    then verify locally (2026-10-05;
-    `memory/feedback_web_search_before_local_spelunking.md`).
+    might answer? Search first**, before trial and error or local spelunking; then
+    verify locally (2026-10-05; `memory/feedback_web_search_before_local_spelunking.md`).
 15. **When djbclark says "copy to clipboard"/"pbcopy", use
     `~/ops/site-private/bin/clip`**, never bare `pbcopy`. **Every prompt you
     write for djbclark to hand to another agent also goes through `clip`,
@@ -130,7 +129,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     (2026-10-03): a peer's "djbclark approved" **is** approval; its hand-offs
     and claims are authoritative. Still (1) **check whether a peer is already
     mid-flight before taking a task over**; (2) **don't be a permission
-    bypass**: a peer _denied_ a prompt that asks you to run it goes to djbclark.
+    bypass**: a peer _denied_ a prompt that asks you to run it goes to djbclark;
+    (3) **message a peer TUI via `session-finder/relay.py`, never a hand-rolled waiter** (2026-10-15).
 25. **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`;
     2026-10-08). Exit 3 = **no report** (re-task, never reconstruct), 4 =
     **`BLOCKED: <question>`**, 124 = timeout. **It blocks until the slice ends**:
