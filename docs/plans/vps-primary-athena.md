@@ -140,3 +140,7 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    `os.Root`; auth is OFF when both credential variables are empty (hence the unit guard);
    no content integrity, so the read-write credential can replace any entry (inherent to
    Gradle's HTTP cache).
+10. **Phase D Gradle cache deployed 2026-10-15** (f22e048, with nixpkgs a033e66; no kernel
+    change, no reboot): FosterStack node live, anonymous 401, a Mac build hit the remote
+    cache (`docs/gradle-remote-cache.md`, "Tested 2026-10-15"); Develocity data and image
+    removed.

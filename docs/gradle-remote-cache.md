@@ -50,6 +50,15 @@ disk cache and carries on.
 Switches: `GRADLE_REMOTE_CACHE=off` (skip everything), `GRADLE_REMOTE_CACHE_URL=...`,
 `GRADLE_REMOTE_CACHE_PUSH=false` (read-only).
 
+## Tested 2026-10-15 (FosterStack node, after deploy f22e048)
+
+1. Server, from the Mac over the tailnet: `/healthz` `ok`; anonymous PUT and GET 401. Unit
+   `NRestarts=0`; log `"auth":"enabled"`.
+2. Mac, Gradle 9.7.1 with an isolated Gradle home: build 1 stored `:compileJava`; with the
+   local cache wiped, build 2 reported `:compileJava FROM-CACHE` and the node returns that
+   key (200), so the hit came from the VPS. The Mac's init script was unchanged.
+3. Old Develocity data (`/var/lib/gradle-build-cache`, 727 MB) and image removed.
+
 ## Tested 2026-10-13 (Develocity node; the client side still holds)
 
 1. Server: anonymous GET/PUT 403; wrong password 403; correct password PUT 200 / GET 200;
