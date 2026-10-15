@@ -1,7 +1,7 @@
 # MIT Athena pieces from SIPB's nixathena flake, trimmed to a headless server.
 # Copied from `get` (forgejo.mit.edu/djbclark/get, nixos/athena.nix) and adapted:
 # no Kerberos password login (tickets are pushed from the Mac instead), and AFS
-# is a separate step (phase B of docs/plans/vps-primary-athena.md).
+# and the ticket push are in ./athena-afs.nix (phase B).
 {
 
   pkgs,
@@ -28,6 +28,4 @@ in
     hesiod.enable = false;
     zephyr.enable = false;
   };
-  # nixathena sets `lib.mkDefault true`; a plain false wins. Phase B turns it on.
-  services.openafsClient.enable = false;
 }

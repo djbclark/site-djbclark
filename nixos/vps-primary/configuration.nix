@@ -4,6 +4,7 @@
   imports = [
     ./hardware-configuration.nix
     ../modules/athena.nix
+    ../modules/athena-afs.nix
     ../modules/packages.nix
     ../modules/terminals.nix
     ../modules/users.nix
