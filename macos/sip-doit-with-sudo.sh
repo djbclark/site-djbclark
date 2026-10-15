@@ -88,6 +88,31 @@
 #     exits, re-triggered by every LaunchServices app-state notification), so
 #     it is frozen, not TERMed: App Tamer had been SIGSTOPping it with no
 #     visible side effect, and a kill would just respawn it.
+#   - 2026-10-15 (later): knowledgeconstructiond (Apple Intelligence
+#     IntelligencePlatformCore "FullPipeline", a nightly power-required
+#     background task that tripped macOS's CPU-limit diagnostic four nights
+#     running, Oct 9-12) = no on-device knowledge graph; one-shot, so TERMed.
+#     sharingd (AirDrop, Handoff, Universal Clipboard, Continuity; KeepAlive +
+#     RunAtLoad, so only a freeze sticks) and contactsd (Contacts store; it
+#     lives in the user/<uid> background domain, not gui, hence USER_DAEMONS)
+#     are frozen at the operator's request: AirDrop, Handoff and Contacts are
+#     not used here. A frozen XPC daemon makes callers hang rather than fail,
+#     so a stuck share sheet or Mail address lookup is the symptom to watch
+#     for; undo one by removing it from the lists here and in
+#     bin/apple_daemon_ban.sh, then `kill -CONT` its pid.
+#   - 2026-10-15 (operator: "disable or kill every single thing mentioned"):
+#     six more long-lived gui agents, all frozen on sight: duetexpertd
+#     (CoreDuet suggestions expert, suggestd's sibling; two CPU-limit
+#     diagnostics Oct 9/12) = no Siri Suggestions or app predictions;
+#     mediaanalysisd (photoanalysisd's sibling, the main Neural Engine
+#     client behind ANECompilerService's CPU) = no Visual Look Up, Live Text
+#     or Photos object search; campo = Siri AI.app, the macOS 27 Siri app
+#     (KeepAlive + RunAtLoad) and the client that reactivates
+#     generativeexperiencesd; visualintelligenced; siriknowledged; and
+#     intelligenceplatformd, knowledgeconstructiond's parent in the same
+#     IntelligencePlatformCore group. Siri and Apple Intelligence are already
+#     off by profile (no-apple-intelligence/). Not touched: ANECompilerService
+#     is aned's XPC helper, not a job; it goes quiet once its clients are.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
@@ -166,6 +191,14 @@ GUI_DAEMONS=(
   "com.apple.helpd"
   "com.apple.sirittsd"
   "com.apple.siriactionsd"
+  "com.apple.knowledgeconstructiond"
+  "com.apple.sharingd"
+  "com.apple.duetexpertd"
+  "com.apple.mediaanalysisd"
+  "com.apple.campo"
+  "com.apple.visualintelligenced"
+  "com.apple.siriknowledged"
+  "com.apple.intelligenceplatformd"
   "com.apple.generativeexperiencesd"
   "com.apple.intelligencecontextd"
   "com.apple.intelligenceflowd"
@@ -173,6 +206,21 @@ GUI_DAEMONS=(
   "com.apple.spotlightknowledged.updater"
   "com.apple.spotlightknowledged.importer"
 )
+
+# Jobs in the per-user background domain (user/<uid>, LimitLoadToSessionType
+# Background), which launchctl addresses only there, never as gui/<uid>.
+# Treated exactly like the gui list (flag, kill, freeze, check, revert).
+USER_DOMAIN="user/$CONSOLE_UID"
+USER_DAEMONS=(
+  "com.apple.contactsd"
+)
+
+# gui_like_jobs: prints "<domain> <label>" for every gui- and user-domain job.
+gui_like_jobs() {
+  local d
+  for d in "${GUI_DAEMONS[@]}"; do echo "$GUI_DOMAIN $d"; done
+  for d in "${USER_DAEMONS[@]}"; do echo "$USER_DOMAIN $d"; done
+}
 
 SYSTEM_DAEMONS=(
   "com.apple.cloudd"
@@ -286,20 +334,21 @@ report_state() {
   echo ""
   echo "State of the targeted daemons:"
   local d pid flag any_unfrozen=0
-  for d in "${GUI_DAEMONS[@]}"; do
-    is_disabled "$GUI_DOMAIN" "$d" && flag=disabled || flag=enabled
-    pid=$(job_pid "$GUI_DOMAIN" "$d")
+  local dom
+  while read -r dom d; do
+    is_disabled "$dom" "$d" && flag=disabled || flag=enabled
+    pid=$(job_pid "$dom" "$d")
     if is_flag_only "$d"; then
-      echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)} (flag-only: not killed)"
+      echo "  $dom/$d: flag=$flag${pid:+, running (pid $pid)} (flag-only: not killed)"
       continue
     fi
     if [ -n "$pid" ] && is_frozen "$pid"; then
-      echo "  $GUI_DOMAIN/$d: flag=$flag, frozen (pid $pid)"
+      echo "  $dom/$d: flag=$flag, frozen (pid $pid)"
     else
       [ -n "$pid" ] && any_unfrozen=1
-      echo "  $GUI_DOMAIN/$d: flag=$flag${pid:+, running (pid $pid)}"
+      echo "  $dom/$d: flag=$flag${pid:+, running (pid $pid)}"
     fi
-  done
+  done < <(gui_like_jobs)
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" && flag=disabled || flag=enabled
     pid=$(job_pid system "$d")
@@ -330,15 +379,15 @@ if [ "$MODE" = check ]; then
   # passes, so younger sightings are enforcement windows, not failures, and
   # a frozen (SIGSTOP) instance is the intended steady state.
   SURVIVED_UNFROZEN_S=120
-  for d in "${GUI_DAEMONS[@]}"; do
-    is_disabled "$GUI_DOMAIN" "$d" || PROBLEMS+=("flag not set: $GUI_DOMAIN/$d")
+  while read -r dom d; do
+    is_disabled "$dom" "$d" || PROBLEMS+=("flag not set: $dom/$d")
     is_flag_only "$d" && continue
-    pid=$(job_pid "$GUI_DOMAIN" "$d")
+    pid=$(job_pid "$dom" "$d")
     if [ -n "$pid" ] && ! is_frozen "$pid" \
        && [ "$(age_s "$pid" 2>/dev/null || echo 999999)" -gt "$SURVIVED_UNFROZEN_S" ]; then
-      PROBLEMS+=("running despite flag, unfrozen ${SURVIVED_UNFROZEN_S}s+: $GUI_DOMAIN/$d")
+      PROBLEMS+=("running despite flag, unfrozen ${SURVIVED_UNFROZEN_S}s+: $dom/$d")
     fi
-  done
+  done < <(gui_like_jobs)
   for d in "${SYSTEM_DAEMONS[@]}"; do
     is_disabled system "$d" || PROBLEMS+=("flag not set: system/$d")
     is_flag_only "$d" && continue
@@ -387,26 +436,26 @@ fi
 if [ "$MODE" = revert ]; then
   echo "Re-enabling daemons for: $CONSOLE_USER (UID: $CONSOLE_UID)"
   echo "------------------------------------------------------------------"
-  for d in "${GUI_DAEMONS[@]}"; do converge_enabled "$GUI_DOMAIN" "$d"; done
+  while read -r dom d; do converge_enabled "$dom" "$d"; done < <(gui_like_jobs)
   for d in "${SYSTEM_DAEMONS[@]}"; do converge_enabled system "$d"; done
   echo ""
   echo "Continuing (SIGCONT) instances frozen by the apple-daemons watchdog..."
-  for d in "${GUI_DAEMONS[@]}"; do
-    pid=$(job_pid "$GUI_DOMAIN" "$d")
+  while read -r dom d; do
+    pid=$(job_pid "$dom" "$d")
     case "$pid" in ''|*[!0-9]*|0) continue ;; esac
     case "$(ps -o stat= -p "$pid" 2>/dev/null | gtr -d ' ')" in
       T*) kill -CONT "$pid" 2>/dev/null && echo "  $d: continued pid $pid" ;;
     esac
-  done
+  done < <(gui_like_jobs)
   report_state
   echo ""
   echo "Re-enabled flags apply at the next login/boot (the deleted semantic stores are rebuilt by macOS)."
   exit "$FAILED"
 fi
 
-echo "Applying user-level (GUI) overrides for: $CONSOLE_USER (UID: $CONSOLE_UID)"
+echo "Applying user-level (gui + user domain) overrides for: $CONSOLE_USER (UID: $CONSOLE_UID)"
 echo "------------------------------------------------------------------"
-for d in "${GUI_DAEMONS[@]}"; do converge_disabled "$GUI_DOMAIN" "$d"; done
+while read -r dom d; do converge_disabled "$dom" "$d"; done < <(gui_like_jobs)
 
 echo ""
 echo "Applying system-level (Root) overrides"

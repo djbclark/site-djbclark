@@ -14,7 +14,7 @@
 # process, so the KILL escalation destroyed App Tamer's freezes and forced
 # a respawn. A frozen job burns no CPU, never exits, and therefore never
 # respawns; the only burn window is the ≤60 s after login/boot (or a reap).
-# triald/helpd/sirittsd (short one-shots) and the root system-domain jobs are
+# triald/helpd/sirittsd/knowledgeconstructiond (short one-shots) and the root system-domain jobs are
 # TERMed. The Apple Intelligence daemons (generativeexperiencesd,
 # intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are
 # flag-only (2026-10-13): persistent clients reactivate them within ~1 s of a
@@ -95,17 +95,32 @@ FREEZE_LABELS=(
   "com.apple.spotlightknowledged.updater"
   "com.apple.spotlightknowledged.importer"
   "com.apple.siriactionsd"   # Shortcuts/App Intents backend; long-lived, respawns on kill (2026-10-15)
+  "com.apple.sharingd"       # AirDrop/Handoff/Continuity; KeepAlive+RunAtLoad, only a freeze sticks (2026-10-15)
+  "com.apple.duetexpertd"    # CoreDuet suggestions expert, suggestd's sibling (2026-10-15)
+  "com.apple.mediaanalysisd" # Visual Look Up/Live Text/Photos analysis; main ANE client (2026-10-15)
+  "com.apple.campo"          # Siri AI.app; KeepAlive+RunAtLoad; reactivates generativeexperiencesd (2026-10-15)
+  "com.apple.visualintelligenced"
+  "com.apple.siriknowledged"
+  "com.apple.intelligenceplatformd"   # knowledgeconstructiond's parent (2026-10-15)
+)
+# Per-user background domain (user/<uid>), where launchd keeps these; gui/<uid> cannot see them.
+USER_FREEZE_LABELS=(
+  "com.apple.contactsd"      # Contacts store; the operator does not use Contacts (2026-10-15)
 )
 TERM_LABELS=(
   "com.apple.triald"
   "com.apple.helpd"
   "com.apple.sirittsd"
+  "com.apple.knowledgeconstructiond"   # nightly Apple Intelligence FullPipeline, one-shot (2026-10-15)
 )
 
 FROZEN=""
 KILLED=""
 for label in "${FREEZE_LABELS[@]}"; do
   freeze "gui/$CONSOLE_UID" "$label"
+done
+for label in "${USER_FREEZE_LABELS[@]}"; do
+  freeze "user/$CONSOLE_UID" "$label"
 done
 for label in "${TERM_LABELS[@]}"; do
   kill_pid "gui/$CONSOLE_UID" "$label"
