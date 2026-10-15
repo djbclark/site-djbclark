@@ -79,7 +79,7 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 
 ## 3. Checks
 
-1. Phase A is on branch `vps-primary-athena` (903360c), checked 2026-10-15 on the
+1. Phase A (branch `vps-primary-athena`, landed as 107fa94) was checked 2026-10-15 on the
    host with eval plus `nix build --dry-run` (no build): nixathena `99ddc9fe`
    evaluates on nixos-26.05; every slim-list attribute exists; 1.4 GiB unpacked
    to fetch, and the host would build moira, remctl, athrun, hesiod and
