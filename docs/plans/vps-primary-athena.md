@@ -108,3 +108,11 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 7. Seen during phase B: root logs in over the **public** address
    (137.83.218.121) with the automation key, alongside the tailnet logins. Find
    that client before phase C closes port 22 publicly.
+8. **Phase C step 1 deployed 2026-10-15** (5dc4189): `AllowUsers root djbclark`,
+   `MaxAuthTries 3`, `LoginGraceTime 30`, the tailnet exempt from
+   `PerSourcePenalties`. On the Mac, `vps`/`vps-primary` now resolve to the tailnet
+   address and `vps-public` is the break-glass alias (`~/.ssh/config`, not in a
+   repo); `inventory/hosts.yml` `ansible_host` is the tailnet address. Step 2,
+   closing 22 publicly, waits a few days of clean tailnet-only use. It will also
+   make `bin/fleet-watch`'s public-address fallback probe (`VPS_PUBLIC`) fail
+   whenever the tailnet is down, which is the intended signal.
