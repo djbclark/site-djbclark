@@ -14,6 +14,9 @@
 # process, so the KILL escalation destroyed App Tamer's freezes and forced
 # a respawn. A frozen job burns no CPU, never exits, and therefore never
 # respawns; the only burn window is the ≤60 s after login/boot (or a reap).
+# At logout/restart/shutdown the persistent com.djbclark.shutdown-thaw agent
+# (bin/shutdown-thaw.sh) CONTs and TERMs every frozen job, because a stopped
+# process stalls the shutdown into a hard reset (2026-10-15).
 # triald/helpd/sirittsd/knowledgeconstructiond (short one-shots) and the root system-domain jobs are
 # TERMed. The Apple Intelligence daemons (generativeexperiencesd,
 # intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are
