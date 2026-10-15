@@ -43,6 +43,7 @@ kill_pid() {
 SYSTEM_LABELS=(
   "com.apple.cloudd"
   "com.apple.triald.system"
+  "com.apple.coreduetd"   # root half of CoreDuet, duetexpertd's sibling (2026-10-15)
   "com.apple.spindump"
   "com.apple.tailspind"
 )

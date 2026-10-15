@@ -119,6 +119,15 @@
 #     ...e5bundlecache/.../*.tmp.<client pid>_*.bundle path). Killing that
 #     pid is harmless (it ignores TERM, use KILL): aned returns an error to a
 #     client that is frozen anyway, and nothing re-requested the compile.
+#   - 2026-10-15 (last three, operator chose "all three"): BiomeAgent (the
+#     Biome event-stream store that feeds suggestd, duetexpertd and
+#     intelligenceplatformd; also read by Screen Time, Focus filters and
+#     Shortcuts automations) and chronod (ChronoCore: desktop and Notification
+#     Center widgets, widget-backed Control Center modules, widget pushes;
+#     KeepAlive only on crash) are frozen; coreduetd (root half of CoreDuet:
+#     knowledge and people stores, proactive SuggestionRequest endpoints; no
+#     KeepAlive) is TERMed by the root helper like triald.system. Expect
+#     widgets to stop updating.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
@@ -205,6 +214,8 @@ GUI_DAEMONS=(
   "com.apple.visualintelligenced"
   "com.apple.siriknowledged"
   "com.apple.intelligenceplatformd"
+  "com.apple.BiomeAgent"
+  "com.apple.chronod"
   "com.apple.generativeexperiencesd"
   "com.apple.intelligencecontextd"
   "com.apple.intelligenceflowd"
@@ -231,6 +242,7 @@ gui_like_jobs() {
 SYSTEM_DAEMONS=(
   "com.apple.cloudd"
   "com.apple.triald.system"
+  "com.apple.coreduetd"
   "com.apple.spindump"
   "com.apple.tailspind"
   "com.apple.modelmanagerd"

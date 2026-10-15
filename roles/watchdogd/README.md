@@ -53,7 +53,9 @@ per-user `user/<uid>` domain, the ban script's `USER_FREEZE_LABELS`) were frozen
 operator's request, and knowledgeconstructiond (nightly Apple Intelligence pipeline,
 four CPU-limit diagnostics Oct 9-12) joined the TERM set, and duetexpertd, mediaanalysisd,
 campo (Siri AI.app), visualintelligenced, siriknowledged and intelligenceplatformd joined
-the frozen set (operator: disable everything in that family; header of the sip script).
+the frozen set (operator: disable everything in that family; header of the sip script);
+then BiomeAgent and chronod (frozen) and coreduetd (system half, TERMed; the installed
+root helper must be re-copied when its list changes).
 triald/helpd/sirittsd/knowledgeconstructiond (short one-shots) and the system-domain half (cloudd, triald.system, spindump,
 tailspind run as root; modelmanagerd and modelcatalogd are flag-only, never killed) are TERMed. The five Apple Intelligence daemons (generativeexperiencesd,
 intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are flag-only:
