@@ -60,7 +60,8 @@ check together.
 3. The first deploy failed in `tinyproxy-google` only: `ip` in the start script needs
    `AF_NETLINK`, which the unit's `RestrictAddressFamilies` had left out. The firewall
    rules applied, nothing listened, and the fix (b66d70b) was deployed minutes later.
-4. **Minimum host list: `www.google.com` only.** `consent.google.com` was not needed:
+4. **Minimum host list at deploy time: `www.google.com` only** (`cse.google.com` was added
+   later for the `google cse` engine, see the status note at the top). `consent.google.com` was not needed:
    vps-primary is in the EU, so Google redirects a cookie-less client to
    `consent.google.com`, but SearXNG sends `CONSENT=YES+` and a `SOCS=` cookie, and with
    that cookie vps-primary (direct) and `get` (through the proxy) both get the search
