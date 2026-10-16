@@ -18,9 +18,13 @@ let
   publicInterface = "enp1s0";
   # Hosts a CONNECT may reach (extended regex, case-insensitive, matched against the
   # host name only). Keep this the measured minimum (docs/google-proxy-vps-primary.md).
+  # cse.google.com: SearXNG's "google cse" engine (results from /cse/element/v1; its
+  # token comes from www.google.com/cse/cse.js). The plain "google" engine 403s from
+  # every address since 2026-07 (searxng#6359, #6835), so "google cse" is the one in use.
   allowedHosts = [
     "^google\\.com$"
     "^www\\.google\\.com$"
+    "^cse\\.google\\.com$"
   ];
 
   filterFile = pkgs.writeText "tinyproxy-google.filter" (lib.concatStringsSep "\n" allowedHosts + "\n");

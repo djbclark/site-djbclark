@@ -7,10 +7,14 @@ are routed through a proxy on vps-primary; every other engine keeps going out di
 Module: `nixos/modules/google-proxy.nix`. The SearXNG side (the per-engine `proxies:`
 setting) lives with the SearXNG image, not here.
 
-**Status (2026-10-16): deployed, kept, and unused.** djbclark decided to keep the proxy as is.
-SearXNG's `google` engine gets a 403 from every address (searxng/searxng#6359), so
-SearXNG r3 does not route anything through it and the question in 3.5 below stays
-unanswered. `fleet-watch vps` still alerts if the unit stops; if the proxy is ever
+**Status (2026-10-16, later): repurposed for `google cse`.** SearXNG's plain `google`
+engine gets a 403 from every address (searxng/searxng#6359, still open as #6835), so r3
+did not use the proxy. The `google cse` engine is the Google path that still works: it
+fetches a token from `www.google.com/cse/cse.js` and results from
+`cse.google.com/cse/element/v1`, and both answered 200 with real results from the Mac and
+from Hyades. From the shared Hyades address it got "unusual traffic" 429s about a dozen
+times on 2026-10-15, so `cse.google.com` was added to the allowlist and SearXNG r5 sends
+`google cse` through the proxy. `fleet-watch vps` still alerts if the unit stops; if the proxy is ever
 retired, remove `google-proxy.nix`, its import, its `registry/ports.yml` entry and that
 check together.
 
