@@ -7,6 +7,13 @@ are routed through a proxy on vps-primary; every other engine keeps going out di
 Module: `nixos/modules/google-proxy.nix`. The SearXNG side (the per-engine `proxies:`
 setting) lives with the SearXNG image, not here.
 
+**Status (2026-10-16): deployed, kept, and unused.** djbclark decided to keep the proxy as is.
+SearXNG's `google` engine gets a 403 from every address (searxng/searxng#6359), so
+SearXNG r3 does not route anything through it and the question in 3.5 below stays
+unanswered. `fleet-watch vps` still alerts if the unit stops; if the proxy is ever
+retired, remove `google-proxy.nix`, its import, its `registry/ports.yml` entry and that
+check together.
+
 ## 1. Why tinyproxy, and what was searched first
 
 1. **Nothing new on the SearXNG side.** SearXNG already has a per-engine `proxies:`
