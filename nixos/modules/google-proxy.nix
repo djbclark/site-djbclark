@@ -74,6 +74,7 @@ in
       RestrictAddressFamilies = [
         "AF_INET"
         "AF_UNIX"
+        "AF_NETLINK" # `ip addr` in the start script
       ];
       SystemCallFilter = [ "@system-service" ];
     };
