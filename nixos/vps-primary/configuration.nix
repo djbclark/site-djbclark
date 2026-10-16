@@ -5,6 +5,7 @@
     ./hardware-configuration.nix
     ../modules/athena.nix
     ../modules/athena-afs.nix
+    ../modules/google-proxy.nix
     ../modules/packages.nix
     ../modules/terminals.nix
     ../modules/users.nix
