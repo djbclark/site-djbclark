@@ -156,6 +156,8 @@ class UpstreamWatch(unittest.TestCase):
         self.assertTrue(brief.startswith("/baton"))
         self.assertIn("untrusted data", brief)
         self.assertIn("`fix/x`", brief)
+        self.assertIn("`fix/x-prep`", brief)
+        self.assertNotIn("git push --force-with-lease origin <branch>`", brief)
         # Same thread state again: nothing new.
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertEqual((len(self.pings()), len(self.dispatches())), (1, 1))
