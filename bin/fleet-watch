@@ -483,10 +483,10 @@ load_watch() {
 }
 
 vps_probe() {
-  # $1 = address. Prints "<upgrade Result> <ActiveState> <failed units>" on success.
+  # $1 = address. Prints "<upgrade Result> <ActiveState> <failed units> <google proxy state>" on success.
   runb "$VPS_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=8 -o IdentitiesOnly=yes \
     -o IdentityAgent=none -i "$VPS_KEY" -o StrictHostKeyChecking=accept-new "root@$1" \
-    'r=$(systemctl show nixos-upgrade.service -p Result --value); a=$(systemctl show nixos-upgrade.service -p ActiveState --value); f=$(systemctl --failed --plain --no-legend | wc -l); echo "$r $a $f"' 2>/dev/null |
+    'r=$(systemctl show nixos-upgrade.service -p Result --value); a=$(systemctl show nixos-upgrade.service -p ActiveState --value); f=$(systemctl --failed --plain --no-legend | wc -l); p=$(systemctl is-active tinyproxy-google.service || true); echo "$r $a $f ${p:-unknown}"' 2>/dev/null |
     gtail -1
 }
 
@@ -512,14 +512,19 @@ vps_watch() {
     detail="vps-primary unreachable on the tailnet and on the public address for $fails checks (unattended reboot window is 03:00-05:00 UTC; a failed boot needs the Hetzner console: pick the previous generation in GRUB)"
   else
     echo 0 >"$cf"
-    local res act nfail
-    read -r res act nfail <<<"$out"
+    local res act nfail prox
+    read -r res act nfail prox <<<"$out"
     if [[ "$res" != success && "$act" == inactive ]] || [[ "$act" == failed ]]; then
       state=upgrade-failed
       detail="vps-primary: nixos-upgrade failed (Result=$res); run: ssh vps journalctl -u nixos-upgrade -n 50"
     elif [[ "$via" == public ]]; then
       state=tailnet-down
       detail="vps-primary answers on the public address but not on the tailnet (check tailscaled on the VPS)"
+    elif [[ "$prox" != active ]]; then
+      # Restart=on-failure with a 10 s RestartSec never trips the start limit, so a crash
+      # loop shows as "activating", not as a failed unit (docs/google-proxy-vps-primary.md).
+      state=proxy-down
+      detail="vps-primary: tinyproxy-google is $prox (SearXNG's Google engine fails); run: ssh vps journalctl -u tinyproxy-google -n 30"
     elif ((nfail > 0)); then
       state=units-failed
       detail="vps-primary: $nfail failed systemd unit(s); run: ssh vps systemctl --failed"
