@@ -71,6 +71,9 @@ check together.
    not block vps-primary's address: a plain request, a `gbv=1` request, and the SearXNG
    Android-app request (`asearch=arc`) all got 200, none the `sorry/index` page. The
    decisive test is SearXNG's own `google` engine with `proxies:` pointing here.
+   **Answered 2026-10-16:** the plain `google` engine gets 403 through the proxy too (it
+   does from every address), and `google cse` through the proxy works (SearXNG r5, its
+   CONNECTs in this unit's journal, no Google errors in SearXNG's log); see the status note.
 
 ## 4. Operating it
 
