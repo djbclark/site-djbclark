@@ -268,6 +268,8 @@ hosts:
          note: "E5: com.djbclark.litellm systemd --user; loopback until master key + Tailscale bind design"}
       - {port: 5071,  bind: "100.125.249.107", owner: site, service: gradle-build-cache, status: active,
          note: "2026-10-15: FosterStack cache v0.2.2 (ghcr.io/fosterstack/cache, digest-pinned) in Podman (podman-gradle-cache.service, nixos/vps-primary/configuration.nix), replacing the Develocity Build Cache Node; container port 8080. Bound to the VPS tailnet address only, because a published Podman port bypasses networking.firewall. Basic auth, one read-write user mac, password sudo-secretspec GRADLE_BUILD_CACHE_PASSWORD (env file /var/lib/gradle-cache.env on the VPS). Data /var/lib/gradle-cache. See docs/gradle-remote-cache.md."}
+      - {port: 26369, bind: "public-iface", owner: site, service: google-proxy, status: planned,
+         note: "2026-10-16: tinyproxy-google (nixos/modules/google-proxy.nix), CONNECT :443 to an allowlist of Google hosts only, for SearXNG on SIPB Hyades. Firewall accepts only the Hyades egress address. See docs/google-proxy-vps-primary.md."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:
