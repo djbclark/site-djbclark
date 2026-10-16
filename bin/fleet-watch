@@ -7,6 +7,7 @@
 #   fleet-watch load       only the machine-overload check (see Machine overload)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
+#   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch upstream [--dry-run] [--once]  only the upstream-PR watcher (see Upstream PR watcher)
 #   fleet-watch install   write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
@@ -127,6 +128,16 @@ VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # Consecutive failed probes before "down" is announced. 3 x 5 min covers the
 # unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
 VPS_DOWN_AFTER="${FLEET_WATCH_VPS_DOWN_AFTER:-3}"
+# get backup staleness (2026-10-16, asked by the sipb-fa session, approved by djbclark): defeat
+# pulls a nightly restic backup of get; ~/src/get's `scripts/backup-check stale` prints one line
+# and exits 1 when the last success is older than 30 h or defeat is unreachable (ssh defeat).
+# Probed at most every GETBACKUP_INTERVAL seconds; "unreachable" is announced only after
+# GETBACKUP_DOWN_AFTER consecutive failed probes (the Mac off the network is not news), "stale" at once.
+GETBACKUP="${FLEET_WATCH_GETBACKUP:-on}"
+GETBACKUP_CMD="${FLEET_WATCH_GETBACKUP_CMD:-$HOME/src/get/scripts/backup-check}"
+GETBACKUP_INTERVAL="${FLEET_WATCH_GETBACKUP_INTERVAL:-1800}"
+GETBACKUP_DOWN_AFTER="${FLEET_WATCH_GETBACKUP_DOWN_AFTER:-3}"
+GETBACKUP_TIMEOUT="${FLEET_WATCH_GETBACKUP_TIMEOUT:-40}"
 # Upstream PR watcher (2026-10-16); see "Upstream PR watcher" in the header.
 UPSTREAM="${FLEET_WATCH_UPSTREAM:-on}"
 UPSTREAM_REPOS="${FLEET_WATCH_UPSTREAM_REPOS-cfengine/core cfengine/libntech NorthernTechHQ/libntech}"
@@ -589,6 +600,47 @@ vps_watch() {
   return 0
 }
 
+getbackup_watch() {
+  # Sets GETBACKUP_STATE (ok | stale | unreachable(N) | off); notifies on transitions only, once
+  # per incident, recording the notified state only when the notice went out (as vps_watch).
+  GETBACKUP_STATE=off
+  [[ "$GETBACKUP" == on && -x "$GETBACKUP_CMD" ]] || return 0
+  local sf="$STATE_DIR/getbackup-state" cf="$STATE_DIR/getbackup-fails" tf="$STATE_DIR/getbackup-last"
+  local prev now last out rc state fails
+  prev=$(cat "$sf" 2>/dev/null || echo ok)
+  now=$(gdate +%s)
+  last=$(gsed -n 1p "$tf" 2>/dev/null || echo 0)
+  if ((now - ${last:-0} < GETBACKUP_INTERVAL)) && [[ "$1" != manual ]]; then
+    GETBACKUP_STATE=$(gsed -n 2p "$tf" 2>/dev/null || echo "$prev")
+    return 0
+  fi
+  out=$(runb "$GETBACKUP_TIMEOUT" "$GETBACKUP_CMD" stale 2>/dev/null)
+  rc=$?
+  out=$(gtail -1 <<<"$out")
+  if [[ "$rc" == 0 ]]; then
+    echo 0 >"$cf"
+    state=ok
+  elif [[ "$out" == *"last success"* ]]; then
+    echo 0 >"$cf"
+    state=stale
+  else
+    fails=$(( $(cat "$cf" 2>/dev/null || echo 0) + 1 ))
+    echo "$fails" >"$cf"
+    state="unreachable($fails)"
+    [[ -n "$out" ]] || out="get backup: backup-check gave no output (rc=$rc)"
+  fi
+  GETBACKUP_STATE="$state"
+  printf '%s\n%s\n' "$now" "$state" >"$tf"
+  [[ "$state" == unreachable* ]] && { ((fails >= GETBACKUP_DOWN_AFTER)) || return 0; state=unreachable; }
+  [[ "$state" == "$prev" ]] && return 0
+  if [[ "$state" == ok ]]; then
+    notify "get-backup" "fresh again ($out; was: $prev)" && echo ok >"$sf"
+  else
+    notify "get-backup" "$out; check: ~/src/get/scripts/backup-check" && echo "$state" >"$sf"
+  fi
+  return 0
+}
+
 # --- Upstream PR watcher (2026-10-16); see "Upstream PR watcher" in the header ------------------
 
 # The newest non-operator activity on one PR or issue, from its issue, pull, reviews, review
@@ -919,8 +971,10 @@ check() {
   done
   load_watch
   vps_watch
+  getbackup_watch check
   upstream_watch check || true
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
+  [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
   local r
   for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
   # S1 freshness speaks for itself (once per incident), so s1= is shown, never diffed.
@@ -994,6 +1048,10 @@ case "${1:-check}" in
     vps_watch
     echo "vps=$VPS_STATE"
     ;;
+  getbackup)
+    getbackup_watch manual
+    echo "getbackup=$GETBACKUP_STATE"
+    ;;
   upstream)
     shift
     for a in "$@"; do
@@ -1038,7 +1096,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    gsed -n '2,11p' "$0"
+    gsed -n '2,12p' "$0"
     exit 1
     ;;
 esac
