@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""attach/detach/add/fsid for AFS lockers on macOS. Symlinks $MITDIR/<name> -> AFS path.
+Install once as athena-locker; symlink it as attach, detach, add, fsid."""
+import os, sys, subprocess, shutil, argparse
+MITDIR = os.environ.get("MITDIR", "/mit")
+DOM = os.environ.get("HES_DOMAIN", "athena.mit.edu").strip(".")
+
+def resolve(name):
+    """Hesiod filsys lookup: TXT <name>.filsys.ns.<rhs>; returns [(type, path, mode, mountpoint)] by priority."""
+    if not name or name.startswith(".") or "/" in name:
+        raise SystemExit(f"{name}: invalid locker name")
+    out = subprocess.run(["dig", "+short", "TXT", f"{name}.filsys.ns.{DOM}"],
+                         capture_output=True, text=True).stdout
+    recs = []
+    for line in out.splitlines():
+        f = line.strip().strip('"').split()
+        if len(f) >= 4: recs.append(f)
+    if not recs: raise SystemExit(f"{name}: Locker unknown")
+    def prio(f): return int(f[-1]) if f[-1].isdigit() else 0
+    if all(f[-1].isdigit() and int(f[-1]) > 0 for f in recs):   # FSGROUP: last field is priority
+        recs.sort(key=prio)
+    return [tuple(f[:4]) for f in recs]
+
+def afs_records(name):
+    r = [x for x in resolve(name) if x[0] in ("AFS", "LOC")]
+    if not r: raise SystemExit(f"{name}: no AFS/LOC record (NFS/UFS/ERR lockers are not supported)")
+    return r
+
+def attach(name, auth=True, verbose=True):
+    for typ, path, mode, _mp in afs_records(name):
+        if auth and typ == "AFS" and shutil.which("aklog"):
+            subprocess.run(["aklog", "-path", path], stderr=subprocess.DEVNULL)  # token for that cell
+        link = os.path.join(MITDIR, name)
+        if os.path.islink(link) and os.readlink(link) == path: pass
+        else:
+            if os.path.lexists(link): os.unlink(link)
+            os.symlink(path, link)
+        if verbose: print(f"attach: {path} attached to {link} for filesystem {name}")
+        return link
+    return None
+
+def detach(name):
+    link = os.path.join(MITDIR, name)
+    if os.path.islink(link): os.unlink(link)
+    else: print(f"detach: {name} is not attached", file=sys.stderr)
+
+def attach_one(o, n):
+    if o.l:
+        print(f"{n} resolves to:")
+        for r in resolve(n): print(" ".join(r))
+    else:
+        l = attach(n, auth=not o.n, verbose=not (o.q or o.p))
+        if o.p and l: print(l)
+
+def main():
+    prog = os.path.basename(sys.argv[0]); a = sys.argv[1:]
+    if prog == "athena-locker" and a: prog, a = a[0], a[1:]
+    if prog == "attach":
+        p = argparse.ArgumentParser(prog="attach"); p.add_argument("-l", action="store_true", help="lookup only")
+        p.add_argument("-n", action="store_true", help="no aklog"); p.add_argument("-q", action="store_true")
+        p.add_argument("-p", action="store_true"); p.add_argument("lockers", nargs="*")
+        o, _ = p.parse_known_args(a)          # ignore legacy flags (-h -z -r -w ...)
+        if not o.lockers:
+            for n in sorted(os.listdir(MITDIR)):
+                l = os.path.join(MITDIR, n)
+                if os.path.islink(l): print(f"{n:20} -> {os.readlink(l)}")
+            return
+        rc = 0
+        for n in o.lockers:
+            try:
+                attach_one(o, n)
+            except SystemExit as e:        # one bad locker must not stop the rest
+                print(e, file=sys.stderr); rc = 1
+        sys.exit(rc)
+    elif prog == "detach":
+        for n in [x for x in a if not x.startswith("-")]: detach(n)
+    elif prog == "fsid":  # -a/-u: (re)authenticate / drop tokens for a locker
+        un = "-u" in a
+        for n in [x for x in a if not x.startswith("-")]:
+            if un: subprocess.run(["unlog"])
+            else: subprocess.run(["aklog", "-path", afs_records(n)[0][1]])
+    elif prog == "add":   # eval "$(add -b locker ...)" ; prints PATH export
+        front = "-f" in a; names = [x for x in a if not x.startswith("-")]
+        path = os.environ.get("PATH", "").split(":")
+        for n in names:
+            link = attach(n, verbose=False)
+            if not link: continue
+            for d in ("bin",):  # TODO: athdir arch/<sysname>/bin lookup
+                d = os.path.join(link, d)
+                if d in path: path.remove(d)
+                path = ([d] + path) if front else (path + [d])
+        print('export PATH="%s"' % ":".join(path))
+    else:
+        sys.exit("usage: athena-locker {attach|detach|add|fsid} ...")
+main()
