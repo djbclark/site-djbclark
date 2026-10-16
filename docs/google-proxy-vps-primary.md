@@ -40,6 +40,31 @@ setting) lives with the SearXNG image, not here.
    firewall rule is the only authentication, so a change of the Hyades egress address
    makes the proxy unreachable (fail closed) until `hyadesEgress` is updated.
 
-## 3. Acceptance record
+## 3. Acceptance record (2026-10-16, deployed at b66d70b)
 
-Filled in after deploy (see the end of this file).
+1. From `get` (egress measured 18.4.60.84), through the proxy: `https://www.google.com`
+   CONNECT succeeds (HTTP 200 from Google); `https://example.com` and
+   `https://consent.google.com` get `CONNECT tunnel failed, response 403`.
+2. From the Mac (not the Hyades address) the port times out (curl exit 28, 8 s).
+3. The first deploy failed in `tinyproxy-google` only: `ip` in the start script needs
+   `AF_NETLINK`, which the unit's `RestrictAddressFamilies` had left out. The firewall
+   rules applied, nothing listened, and the fix (b66d70b) was deployed minutes later.
+4. **Minimum host list: `www.google.com` only.** `consent.google.com` was not needed:
+   vps-primary is in the EU, so Google redirects a cookie-less client to
+   `consent.google.com`, but SearXNG sends `CONSENT=YES+` and a `SOCS=` cookie, and with
+   that cookie vps-primary (direct) and `get` (through the proxy) both get the search
+   page with no redirect. `google.com` is allowed as well, untested.
+5. **What was not proven.** No request shape reproduced the 429 from `get` without the
+   proxy, so these curl tests cannot show that the proxy fixes it, only that Google does
+   not block vps-primary's address: a plain request, a `gbv=1` request, and the SearXNG
+   Android-app request (`asearch=arc`) all got 200, none the `sorry/index` page. The
+   decisive test is SearXNG's own `google` engine with `proxies:` pointing here.
+
+## 4. Operating it
+
+1. Log: `journalctl -u tinyproxy-google` (refused hosts show as "Proxying refused on
+   filtered domain").
+2. To add a host, add its regex to `allowedHosts` in the module and promote as usual
+   (`docs/nixos-in-git.md`); only the proxy unit restarts, the firewall rule is unchanged.
+3. If SearXNG gets connection timeouts, check `curl -4 https://ifconfig.me` from the
+   microVM: the firewall rule is keyed to that address (`hyadesEgress`).
