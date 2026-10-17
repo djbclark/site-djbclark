@@ -104,7 +104,7 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 5. `security.sudo.wheelNeedsPassword = false` for `djbclark`: no local password
    exists, and root is already reachable with a key.
 6. **Phase B deployed 2026-10-15** (63fc0b8): OpenAFS 1.8.16.1 loaded without a
-   reboot, `/afs/athena.mit.edu` mounted, 2.9 GiB cache. The Mac's `athena-kinit`
+   reboot, `/afs/athena.mit.edu` mounted, 2.9 GiB cache. The Mac's [`athena-kinit`](https://forgejo.mit.edu/djbclark/athena-mac) (`~/src/athena-mac/athena-kinit`)
    pushes the TGT hourly with `~/.ssh/athena_tgt_push`, whose authorized_keys entry
    is `restrict`, `from=` the Mac's tailnet address and forced to
    `athena-tgt-receive`; tickets live in `FILE:/var/lib/krb5cc/<uid>/tgt` (nixathena's
@@ -144,3 +144,61 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
     change, no reboot): FosterStack node live, anonymous 401, a Mac build hit the remote
     cache (`docs/gradle-remote-cache.md`, "Tested 2026-10-15"); Develocity data and image
     removed.
+
+## Follow-up (2026-10-16)
+
+Canonical, parametrised modules now live at
+https://forgejo.mit.edu/djbclark/athena-nixos (extracted from
+`nixos/modules/athena.nix` and `athena-afs.nix`). **Do not switch the live
+consumer yet** while Athena/AFS work is in flight on vps-primary; this section
+is the exact change for a later session.
+
+### Flake input (`nixos/flake.nix`)
+
+```nix
+inputs.athena-nixos = {
+  url = "git+https://forgejo.mit.edu/djbclark/athena-nixos";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+# optional: inputs.athena-nixos.inputs.nixathena.follows = "nixathena";
+```
+
+Keep or drop the direct `nixathena` input depending on whether anything else
+still needs it; `athena-nixos.nixosModules.default` already imports
+`nixathena.nixosModules.default`.
+
+### Config change (`nixos/vps-primary/configuration.nix`)
+
+Replace the two in-tree imports with the flake module and set the options that
+match today's hard-coded values:
+
+```nix
+imports = [
+  # was: ../modules/athena.nix  and  ../modules/athena-afs.nix
+  athena-nixos.nixosModules.default
+  # ...other modules unchanged...
+];
+athena-afs.user = "djbclark";
+athena-afs.pushFrom = "100.113.53.87";
+athena-afs.pushKeys = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAhjpIb8xyRFKfrYvZuwsaH4GgV/ViZfvq5XoNn3SgRy djbclark@mac-athena-tgt-push"
+];
+```
+
+Pass `athena-nixos` through `specialArgs` (or rely on the module's own
+`_module.args.nixathena` when using `default`). Remove the duplicate
+`nixathena.nixosModules.default` import from `flake.nix` if `default` is used.
+
+After the switch, delete or leave as stubs the in-tree
+`nixos/modules/athena*.nix` copies (they already point at the Forgejo repo in
+their headers).
+
+### Verification after switch (no rebuild in the extraction slice)
+
+On vps-primary, as `djbclark`:
+
+1. `klist` — renewable TGT for `djbclark@ATHENA.MIT.EDU`
+2. `tokens` — rxkad tokens
+3. `ls /afs/athena.mit.edu` — AFS readable
+4. Confirm `systemctl list-timers athena-tgt-renew.timer` still fires
+5. From the Mac: `athena-kinit push` (or the hourly agent) still prints `ok`

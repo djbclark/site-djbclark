@@ -1,3 +1,6 @@
+# Canonical, parametrised copy: https://forgejo.mit.edu/djbclark/athena-nixos
+# (this copy is consumed by vps-primary until the flake-input switch —
+# docs/plans/vps-primary-athena.md, Follow-up).
 # MIT Athena pieces from SIPB's nixathena flake, trimmed to a headless server.
 # Copied from `get` (forgejo.mit.edu/djbclark/get, nixos/athena.nix) and adapted:
 # no Kerberos password login (tickets are pushed from the Mac instead), and AFS

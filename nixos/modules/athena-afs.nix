@@ -1,8 +1,11 @@
+# Canonical, parametrised copy: https://forgejo.mit.edu/djbclark/athena-nixos
+# (this copy is consumed by vps-primary until the flake-input switch —
+# docs/plans/vps-primary-athena.md, Follow-up).
 # OpenAFS client and Athena tickets pushed from the Mac (phase B of
 # docs/plans/vps-primary-athena.md; decisions 1.4 and 1.5).
 #
 # There is no Kerberos password login here, so tickets arrive from the Mac:
-# its hourly athena-kinit job (macos/athena-kerberos/athena-kinit) sends a
+# its hourly athena-kinit job (https://forgejo.mit.edu/djbclark/athena-mac/src/branch/main/athena-kinit) sends a
 # renewable TGT over ssh with a key that can do nothing but run
 # athena-tgt-receive. The receiver installs it as djbclark's cache and runs
 # aklog. When the Mac is asleep, athena-tgt-renew keeps the ticket and the AFS
