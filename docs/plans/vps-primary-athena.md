@@ -151,7 +151,7 @@ Canonical, parametrised modules now live at
 https://forgejo.mit.edu/djbclark/athena-nixos (extracted from
 `nixos/modules/athena.nix` and `athena-afs.nix`).
 
-**Switched 2026-10-17** (djbclark asked for it). `flake.nix` takes `athena-nixos` (its
+**Switched 2026-10-16** (evening local, 2026-10-17 UTC in the host logs; djbclark asked for it). `flake.nix` takes `athena-nixos` (its
 `nixathena` follows ours, so the lock still has the one nixathena), `configuration.nix` sets
 the three `athena-afs.*` options, and the in-tree `modules/athena*.nix` copies were deleted.
 Checked on the host before promoting: a `path:` build of the old and the new config gave the
@@ -163,7 +163,9 @@ from the import order of `environment.systemPackages`); the lock diff added only
 passed afterwards: `klist` (renewable TGT, renew until 10-22), `tokens`, `ls /afs/athena.mit.edu`,
 the renew timer, and `athena-kinit push` from the Mac (`pushed TGT to vps-primary`). The AFS client
 unit is `afsd.service`; the module's `after = [ "openafs-client.service" ]` on the renew service
-names a unit that does not exist (harmless, already so before the switch).
+names a unit that does not exist (harmless, already so before the switch). `get` (the Hyades
+microVM) keeps its own copy of the `athena` block on purpose: `~/src/get` `docs/design.md`
+section 5 (decided 2026-10-16).
 
 ### Flake input (`nixos/flake.nix`)
 
