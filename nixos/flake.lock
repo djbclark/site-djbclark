@@ -30,36 +30,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1792235900,
-        "narHash": "sha256-nRd3WaCM9Ni3n01Z32wZyCf5hPjIyBPMK4twSqbeDKg=",
+        "lastModified": 1792238566,
+        "narHash": "sha256-qNJg/2nvWFxBLSh3z5NENGn3MY7XQK2iW0Olv/XjzJ0=",
         "owner": "djbclark",
         "repo": "bb-nix",
-        "rev": "675a4371dd03b80944a00438b41f9f18762c2cbe",
+        "rev": "19da3f13ad6d5bf16ed5dd796b25f1f30dc2d7b4",
         "type": "github"
       },
       "original": {
         "owner": "djbclark",
         "repo": "bb-nix",
-        "type": "github"
-      }
-    },
-    "cloudroom-nix": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1792198556,
-        "narHash": "sha256-Oho/AezzSXoY1ce8sJ2w+v4StRMg/6grkQPGMGyor3g=",
-        "owner": "djbclark",
-        "repo": "cloudroom-nix",
-        "rev": "8b5dc6200ab824be23409df29e3fe28a3b5a6393",
-        "type": "github"
-      },
-      "original": {
-        "owner": "djbclark",
-        "repo": "cloudroom-nix",
         "type": "github"
       }
     },
@@ -103,7 +83,6 @@
       "inputs": {
         "athena-nixos": "athena-nixos",
         "bb-nix": "bb-nix",
-        "cloudroom-nix": "cloudroom-nix",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs"
       }

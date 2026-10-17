@@ -1,6 +1,5 @@
 {
   pkgs,
-  cloudroom-nix,
   bb-nix,
   ...
 }:
@@ -128,54 +127,45 @@
     };
   };
 
-  # Cloudroom core, an agent runner (docs/cloudroom-vps-primary.md, 2026-10-16). Module and
-  # packages: github.com/djbclark/cloudroom-nix. The -bin packages are built by Forgejo CI and
-  # only downloaded here: nothing compiles on this host (djbclark, 2026-10-16).
-  # The caps hold the core and every agent: the host has 4 GB and also runs the Gradle cache
-  # (1 GB cap) and Athena, so past them the kernel reclaims inside Cloudroom, not host-wide.
-  services.cloudroom = {
-    enable = true;
-    package = cloudroom-nix.packages.x86_64-linux.cloudroom-core-bin;
-    codex.package = cloudroom-nix.packages.x86_64-linux.codex-npm-bin;
-    # The host's ChatGPT login rejects gpt-6-luna (the Mac's default); its models_cache.json lists
-    # gpt-6-astra and gpt-5.6-{sol,terra,luna} (djbclark, 2026-10-17). Clients can pick per session.
-    codex.model = "gpt-5.6-luna";
-    # Sessions that name no harness get Claude Code (djbclark, 2026-10-16); Codex stays installed.
-    environment.CLOUDROOM_HARNESS = "claude-code";
-    memoryHigh = "2560M";
-    memoryMax = "3G";
-    tailscaleServe.enable = true;
-  };
-
-  # BB (github.com/get-bb/bb), the agent app that replaces Cloudroom. C1 (2026-10-17): it runs
-  # beside Cloudroom on tailnet port 8443 (443 is still Cloudroom's) with smaller memory caps.
-  # C2 removes services.cloudroom and moves BB to 443 and 38443 (appUrl without :8443,
-  # tailscaleServe.ports = [ 443 38443 ], caps 2560M/3G). BB has no login: the tailnet is the
-  # only boundary, and it must never be funnelled. Packages are built by Forgejo CI
-  # (forgejo.mit.edu/djbclark/bb-build) and only downloaded here.
+  # BB (github.com/get-bb/bb), the agent app that replaced Cloudroom (C2, 2026-10-17). Tailnet
+  # 443 is the web UI; 38443 is the address other machines' host daemons use (externalUrl).
+  # BB has no login: the tailnet is the only boundary, and it must never be funnelled. Packages
+  # are built by Forgejo CI (forgejo.mit.edu/djbclark/bb-build) and only downloaded here.
+  # The caps hold the server and every agent: the host has 4 GB and also runs the Gradle cache
+  # (1 GB cap) and Athena, so past them the kernel reclaims inside BB, not host-wide.
   services.bb = {
     enable = true;
     package = bb-nix.packages.x86_64-linux.bb-app-bin;
-    appUrl = "https://vps-primary.greyhound-sidemirror.ts.net:8443";
+    appUrl = "https://vps-primary.greyhound-sidemirror.ts.net";
     externalUrl = "https://vps-primary.greyhound-sidemirror.ts.net:38443";
     # Anthropic's native installer, run once as the bb user (nix-ld is enabled by nativeInstaller).
     claudeCode = {
       nativeInstaller = true;
       executable = "/var/lib/bb/.local/bin/claude";
     };
+    # npmGlobalPrefix keeps its default (/var/lib/bb/.local): BB's own `npm install -g` (Pi and
+    # other agents installed from the UI) fails on the read-only Node store path without it.
     extraPackages = [
       bb-nix.packages.x86_64-linux.codex-npm-bin
       pkgs.git
       pkgs.gh
       pkgs.ripgrep
     ];
-    memoryHigh = "1536M";
-    memoryMax = "2G";
+    memoryHigh = "2560M";
+    memoryMax = "3G";
     tailscaleServe = {
       enable = true;
-      ports = [ 8443 ];
+      ports = [
+        443
+        38443
+      ];
     };
   };
+
+  # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
+  # Cursor's bundled node (both installed into /var/lib/bb/.local). claudeCode.nativeInstaller
+  # also turns it on; it is stated here so it does not depend on that option.
+  programs.nix-ld.enable = true;
 
   # The host builds this configuration from git, never from /etc/nixos:
   # github:djbclark/site-djbclark, branch deploy-vps-primary, flake in nixos/. Deploy =
