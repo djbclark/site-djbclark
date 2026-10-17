@@ -12,9 +12,11 @@ token-protected HTTP API, and keeps their history on that machine. Installed on 
 3. **Builds:** the private Forgejo repo forgejo.mit.edu/djbclark/cloudroom-core-build (local
    `~/src/cloudroom-core-build`).
 
-## Rule: nothing is compiled on vps-primary
+## Builds run in Forgejo CI by default
 
-djbclark, 2026-10-16: no software builds on the host; builds run in Forgejo CI. So vps-primary
+djbclark, 2026-10-16: build in Forgejo CI rather than on vps-primary. Compiling on the host is
+allowed when there is no other good option or host, or when it is actually the fastest route
+(relaxed the same day from "no builds on the host"). As set up, nothing compiles there: vps-primary
 uses cloudroom-nix's `cloudroom-core-bin` (static musl, built from upstream's pinned tag in a
 digest-pinned `rust:alpine` container, `cargo test` as the gate) and `codex-npm-bin` (the
 `@openai/codex` release upstream tested), both Forgejo generic packages pinned by URL and hash:
