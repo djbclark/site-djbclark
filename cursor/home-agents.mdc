@@ -333,7 +333,9 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
 5. **New tool, MCP server or plugin added anywhere? Ask djbclark whether to add it
    to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in without
    asking unless it looks sensitive** (2026-10-12).
-   (`memory/feedback_ask_update_apply_toolchain_prompt.md`)
+   (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **Every AI TUI, agent CLI and ACP
+   server stays on its latest release on every machine: upgrade without asking, and never
+   hard-code a version in a path** (2026-10-17). (`memory/feedback_ai_tuis_always_latest.md`)
 6. **Never pass `--help` to a subcommand of a live-service CLI** (2026-10-09:
    `collie update --help` started a real update); `collie` is read-only for agents
    (`collie version`, `collie help`, docs), `update`/`pair`/config changes are the
