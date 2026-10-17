@@ -37,7 +37,7 @@ packages, and this repo's vps-primary system at a commit before promotion
 | History | `/var/lib/cloudroom/history`; workspaces `/code`. |
 | Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for the core and every agent (4 GB host, also running the Gradle cache and Athena). |
 | Codex model | `gpt-5.6-luna` (2026-10-17). The Mac's default `gpt-6-luna` failed: "not supported when using Codex with a ChatGPT account"; the host login's choices are in `~cloudroom-agent/.codex/models_cache.json`. |
-| Harnesses | Default `claude-code` (`CLOUDROOM_HARNESS`, djbclark 2026-10-16); Codex also logged in. Both logins done 2026-10-16 as `cloudroom-agent`; smoke test passed for Claude Code (Codex was out of quota at the time). |
+| Harnesses | Default `claude-code` (`CLOUDROOM_HARNESS`, djbclark 2026-10-16); Codex also logged in. Both logins done 2026-10-16 as `cloudroom-agent`; smoke tests passed for Claude Code (2026-10-16) and Codex on `gpt-5.6-luna` (2026-10-17). |
 
 ```bash
 ssh vps-ts
@@ -62,7 +62,8 @@ on vps-primary.
 `tailscale serve --bg --https=8790 http://127.0.0.1:39886` (registry/ports.yml; never :443, which is
 caddy-https; never funnel). Open `https://mac.greyhound-sidemirror.ts.net:8790/` on the phone. It has no
 login of its own, so the tailnet is the only boundary, and it works only while the Mac is awake with the
-app open. The Cloudroom Connect relay (cloudroom.run) is inactive because `sandboxToken` is gone. Running
+app open. A new browser shows the setup screen again (dismissal is per browser): tap Skip setup
+(cloudroom-gui#7). The Cloudroom Connect relay (cloudroom.run) is inactive because `sandboxToken` is gone. Running
 the app server on vps-primary instead (phone works with the Mac off) waits for cloudroom-gui PR #5:
 until it merges, a fresh browser is locked on onboarding; research in site-private
 `memory/handoffs/site-djbclark/RESEARCH_cloudroom-app-server-on-vps-primary_2026-10-17.md`; plan: CI repackages the Linux AppImage's Node tree, Nix module with a dedicated user, nft rule keeping
