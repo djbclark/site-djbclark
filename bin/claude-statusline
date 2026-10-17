@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# claude-statusline — one persistent line under every Claude Code session:
+#   model · effort · context used/size (percent) · 5h/7d quota · cost · Claude Code version
+#
+# Claude Code pipes a JSON payload to the statusLine command on each update
+# (https://code.claude.com/docs/en/statusline). Orca's own script
+# (~/.orca/agent-hooks/claude-statusline.sh) prints nothing: it forwards the payload to Orca's
+# hook endpoint and exits, and in herdr it exits at once, so herdr panes had no status line at
+# all. This script forwards the payload to Orca's script when Orca's environment is present
+# (so Orca keeps its data) and then prints the line itself, everywhere.
+#
+# Asked for by djbclark 2026-10-17 ("a persistent line that shows what model, version, effort,
+# context size is being used in each session"). CLAUDE_STATUSLINE_DISABLE=1 prints nothing.
+set -u
+payload=$(cat)
+[ -n "$payload" ] || exit 0
+[ -z "${CLAUDE_STATUSLINE_DISABLE:-}" ] || exit 0
+orca=$HOME/.orca/agent-hooks/claude-statusline.sh
+if [ -n "${ORCA_PANE_KEY:-}" ] && [ -x "$orca" ]; then
+  printf '%s' "$payload" | /bin/sh "$orca" >/dev/null 2>&1 || :
+fi
+command -v jq >/dev/null 2>&1 || { echo "statusline: jq missing"; exit 0; }
+printf '%s' "$payload" | jq -r '
+  def k: if . == null then "?" elif . >= 1000000 then "\(. / 1000000 | . * 10 | round / 10)M" elif . >= 1000 then "\(. / 1000 | round)k" else "\(.)" end;
+  def pct: if . == null then "" else "\(. | round)%" end;
+  (.model.display_name // .model.id // "?") as $model
+  | (if ((.model.id // "") | test("\\[1m\\]")) then " 1M" else "" end) as $big
+  | (.effort.level // "") as $effort
+  | (.context_window.total_input_tokens // .context_window.current_usage.input_tokens) as $used
+  | (.context_window.context_window_size) as $size
+  | (.context_window.used_percentage) as $usedpct
+  | (.rate_limits.five_hour.used_percentage) as $h5
+  | (.rate_limits.seven_day.used_percentage) as $d7
+  | (.cost.total_cost_usd) as $cost
+  | [ ($model + $big),
+      (if $effort != "" then "effort " + $effort else empty end),
+      ("ctx " + ($used | k) + "/" + ($size | k) + (if $usedpct != null then " " + ($usedpct | pct) else "" end)),
+      (if $h5 != null or $d7 != null then "quota 5h " + ($h5 | pct) + " · 7d " + ($d7 | pct) else empty end),
+      (if $cost != null then "$" + ($cost * 100 | round / 100 | tostring) else empty end),
+      (if .fast_mode == true then "fast" else empty end),
+      ("v" + (.version // "?"))
+    ] | join(" · ")'
