@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "cloudroom-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792197042,
+        "narHash": "sha256-Y45RNQCuDbLo1MyBoquBINOZzhxZPevwdORbH8ZAdJE=",
+        "owner": "djbclark",
+        "repo": "cloudroom-nix",
+        "rev": "f0da65b72de117897645a4a26557c6e71f9e3432",
+        "type": "github"
+      },
+      "original": {
+        "owner": "djbclark",
+        "repo": "cloudroom-nix",
+        "type": "github"
+      }
+    },
     "nixathena": {
       "inputs": {
         "nixpkgs": [
@@ -38,6 +58,7 @@
     },
     "root": {
       "inputs": {
+        "cloudroom-nix": "cloudroom-nix",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs"
       }

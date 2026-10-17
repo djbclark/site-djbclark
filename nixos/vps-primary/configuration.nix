@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, cloudroom-nix, ... }:
 
 {
   imports = [
@@ -115,6 +115,22 @@
       ];
       RestartSec = "10s";
     };
+  };
+
+  # Cloudroom core, an agent runner (docs/cloudroom-vps-primary.md, 2026-10-16). Module and
+  # packages: github.com/djbclark/cloudroom-nix. The -bin packages are built by Forgejo CI and
+  # only downloaded here: nothing compiles on this host (djbclark, 2026-10-16).
+  # The caps hold the core and every agent: the host has 4 GB and also runs the Gradle cache
+  # (1 GB cap) and Athena, so past them the kernel reclaims inside Cloudroom, not host-wide.
+  services.cloudroom = {
+    enable = true;
+    package = cloudroom-nix.packages.x86_64-linux.cloudroom-core-bin;
+    codex.package = cloudroom-nix.packages.x86_64-linux.codex-npm-bin;
+    # The Mac's ~/.codex/config.toml default (2026-10-16); clients can pick per session.
+    codex.model = "gpt-6-luna";
+    memoryHigh = "2560M";
+    memoryMax = "3G";
+    tailscaleServe.enable = true;
   };
 
   # The host builds this configuration from git, never from /etc/nixos:

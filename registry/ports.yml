@@ -270,6 +270,8 @@ hosts:
          note: "2026-10-15: FosterStack cache v0.2.2 (ghcr.io/fosterstack/cache, digest-pinned) in Podman (podman-gradle-cache.service, nixos/vps-primary/configuration.nix), replacing the Develocity Build Cache Node; container port 8080. Bound to the VPS tailnet address only, because a published Podman port bypasses networking.firewall. Basic auth, one read-write user mac, password sudo-secretspec GRADLE_BUILD_CACHE_PASSWORD (env file /var/lib/gradle-cache.env on the VPS). Data /var/lib/gradle-cache. See docs/gradle-remote-cache.md."}
       - {port: 26369, bind: "public-iface", owner: site, service: google-proxy, status: active,
          note: "2026-10-16: tinyproxy-google (nixos/modules/google-proxy.nix), CONNECT :443 to an allowlist of Google hosts only, for SearXNG on SIPB Hyades. Firewall accepts only the Hyades egress address. See docs/google-proxy-vps-primary.md."}
+      - {port: 9840,  bind: "127.0.0.1", owner: site, service: cloudroom-core, status: active,
+         note: "2026-10-16: Cloudroom core (nixos/modules/cloudroom.nix), plain HTTP on loopback only; reached as https://vps-primary.greyhound-sidemirror.ts.net/ through tailscale serve (443 on the tailnet, never funnel). Bearer token in /etc/cloudroom/core.env on the VPS. See docs/cloudroom-vps-primary.md."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:
