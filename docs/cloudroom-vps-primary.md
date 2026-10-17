@@ -64,7 +64,8 @@ caddy-https; never funnel). Open `https://mac.greyhound-sidemirror.ts.net:8790/`
 login of its own, so the tailnet is the only boundary, and it works only while the Mac is awake with the
 app open. A new browser shows the setup screen again (dismissal is per browser): tap Skip setup
 (cloudroom-gui#7). The Cloudroom Connect relay (cloudroom.run) is inactive because `sandboxToken` is gone. Running
-the app server on vps-primary instead (phone works with the Mac off) waits for cloudroom-gui PR #5:
+the app server on vps-primary instead (phone works with the Mac off; requested upstream as
+cloudroom-gui#8) waits for cloudroom-gui PR #5:
 until it merges, a fresh browser is locked on onboarding; research in site-private
 `memory/handoffs/site-djbclark/RESEARCH_cloudroom-app-server-on-vps-primary_2026-10-17.md`; plan: CI repackages the Linux AppImage's Node tree, Nix module with a dedicated user, nft rule keeping
 `cloudroom-agent` off its ports, about 300-450 MB.
