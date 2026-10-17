@@ -64,8 +64,8 @@ caddy-https; never funnel). Open `https://mac.greyhound-sidemirror.ts.net:8790/`
 login of its own, so the tailnet is the only boundary, and it works only while the Mac is awake with the
 app open. The Cloudroom Connect relay (cloudroom.run) is inactive because `sandboxToken` is gone. Running
 the app server on vps-primary instead (phone works with the Mac off) waits for cloudroom-gui PR #5:
-until it merges, a fresh browser is locked on onboarding; the research is in this session's report, plan
-summary: CI repackages the Linux AppImage's Node tree, Nix module with a dedicated user, nft rule keeping
+until it merges, a fresh browser is locked on onboarding; research in site-private
+`memory/handoffs/site-djbclark/RESEARCH_cloudroom-app-server-on-vps-primary_2026-10-17.md`; plan: CI repackages the Linux AppImage's Node tree, Nix module with a dedicated user, nft rule keeping
 `cloudroom-agent` off its ports, about 300-450 MB.
 
 Harness logins (Codex device auth, Claude Code's native installer) are djbclark's, by browser, as
