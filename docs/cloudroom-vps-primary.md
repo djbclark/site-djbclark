@@ -49,9 +49,13 @@ api http://127.0.0.1:9840/v1/ready
 The Mac app (`/Applications/Cloudroom.app`, v106) keeps its Core connection in
 `~/.gui-cloudroom/cloudroom.json` (mode 600). It insists on a hosted cloudroom.dev sign-in
 (`account`, `sandboxToken`) and rewrites the file at that login screen, but the same file may also
-hold `url` and `token`, and threads then use that Core. So: quit the app, add
+hold `url` and `token`. While `sandboxToken` is there too, new Cloud threads go to cloudroom.dev's
+hosted sandboxes (a queue), not this Core (`newThreadsInSandboxes()` in cloudroom-gui's
+`commands.ts`); only sign-in writes it. So: quit the app, add
 `"url": "https://vps-primary.greyhound-sidemirror.ts.net"` and `"token"` (sudo-secretspec
-`CLOUDROOM_VPS_PRIMARY_TOKEN`) beside the sign-in, relaunch (2026-10-17).
+`CLOUDROOM_VPS_PRIMARY_TOKEN`), delete `sandboxToken`, keep `account` (without it the onboarding
+screen locks, cloudroom-gui PR #5), relaunch. Verified 2026-10-17: a Cloud thread ran Claude Code
+on vps-primary.
 
 Harness logins (Codex device auth, Claude Code's native installer) are djbclark's, by browser, as
 `cloudroom-agent`: cloudroom-nix README, "Log the harnesses in".
