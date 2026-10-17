@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: 32c1062ec60f084f53fcea86bbb7e22e1a694755
-synced: '2026-10-10T17:30:22Z'
+product_commit: 710fdd5df2877e5d8e47b18945030ab9ad15fd99
+synced: '2026-10-17T20:31:25Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -48,3 +48,5 @@ files:
   sha256: 115718ca805a1a8e244abd05b53661a71af03655bb6af05484208202c79e5b84
 - path: generated/stayturgid/inventory/group_vars/vendor_samsung.yml
   sha256: 23fabe3a273f02b51ebc3b1f1629770b7aa496e122cd4ec786b915b86131ee3e
+- path: generated/stayturgid/inventory/group_vars/stayturgid.yml
+  sha256: 4efe1bebd8d7d439240b68de249d583ddbe2f048a19e36ec1ba8556b041aafee
