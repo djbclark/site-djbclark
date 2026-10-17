@@ -30,11 +30,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792240046,
-        "narHash": "sha256-2xzNPC50g7W89JmsxYnHfXxqGpBJ4t702d2HhTVar4E=",
+        "lastModified": 1792268158,
+        "narHash": "sha256-fWV88gfzJm5Yx/f/QxV4pgKAAaK50wTcgQKXF3bufzY=",
         "owner": "djbclark",
         "repo": "bb-nix",
-        "rev": "b8ba882d229b3113e504b57e588d0fe487e67068",
+        "rev": "a0e9177d4a977f0588313b17d5cc1bc3314de25d",
         "type": "github"
       },
       "original": {
