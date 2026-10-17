@@ -166,7 +166,7 @@ setting `ZCODE_BIN`; `--effort`/`--context` select effort and window, and the
 `acp-run: applied:` line shows what the agent actually used).
 
 **Delegation route, in order:** (1) headless to an ACP agent: **`acp-run <agent>
--C <dir> -p '<prompt>' --model <m> [--perm deny]`**
+-C <dir> -p '<prompt>' --model <m> [--perm deny]`** (`~/.local/bin/acp-run`, not in `djbclark-ade/bin`)
 (**always `--model`**; acp-run is yolo-only since 2026-10-14, `--perm deny` is
 for review-only slices and `scoped:` is gone; exit 0 is not success, verify
 tests/diff); (2) supervised
