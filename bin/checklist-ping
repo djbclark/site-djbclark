@@ -8,9 +8,10 @@
 # When every item is ticked it pings that once and, if CHECKLIST_PING_LABEL names a
 # launchd label, boots that job out so the reminder stops by itself.
 #
-# Written for the daily 04:14 "Claude Code mod of the day" reminder (djbclark,
-# 2026-10-17), driven by ~/Library/LaunchAgents/com.djbclark.mods-reminder.plist;
-# the checklist is site-private memory/project_claude_code_mods_rollout.md.
+# Generic. Written 2026-10-17 for the daily 04:14 "Claude Code mod of the day"
+# reminder; that job moved the same day to djbclark-ade
+# skills/teach/scripts/next_item.py --ping (same-day repeat, last-day recap), so
+# nothing schedules this script now. Kept for any other checklist.
 # No model, no network beyond hermes-ping. HERMES_PING_DRY=1 prints instead of sending.
 set -u
 [ "$#" -eq 2 ] || { echo "usage: checklist-ping <file.md> \"<repo>: <prefix>\"" >&2; exit 2; }
