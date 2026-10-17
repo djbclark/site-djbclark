@@ -149,9 +149,16 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 
 Canonical, parametrised modules now live at
 https://forgejo.mit.edu/djbclark/athena-nixos (extracted from
-`nixos/modules/athena.nix` and `athena-afs.nix`). **Do not switch the live
-consumer yet** while Athena/AFS work is in flight on vps-primary; this section
-is the exact change for a later session.
+`nixos/modules/athena.nix` and `athena-afs.nix`).
+
+**Switched 2026-10-17** (djbclark asked for it). `flake.nix` takes `athena-nixos` (its
+`nixathena` follows ours, so the lock still has the one nixathena), `configuration.nix` sets
+the three `athena-afs.*` options, and the in-tree `modules/athena*.nix` copies were deleted.
+Checked on the host before promoting: a `path:` build of the old and the new config gave the
+same package closure and an identical `system-path` file tree (only the derivation hash moved,
+from the import order of `environment.systemPackages`); the lock diff added only the
+`athena-nixos` node. The sections below are the change as written; the verification list at
+the end was run after the switch (result in the commit that follows).
 
 ### Flake input (`nixos/flake.nix`)
 

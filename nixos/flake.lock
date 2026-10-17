@@ -1,5 +1,28 @@
 {
   "nodes": {
+    "athena-nixos": {
+      "inputs": {
+        "nixathena": [
+          "nixathena"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792198465,
+        "narHash": "sha256-ePdmFVMWtTo+UV82Q3zdXWFuQOz+Pte+b071OLLEi8A=",
+        "ref": "refs/heads/main",
+        "rev": "91f1e186971e6e56db32c644bd429981c9551470",
+        "revCount": 2,
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
+      }
+    },
     "cloudroom-nix": {
       "inputs": {
         "nixpkgs": [
@@ -58,6 +81,7 @@
     },
     "root": {
       "inputs": {
+        "athena-nixos": "athena-nixos",
         "cloudroom-nix": "cloudroom-nix",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs"

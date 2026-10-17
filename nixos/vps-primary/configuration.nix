@@ -3,12 +3,18 @@
 {
   imports = [
     ./hardware-configuration.nix
-    ../modules/athena.nix
-    ../modules/athena-afs.nix
     ../modules/google-proxy.nix
     ../modules/packages.nix
     ../modules/terminals.nix
     ../modules/users.nix
+  ];
+
+  # Athena/AFS come from the athena-nixos flake input (nixos/flake.nix); the values below are
+  # what the in-tree athena-afs.nix hard-coded until 2026-10-17. Plan: docs/plans/vps-primary-athena.md.
+  athena-afs.user = "djbclark";
+  athena-afs.pushFrom = "100.113.53.87";
+  athena-afs.pushKeys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAhjpIb8xyRFKfrYvZuwsaH4GgV/ViZfvq5XoNn3SgRy djbclark@mac-athena-tgt-push"
   ];
 
   boot.loader.grub.enable = true;

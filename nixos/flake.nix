@@ -17,19 +17,27 @@
     url = "git+https://forgejo.mit.edu/SIPB/nixathena.git";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # Our headless Athena + pushed-ticket OpenAFS modules (extracted 2026-10-16 from the in-tree
+  # copies); its nixathena follows ours, so the host keeps building the one locked nixathena.
+  inputs.athena-nixos = {
+    url = "git+https://forgejo.mit.edu/djbclark/athena-nixos";
+    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.nixathena.follows = "nixathena";
+  };
 
   outputs =
     {
       self,
       nixpkgs,
-      nixathena,
+      athena-nixos,
       cloudroom-nix,
+      ...
     }:
     {
       nixosConfigurations.vps-primary = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit nixathena cloudroom-nix; };
+        specialArgs = { inherit cloudroom-nix; };
         modules = [
-          nixathena.nixosModules.default
+          athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           cloudroom-nix.nixosModules.default
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
