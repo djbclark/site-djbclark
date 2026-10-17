@@ -128,6 +128,8 @@
     codex.package = cloudroom-nix.packages.x86_64-linux.codex-npm-bin;
     # The Mac's ~/.codex/config.toml default (2026-10-16); clients can pick per session.
     codex.model = "gpt-6-luna";
+    # Sessions that name no harness get Claude Code (djbclark, 2026-10-16); Codex stays installed.
+    environment.CLOUDROOM_HARNESS = "claude-code";
     memoryHigh = "2560M";
     memoryMax = "3G";
     tailscaleServe.enable = true;
