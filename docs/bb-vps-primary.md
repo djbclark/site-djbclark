@@ -138,10 +138,15 @@ Notes that are easy to lose:
    `CRUSH_COMMIT` and `CRUSH_VERSION` in `crush.env`, push, and install the new `PIN crush-acp` line's file as
    `~bb/.local/bin/crush-acp` (download, check the SRI hash, `mv -f`).
 3. The custom agents are one JSON array in `provider-acp` `customAgents` (read it with `bbcli plugin config
-   provider-acp`). `cline` and `crush` carry `permissionCli` entries that add their yolo flag in full-permission
-   threads; `zcode` sets `ZCODE_BIN` to the vendor `zcode.cjs`; `crush` sets `CRUSH_DISABLE_METRICS=1` and
-   `CRUSH_GLOBAL_DATA=/var/lib/bb/.local/share/crush-acp`. The BB docs say custom agents work only with a
-   co-located daemon; test before relying on one on a remote machine.
+   provider-acp`). The setting is server-wide and its commands run on the thread's machine, so every entry is a
+   bare command name found on that machine's login PATH, never an absolute path (absolute vps-primary paths gave
+   `spawn ... ENOENT` on other machines, 2026-10-17). `cline` and `crush` carry `permissionCli` entries that add
+   their yolo flag in full-permission threads. Three per-machine wrappers in `~/.local/bin` hold what a static
+   entry cannot: `zcode-acp-bb` (sets `ZCODE_BIN` to the vendor `zcode.cjs` under `$(npm root -g)`), `agy-acp-bb`
+   (runs the newest `~/.local/share/agy-acp-server/<version>/agy_acp_server.par`) and `crush-acp-bb` (sets
+   `CRUSH_DISABLE_METRICS=1` and `CRUSH_GLOBAL_DATA=$HOME/.local/share/crush-acp`). Every machine needs the three
+   wrappers before it runs those agents; the get repo's `scripts/get-bb-agents wrappers` writes them. Custom agents
+   do run on remote machines (tested on get), although the BB docs say they need a co-located daemon.
 4. A new built-in agent shows in `bbcli provider list` about two minutes after install (BB's periodic refresh).
 5. Disk: `/` is about 66% used; Hermes (2.5 GB), the npm globals (2 GB) and the agy server (1 GB) are the large
    pieces. The agy server is re-downloadable and the first to drop.
