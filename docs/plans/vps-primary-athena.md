@@ -157,8 +157,13 @@ the three `athena-afs.*` options, and the in-tree `modules/athena*.nix` copies w
 Checked on the host before promoting: a `path:` build of the old and the new config gave the
 same package closure and an identical `system-path` file tree (only the derivation hash moved,
 from the import order of `environment.systemPackages`); the lock diff added only the
-`athena-nixos` node. The sections below are the change as written; the verification list at
-the end was run after the switch (result in the commit that follows).
+`athena-nixos` node. Promoted as 5a43d2b and applied with `systemctl start nixos-upgrade`
+(live: `/run/current-system` is the new system, `nixos-version --configuration-revision` prints
+5a43d2b, no failed units, no reboot). All five checks of the verification list at the end
+passed afterwards: `klist` (renewable TGT, renew until 10-22), `tokens`, `ls /afs/athena.mit.edu`,
+the renew timer, and `athena-kinit push` from the Mac (`pushed TGT to vps-primary`). The AFS client
+unit is `afsd.service`; the module's `after = [ "openafs-client.service" ]` on the renew service
+names a unit that does not exist (harmless, already so before the switch).
 
 ### Flake input (`nixos/flake.nix`)
 
