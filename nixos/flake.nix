@@ -13,6 +13,12 @@
     url = "github:djbclark/cloudroom-nix";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # services.bb, the BB agent app that replaces Cloudroom (plan: site-private memory/handoffs/
+  # site-djbclark/PLAN_bb-replaces-cloudroom_2026-10-17.md). C1 runs it beside Cloudroom.
+  inputs.bb-nix = {
+    url = "github:djbclark/bb-nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
   inputs.nixathena = {
     url = "git+https://forgejo.mit.edu/SIPB/nixathena.git";
     inputs.nixpkgs.follows = "nixpkgs";
@@ -31,14 +37,16 @@
       nixpkgs,
       athena-nixos,
       cloudroom-nix,
+      bb-nix,
       ...
     }:
     {
       nixosConfigurations.vps-primary = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit cloudroom-nix; };
+        specialArgs = { inherit cloudroom-nix bb-nix; };
         modules = [
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           cloudroom-nix.nixosModules.default
+          bb-nix.nixosModules.default
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

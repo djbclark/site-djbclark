@@ -23,6 +23,26 @@
         "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
       }
     },
+    "bb-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792235900,
+        "narHash": "sha256-nRd3WaCM9Ni3n01Z32wZyCf5hPjIyBPMK4twSqbeDKg=",
+        "owner": "djbclark",
+        "repo": "bb-nix",
+        "rev": "675a4371dd03b80944a00438b41f9f18762c2cbe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "djbclark",
+        "repo": "bb-nix",
+        "type": "github"
+      }
+    },
     "cloudroom-nix": {
       "inputs": {
         "nixpkgs": [
@@ -82,6 +102,7 @@
     "root": {
       "inputs": {
         "athena-nixos": "athena-nixos",
+        "bb-nix": "bb-nix",
         "cloudroom-nix": "cloudroom-nix",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs"

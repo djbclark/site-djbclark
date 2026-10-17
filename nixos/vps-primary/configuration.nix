@@ -1,4 +1,9 @@
-{ pkgs, cloudroom-nix, ... }:
+{
+  pkgs,
+  cloudroom-nix,
+  bb-nix,
+  ...
+}:
 
 {
   imports = [
@@ -140,6 +145,36 @@
     memoryHigh = "2560M";
     memoryMax = "3G";
     tailscaleServe.enable = true;
+  };
+
+  # BB (github.com/get-bb/bb), the agent app that replaces Cloudroom. C1 (2026-10-17): it runs
+  # beside Cloudroom on tailnet port 8443 (443 is still Cloudroom's) with smaller memory caps.
+  # C2 removes services.cloudroom and moves BB to 443 and 38443 (appUrl without :8443,
+  # tailscaleServe.ports = [ 443 38443 ], caps 2560M/3G). BB has no login: the tailnet is the
+  # only boundary, and it must never be funnelled. Packages are built by Forgejo CI
+  # (forgejo.mit.edu/djbclark/bb-build) and only downloaded here.
+  services.bb = {
+    enable = true;
+    package = bb-nix.packages.x86_64-linux.bb-app-bin;
+    appUrl = "https://vps-primary.greyhound-sidemirror.ts.net:8443";
+    externalUrl = "https://vps-primary.greyhound-sidemirror.ts.net:38443";
+    # Anthropic's native installer, run once as the bb user (nix-ld is enabled by nativeInstaller).
+    claudeCode = {
+      nativeInstaller = true;
+      executable = "/var/lib/bb/.local/bin/claude";
+    };
+    extraPackages = [
+      bb-nix.packages.x86_64-linux.codex-npm-bin
+      pkgs.git
+      pkgs.gh
+      pkgs.ripgrep
+    ];
+    memoryHigh = "1536M";
+    memoryMax = "2G";
+    tailscaleServe = {
+      enable = true;
+      ports = [ 8443 ];
+    };
   };
 
   # The host builds this configuration from git, never from /etc/nixos:
