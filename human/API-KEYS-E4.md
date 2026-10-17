@@ -47,9 +47,10 @@ LiteLLM Auto Router v2 tiers (see `roles/litellm`; prefers funded providers):
 | COMPLEX | `openrouter-auto` | `OPENROUTER_API_KEY` |
 | REASONING | `deepseek-reasoner` | `DEEPSEEK_API_KEY` |
 
-Also injected when set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`OPENCODE_ZEN_API_KEY` (model aliases `gpt-*`, `claude-sonnet-5`,
-`opencode-zen-flash`).
+Also injected when set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+`OPENCODE_ZEN_API_KEY` was retired on 2026-10-17: OpenCode answered `api_key_expired`, Zen is no
+longer used, and opencode itself now signs in through the OpenCode Console. With it unset the role
+leaves out the `opencode-go/*` models.
 
 ### sudo-secretspec CLI
 
@@ -61,7 +62,6 @@ sudo-secretspec set ANTHROPIC_API_KEY --reason "LiteLLM provider key"   # skip i
 sudo-secretspec set DEEPSEEK_API_KEY --reason "LiteLLM provider key"
 sudo-secretspec set GEMINI_API_KEY --reason "LiteLLM provider key"
 sudo-secretspec set OPENROUTER_API_KEY --reason "LiteLLM provider key"
-sudo-secretspec set OPENCODE_ZEN_API_KEY --reason "LiteLLM provider key"
 ```
 
 There is no dotenv file to hand-edit — every value goes through the broker.
