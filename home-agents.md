@@ -146,7 +146,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice.
     grok and copilot are reserves: floor 60% left, one small slice, only when that
     vendor is the point. agy only via `acp-run agy`; gemini deprecated, not installed;
-    hermes never a target; omp never without djbclark's explicit yes for that run**
+    hermes never a target; omp never without djbclark's explicit yes for that run; cline uninstalled 2026-10-17, gated likewise (Hermes keeps its ClinePass pool)**
     (2026-10-15; acp-run/acp-dispatch gate both); all but muse speak ACP (`acp-run
     --list`). Binary names differ from provider ids ([[reference_agent_rules_code_discovery_and_cli_table]]).
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling,

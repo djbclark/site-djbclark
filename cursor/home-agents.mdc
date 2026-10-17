@@ -185,7 +185,8 @@ sublimit of the one Claude weekly, not a separate pool (one copy:
 `skills/model-routing/SKILL.md` *Routing policy*). **omp (oh-my-pi), by any route
 (`omp`, `omp acp`, acp-run, Orca, Herdr), never without djbclark's specific,
 explicit approval for that run** (2026-10-15; acp-run and acp-dispatch refuse it
-unless `ACP_OPERATOR_APPROVED=omp`).
+unless `ACP_OPERATOR_APPROVED=omp`). **cline** uninstalled 2026-10-17, gated the
+same way (`ACP_OPERATOR_APPROVED=cline`); Hermes keeps its own ClinePass pool.
 
 ## Multi-agent toolkit — know these exist (2026-10-05)
 
