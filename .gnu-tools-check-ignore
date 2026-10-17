@@ -21,4 +21,3 @@ docs/plans/*
 # commit 5c01b93 did exactly that; reverted). Root scripts keep /usr/bin tools.
 macos/neofinder/neofinder-spotlight-index
 roles/watchdogd/files/auxkc_heal_root.sh
-macos/athena-kerberos/install-root.sh
