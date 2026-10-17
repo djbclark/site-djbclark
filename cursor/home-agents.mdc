@@ -239,7 +239,8 @@ re-routing the slice is not the fix (2026-10-10;
 decision, a failure), also send it to the Hermes Telegram Inbox:
 `~/.local/bin/hermes-ping "<repo>: <one line>"`, never bare `hermes send`: it adds
 the interface, workspace/tab/pane, session and a focus link. One line per event,
-never a loop. Operator notices from scripts go to Hermes too, not macOS
+never a loop. Every PR, issue, comment or page the ping mentions goes in as a full
+URL, never a bare `repo#N` (2026-10-17). Operator notices from scripts go to Hermes too, not macOS
 notifications. (`memory/feedback_ping_telegram_and_chat.md`)
 
 ## Periodic updates are a script, not a cron prompt (2026-10-05)

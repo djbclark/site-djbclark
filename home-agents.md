@@ -69,7 +69,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 12. **When a task completes or something needs djbclark**, also run
     `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`):
     one line per event, no loops, the same content as the chat reply; script
-    notices too (2026-10-05; `memory/feedback_ping_telegram_and_chat.md`).
+    notices too (2026-10-05). **Every PR, issue, comment or page it mentions
+    goes in as a full URL, never `repo#N`** (2026-10-17). (`memory/feedback_ping_telegram_and_chat.md`)
 13. **Asked for periodic updates ("report every N minutes", "keep me posted")?
     Never schedule a recurring model prompt** (CronCreate, /loop): use or extend
     `~/ops/site-private/bin/fleet-watch`, or a similar script; one-shot checks

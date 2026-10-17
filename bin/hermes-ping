@@ -3,6 +3,9 @@
 #
 #   hermes-ping "<repo>: <one line>"
 #
+# Any PR, issue, comment or page the line mentions goes in as a full URL, never a bare
+# repo#N (djbclark, 2026-10-17: he taps through from the phone).
+#
 # Prefixes the message with the container the calling agent runs in (herdr, Orca, tmux,
 # iTerm2, Ghostty, Terminal.app, VS Code/Cursor, ssh, Claude Code cloud), the workspace /
 # tab / pane names it can find, the Claude Code session name and title, and the cwd. Adds a
