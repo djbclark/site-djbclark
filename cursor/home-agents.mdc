@@ -316,7 +316,7 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob FILE 'FIND' -- 'REPL'`**
    (2026-10-09; FILE is relative to the cwd, an absolute `--glob` matches
    nothing; FIND spans lines as typed, **exit 1 when nothing matched**,
-   also on a gitignored file ("No input was in scope", 2026-10-14),
+   also on a gitignored file or one under a dot-directory such as `.forgejo/` ("No input was in scope", 2026-10-14, 2026-10-17),
    `--dry-run` previews; a FIND starting with `-` or a gitignored file goes through the Edit tool;
    **REPL turns backslash escapes into control characters** (`\b` became a
    backspace, 2026-10-10): REPL with `\` goes through Python with an assert).

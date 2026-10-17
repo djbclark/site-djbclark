@@ -26,8 +26,8 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    `du`/`find` over `~/.cache` timed out; `dust` sizes it in seconds). **Literal
    replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH
    'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing matched, also when the
-   glob is absolute**, 2026-10-11, **or the file is gitignored**, 2026-10-14; FIND starting with `-` or a
-   gitignored file: the Edit tool; **REPL
+   glob is absolute**, 2026-10-11, **or the file is gitignored**, 2026-10-14, **or under a dot-directory** like `.forgejo/`, 2026-10-17; FIND starting with `-` or a
+   gitignored/dot-dir file: the Edit tool; **REPL
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Mac code uses GNU `g*` (brew) where BSD differs (`ggrep`, `gsed`, `gawk`, `gtr`, `gdate`, `gstat`, ...) or for a GNU-only flag;
    `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
