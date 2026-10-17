@@ -12,6 +12,8 @@
 #   F <n>% left (<countdown>)  — the Fable sublimit (<=50% of the Claude weekly), from
 #       `cswap list --json` `.usage.scoped[] | select(.name=="Fable")`; cswap answers from its
 #       cache in ~0.1 s (no live call per refresh); `~` marks a reading older than 30 min.
+#   B/W before the first API response — Claude Code's payload has no rate_limits until then, so
+#       they are filled from the same cswap call (5h/7d) and claude-powerline draws them as usual.
 #   <branch>  — git branch of the payload's cwd, last so a narrow pane truncates it first.
 #
 # Why a shim at all: Orca's own script (~/.orca/agent-hooks/claude-statusline.sh) prints nothing;
@@ -23,17 +25,32 @@ payload=$(cat)
 [ -n "$payload" ] || exit 0
 [ -z "${CLAUDE_STATUSLINE_DISABLE:-}" ] || exit 0
 state=$HOME/.local/state/claude-statusline; mkdir -p "$state" 2>/dev/null; exec 2>>"$state/last.err"
+printf '%s' "$payload" > "$state/last-payload.json" 2>/dev/null || :  # for debugging missing segments
 orca=$HOME/.orca/agent-hooks/claude-statusline.sh
 if [ -n "${ORCA_PANE_KEY:-}" ] && [ -x "$orca" ]; then
   printf '%s' "$payload" | /bin/sh "$orca" >/dev/null 2>&1 || :
 fi
 pl=$HOME/.local/bin/claude-powerline
 [ -x "$pl" ] || { echo "statusline: claude-powerline missing (npm install -g @owloops/claude-powerline)"; exit 0; }
+
+cs=""
+command -v cswap >/dev/null 2>&1 && cs=$(timeout 2 cswap list --json 2>/dev/null || :)
+# Claude Code adds rate_limits only after the session's first API response; until then fill them
+# from cswap's cache so the B (5h) and W (7d) segments show from the start, like F does.
+if [ -n "$cs" ] && ! printf '%s' "$payload" | jq -e '.rate_limits.five_hour' >/dev/null 2>&1; then
+  payload=$(jq -c --argjson cs "$cs" '
+    def epoch: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+    (first($cs.accounts[] | select(.active)).usage // {}) as $u
+    | if $u.fiveHour and $u.sevenDay then .rate_limits = {
+        five_hour: {used_percentage: $u.fiveHour.pct, resets_at: ($u.fiveHour.resetsAt | epoch)},
+        seven_day: {used_percentage: $u.sevenDay.pct, resets_at: ($u.sevenDay.resetsAt | epoch)}}
+      else . end' <<<"$payload" 2>/dev/null || printf '%s' "$payload")
+fi
 line=$(printf '%s' "$payload" | "$pl" --config="$HOME/.claude/claude-powerline.json")
 
 fable=""
-if command -v cswap >/dev/null 2>&1; then
-  fable=$(timeout 2 cswap list --json 2>/dev/null | jq -r '
+if [ -n "$cs" ]; then
+  fable=$(printf '%s' "$cs" | jq -r '
     first(.accounts[] | select(.active)) as $a
     | ($a.usage.scoped // [])[] | select(.name == "Fable")
     | "F \(100 - .pct | round)% left (\(.countdown))" + (if ($a.usageAgeSeconds // 0) > 1800 then " ~" else "" end)' 2>/dev/null | head -n 1)
