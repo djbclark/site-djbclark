@@ -22,7 +22,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 `ts init`**; no-hit `graft grep`: retry short ([[reference_agent_rules_code_discovery_and_cli_table]]).
 
 1. **Fast tools:** `rg` **always with a path** (2026-10-09), `fd`, `ast-grep`,
-   `uv` not `pip`, **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11:
+   `uv` not `pip`, **`aria2c -x8 -s8` not curl/`gh release download` for big files** (2026-10-17), **`dust`/`gdu` not `du`/`find` for cache sizing** (2026-10-11:
    `du`/`find` over `~/.cache` timed out; `dust` sizes it in seconds). **Literal
    replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH
    'FIND' -- 'REPL'`** (2026-10-09; **exit 1 when nothing matched, also when the
