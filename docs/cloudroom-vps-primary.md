@@ -58,6 +58,16 @@ screen locks, cloudroom-gui PR #5), relaunch. Reported upstream as
 cloudroom-gui#6. Verified 2026-10-17: a Cloud thread ran Claude Code
 on vps-primary.
 
+**Phone (2026-10-17, djbclark):** the Mac app's own server is on the tailnet with
+`tailscale serve --bg --https=8790 http://127.0.0.1:39886` (registry/ports.yml; never :443, which is
+caddy-https; never funnel). Open `https://mac.greyhound-sidemirror.ts.net:8790/` on the phone. It has no
+login of its own, so the tailnet is the only boundary, and it works only while the Mac is awake with the
+app open. The Cloudroom Connect relay (cloudroom.run) is inactive because `sandboxToken` is gone. Running
+the app server on vps-primary instead (phone works with the Mac off) waits for cloudroom-gui PR #5:
+until it merges, a fresh browser is locked on onboarding; the research is in this session's report, plan
+summary: CI repackages the Linux AppImage's Node tree, Nix module with a dedicated user, nft rule keeping
+`cloudroom-agent` off its ports, about 300-450 MB.
+
 Harness logins (Codex device auth, Claude Code's native installer) are djbclark's, by browser, as
 `cloudroom-agent`: cloudroom-nix README, "Log the harnesses in".
 

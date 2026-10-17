@@ -103,6 +103,13 @@ hosts:
       - {port: 8787,  bind: "127.0.0.1", owner: site, service: collie-bridge, status: active,
          caddy_path: "/collie/*",
          note: "Collie bridge (Herdr plugin herdr.collie, launchd gui/501/herdr.collie, ~/.collie/current/bin/collie _exec-bridge). Served by Caddy at https://mac.greyhound-sidemirror.ts.net/collie/ (#40, docs/plans/collie-caddy-integration-plan.md): COLLIE_SKIP_SERVE=1 and COLLIE_BASE_PATH=/collie in ~/.config/herdr/plugins/config/herdr.collie/.env, so Collie publishes no tailscale serve mapping. Never let Collie publish on tailnet :443: it collides with caddy-https above -- caused the 2026-09-24..26 caddy crash-loop and recurred 2026-10-02 after `collie update` republished 443. Until #40 it used its own `tailscale serve --https=8788` (COLLIE_SERVE_PORT=8788). Collie's PWA, pairing and push are per-origin, so moving the door means re-adding the app on the phone."}
+      - {port: 39886, bind: "127.0.0.1", owner: unmanaged, service: cloudroom-app-server, status: active,
+         must_be_up: false,  # runs only while /Applications/Cloudroom.app is open
+         tailscale_serve_port: 8790,
+         note: "2026-10-17: the Cloudroom desktop app's own server (web UI + /api + /ws). Unauthenticated, permits command execution: tailnet only via tailscale serve --https=8790 for phone access (djbclark), never funnel, never :443 (caddy-https). See docs/cloudroom-vps-primary.md."}
+      - {port: 39887, bind: "127.0.0.1", owner: unmanaged, service: cloudroom-app-host-daemon, status: active,
+         must_be_up: false,
+         note: "2026-10-17: Cloudroom desktop app's host daemon; loopback only, not served."}
       # ── MCP bridges / shared MCP servers (1879x block) ────────────────────────
       # The six bridge ports were observed listening but never registered; rows
       # added 2026-09-26 when 18796 was allocated. Pairs: raw mcp-proxy (even)
