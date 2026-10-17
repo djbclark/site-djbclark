@@ -46,6 +46,13 @@ api() { sudo awk -F= '/^CLOUDROOM_TOKEN=/{print "header = \"Authorization: Beare
 api http://127.0.0.1:9840/v1/ready
 ```
 
+The Mac app (`/Applications/Cloudroom.app`, v106) keeps its Core connection in
+`~/.gui-cloudroom/cloudroom.json` (mode 600). It insists on a hosted cloudroom.dev sign-in
+(`account`, `sandboxToken`) and rewrites the file at that login screen, but the same file may also
+hold `url` and `token`, and threads then use that Core. So: quit the app, add
+`"url": "https://vps-primary.greyhound-sidemirror.ts.net"` and `"token"` (sudo-secretspec
+`CLOUDROOM_VPS_PRIMARY_TOKEN`) beside the sign-in, relaunch (2026-10-17).
+
 Harness logins (Codex device auth, Claude Code's native installer) are djbclark's, by browser, as
 `cloudroom-agent`: cloudroom-nix README, "Log the harnesses in".
 
