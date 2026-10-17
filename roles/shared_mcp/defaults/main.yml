@@ -84,14 +84,15 @@ shared_mcp_servers:
   # firecrawl (2026-10-14): the official firecrawl-mcp (npm, pinned:
   # `npm i -g firecrawl-mcp@3.23.7`, lands in ~/.local/bin) in its own
   # Streamable HTTP mode, pointed at OUR self-hosted Firecrawl on SIPB Hyades
-  # (six microVMs; djbclark-ade skills/hyades-docker/examples/firecrawl) instead
+  # (seven microVMs; public repo forgejo.mit.edu/djbclark/firecrawl-hyades,
+  # local ~/src/firecrawl-hyades, since 2026-10-16) instead
   # of the commercial api.firecrawl.dev. Path /mcp. firecrawl-router
   # (djbclark-ade bin/, symlinked into ~/.local/bin; 2026-10-14) runs
   # firecrawl-mcp as its child on an ephemeral loopback port with a per-process
   # token, sends each request to the self-hosted instance and retries it on the
   # commercial API when self-hosted fails (5xx, unreachable, bot wall, empty
-  # map or search). Report: djbclark-ade
-  # docs/firecrawl-commercial-vs-selfhosted-2026-10-14.md. Both keys come from
+  # map or search). Report: firecrawl-hyades
+  # docs/commercial-vs-selfhosted-2026-10-14.md. Both keys come from
   # sudo-secretspec via `just shared-mcp-apply-secrets`. The router itself also
   # listens on 127.0.0.1:18805 without a token (--open) for Hermes' firecrawl
   # web backend, whose searches then reach SearXNG on Hyades (2026-10-14).
