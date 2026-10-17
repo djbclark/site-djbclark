@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792197464,
-        "narHash": "sha256-GcS+LFKlZqyZFj0JHiSEomd5MjU8ZuM4XVmy1BFZA+w=",
+        "lastModified": 1792198556,
+        "narHash": "sha256-Oho/AezzSXoY1ce8sJ2w+v4StRMg/6grkQPGMGyor3g=",
         "owner": "djbclark",
         "repo": "cloudroom-nix",
-        "rev": "d7956d06bb12c5c08f022bda9a47f841a5d4c049",
+        "rev": "8b5dc6200ab824be23409df29e3fe28a3b5a6393",
         "type": "github"
       },
       "original": {
