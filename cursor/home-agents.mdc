@@ -64,8 +64,8 @@ and BLOCKED slices; put them in every handoff. Why:
 
 **`used_percent` is the share CONSUMED: 100 means exhausted.** Decide from
 `remaining_percent`; write "100% used / 0% left", never a bare percentage. Use
-`aiuse --available [--live]` (usable pools only, from the cache; exit 3 = nothing
-usable). The fullest window binds; one TUI can hold several pools by model family
+`aiuse --available --json [--live]` (usable pools only, from the cache; exit 3 = nothing
+usable). Always `--json` (stderr kept out of it): the default human table changes format (2026-10-17). The fullest window binds; one TUI can hold several pools by model family
 (agy: Gemini vs Claude/GPT), so a 429 names a pool, not the vendor: try its other
 pool. Re-probe before each batch and preflight with one trivial call. After a real
 429, run `aiuse note-exhausted <provider> [--family F] --resets-in 4h53m`.

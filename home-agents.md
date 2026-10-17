@@ -159,8 +159,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 
 29. **`used_percent` is the share CONSUMED — 100 means exhausted.** (2026-10-03)
     Decide from `remaining_percent`; write "100% used / 0% left". Run **`aiuse
-    --available [--json]`** (`--live` if stale; exit 3 = nothing usable) before
-    each batch. **agy: only via `acp-run agy`, never `agy -p`** (hidden burst
+    --available --json`** (`--live` if stale; exit 3 = nothing usable) before
+    each batch. **Agents always pass `--json`, `2>/dev/null` kept out of the file:
+    the default output is a human table whose format changes** (2026-10-17). **agy: only via `acp-run agy`, never `agy -p`** (hidden burst
     limit; no probe loops; [[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by
     default** (2026-10-08, 2026-10-10), **at the minimum model × effort × context
