@@ -32,8 +32,9 @@ TUI links it through `skill-everywhere`; edit only here.
    `FIRECRAWL_SELFHOST_API_KEY`) — no rate limit, no credits, renders JavaScript,
    fetches Reddit, searches through SearXNG. Seven microVMs on one shared
    network: Redis, RabbitMQ, NuQ Postgres, Playwright, the API+workers, Caddy
-   (bearer-token gate), and SearXNG. Deploy files: `skills/hyades-docker/examples/firecrawl/`
-   (`deploy apply|up|down|status`).
+   (bearer-token gate), and SearXNG. Deploy and image-build files, status table and
+   known issues: the public repo https://forgejo.mit.edu/djbclark/firecrawl-hyades
+   (local `~/src/firecrawl-hyades`; `deploy apply|up|down|status`).
 3. **Commercial API** (`https://api.firecrawl.dev`, `FIRECRAWL_API_KEY`) is the
    paid tier — Hyades free tier is "no commercial use", so keep agent volume
    modest and route heavy crawls through commercial when budget allows.
@@ -102,9 +103,10 @@ working around it. The usual failures, in the order to check:
    shared-mcp-apply-secrets`, then reload.
 3. **Self-hosted is unhealthy.** `curl -i
    https://djbclark-firecrawl.sipb.cloud/health` — 401 is correct (gate is
-   token-protected). 502/503 means a microVM is down. `skills/hyades-docker`
-   (`hyades status`, `hyades logs firecrawl`) and the Hyades console are the
-   fix path. The router will fall back to commercial in the meantime, but a
+   token-protected; `/healthz` answers 200 `ok` without one). 502/503 means a
+   microVM is down. `~/src/firecrawl-hyades/deploy status` (one line per microVM)
+   and the `hyades-docker` skill (`hyades status djbclark-fc-api`, `hyades logs
+   djbclark-fc-api`; the seven are named in that repo's README) are the fix path. The router will fall back to commercial in the meantime, but a
    long one is a real incident.
 4. **A page that should work returns empty.** Two questions, in order: (a) did
    the router log a fallback reason? — that explains it. (b) Is the page
