@@ -54,7 +54,8 @@ hosted sandboxes (a queue), not this Core (`newThreadsInSandboxes()` in cloudroo
 `commands.ts`); only sign-in writes it. So: quit the app, add
 `"url": "https://vps-primary.greyhound-sidemirror.ts.net"` and `"token"` (sudo-secretspec
 `CLOUDROOM_VPS_PRIMARY_TOKEN`), delete `sandboxToken`, keep `account` (without it the onboarding
-screen locks, cloudroom-gui PR #5), relaunch. Verified 2026-10-17: a Cloud thread ran Claude Code
+screen locks, cloudroom-gui PR #5), relaunch. Reported upstream as
+cloudroom-gui#6. Verified 2026-10-17: a Cloud thread ran Claude Code
 on vps-primary.
 
 Harness logins (Codex device auth, Claude Code's native installer) are djbclark's, by browser, as
