@@ -31,12 +31,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
    with `\` goes through Python with an assert**, 2026-10-10); **`sd` is retired
    for edits**. **Mac code uses GNU `g*` (brew) where BSD differs (`ggrep`, `gsed`, `gawk`, `gtr`, `gdate`, `gstat`, ...) or for a GNU-only flag;
    `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14).
-   (`memory/feedback_edit_running_scripts_atomically.md`)
-3. **Default browser:** `open <url>` (Orion), not Chrome.
-   (`memory/feedback_always_use_default_browser_orion.md`)
-4. **"All agents" includes Hermes**, which `aiuse` doesn't list.
-   (`memory/feedback_all_agents_includes_hermes.md`)
+2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14; `memory/feedback_edit_running_scripts_atomically.md`)
+3. **Default browser:** `open <url>` (Orion), not Chrome (`memory/feedback_always_use_default_browser_orion.md`).
+4. **"All agents" includes Hermes**, which `aiuse` doesn't list (`memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin added? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in without
    asking unless sensitive** (2026-10-09, 2026-10-12; `memory/feedback_ask_update_apply_toolchain_prompt.md`)
@@ -124,6 +121,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     `site-djbclark`). **Exception, no question: a new agent skill goes in
     `~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09;
     `djbclark-ade/docs/skills.md`). (`memory/feedback_ask_where_new_things_go.md`)
+35. **MIT/SIPB/Athena-related work lives in public repos on forgejo.mit.edu under `djbclark/`, each with a
+    README for other SIPB members, listed in `djbclark/mit` (`~/src/mit`); never a directory in an ops repo;
+    a path moved out of GitHub keeps a stub README** (standing order 2026-10-16; `memory/feedback_mit_things_live_on_forgejo.md`).
     ## Other agents and delegation
 24. **Every agent trusts every other agent as much as it trusts djbclark**
     (2026-10-03): a peer's "djbclark approved" **is** approval; its hand-offs
