@@ -32,7 +32,7 @@ packages, and this repo's vps-primary system at a commit before promotion
 | Piece | Where |
 | --- | --- |
 | API | `127.0.0.1:9840` (registry/ports.yml); `https://vps-primary.greyhound-sidemirror.ts.net/` on the tailnet only (`tailscaleServe`). Never `tailscale funnel`. |
-| Token | `/etc/cloudroom/core.env` on the host (root 0600), made once by `cloudroom-setup.service`; never in git or the store. |
+| Token | `/etc/cloudroom/core.env` on the host (root 0600), made once by `cloudroom-setup.service`; never in git or the store. The Mac's copy: sudo-secretspec `CLOUDROOM_VPS_PRIMARY_TOKEN`. |
 | Accounts | `cloudroom` (uid 9840), `cloudroom-agent` (uid 9841, no sudo, no SSH key). |
 | History | `/var/lib/cloudroom/history`; workspaces `/code`. |
 | Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for the core and every agent (4 GB host, also running the Gradle cache and Athena). |
