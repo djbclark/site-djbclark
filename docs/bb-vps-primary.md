@@ -143,7 +143,7 @@ Notes that are easy to lose:
    `spawn ... ENOENT` on other machines, 2026-10-17). `cline` and `crush` carry `permissionCli` entries that add
    their yolo flag in full-permission threads. Three per-machine wrappers in `~/.local/bin` hold what a static
    entry cannot: `zcode-acp-bb` (sets `ZCODE_BIN` to the vendor `zcode.cjs` under `$(npm root -g)`), `agy-acp-bb`
-   (runs the newest `~/.local/share/agy-acp-server/<version>/agy_acp_server.par`, adding `--uid=` from 1.4.0 on) and `crush-acp-bb` (sets
+   (runs the newest `~/.local/share/agy-acp-server/<version>/agy_acp_server.par`, adding `--uid=` on Linux, as the ACP registry does) and `crush-acp-bb` (sets
    `CRUSH_DISABLE_METRICS=1` and `CRUSH_GLOBAL_DATA=$HOME/.local/share/crush-acp`). Every machine needs the three
    wrappers before it runs those agents; the get repo's `scripts/get-bb-agents wrappers` writes them. Custom agents
    do run on remote machines (tested on get), although the BB docs say they need a co-located daemon.
