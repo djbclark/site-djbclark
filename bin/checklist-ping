@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# checklist-ping — Hermes-ping djbclark the first unticked item of a Markdown checklist.
+#
+#   checklist-ping <file.md> "<repo>: <prefix>"
+#
+# Finds the first line matching `- [ ] ` in <file.md>, strips the marker and Markdown
+# bold, and sends it through hermes-ping as "<prefix> <item>", clipped to 400 chars.
+# When every item is ticked it pings that once and, if CHECKLIST_PING_LABEL names a
+# launchd label, boots that job out so the reminder stops by itself.
+#
+# Written for the daily 04:14 "Claude Code mod of the day" reminder (djbclark,
+# 2026-10-17), driven by ~/Library/LaunchAgents/com.djbclark.mods-reminder.plist;
+# the checklist is site-private memory/project_claude_code_mods_rollout.md.
+# No model, no network beyond hermes-ping. HERMES_PING_DRY=1 prints instead of sending.
+set -u
+[ "$#" -eq 2 ] || { echo "usage: checklist-ping <file.md> \"<repo>: <prefix>\"" >&2; exit 2; }
+file=$1 prefix=$2
+ping=${HERMES_PING_BIN:-$HOME/.local/bin/hermes-ping}
+[ -r "$file" ] || { "$ping" "$prefix checklist missing: $file"; exit 1; }
+item=$(grep -m1 -e '^- \[ \] ' "$file" | cut -c7- | tr -d '*')
+if [ -z "$item" ]; then
+  "$ping" "$prefix every item is ticked; reminder job ${CHECKLIST_PING_LABEL:-} stops now"
+  if [ -n "${CHECKLIST_PING_LABEL:-}" ]; then
+    launchctl bootout "gui/$(id -u)/$CHECKLIST_PING_LABEL" 2>/dev/null || true
+  fi
+  exit 0
+fi
+[ "${#item}" -gt 400 ] && item="${item:0:397}..."
+"$ping" "$prefix $item"
