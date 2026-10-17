@@ -1,25 +1,48 @@
 #!/usr/bin/env bash
-# claude-statusline — Claude Code statusLine command: Orca forwarding shim around claude-powerline.
+# claude-statusline — Claude Code statusLine command: Orca forwarding shim around claude-powerline,
+# plus a Fable-left segment and the git branch.
 #
 # Claude Code pipes a JSON payload to the statusLine command on each update
-# (https://code.claude.com/docs/en/statusline). The line itself is drawn by the existing
-# mod claude-powerline (https://github.com/Owloops/claude-powerline, npm
-# @owloops/claude-powerline, pinned install in ~/.local/bin; config ~/.claude/claude-powerline.json;
-# `/powerline` from its plugin reconfigures it). djbclark 2026-10-17: use an existing mod, not a
-# home-grown line.
+# (https://code.claude.com/docs/en/statusline). The line is drawn by the existing mod
+# claude-powerline (https://github.com/Owloops/claude-powerline, npm @owloops/claude-powerline,
+# pinned install in ~/.local/bin; config ~/.claude/claude-powerline.json; `/powerline` from its
+# plugin reconfigures it). djbclark 2026-10-17: use an existing mod, not a home-grown line.
+#
+# Appended after it (claude-powerline has no custom segments, 2026-10-17):
+#   F <n>% left (<countdown>)  — the Fable sublimit (<=50% of the Claude weekly), from
+#       `cswap list --json` `.usage.scoped[] | select(.name=="Fable")`; cswap answers from its
+#       cache in ~0.1 s (no live call per refresh); `~` marks a reading older than 30 min.
+#   <branch>  — git branch of the payload's cwd, last so a narrow pane truncates it first.
 #
 # Why a shim at all: Orca's own script (~/.orca/agent-hooks/claude-statusline.sh) prints nothing;
 # it posts the payload to Orca's hook endpoint and exits, and outside Orca exits at once, so herdr
-# panes had no status line. The shim keeps Orca fed when its environment is present, then hands
-# the payload to claude-powerline. CLAUDE_STATUSLINE_DISABLE=1 prints nothing.
+# panes had no status line. The shim keeps Orca fed when its environment is present.
+# CLAUDE_STATUSLINE_DISABLE=1 prints nothing. Errors: ~/.local/state/claude-statusline/last.err
 set -u
 payload=$(cat)
 [ -n "$payload" ] || exit 0
 [ -z "${CLAUDE_STATUSLINE_DISABLE:-}" ] || exit 0
+state=$HOME/.local/state/claude-statusline; mkdir -p "$state" 2>/dev/null; exec 2>>"$state/last.err"
 orca=$HOME/.orca/agent-hooks/claude-statusline.sh
 if [ -n "${ORCA_PANE_KEY:-}" ] && [ -x "$orca" ]; then
   printf '%s' "$payload" | /bin/sh "$orca" >/dev/null 2>&1 || :
 fi
 pl=$HOME/.local/bin/claude-powerline
 [ -x "$pl" ] || { echo "statusline: claude-powerline missing (npm install -g @owloops/claude-powerline)"; exit 0; }
-printf '%s' "$payload" | exec "$pl" --config="$HOME/.claude/claude-powerline.json" 2>>"$HOME/.local/state/claude-statusline/last.err"
+line=$(printf '%s' "$payload" | "$pl" --config="$HOME/.claude/claude-powerline.json")
+
+fable=""
+if command -v cswap >/dev/null 2>&1; then
+  fable=$(timeout 2 cswap list --json 2>/dev/null | jq -r '
+    first(.accounts[] | select(.active)) as $a
+    | ($a.usage.scoped // [])[] | select(.name == "Fable")
+    | "F \(100 - .pct | round)% left (\(.countdown))" + (if ($a.usageAgeSeconds // 0) > 1800 then " ~" else "" end)' 2>/dev/null | head -n 1)
+fi
+branch=""
+cwd=$(printf '%s' "$payload" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)
+[ -n "$cwd" ] && branch=$(timeout 1 git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null || :)
+
+out="$line"
+[ -n "$fable" ] && out="$out"$'\e[48;2;42;42;58m\e[38;2;199;146;234m'" $fable "$'\e[0m'
+[ -n "$branch" ] && out="$out"$'\e[48;2;64;64;64m\e[38;2;255;255;255m'" ~ $branch "$'\e[0m'
+printf '%s\n' "$out"
