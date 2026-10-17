@@ -55,7 +55,10 @@ hosted sandboxes (a queue), not this Core (`newThreadsInSandboxes()` in cloudroo
 `"url": "https://vps-primary.greyhound-sidemirror.ts.net"` and `"token"` (sudo-secretspec
 `CLOUDROOM_VPS_PRIMARY_TOKEN`), delete `sandboxToken`, keep `account` (without it the onboarding
 screen locks, cloudroom-gui PR #5), relaunch. Reported upstream as
-cloudroom-gui#6. Verified 2026-10-17: a Cloud thread ran Claude Code
+cloudroom-gui#6. The app's sync helper pins `[url, account id]` in
+`~/.gui-cloudroom/cloudroom-sync/config.json` (`binding`); after changing `account` by hand, set `binding` to
+match, or Codex "Connect" (Cloud) fails with "Sync setup failed" (real error: "connection changed; review sync
+setup again", 2026-10-17). Verified 2026-10-17: a Cloud thread ran Claude Code
 on vps-primary.
 
 **Phone (2026-10-17, djbclark):** the Mac app's own server is on the tailnet with
