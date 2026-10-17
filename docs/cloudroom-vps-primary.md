@@ -37,6 +37,7 @@ packages, and this repo's vps-primary system at a commit before promotion
 | History | `/var/lib/cloudroom/history`; workspaces `/code`. |
 | Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for the core and every agent (4 GB host, also running the Gradle cache and Athena). |
 | Codex model | `gpt-6-luna`, the Mac's `~/.codex/config.toml` default on 2026-10-16. |
+| Harnesses | Default `claude-code` (`CLOUDROOM_HARNESS`, djbclark 2026-10-16); Codex also logged in. Both logins done 2026-10-16 as `cloudroom-agent`; smoke test passed for Claude Code (Codex was out of quota at the time). |
 
 ```bash
 ssh vps-ts
