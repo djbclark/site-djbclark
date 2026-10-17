@@ -132,8 +132,9 @@
     enable = true;
     package = cloudroom-nix.packages.x86_64-linux.cloudroom-core-bin;
     codex.package = cloudroom-nix.packages.x86_64-linux.codex-npm-bin;
-    # The Mac's ~/.codex/config.toml default (2026-10-16); clients can pick per session.
-    codex.model = "gpt-6-luna";
+    # The host's ChatGPT login rejects gpt-6-luna (the Mac's default); its models_cache.json lists
+    # gpt-6-astra and gpt-5.6-{sol,terra,luna} (djbclark, 2026-10-17). Clients can pick per session.
+    codex.model = "gpt-5.6-luna";
     # Sessions that name no harness get Claude Code (djbclark, 2026-10-16); Codex stays installed.
     environment.CLOUDROOM_HARNESS = "claude-code";
     memoryHigh = "2560M";

@@ -36,7 +36,7 @@ packages, and this repo's vps-primary system at a commit before promotion
 | Accounts | `cloudroom` (uid 9840), `cloudroom-agent` (uid 9841, no sudo, no SSH key). |
 | History | `/var/lib/cloudroom/history`; workspaces `/code`. |
 | Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for the core and every agent (4 GB host, also running the Gradle cache and Athena). |
-| Codex model | `gpt-6-luna`, the Mac's `~/.codex/config.toml` default on 2026-10-16. |
+| Codex model | `gpt-5.6-luna` (2026-10-17). The Mac's default `gpt-6-luna` failed: "not supported when using Codex with a ChatGPT account"; the host login's choices are in `~cloudroom-agent/.codex/models_cache.json`. |
 | Harnesses | Default `claude-code` (`CLOUDROOM_HARNESS`, djbclark 2026-10-16); Codex also logged in. Both logins done 2026-10-16 as `cloudroom-agent`; smoke test passed for Claude Code (Codex was out of quota at the time). |
 
 ```bash
