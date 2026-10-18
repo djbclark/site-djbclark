@@ -284,8 +284,11 @@ Wait on a file (`until [ -s f ]`) or a PID (`while kill -0 pid`), never
 `pkill -f '<pattern>'` either: it kills every shell whose command line holds the
 pattern, your own wrapper included (2026-10-10). Kill the saved PID.
 **Never read a command's result through a pipe** (`cmd 2>&1 | tail`): the exit
-status is the last stage's. Write to a file, print the status, then read:
-`cmd > out.log 2>&1; echo "rc=$?"; tail -5 out.log`. Likewise never feed a
+status is the last stage's. Write to a file, save the status, then read:
+`cmd > out.log 2>&1; echo "rc=$?" > out.rc; tail -5 out.log`. A background
+task's "exit code" is the last command's (`tail`'s): read the `rc=` file, never
+the notification (2026-10-17: a red pytest reported green, pushed twice). Never
+credit a hook (pre-push `just ci`) you have not seen run. Likewise never feed a
 `--body-file` from a pipeline: write the file, check `[ -s f ]`, then use it
 (macOS BSD `sed` rejects `1{/x/d}`; use `gsed`, GNU sed, installed).
 (`memory/feedback_exit_status_through_pipe.md`)

@@ -191,7 +191,9 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill your saved
     `$!`. **Never read a result through a pipe** or feed `--body-file` from one
     (`[ -s f ]` first; use `gsed`, not BSD `sed`): `cmd > out.log 2>&1; echo
-    "rc=$?"; tail -5 out.log`. (`memory/feedback_exit_status_through_pipe.md`)
+    "rc=$?" > out.rc; tail -5 out.log`; **a background task's "exit code" is
+    `tail`'s: read `out.rc`, never the notification** (2026-10-17: red pytest
+    reported green). **Never credit a hook you have not seen run** (`memory/feedback_exit_status_through_pipe.md`)
 34. Run builds and tests via `~/ops/site-private/bin/bg` (**always the full path:
     bare `bg` is the shell builtin**). **Tests (pytest, tox, nox, `run_tests*.py`)
     must go through bg**. **Never set `BG_LOAD_WAIT=0` on a build or Gradle
