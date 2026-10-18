@@ -12,6 +12,12 @@
     url = "github:djbclark/bb-nix";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # services.paseo, the Paseo agent workspace beside BB (2026-10-18; docs/paseo.md). Its package is
+  # a tarball Forgejo CI built (forgejo.mit.edu/djbclark/paseo-nix); the host only downloads it.
+  inputs.paseo-nix = {
+    url = "git+https://forgejo.mit.edu/djbclark/paseo-nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
   # SIPB's Athena module (Kerberos, OpenAFS, moira/remctl/athrun); public, no credential
   # needed for the host's nightly fetch. Plan: docs/plans/vps-primary-athena.md.
   inputs.nixathena = {
@@ -32,14 +38,16 @@
       nixpkgs,
       athena-nixos,
       bb-nix,
+      paseo-nix,
       ...
     }:
     {
       nixosConfigurations.vps-primary = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit bb-nix; };
+        specialArgs = { inherit bb-nix paseo-nix; };
         modules = [
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           bb-nix.nixosModules.default
+          paseo-nix.nixosModules.default
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

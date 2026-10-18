@@ -79,12 +79,33 @@
         "type": "github"
       }
     },
+    "paseo-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792335133,
+        "narHash": "sha256-xZWr+pUbjV+TTbz6fZszvTz36EjqETaTzrFqmX6rELo=",
+        "ref": "refs/heads/main",
+        "rev": "cdccc70c8459770c5f9d911fe23f4badd99fb021",
+        "revCount": 4,
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/paseo-nix"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/paseo-nix"
+      }
+    },
     "root": {
       "inputs": {
         "athena-nixos": "athena-nixos",
         "bb-nix": "bb-nix",
         "nixathena": "nixathena",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "paseo-nix": "paseo-nix"
       }
     }
   },

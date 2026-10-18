@@ -2,6 +2,7 @@
   lib,
   pkgs,
   bb-nix,
+  paseo-nix,
   ...
 }:
 
@@ -177,6 +178,37 @@
       ];
     };
   };
+
+  # Paseo (github.com/getpaseo/paseo), a second agent workspace beside BB (djbclark, 2026-10-18).
+  # It runs as BB's `bb` user, so its agents use the logins already in /var/lib/bb (docs/
+  # bb-vps-primary.md, "Logins"); state in /var/lib/bb/.paseo. Tailnet 7263 serves the web UI, the
+  # apps and the CLI. No password and no relay: like BB, the tailnet is the only boundary, and it
+  # must never be funnelled. Built by Forgejo CI (forgejo.mit.edu/djbclark/paseo-nix). docs/paseo.md.
+  services.paseo = {
+    enable = true;
+    package = paseo-nix.packages.x86_64-linux.paseo-bin;
+    user = "bb";
+    hostnames = [ "vps-primary.greyhound-sidemirror.ts.net" ];
+    extraPackages = [
+      bb-nix.packages.x86_64-linux.codex-npm-bin
+      pkgs.git
+      pkgs.gh
+      pkgs.ripgrep
+    ];
+    slice = "agents.slice";
+    tailscaleServe.enable = true;
+  };
+
+  # One memory cap for BB, Paseo and every agent either starts (the per-unit BB caps above still
+  # apply inside it): the 4 GB host also runs the Gradle cache and Athena.
+  systemd.slices.agents = {
+    description = "Agent workspaces (BB, Paseo) and their agents";
+    sliceConfig = {
+      MemoryHigh = "2816M";
+      MemoryMax = "3G";
+    };
+  };
+  systemd.services.bb.serviceConfig.Slice = "agents.slice";
 
   # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
   # Cursor's bundled node (both installed into /var/lib/bb/.local). claudeCode.nativeInstaller
