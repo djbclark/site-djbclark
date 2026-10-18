@@ -89,6 +89,10 @@ hosts:
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
          note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
+      - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo,            status: active,
+         must_be_up: false,  # the desktop app owns the daemon; down while Paseo.app is quit
+         tailscale_serve_port: 7263,
+         note: "2026-10-18: Paseo daemon + web UI (github.com/getpaseo/paseo), started by Paseo.app (brew cask paseo); config and tailnet serve by roles/paseo_desktop. Also opens one ephemeral loopback port. No password, no relay: tailnet-only, never funnel. Same port on vps-primary and get. See docs/paseo.md."}
       - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
          note: "2026-10-03: `aiuse serve` (github.com/djbclark/aiuse, ~/src/aiuse) — on-demand loopback HTTP for agents, auto-started by the operator/agents, not a launchd service we manage (same class as opencli :19825). Its CLI default was 8787 until 2026-10-03, which silently collided with collie-bridge above: collie answers every path with HTML 200, so an agent hitting http://127.0.0.1:8787/v1/snapshot got plausible HTML from collie while aiuse serve wasn't running. aiuse commit 11d67f4 moved the default to 28787 AND made serve fail loudly when the port is held by a non-aiuse responder; clients identity-check via GET /v1/health -> {\"service\": \"aiuse\"}. Do not reassign 8787 or 28787 without checking both repos."}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
@@ -280,6 +284,9 @@ hosts:
          note: "2026-10-17: BB (get-bb/bb; services.bb from github.com/djbclark/bb-nix, nixos/vps-primary/configuration.nix), replacing Cloudroom core. Web UI and API on loopback; tailnet 443 (browser) and 38443 (host daemons of other machines) both proxy here through tailscale serve. UNAUTHENTICATED and permits command execution: the tailnet is the only boundary, never tailscale funnel. See docs/bb-vps-primary.md."}
       - {port: 38887, bind: "127.0.0.1", owner: site, service: bb-host-daemon, status: active,
          note: "2026-10-17: BB host daemon of the server's own machine; loopback only, not served."}
+      - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo, status: planned,
+         tailscale_serve_port: 7263,
+         note: "2026-10-18: Paseo daemon + web UI as user bb (services.paseo from forgejo.mit.edu/djbclark/paseo-nix, nixos/vps-primary/configuration.nix), sharing BB's agent logins and an agents.slice memory cap. UNAUTHENTICATED and permits command execution: tailnet-only, never funnel. See docs/paseo.md."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:

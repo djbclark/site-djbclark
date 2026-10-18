@@ -226,6 +226,14 @@ watchdogd-status:
     @gtail -n 20 "$HOME/Library/Logs/watchdogd/watchdogd.log" 2>/dev/null || echo "no log yet"
 
 
+# Paseo desktop on the Mac: daemon config (port 7263, web UI, no relay) and its tailnet serve.
+# The Linux hosts get Paseo from nixos/ (vps-primary) and the get repo; see docs/paseo.md.
+paseo-desktop-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/paseo_desktop.yml {{ args }}
+
+paseo-desktop-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check --diff playbooks/paseo_desktop.yml {{ args }}
+
 # Install/configure Open WebUI.
 # Default limit mac (live).
 open_webui_hosts := env_var_or_default("OPEN_WEBUI_HOSTS", "mac")

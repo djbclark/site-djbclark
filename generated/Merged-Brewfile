@@ -31,6 +31,12 @@ brew "yq"  # [agent-cli-tools] YAML query/edit, jq-style syntax — fits the ans
 cask "codexbar"  # [ai-quota-tools] CodexBar.app + codexbar CLI — primary multi-provider live quotas for aiuse. Formula installs CodexBarCLI as `codexbar` on PATH.
 cask "openusage"  # [ai-quota-tools] OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits. After install: open app once; Settings → Command Line → Install for `openusage` CLI. Used by aiuse collectors.openusage (enabled by default).
 
+# === stack: paseo ===
+# Paseo (github.com/getpaseo/paseo), an agentic development environment: desktop app with its own daemon on 127.0.0.1:7263, published on the tailnet by roles/paseo_desktop.
+# fragment: brew/fragments/paseo.yml
+
+cask "paseo"  # [paseo] desktop app + `paseo` CLI (linked to /opt/homebrew/bin/paseo)
+
 # === stack: site ===
 # Packages the site repo owns: SecretSpec (E4), F2 workstation claim (herdr), and site orchestration tooling.
 # fragment: brew/fragments/site.yml
@@ -61,4 +67,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 1 taps, 32 formulae, 3 casks across 4 stack(s)
+# summary: 1 taps, 32 formulae, 4 casks across 5 stack(s)

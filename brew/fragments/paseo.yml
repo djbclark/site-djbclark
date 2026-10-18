@@ -1,0 +1,9 @@
+# Paseo desktop app (roles/paseo_desktop, docs/paseo.md). Hand-edited. Project with: just brew-project
+stack: paseo
+description: >-
+  Paseo (github.com/getpaseo/paseo), an agentic development environment: desktop app with its own
+  daemon on 127.0.0.1:7263, published on the tailnet by roles/paseo_desktop.
+
+casks:
+  - name: paseo
+    note: desktop app + `paseo` CLI (linked to /opt/homebrew/bin/paseo)

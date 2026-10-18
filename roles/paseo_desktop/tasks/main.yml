@@ -1,0 +1,54 @@
+---
+- name: Check the Paseo cask is installed
+  ansible.builtin.stat:
+    path: "{{ paseo_desktop_cli }}"
+  register: _paseo_desktop_cli
+
+- name: Fail without the Paseo cask
+  ansible.builtin.fail:
+    msg: "brew install --cask paseo first (brew/fragments/paseo.yml)"
+  when: not _paseo_desktop_cli.stat.exists
+
+- name: Read the daemon config
+  ansible.builtin.command:
+    argv: ["{{ paseo_desktop_cli }}", daemon, config, get, --json]
+  register: _paseo_desktop_config
+  changed_when: false
+  check_mode: false
+
+- name: Set daemon config keys
+  # `config set` saves config.json; a running daemon applies some keys live and the rest at its next
+  # start (the app's Settings -> host -> Restart daemon, or quitting and reopening the app).
+  ansible.builtin.command:
+    argv: ["{{ paseo_desktop_cli }}", daemon, config, set, "{{ item.key }}", "{{ item.value }}"]
+  loop: "{{ paseo_desktop_config | dict2items }}"
+  vars:
+    _current: "{{ (_paseo_desktop_config.stdout | from_json).value }}"
+    _path: "{{ item.key.split('.') }}"
+    _have: >-
+      {%- set ns = namespace(v=_current) -%}
+      {%- for k in _path -%}{%- set ns.v = (ns.v[k] if (ns.v is mapping and k in ns.v) else none) -%}{%- endfor -%}
+      {{ ns.v | to_json }}
+  when: (_have | from_json) != (item.value | from_json)
+
+- name: Check current tailscale serve configuration
+  ansible.builtin.command:
+    argv: [tailscale, serve, status, --json]
+  register: _paseo_desktop_serve_status
+  changed_when: false
+  check_mode: false
+
+- name: Publish the daemon on the tailnet with tailscale serve
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - serve
+      - --bg
+      - "--https={{ paseo_desktop_serve_port }}"
+      - "http://127.0.0.1:{{ paseo_desktop_port }}"
+  vars:
+    _key: "{{ caddy_public_hostname }}:{{ paseo_desktop_serve_port }}"
+    _doc: "{{ (_paseo_desktop_serve_status.stdout | from_json) | default({}, true) }}"
+  when: >-
+    (_doc.get('Web', {}).get(_key, {}).get('Handlers', {}).get('/', {}).get('Proxy', ''))
+    != ('http://127.0.0.1:' ~ paseo_desktop_port)
