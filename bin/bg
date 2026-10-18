@@ -96,9 +96,9 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
   for d in "${plektra_dirs[@]}"; do
     top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || continue
     if ggrep -qs 'namespace = "rocks.pkb.plektra"' "$top/app/build.gradle.kts"; then
-      echo "bg: Plektra is built on forgejo.mit.edu only, never on this Mac ($top)." >&2
-      echo "bg: tests or any Gradle task: scripts/djb-ci-run REF [GRADLE_ARGS...]; an APK: push plk/main" >&2
-      echo "bg: (a release is built), then scripts/djb-install-latest. See the repo's AGENTS.md." >&2
+      echo "bg: Plektra is built on GitHub Actions only, never on this Mac ($top)." >&2
+      echo "bg: tests or any Gradle task: scripts/github-test-ref REF [GRADLE_ARGS...]; an APK: scripts/github-test-ref --release plk/main" >&2
+      echo "bg: (a release is built), then scripts/github-install-latest. See the repo's AGENTS.md." >&2
       exit 3
     fi
   done
