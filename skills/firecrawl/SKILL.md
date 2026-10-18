@@ -42,8 +42,9 @@ TUI links it through `skill-everywhere`; edit only here.
    every request to self-hosted; falls back to commercial once on (a)
    unreachable/timeout, (b) 404 (routes not in self-hosted: agent, monitor,
    ...), (c) 5xx, (d) a bot-walled scrape (page status 202/403/405/429/503, or a
-   short page whose text is one of the named challenges), or (e) an empty map or
-   search. Never the other way: a commercial 429 or 402 never sends work back.
+   short page whose text is one of the named challenges), (e) a `json` or `query`
+   format scrape whose `warning` says the LLM step failed (self-hosted has no LLM
+   key, so it answers 200 with no result), or (f) an empty map or search. Never the other way: a commercial 429 or 402 never sends work back.
    Crawl jobs stay on the backend that started them (job id → backend map;
    absolute `url`/`next` links in responses are rewritten to point back at the
    router). The response header `X-Firecrawl-Backend` names the backend used;
@@ -139,4 +140,4 @@ working around it. The usual failures, in the order to check:
 3. Self-hosted health: `curl -i https://djbclark-firecrawl.sipb.cloud/health`
    → 401.
 4. Router tests: `/opt/homebrew/bin/pytest
-   ~/src/djbclark-ade/tests/test_firecrawl_router.py -x` → 18 passed.
+   ~/src/djbclark-ade/tests/test_firecrawl_router.py -x` → 20 passed.
