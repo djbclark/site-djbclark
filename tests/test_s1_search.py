@@ -15,8 +15,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
-import s1_evidence as s1  # noqa: E402
-import s1_search as search  # noqa: E402
+import s1_evidence as s1
+import s1_search as search
 
 
 class SearchTestCase(unittest.TestCase):
@@ -42,16 +42,16 @@ class SearchTestCase(unittest.TestCase):
     ):
         raw = json.dumps({"content": text}).encode() if json_payload else text.encode()
         n = seq if seq is not None else self.store.stats()["events"]
-        params = dict(
-            producer="claude-code",
-            source_uri="file:///t.jsonl",
-            source_locator=locator or f"l{n}#{n}",
-            raw=raw,
-            ts_utc=f"2026-08-23T20:00:{n:02d}Z",
-            role="user",
-            origin="human",
-            source_seq=n,
-        )
+        params = {
+            "producer": "claude-code",
+            "source_uri": "file:///t.jsonl",
+            "source_locator": locator or f"l{n}#{n}",
+            "raw": raw,
+            "ts_utc": f"2026-08-23T20:00:{n:02d}Z",
+            "role": "user",
+            "origin": "human",
+            "source_seq": n,
+        }
         params.update(kw)
         eid, _ = self.store.put_event(**params)
         if conversation:
@@ -268,13 +268,13 @@ CREATE TABLE search_indexed (
 class TestMigration(unittest.TestCase):
     """A layout-1 store, written the way the old build() wrote it."""
 
-    TEXTS = [
+    TEXTS = (
         "the quick brown fox",
         "deploy_ops_release.py syncs memory",
         "AU CAFÉ NOIR",
         "unrelated words here",
         "odd￿byte",
-    ]
+    )
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -366,7 +366,7 @@ class TestMigration(unittest.TestCase):
             [r["event_id"] for r in index.search("café", mode="trigram")], [self.ids[2]]
         )
         # New events after the migration go through the new write path.
-        eid, _ = self.store.put_event(
+        self.store.put_event(
             producer="claude-code",
             source_uri="file:///t.jsonl",
             source_locator="l9",
@@ -449,6 +449,17 @@ class TestNeighbours(SearchTestCase):
     def test_unknown_event_raises(self) -> None:
         with self.assertRaises(KeyError):
             self.index.neighbours("nope")
+
+    def test_accepts_the_short_id_search_prints(self) -> None:
+        ids = [self.add(f"turn {i}", seq=i, conversation="conv-3") for i in range(3)]
+        rows = self.index.neighbours(ids[1][:14], window=1)
+        self.assertEqual([r["event_id"] for r in rows], ids[0:3])
+
+    def test_ambiguous_prefix_raises(self) -> None:
+        self.add("one", seq=0, conversation="conv-4")
+        self.add("two", seq=1, conversation="conv-4")
+        with self.assertRaises(KeyError):
+            self.index.neighbours("")
 
 
 class TestStats(SearchTestCase):

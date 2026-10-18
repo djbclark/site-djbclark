@@ -67,12 +67,13 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from s1_evidence import DEFAULT_DB, EvidenceStore, _Zstd, now_iso  # noqa: E402
+from s1_evidence import DEFAULT_DB, EvidenceStore, _Zstd, now_iso
 
 PROJECTION_CHARS = 8192
 # Version of project(): bump it and build() re-indexes every event.
@@ -732,11 +733,18 @@ class SearchIndex:
 
         Falls back to the producer session when the event was never assigned
         to a conversation, so this still returns useful context rather than
-        nothing.
+        nothing. ``event_id`` may be the shortened id ``search`` prints, as
+        long as it is a unique prefix.
         """
         row = self.store.get_event(event_id)
         if row is None:
-            raise KeyError(event_id)
+            matches = self.db.execute(
+                "SELECT event_id FROM event WHERE event_id >= ? AND event_id < ? LIMIT 2",
+                (event_id, event_id + "￿")).fetchall()
+            if len(matches) != 1:
+                raise KeyError(event_id)
+            event_id = matches[0]["event_id"]
+            row = self.store.get_event(event_id)
         member = self.db.execute(
             "SELECT conversation_id FROM conversation_member WHERE event_id=?",
             (event_id,)).fetchone()
@@ -813,7 +821,7 @@ class SearchIndex:
 
 def _print(rows: list[sqlite3.Row]) -> None:
     for r in rows:
-        snip = re.sub(r"\s+", " ", (r["snip"] if "snip" in r.keys() else "") or "")[:110]
+        snip = re.sub(r"\s+", " ", (r["snip"] if "snip" in r.keys() else "") or "")[:110]  # noqa: SIM118 (`in` on a Row tests values)
         print(f"{r['event_id'][:14]}  {r['ts_utc'][:19]}  {r['producer'][:12]:12} "
               f"{(r['scope'] or '')[:16]:16} {snip}")
 
