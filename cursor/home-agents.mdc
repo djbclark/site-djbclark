@@ -198,7 +198,8 @@ target** (acp-run/acp-dispatch gate it). **Never an all-vendor fan-out**:
 (2026-10-18): judgment is Opus `high`, codex `gpt-6-astra` and Fable `high` only for
 work that really needs them (codex one slice in flight, Fable `xhigh` almost
 never), everyday work on the other pools at
-the minimum spec, proactively via `bigteam`/sub-agents; Fable is a <=50%
+the minimum spec (claude codes on Sonnet 5.5, never Fable; quota never buys a pool
+more than 10 rank steps below the best into code/judgment, 2026-10-18), proactively via `bigteam`/sub-agents; Fable is a <=50%
 sublimit of the one Claude weekly, not a separate pool (one copy:
 `skills/model-routing/SKILL.md` *Routing policy*; numbers in
 `djbclark-ade/config/routing.toml`, `route_agent.py policy --md`). `acp-dispatch`
