@@ -101,6 +101,7 @@ Mac-side copies are not shared (single-use refresh tokens would invalidate each 
 | grok | `~bb/.grok/auth.json` | signed in 2026-10-18 |
 | Hermes (bb's own) | `~bb/.hermes/auth.json` | signed in 2026-10-18 via `hermes auth add openai-codex`; `auth.adopt_external_logins` stays false |
 | copilot | `~bb/.copilot/config.json` | signed in 2026-10-18, token in the 0600 config file (no keyring on the host) |
+| gh | `~bb/.config/gh/hosts.yml` | signed in 2026-10-18 as djbclark (device code at github.com/login/device; `gh auth login -h github.com -p https -w --skip-ssh-key --insecure-storage`; scopes gist, read:org, repo, workflow; token in the 0600 file, no keyring; git uses gh as credential helper) |
 | zcode | `~bb/.zcode/v2/credentials.json` | signed in 2026-10-18 (GLM-5.3, z.ai coding plan) |
 | agy | `~bb/.gemini/antigravity-cli/antigravity-oauth-token` | signed in 2026-10-18; no prompt sent yet (hidden burst limit) |
 | qwen | none | skipped: `/auth` offers only an Alibaba ModelStudio key, not OAuth |
