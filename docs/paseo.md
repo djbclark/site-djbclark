@@ -27,6 +27,11 @@ port 7263, SSL on); the Android app on the stayturgid phones the same way over T
 opens the URLs above (the bundled web UI); the CLI takes `--host <name>.greyhound-sidemirror.ts.net:7263`
 (the local daemon needs no `--host`).
 
+Status 2026-10-18: all three daemons answer `/api/health` and the web UI over the tailnet (vps-primary at
+site-djbclark f919386, get at image `ci-eb12788`, Mac app 0.11.4). Android `sh.paseo` 0.11.4 (stayturgid
+`bootstrap_apks`, `just deploy-apks`) is on s24 and t2e; hd8 and p7a were off the tailnet and get it on their
+next `deploy-apks`.
+
 ## Skills
 
 Paseo's six agent skills are vendored in djbclark-ade (`skills/paseo*`, `skills/paseo/UPSTREAM.md`) and linked
