@@ -30,7 +30,7 @@ numbered once across the file.
    dot-directory file: use the Edit tool, as for a FIND starting with `-`); **REPL with `\` goes through Python with
    an assert** (2026-10-09; dated cases in the memory file below); **`sd` is retired
    for edits**. **Mac code uses GNU `g*` (brew) where BSD differs (`ggrep`, `gsed`, `gawk`, `gtr`, `gdate`, `gstat`, ...) or for a GNU-only flag;
-   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). (`memory/feedback_modern_cli_tools.md`)
+   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit; **`djbclark-ade/claude/hooks/bash_habits_gate.py` denies it in Claude, Codex and Cursor**, 2026-10-18). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). **Test a NOPASSWD rule with `sudo -k -n CMD`: a cached ticket (machine-wide here) makes plain `sudo -n` pass anything** (2026-10-18). (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`), **on the `realpath`: a symlink gets clobbered** (2026-10-14; `memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome (`memory/feedback_always_use_default_browser_orion.md`).
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list (`memory/feedback_all_agents_includes_hermes.md`).
@@ -181,7 +181,7 @@ numbered once across the file.
     (2026-10-08). (`memory/feedback_start_slow_commands_in_background.md`) **Wait
     on a file or a PID**, **never `until ! pgrep -f '<pattern>'`; never `pkill -f
     '<pattern>'`** (2026-10-10: `-f` matches your own shell); kill your saved
-    `$!`. **Never read a result through a pipe** or feed `--body-file` from one
+    `$!`. **Never read a result through a pipe** (the same gate denies `cmd | tail && ...` and `| head; echo $?`: 2026-10-18 a refused merge still pushed) or feed `--body-file` from one
     (`[ -s f ]` first; use `gsed`, not BSD `sed`): `cmd > out.log 2>&1; echo
     "rc=$?" > out.rc; tail -5 out.log`; **a background task's "exit code" is
     `tail`'s: read `out.rc`, never the notification** (2026-10-17: red pytest

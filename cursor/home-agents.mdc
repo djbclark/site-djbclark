@@ -315,7 +315,8 @@ status is the last stage's. Write to a file, save the status, then read:
 `cmd > out.log 2>&1; echo "rc=$?" > out.rc; tail -5 out.log`. A background
 task's "exit code" is the last command's (`tail`'s): read the `rc=` file, never
 the notification (2026-10-17: a red pytest reported green, pushed twice). Never
-credit a hook (pre-push `just ci`) you have not seen run. Likewise never feed a
+credit a hook (pre-push `just ci`) you have not seen run. The same gate denies
+`cmd | tail && ...` and `| head; echo $?` (2026-10-18: a refused merge still pushed). Likewise never feed a
 `--body-file` from a pipeline: write the file, check `[ -s f ]`, then use it
 (macOS BSD `sed` rejects `1{/x/d}`; use `gsed`, GNU sed, installed).
 (`memory/feedback_exit_status_through_pipe.md`)
@@ -355,7 +356,7 @@ djbclark to type a `!` command. Privileged steps still use their sanctioned path
    backspace, 2026-10-10): REPL with `\` goes through Python with an assert).
    **`sd` is retired for edits** (exit 0 on no match; it lost an edit).
    **Mac code uses the brew GNU tools where BSD differs (`gsed`, `gawk`, `gtr`, `gfind`, `gtar`, `ggrep`, `gdate`, `gstat`, ...) or for a GNU-only flag;
-   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15).
+   `cat`/`mkdir -p`/`rm -f` and `timeout`/`nproc` stay bare, as does portable or off-Mac code; check: `gnu-tools-check`** (2026-10-14; keep the `g` prefix, no gnubin on `PATH`). **Always `gsed`, never bare `sed`, in your own commands, scripts, skills and docs unless BSD sed is required** (2026-10-15: a BSD `sed -i` broke an edit; `djbclark-ade/claude/hooks/bash_habits_gate.py` denies it as a Cursor `beforeShellExecution` hook too, 2026-10-18). **Root/NOPASSWD scripts keep `/usr/bin` tools and go in `.gnu-tools-check-ignore`: a g* tool puts user-writable `/opt/homebrew/bin` on root's PATH** (2026-10-15). **Test a NOPASSWD rule with `sudo -k -n CMD`: a cached ticket (machine-wide here) makes plain `sudo -n` pass anything** (2026-10-18).
    `dust`/`procs`/`xh` where they fit. Keep `cat`/`ls`/`diff`/`jq` (rtk compacts
    them). Android greps stay `grep`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file, then `mv -f`, on the `realpath`: a symlink gets clobbered, 2026-10-14), never edit in
