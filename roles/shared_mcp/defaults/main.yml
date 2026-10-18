@@ -89,9 +89,9 @@ shared_mcp_servers:
   # of the commercial api.firecrawl.dev. Path /mcp. firecrawl-router
   # (djbclark-ade bin/, symlinked into ~/.local/bin; 2026-10-14) runs
   # firecrawl-mcp as its child on an ephemeral loopback port with a per-process
-  # token, sends each request to the self-hosted instance and retries it on the
-  # commercial API when self-hosted fails (5xx, unreachable, bot wall, empty
-  # map or search). Report: firecrawl-hyades
+  # token and sends each request to the self-hosted instance. The commercial
+  # API fallback (5xx, unreachable, bot wall, empty map or search) is OFF unless
+  # shared_mcp_firecrawl_commercial_enabled is set (2026-10-18). Report: firecrawl-hyades
   # docs/commercial-vs-selfhosted-2026-10-14.md. Both keys come from
   # sudo-secretspec via `just shared-mcp-apply-secrets`. The router itself also
   # listens on 127.0.0.1:18805 without a token (--open) for Hermes' firecrawl
@@ -119,6 +119,10 @@ shared_mcp_servers:
 # only into the 0600 LaunchAgent, and tasks/main.yml fails closed without it.
 shared_mcp_firecrawl_api_url: "https://djbclark-firecrawl.sipb.cloud"
 shared_mcp_firecrawl_api_key: "{{ lookup('env', 'FIRECRAWL_SELFHOST_API_KEY') | default('', true) }}"
-# The commercial key (sudo-secretspec FIRECRAWL_API_KEY) for the router's
-# fallback; empty turns the fallback off.
-shared_mcp_firecrawl_fallback_api_key: "{{ lookup('env', 'FIRECRAWL_API_KEY') | default('', true) }}"
+# The commercial Firecrawl API does not exist for the router (djbclark, 2026-10-18):
+# no key is rendered, so the router has no fallback at all and a failed self-hosted
+# request is returned as it failed. Opt in only for a comparison test, with
+# `-e shared_mcp_firecrawl_commercial_enabled=true` (the key is sudo-secretspec
+# FIRECRAWL_API_KEY), and apply again without it afterwards.
+shared_mcp_firecrawl_commercial_enabled: false
+shared_mcp_firecrawl_fallback_api_key: "{{ (lookup('env', 'FIRECRAWL_API_KEY') | default('', true)) if shared_mcp_firecrawl_commercial_enabled | bool else '' }}"
