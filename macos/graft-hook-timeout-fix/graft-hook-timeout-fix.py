@@ -24,6 +24,10 @@ Code's 60 s limit and is SIGKILLed, which leaves a stale graft/.cache/.sync.lock
 the timeout (20 -> 40 -> 60) never helped. With refresh off, the prompt hook answers from
 the current graph; the Stop hook's background sync and the MCP tools still refresh it.
 
+It also routes every graft hook through graft-hook-guard.sh (2026-10-18), which skips
+the hook for denied project dirs (~/src/hermes-worktrees): graft's Stop hook otherwise
+runs a detached `graft build .` there that splits into five full hermes-agent trees.
+
 Remove the timeout part once graft writes seconds (check its settings-merge.js), and the
 refresh part once graft's prompt hook stops rebuilding inline.
 """
@@ -35,6 +39,7 @@ MAX_SANE = 600
 # Seconds per graft hook subcommand (2026-09-21 choice; graft's ms values /1000
 # plus headroom). Unknown future subcommands get ceil(ms / 1000).
 NO_REFRESH = "GRAFT_NO_REFRESH=1 "
+GUARD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "graft-hook-guard.sh")
 SECONDS = {"prompt": 60, "post-edit": 15, "tool-savings": 12, "session-start": 12, "stop": 12}
 
 
@@ -56,6 +61,10 @@ def fix(d):
                 if sub == "prompt" and "GRAFT_NO_REFRESH=" not in cmd:
                     h["command"] = NO_REFRESH + cmd
                     changes.append(f"{event}/{sub}: added {NO_REFRESH.strip()}")
+                at = h["command"].find('node "')
+                if GUARD not in h["command"] and at >= 0:
+                    h["command"] = h["command"][:at] + GUARD + " " + h["command"][at:]
+                    changes.append(f"{event}/{sub}: added guard")
                 if not isinstance(t, (int, float)) or t <= MAX_SANE:
                     continue
                 new = SECONDS.get(sub, -(-int(t) // 1000))
