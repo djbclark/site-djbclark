@@ -88,21 +88,33 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
     fi
   done
 fi
-# CI-only repos (2026-10-18): a repo registered with `load-watch ci-only add DIR "CMD"` (after
-# load-watch caught its builds loading this Mac and its agent moved them to Forgejo CI) is built
-# there only. bg runs only builds and tests, so refuse any command in one. Registry:
-# ~/.config/load-watch/ci-only.tsv. BG_ALLOW_LOCAL_CI_ONLY=1 on djbclark's say only (don't
-# advertise it in messages agents see).
-ci_reg="$HOME/.config/load-watch/ci-only.tsv"
-if [ -s "$ci_reg" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ]; then
-  top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || top=
-  if [ -n "$top" ]; then
-    ci_cmd=$(gawk -F'\t' -v t="$top" '$1 == t { print $2; exit }' "$ci_reg")
-    if [ -n "$ci_cmd" ]; then
-      echo "bg: $top builds and tests on Forgejo CI only, never on this Mac (load-watch ci-only)." >&2
-      echo "bg: run instead: $ci_cmd" >&2
-      exit 3
-    fi
+# CI-first (djbclark, 2026-10-18): before a build or test runs here, its repo needs a recorded decision
+# about Forgejo CI: `load-watch ci decide DIR ci "CMD"` (bg refuses and names the command), `local "why"`
+# (runs here) or `pending` (seeded from repos bg already ran in; runs here, with a reminder). No decision:
+# refuse until the agent has looked at offloading it (forgejo-ci skill) and recorded one. Worktrees and
+# cow pastures take their main repo's decision. BG_ALLOW_LOCAL_CI_ONLY=1 on djbclark's say only (don't
+# advertise it in messages agents see); BG_CI_UNDECIDED_OK=1 lets one small test file through undecided.
+# Fails open if load-watch is missing or errors.
+lw="$HOME/src/djbclark-ade/bin/load-watch"
+if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
+    && top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
+  dec=$("$lw" ci check "$top" 2>/dev/null); rc=$?
+  mode=${dec%%$'\t'*}; rest=${dec#*$'\t'}; text=${rest%%$'\t'*}
+  if [ "$rc" = 1 ] && [ "${BG_CI_UNDECIDED_OK:-0}" != 1 ]; then
+    echo "bg: $top has no CI-first decision yet, so bg will not build or test in it." >&2
+    echo "bg: First see whether this work can run on Forgejo CI instead of this Mac (forgejo-ci skill):" >&2
+    echo "bg: Linux-capable builds and tests usually can; macOS-only work can use GitHub's macOS runners." >&2
+    echo "bg: Ask djbclark before creating a Forgejo copy. Then record the decision and rerun:" >&2
+    echo "bg:   $lw ci decide $top ci \"<command that runs it on CI>\"" >&2
+    echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"" >&2
+    exit 3
+  elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
+    echo "bg: $top builds and tests on Forgejo CI only, never on this Mac (load-watch ci)." >&2
+    echo "bg: run instead: $text" >&2
+    exit 3
+  elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then
+    echo "bg: reminder: $top runs locally pending a CI-first decision; see whether it can move to" >&2
+    echo "bg: Forgejo CI (forgejo-ci skill), then: $lw ci decide $top ci|local \"...\"" >&2
   fi
 fi
 is_test=0
