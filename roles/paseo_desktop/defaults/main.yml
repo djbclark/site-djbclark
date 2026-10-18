@@ -16,3 +16,9 @@ paseo_desktop_config:
   daemon.hostnames: '["{{ caddy_public_hostname }}"]'
   daemon.relay.enabled: "false"
   features.webUi.enabled: "true"
+# Paseo.app's own settings (desktop-settings.json "settings", merged key by key). The daemon outlives the
+# app (djbclark, 2026-10-18), so quitting the window never stops running agents. The app reads it at start.
+paseo_desktop_settings_path: "{{ ansible_facts.user_dir }}/Library/Application Support/Paseo/desktop-settings.json"
+paseo_desktop_settings:
+  daemon:
+    keepRunningAfterQuit: true

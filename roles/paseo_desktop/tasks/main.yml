@@ -53,6 +53,40 @@
     (_doc.get('Web', {}).get(_key, {}).get('Handlers', {}).get('/', {}).get('Proxy', ''))
     != ('http://127.0.0.1:' ~ paseo_desktop_port)
 
+- name: Merge Paseo.app desktop settings
+  # Atomic rewrite (temp file, then rename) of only the keys in paseo_desktop_settings; prints "changed".
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -I
+      - -c
+      - |
+        import json, os, sys, tempfile
+        path, want = sys.argv[1], json.loads(sys.argv[2])
+        doc = json.load(open(path)) if os.path.exists(path) else {"version": 1, "settings": {}}
+        def merge(dst, src):
+            hit = False
+            for k, v in src.items():
+                if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                    hit |= merge(dst[k], v)
+                elif dst.get(k) != v:
+                    dst[k] = v
+                    hit = True
+            return hit
+        if merge(doc.setdefault("settings", {}), want):
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+            with os.fdopen(fd, "w") as f:
+                json.dump(doc, f, indent=2)
+                f.write("\n")
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)
+            print("changed")
+      - "{{ paseo_desktop_settings_path }}"
+      - "{{ paseo_desktop_settings | to_json }}"
+  register: _paseo_desktop_settings
+  changed_when: "'changed' in _paseo_desktop_settings.stdout"
+  when: not ansible_check_mode
+
 - name: Render the Paseo login LaunchAgent
   # The daemon lives only while the app runs (djbclark, 2026-10-18: start it at login, in the background),
   # so phones and the other hosts can always reach it. A LaunchAgent running `open -g -j`, not a login
