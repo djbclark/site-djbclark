@@ -284,7 +284,7 @@ hosts:
          note: "2026-10-17: BB (get-bb/bb; services.bb from github.com/djbclark/bb-nix, nixos/vps-primary/configuration.nix), replacing Cloudroom core. Web UI and API on loopback; tailnet 443 (browser) and 38443 (host daemons of other machines) both proxy here through tailscale serve. UNAUTHENTICATED and permits command execution: the tailnet is the only boundary, never tailscale funnel. See docs/bb-vps-primary.md."}
       - {port: 38887, bind: "127.0.0.1", owner: site, service: bb-host-daemon, status: active,
          note: "2026-10-17: BB host daemon of the server's own machine; loopback only, not served."}
-      - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo, status: planned,
+      - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo, status: active,
          tailscale_serve_port: 7263,
          note: "2026-10-18: Paseo daemon + web UI as user bb (services.paseo from forgejo.mit.edu/djbclark/paseo-nix, nixos/vps-primary/configuration.nix), sharing BB's agent logins and an agents.slice memory cap. UNAUTHENTICATED and permits command execution: tailnet-only, never funnel. See docs/paseo.md."}
 
