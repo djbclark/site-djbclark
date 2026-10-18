@@ -130,7 +130,7 @@ numbered once across the file.
     `acp-dispatch resume RECORD`, never a fresh dispatch: its thinking is work**, 2026-10-18; agy Claude/GPT can't reopen, so resume starts a new session with a checkpoint), 4 = **`BLOCKED:
     <question>`**, 124 = timeout. **It blocks until the slice ends**: `--detach --no-wait`, then the printed
     `rearm` waiter with `run_in_background`. **Agent-tool sub-agents:** paste `acp-dispatch footer --report
-    <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read that file, never the final message
+    <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt (`agent_footer_gate` appends it if missing, 2026-10-18); read that file, never the final message
     ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p
     '<prompt>' --model <m>`** (**always `--model`**, zcode too since 2026-10-15;
