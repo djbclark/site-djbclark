@@ -788,11 +788,11 @@ upr_dispatch() {
   draft="$UPSTREAM_CHAIN/upstream-reply-${repo//\//-}-$n.md"
   brief="$STATE_DIR/$name-input.md"
   if ((UPSTREAM_DRY)); then
-    echo "would dispatch: acp-dispatch claude --model sonnet --name $name -f $brief -C $UPSTREAM_DIR --task upstream-pr --timeout $UPSTREAM_TIMEOUT --detach --no-wait (brief = $UPSTREAM_PROMPT + event; reply draft $draft)"
+    echo "would dispatch: acp-dispatch claude --model sonnet --kind judgment --name $name -f $brief -C $UPSTREAM_DIR --task upstream-pr --timeout $UPSTREAM_TIMEOUT --detach --no-wait (brief = $UPSTREAM_PROMPT + event; reply draft $draft)"
     return 0
   fi
   upr_brief "$ev" "$draft" >"$brief"
-  out=$(PATH="$HOME/.local/bin:$PATH" runb 240 "$UPSTREAM_DISPATCH" claude --model sonnet \
+  out=$(PATH="$HOME/.local/bin:$PATH" runb 240 "$UPSTREAM_DISPATCH" claude --model sonnet --kind judgment \
     --name "$name" -f "$brief" -C "$UPSTREAM_DIR" --task upstream-pr --timeout "$UPSTREAM_TIMEOUT" \
     --min-headroom "$UPSTREAM_MIN_HEADROOM" --detach --no-wait 2>&1)
   rc=$?
