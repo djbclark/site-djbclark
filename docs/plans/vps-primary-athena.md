@@ -58,7 +58,7 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
 
 ### Phase B: AFS and tickets
 
-1. `services.openafsClient.enable = true`, cache about 3 GiB, `/afs`.
+1. `services.openafsClient.enable = true`, cache about 3 GiB, `/afs`. Lowered to 500000 KiB (about 490 MiB) on 2026-10-18 in `configuration.nix`: light use, 8.4 GB free on root.
 2. Ticket push from the Mac (extend the dialup push job) plus an `aklog` and
    renew timer on the VPS.
 3. Check: `tokens`, `ls /afs/athena.mit.edu/user/d/j/djbclark`.
