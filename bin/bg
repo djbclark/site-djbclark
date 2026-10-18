@@ -85,7 +85,7 @@ for a in "$@"; do
     gradle|gradlew) is_gradle=1 ;;
   esac
 done
-# Plektra is built only on forgejo.mit.edu (djbclark, 2026-10-14): refuse a Gradle command in a
+# Plektra is built only on CI (Forgejo 2026-10-14, GitHub runners 2026-10-18; djbclark): refuse a Gradle command in a
 # Plektra checkout (from its cwd, or a gradlew path into one). BG_ALLOW_LOCAL_PLEKTRA=1 overrides
 # it on djbclark's say only (don't advertise it in messages agents see).
 if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
@@ -117,14 +117,14 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
   mode=${dec%%$'\t'*}; rest=${dec#*$'\t'}; text=${rest%%$'\t'*}
   if [ "$rc" = 1 ] && [ "${BG_CI_UNDECIDED_OK:-0}" != 1 ]; then
     echo "bg: $top has no CI-first decision yet, so bg will not build or test in it." >&2
-    echo "bg: First see whether this work can run on Forgejo CI instead of this Mac (forgejo-ci skill):" >&2
+    echo "bg: First see whether this work can run on CI instead of this Mac (GitHub runners, forgejo-ci skill):" >&2
     echo "bg: Linux-capable builds and tests usually can; macOS-only work can use GitHub's macOS runners." >&2
-    echo "bg: Ask djbclark before creating a Forgejo copy. Then record the decision and rerun:" >&2
+    echo "bg: Ask djbclark before pushing CI branches to a repo he does not own. Then record the decision and rerun:" >&2
     echo "bg:   $lw ci decide $top ci \"<command that runs it on CI>\"" >&2
     echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"" >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
-    echo "bg: $top builds and tests on Forgejo CI only, never on this Mac (load-watch ci)." >&2
+    echo "bg: $top builds and tests on CI only, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then

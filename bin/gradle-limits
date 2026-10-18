@@ -44,7 +44,7 @@ link_homes() {
   done
   # Machine-wide init scripts: the one-build-at-a-time slot (gradle/init.d/machine-slot.gradle),
   # the shared remote build cache (gradle/init.d/global-remote-cache.init.gradle.kts) and the
-  # Plektra guard (gradle/init.d/plektra-remote-only.gradle: Plektra builds on forgejo.mit.edu only).
+  # Plektra guard (gradle/init.d/plektra-remote-only.gradle: Plektra builds on GitHub Actions only).
   local init src
   for init in machine-slot.gradle global-remote-cache.init.gradle.kts plektra-remote-only.gradle; do
     src="$repo/gradle/init.d/$init"
