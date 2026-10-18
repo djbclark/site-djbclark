@@ -110,6 +110,11 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     README for other SIPB members, listed in `djbclark/mit` (`~/src/mit`); never a directory in an ops repo;
     a path moved out of GitHub keeps a stub README** (standing order 2026-10-16; `memory/feedback_mit_things_live_on_forgejo.md`).
     **Push there with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE BRANCH`; plain `git push` fails by design** (2026-10-18).
+36. **NixOS rebuilds are shared by every agent: deploy only the pushed branch head, so every agent's committed
+    change ships** (djbclark, 2026-10-18). Push your change first; get deploys `main` (`scripts/deploy`),
+    vps-primary `master` promoted to `deploy-vps-primary`; never a local, side-branch or older commit. A deploy
+    in flight: wait, then redeploy the new head; then check the deployed revision is that head. Heavy builds
+    and `nix flake update` run on Forgejo CI (bb-build `nix-build`, `update` input), not on vps-primary.
 
 ## Other agents and delegation
 

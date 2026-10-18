@@ -151,6 +151,16 @@ moved out of a GitHub repo keeps a stub README so old links still land
 Push to forgejo.mit.edu with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE
 BRANCH`; plain `git push` has no credentials there and fails (2026-10-18).
 
+## NixOS rebuilds are shared (2026-10-18)
+
+**Deploy only the pushed branch head, so every agent's committed change ships**
+(djbclark, 2026-10-18). Push your change first; `get` deploys `main`
+(`scripts/deploy`), vps-primary `master` promoted to `deploy-vps-primary`; never a
+local, side-branch or older commit. If a deploy is in flight, wait, then redeploy the
+new head, and check the deployed revision is that head. Heavy builds and `nix flake
+update` run on Forgejo CI (bb-build `nix-build` workflow, `update` input), not on
+vps-primary.
+
 ## Reply formatting — number every list
 
 **Every bulleted list in a reply to djbclark uses numbers or letters, never
