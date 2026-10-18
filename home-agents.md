@@ -94,7 +94,8 @@ numbered once across the file.
     standalone `CLAUDE.md`; vendor instruction files under `~` likewise, bar non-symlinkable formats (Cursor
     `.mdc`). (`memory/feedback_claude_md_symlink_to_agents_md.md`)
 21. **Commit and push your own changes, every repo, as each unit lands, unasked; a file shared with another
-    agent's edits: stage only your hunks (`git apply --cached`)** (2026-10-12;
+    agent's edits: stage only your hunks (`git apply --cached`); commit with `git commit -- <your paths>`: a bare
+    `git commit` takes what another agent staged too** (2026-10-12, 2026-10-18;
     `memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`; **deployments read it**: small
     commits, quick reverts. **Data in place:** `site-private/memory/`, `site-djbclark/research/` (**public**).
     Never stage `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/ reset/`commit
