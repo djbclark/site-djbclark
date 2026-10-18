@@ -197,6 +197,9 @@
     ];
     slice = "agents.slice";
     tailscaleServe.enable = true;
+    # Paseo's agents run as bb too: use bb's one session bus (bb-nix `sessionBus`), or Copilot/Hermes
+    # keyring lookups autolaunch dbus-daemons that never exit (djbclark-ade-9e, 2026-10-18).
+    environment.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/bb-session-bus/bus";
   };
 
   # One memory cap for BB, Paseo and every agent either starts (the per-unit BB caps above still
@@ -209,6 +212,10 @@
     };
   };
   systemd.services.bb.serviceConfig.Slice = "agents.slice";
+  systemd.services.paseo = {
+    wants = [ "bb-session-bus.service" ];
+    after = [ "bb-session-bus.service" ];
+  };
 
   # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
   # Cursor's bundled node (both installed into /var/lib/bb/.local). claudeCode.nativeInstaller
