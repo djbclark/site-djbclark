@@ -18,7 +18,7 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 
 | Host | Daemon | Runs as | URL (tailnet only) | Config |
 | --- | --- | --- | --- | --- |
-| mac | Paseo.app (`brew install --cask paseo`) starts and owns it; down while the app is quit | djbclark | https://mac.greyhound-sidemirror.ts.net:7263 | `roles/paseo_desktop` (`just paseo-desktop-apply`): `~/.paseo/config.json` keys and the serve |
+| mac | Paseo.app (`brew install --cask paseo`) starts and owns it; LaunchAgent `com.djbclark.paseo-desktop` opens the app hidden at login (djbclark, 2026-10-18); down while the app is quit | djbclark | https://mac.greyhound-sidemirror.ts.net:7263 | `roles/paseo_desktop` (`just paseo-desktop-apply`): `~/.paseo/config.json` keys, the serve and the LaunchAgent |
 | vps-primary | `services.paseo` (systemd `paseo.service`) | `bb`, sharing BB's agent logins in `/var/lib/bb`; state `/var/lib/bb/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; BB and Paseo share `agents.slice` (MemoryMax 3G) |
 | get | `services.paseo` in the image | djbclark; state `~/.paseo` on `/persist` | https://get.greyhound-sidemirror.ts.net:7263 | `~/src/get` `nixos/paseo.nix`; the TSI port shim is preloaded; get's Tailscale shields are down for this (get `docs/runbook.md` 8.4) |
 

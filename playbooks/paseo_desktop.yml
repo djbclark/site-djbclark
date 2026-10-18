@@ -1,6 +1,6 @@
 ---
 - name: Configure the Paseo desktop daemon on the Mac
   hosts: mac
-  gather_facts: false
+  gather_facts: true
   roles:
     - role: paseo_desktop

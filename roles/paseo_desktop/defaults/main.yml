@@ -3,6 +3,9 @@
 # own daemon; this role only sets that daemon's config.json and publishes it on the tailnet. The Linux
 # hosts run the daemon from forgejo.mit.edu/djbclark/paseo-nix instead (docs/paseo.md).
 paseo_desktop_cli: /opt/homebrew/bin/paseo
+paseo_desktop_app: /Applications/Paseo.app
+paseo_desktop_label: com.djbclark.paseo-desktop
+paseo_desktop_plist_path: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ paseo_desktop_label }}.plist"
 paseo_desktop_port: 7263
 # Tailnet HTTPS port of `tailscale serve` (registry/ports.yml tailscale_serve_port). Never funnel.
 paseo_desktop_serve_port: 7263

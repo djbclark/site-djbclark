@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{ paseo_desktop_label }}</string>
+  {#- Starts Paseo.app at login without its window (-g: no focus, -j: hidden); the app then starts its
+      own daemon. `open` exits at once, so no KeepAlive: quitting the app stays quit until next login. #}
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-g</string>
+    <string>-j</string>
+    <string>-a</string>
+    <string>{{ paseo_desktop_app }}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>

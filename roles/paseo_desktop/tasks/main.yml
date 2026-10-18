@@ -52,3 +52,76 @@
   when: >-
     (_doc.get('Web', {}).get(_key, {}).get('Handlers', {}).get('/', {}).get('Proxy', ''))
     != ('http://127.0.0.1:' ~ paseo_desktop_port)
+
+- name: Render the Paseo login LaunchAgent
+  # The daemon lives only while the app runs (djbclark, 2026-10-18: start it at login, in the background),
+  # so phones and the other hosts can always reach it. A LaunchAgent running `open -g -j`, not a login
+  # item: macOS ignores a login item's `hidden` flag, so the window would open at every login.
+  ansible.builtin.template:
+    src: paseo-desktop.plist.j2
+    dest: "{{ paseo_desktop_plist_path }}"
+    mode: "0644"
+  register: _paseo_desktop_plist
+
+- name: Remove a Paseo login item (the LaunchAgent replaces it)
+  ansible.builtin.command:
+    argv:
+      - osascript
+      - -e
+      - tell application "System Events"
+      - -e
+      - set n to count (every login item whose name is "Paseo")
+      - -e
+      - delete (every login item whose name is "Paseo")
+      - -e
+      - return n
+      - -e
+      - end tell
+  register: _paseo_desktop_login_item
+  changed_when: _paseo_desktop_login_item.stdout | trim != "0"
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Probe the Paseo login LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ ansible_facts.user_uid }}/{{ paseo_desktop_label }}"]
+  register: _paseo_desktop_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out the changed Paseo login LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/{{ paseo_desktop_label }}"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _paseo_desktop_plist.changed
+    - _paseo_desktop_loaded.rc == 0
+
+# launchd teardown race: bootstrap right after bootout can fail with rc=5. Retry, don't sleep.
+- name: Bootstrap the Paseo login LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ paseo_desktop_plist_path }}"]
+  register: _paseo_desktop_bootstrap
+  changed_when: _paseo_desktop_bootstrap.rc == 0
+  failed_when: _paseo_desktop_bootstrap.rc != 0
+  until: _paseo_desktop_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - _paseo_desktop_loaded.rc != 0 or _paseo_desktop_plist.changed
+
+- name: Check whether Paseo.app is running
+  ansible.builtin.command:
+    argv: [pgrep, -f, "{{ paseo_desktop_app }}/Contents/MacOS/"]
+  register: _paseo_desktop_running
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Start Paseo.app in the background
+  ansible.builtin.command:
+    argv: [open, -g, -j, -a, "{{ paseo_desktop_app }}"]
+  when: _paseo_desktop_running.rc != 0
