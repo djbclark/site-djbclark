@@ -119,7 +119,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     never a hand-rolled waiter** (2026-10-15).
 25. **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`; 2026-10-08). Exit 3 = **no
     report** (re-task, never reconstruct; **a quota stop is resumed in its own session after the reset,
-    `acp-dispatch resume RECORD`, never a fresh dispatch: its thinking is work**, 2026-10-18), 4 = **`BLOCKED:
+    `acp-dispatch resume RECORD`, never a fresh dispatch: its thinking is work**, 2026-10-18; agy Claude/GPT can't reopen, so resume starts a new session with a checkpoint), 4 = **`BLOCKED:
     <question>`**, 124 = timeout. **It blocks until the slice ends**: `--detach --no-wait`, then the printed
     `rearm` waiter with `run_in_background`. **Agent-tool sub-agents:** paste `acp-dispatch footer --report
     <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read that file, never the final message

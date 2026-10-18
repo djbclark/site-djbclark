@@ -49,7 +49,8 @@ prompt, which is `❯` plus a non-breaking space, so the note was never sent).
 It adds the delivery footer, writes `~/.local/state/bigteam/<task>/<name>-report.md`,
 its `.done` marker and a jobs record; exit 3 = **no report** (a delivery failure:
 re-task it, never reconstruct; a quota stop is resumed in its own session after the
-reset with `acp-dispatch resume RECORD`, never a fresh dispatch, 2026-10-18),
+reset with `acp-dispatch resume RECORD`, never a fresh dispatch, 2026-10-18; agy
+Claude/GPT can't reopen, so resume starts a new session with a checkpoint),
 4 = **`BLOCKED: <question>`**, 124 = timeout.
 **It blocks until the slice ends** (often 10+ min): run it with `--detach
 --no-wait` and wait on the printed `rearm` command in the background. **Agent-tool
