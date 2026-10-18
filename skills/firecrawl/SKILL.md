@@ -159,4 +159,19 @@ working around it. The usual failures, in the order to check:
 3. Self-hosted health: `curl -i https://djbclark-firecrawl.sipb.cloud/health`
    → 401.
 4. Router tests: `/opt/homebrew/bin/pytest
-   ~/src/djbclark-ade/tests/test_firecrawl_router.py -x` → 18 passed.
+   ~/src/djbclark-ade/tests/test_firecrawl_router.py -x` → all pass (39 on 2026-10-18).
+
+## Testing the router live (2026-10-18)
+
+1. **Never `launchctl print` this service**: it dumps the plist's environment
+   (the Hyades, SIPB and LiteLLM keys) into the transcript. Read the plist with
+   `plistlib` inside a script and never print the values.
+2. Test against **isolated instances**, not the live listener:
+   `bin/firecrawl-router --listen 127.0.0.1:PORT --open` with env overrides,
+   `FIRECRAWL_API_KEY` blank so the commercial API is unreachable. Overrides that
+   force a rung to fail: `FIRECRAWL_ROUTER_SIPB_BASE=http://127.0.0.1:9/api` (SIPB
+   dead), `FIRECRAWL_ROUTER_SIPB_KEY=x` (401), `FIRECRAWL_ROUTER_LITELLM_MODELS`,
+   `FIRECRAWL_ROUTER_LLM_DEADLINE=6`, `FIRECRAWL_ROUTER_LLM=off`.
+3. `scripts/live-suite/` holds the 2026-10-18 harness (`python3 -I suite.py OUTDIR`
+   from that directory, about 50 min, results in `OUTDIR/summary.md`). A failed
+   rung is logged as `llm rung NAME failed: REASON` on the router's stderr.
