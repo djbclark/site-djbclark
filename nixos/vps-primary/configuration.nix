@@ -60,9 +60,15 @@
   # Joined to the tailnet 2026-10-13 with a one-time tagged auth key
   # (tag:server: no key expiry); node state lives in /var/lib/tailscale.
   # Public SSH on 22 stays open until the tailnet path is proven.
+  # Exit node (2026-10-17): the Mac routes through here while GlobalProtect breaks its
+  # path to MITnet (home ISP SYNs to forgejo.mit.edu go unanswered; this host reaches it).
+  # "server" turns on IPv4/IPv6 forwarding; the route still needs approving once in the
+  # admin console (the policy has no autoApprovers).
   services.tailscale = {
     enable = true;
     openFirewall = true;
+    useRoutingFeatures = "server";
+    extraSetFlags = [ "--advertise-exit-node" ];
   };
 
   # Shared Gradle remote build cache: FosterStack cache (github.com/fosterstack/cache,
