@@ -162,8 +162,10 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
     result is not a match**: use `find` or an exact `read_note`
     ([[reference_agent_rules_basic_memory_pools]]).
 32. **Routing policy (2026-10-15, every TUI, any directory): minimise cost, maximise
-    code quality, not tokens.** Fable 5.1 `xhigh` and codex `gpt-6-astra` **used fully
-    for serious work**; everyday work on other pools. **Fable is a <=50% sublimit of the
+    code quality, not tokens.** **Frontier models are scarce (2026-10-18): judgment is Opus
+    `high`; codex `gpt-6-astra` and Fable (`high`) only via the `frontier` kind, for what
+    really needs them; codex one slice in flight; Fable `xhigh` almost never
+    (`ACP_OPERATOR_APPROVED=fable-xhigh`)**; everyday work on other pools. **Fable is a <=50% sublimit of the
     one Claude weekly** (2026-10-10's "9% left" was a misread). One copy: `skills/model-routing/SKILL.md` *Routing policy* (`memory/feedback_routing_policy_cost_quality.md`).
 33. **Anything likely to take over ~10-15 s starts with `run_in_background:
     true`** (2026-10-04); wait on the notification, never poll; kill your strays.

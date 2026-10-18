@@ -180,8 +180,10 @@ only when that vendor is the point** (GrokBot and GitHub-side Copilot review run
 on them; `acp-run grok --model grok-4.7`). **hermes is never a delegation
 target** (acp-run/acp-dispatch gate it). **Never an all-vendor fan-out**:
 `route_agent.py plan` picks vendor × model × effort per slice. **Routing policy
-(2026-10-15): minimise cost, maximise code quality**: Fable 5.1 `xhigh` and codex
-`gpt-6-astra` used fully for serious work, everyday work on the other pools at
+(2026-10-15): minimise cost, maximise code quality**; frontier models are scarce
+(2026-10-18): judgment is Opus `high`, codex `gpt-6-astra` and Fable `high` only for
+work that really needs them (codex one slice in flight, Fable `xhigh` almost
+never), everyday work on the other pools at
 the minimum spec, proactively via `bigteam`/sub-agents; Fable is a <=50%
 sublimit of the one Claude weekly, not a separate pool (one copy:
 `skills/model-routing/SKILL.md` *Routing policy*). **omp (oh-my-pi), by any route
