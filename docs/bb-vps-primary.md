@@ -164,6 +164,7 @@ Notes that are easy to lose:
 4. A new built-in agent shows in `bbcli provider list` about two minutes after install (BB's periodic refresh).
 5. Disk: `/` is about 66% used; Hermes (2.5 GB), the npm globals (2 GB) and the agy server (1 GB) are the large
    pieces. The agy server is re-downloadable and the first to drop.
+6. **One D-Bus session bus for `bb`** (bb-nix `sessionBus`, 2a39dbf, 2026-10-18): `bb` has no login session, so a keyring lookup (Copilot CLI 1.0.98 above all, Hermes, `gh auth login`) autolaunched a `dbus-daemon` that never exits; 22 (54 MiB) had piled up in a day, 9 of them from one model catalog refresh. `bb-session-bus.service` serves `/run/bb-session-bus/bus`; the lookups still fail (no Secret Service) and the agents fall back to their files as before. More than one `dbus-daemon` owned by `bb` (`ps -u bb -o comm= \| grep -c dbus-daemon`) means something bypasses `DBUS_SESSION_BUS_ADDRESS`.
 
 ## Bumping a version
 
