@@ -62,6 +62,15 @@ the host: nothing stopped the copy and the host from drifting apart.
    **sops-nix** (age or GPG, templates for secrets inside plain config files) or **agenix**
    (age/SSH keys only, simpler). Not adopted yet; adopt one before putting any secret in the
    configuration.
+5. **Lock and build on Forgejo CI, not on the host** (djbclark, 2026-10-18: faster): bb-build's `nix-build`
+   workflow with `repo=https://github.com/djbclark/site-djbclark.git`, `dir=nixos`, `update='<input> ...'`
+   (runs `nix flake update` and prints the new `flake.lock` as base64 between `LOCK-BEGIN`/`LOCK-END`) and
+   `attrs=nixosConfigurations.vps-primary.config.system.build.toplevel`. One run locks and proves the
+   build; commit the printed lock to `master`.
+6. **Rebuilds are shared** (`~/CLAUDE.md` 36): several agents change `nixos/`. Fold other agents' pending
+   input bumps into yours (2026-10-18: `update='paseo-nix bb-nix'` for the BB-hub session's bb-nix fix),
+   promote `master`'s head only, tell the agents waiting on it, and check
+   `nixos-version --configuration-revision` afterwards.
 
 ## What the migration changed on the host
 
