@@ -52,6 +52,9 @@ VPS (no build there), then merge and deploy only on djbclark's go-ahead
    (`allowUnfreePredicate` for that one package).
 3. `modules/athena.nix`: nixathena trimmed (`workstation = false`, moira,
    remctl, athrun; no lightdm/ldap/pkgsync/hesiod/zephyr), AFS still off.
+   Changed 2026-10-18 (djbclark): Hesiod on for lookups only (`hesiod.nsswitch = false`, so Athena
+   users are not accounts here; logind keeps systemd's sandbox), pyhesiodfs for `/mit/LOCKER`, and an
+   `attach LOCKER` shim that resolves it (athena-nixos 3c7611c; nixathena has no real `attach`).
 4. `modules/users.nix`: user `djbclark` (wheel, key login); root keeps the
    automation key.
 5. `modules/terminals.nix`: et and mosh, ports opened on `tailscale0` only.
