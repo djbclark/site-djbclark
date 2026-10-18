@@ -148,6 +148,8 @@ with a README for other SIPB members, and gets a line in the index repo
 `djbclark/mit` (`~/src/mit`)**; never a directory inside an ops repo. A path
 moved out of a GitHub repo keeps a stub README so old links still land
 (standing order, djbclark 2026-10-16; `memory/feedback_mit_things_live_on_forgejo.md`).
+Push to forgejo.mit.edu with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE
+BRANCH`; plain `git push` has no credentials there and fails (2026-10-18).
 
 ## Reply formatting — number every list
 

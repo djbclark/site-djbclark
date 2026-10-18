@@ -109,6 +109,7 @@ or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
 35. **MIT/SIPB/Athena-related work lives in public repos on forgejo.mit.edu under `djbclark/`, each with a
     README for other SIPB members, listed in `djbclark/mit` (`~/src/mit`); never a directory in an ops repo;
     a path moved out of GitHub keeps a stub README** (standing order 2026-10-16; `memory/feedback_mit_things_live_on_forgejo.md`).
+    **Push there with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE BRANCH`; plain `git push` fails by design** (2026-10-18).
 
 ## Other agents and delegation
 
