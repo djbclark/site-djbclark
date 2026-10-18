@@ -12,15 +12,32 @@
 # graft 0.23.0 has no per-directory opt-out, and TRAIL_NO_HOOKS is global, so
 # this wrapper skips every graft hook event for the denied trees instead.
 #
+# A single hermes-agent checkout is too big for the Stop build alone: fully
+# cached (0 of 10951 files parsed) it still took 270 s wall, 3.25 GB peak, at
+# load ~75 on 2026-10-18, so it overran the 120 s cap at the end of every turn.
+# Those trees skip only `stop`; queries still refresh the graph on demand.
+#
 # graft-hook-timeout-fix.py keeps this prefix on graft's hook commands, since
 # `graft init` rewrites them wholesale.
 deny=(
   "$HOME/src/hermes-worktrees"
 )
+deny_stop=(
+  "$HOME/.hermes/hermes-agent"
+  "$HOME/.cow/pastures/hermes-agent"
+)
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+event="${*: -1}"
 for d in "${deny[@]}"; do
   case "$dir/" in
     "$d"/*) exit 0 ;;
   esac
 done
+if [ "$event" = stop ]; then
+  for d in "${deny_stop[@]}"; do
+    case "$dir/" in
+      "$d"/*) exit 0 ;;
+    esac
+  done
+fi
 exec "$@"
