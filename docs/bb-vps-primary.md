@@ -97,7 +97,18 @@ Mac-side copies are not shared (single-use refresh tokens would invalidate each 
 | Codex | `~bb/.codex/auth.json` (its `config.toml` was deliberately not copied) | signed in |
 | Cursor | `~bb/.cursor`, binary `~bb/.local/bin/cursor-agent` | signed in by djbclark |
 | Pi | in `~bb`, installed from BB's UI | listed; install (and login) is djbclark's to retry in the UI |
+| omp | `~bb/.omp/agent/agent.db` | signed in 2026-10-18, Anthropic OAuth only (the one provider omp is used for) |
+| grok | `~bb/.grok/auth.json` | signed in 2026-10-18 |
+| Hermes (bb's own) | `~bb/.hermes/auth.json` | signed in 2026-10-18 via `hermes auth add openai-codex`; `auth.adopt_external_logins` stays false |
+| copilot | `~bb/.copilot/config.json` | signed in 2026-10-18, token in the 0600 config file (no keyring on the host) |
+| zcode | `~bb/.zcode/v2/credentials.json` | signed in 2026-10-18 (GLM-5.3, z.ai coding plan) |
+| agy | `~bb/.gemini/antigravity-cli/antigravity-oauth-token` | signed in 2026-10-18; no prompt sent yet (hidden burst limit) |
+| qwen | none | skipped: `/auth` offers only an Alibaba ModelStudio key, not OAuth |
+| crush | none | parked: needs the SIPB loopback proxy, a crushrc and `MIT_SIPB_API_KEY` (plan 14.42) |
+| cline | none | installed, kept, unsigned |
 | the rest | see "Agents" | not signed in except opencode (free models) |
+
+The same agents on `get` (user `djbclark`, `~/`) were signed in the same way on 2026-10-18; Claude, Cursor and Codex too.
 
 If a login ever shows as signed out, log in fresh as `bb` (do not re-copy a token that may have been refreshed
 elsewhere).
