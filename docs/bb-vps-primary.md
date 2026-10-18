@@ -106,7 +106,8 @@ Mac-side copies are not shared (single-use refresh tokens would invalidate each 
 | qwen | none | skipped: `/auth` offers only an Alibaba ModelStudio key, not OAuth |
 | crush | none | parked: needs the SIPB loopback proxy, a crushrc and `MIT_SIPB_API_KEY` (plan 14.42) |
 | cline | none | installed, kept, unsigned |
-| the rest | see "Agents" | not signed in except opencode (free models) |
+| opencode | `~bb/.local/share/opencode/opencode.db`, `~bb/.config/opencode/service.json` | signed in 2026-10-18 with the OpenCode Console account (web device login; the models are the paid OpenCode Go plan, none is free) |
+| the rest | see "Agents" | not signed in |
 
 The same agents on `get` (user `djbclark`, `~/`) were signed in the same way on 2026-10-18; Claude, Cursor and Codex too.
 
@@ -124,7 +125,7 @@ into `~/.local/bin` or `~/.grok`); nix-ld covers the generic Linux binaries.
 | Claude Code | `claudeCode.nativeInstaller` (Anthropic's installer) | native | `claude` |
 | Codex | `codex-npm-bin` (bb-build `bb-codex-npm`, on the unit PATH) | native | `codex login --device-auth` |
 | Cursor | `cursor-agent` installer | built-in | `cursor-agent login` |
-| opencode | `npm i -g @opencode/cli` | built-in `acp-opencode` | optional (free models work without): `opencode auth login` |
+| opencode | `npm i -g @opencode/cli` | built-in `acp-opencode` | `opencode auth login`, pick OpenCode Console, then "OpenCode Console account" (a device code to approve on opencode.ai; OpenCode Go itself only asks for an API key). Run it from `cd ~`: from an unreadable cwd such as `/root`, `opencode auth list` fails with `UnexpectedStatus: 500` |
 | omp | vendor installer (`omp.sh`, prebuilt) | built-in `acp-omp` | `omp login` |
 | grok | vendor installer (`x.ai/cli`) into `~/.grok` | built-in `acp-grok` | `grok login` (prints a URL) |
 | hermes | fresh Hermes Agent, own `HERMES_HOME` `~bb/.hermes` (no gateway, no memory provider, no Mac state) | built-in `acp-hermes-agent` | `hermes auth add openai-codex --type oauth --no-browser` (route preset: provider `openai-codex`) |
