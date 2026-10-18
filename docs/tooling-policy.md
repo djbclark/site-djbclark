@@ -93,6 +93,17 @@ in site-private for the full evaluation notes.
 
 ## Symbol-level navigation — `graft` and `token-savior` (added 2026-10-03)
 
+> **2026-10-18, operator decision (djbclark), after measurement: `token-savior` is
+> removed from every agent CLI and uninstalled, and `graft`'s MCP server is
+> deregistered from the agent TUIs.** Over 14 days of Claude transcripts (1,458
+> files) there were 0 real token-savior tool calls and 95 graft-MCP calls against
+> about 24,000 `graft` CLI uses, while each Claude session spawned its own stdio
+> `graft mcp` (4-47 MB) and `token-savior-recall` python (4-9 MB), about 270 MB
+> across 9 sessions on a 16 GB Mac. **The `graft` CLI (`graft ask/grep/skeleton/
+> callers`) is the navigator; there is no token-savior.** The rest of this section
+> is the 2026-10-03 benchmark and wiring record, kept as history: ignore its
+> "token-savior first" advice and do not follow its install or registration steps.
+
 One layer above structural search: both of these index a repo by *symbol*
 (function, class, import, call edge) and answer with a `file:line` span plus the
 few lines that matter, instead of a file you then have to read. A `find_symbol`
@@ -309,31 +320,12 @@ The two tools also do not index the same corpus: for stayturgid, token-savior in
 1504 files including the vendored `.ansible/collections/` tree, graft 282 code
 files. That alone explains much of the divergence in their result sets.
 
-### How it is wired — 12 agent CLIs, one identical command
+### How it was wired — 12 agent CLIs, one identical command (history)
 
-```bash
-uv tool install "token-savior-recall[mcp]"                 # ~/.local/bin/{token-savior,ts}
-claude        mcp add token-savior --scope user -- /Users/djbclark/.local/bin/token-savior-mcp
-codex         mcp add token-savior              -- /Users/djbclark/.local/bin/token-savior-mcp
-opencode      mcp add --global token-savior     -- /Users/djbclark/.local/bin/token-savior-mcp
-grok          mcp add token-savior                 /Users/djbclark/.local/bin/token-savior-mcp
-agy           mcp add token-savior                 /Users/djbclark/.local/bin/token-savior-mcp
-```
-
-Hand-edited, because they have no add subcommand or it is broken:
-`cursor-agent` (`~/.cursor/mcp.json`, then `cursor-agent mcp enable token-savior`),
-`zcode` (`~/.zcode/cli/setting.json`, under `mcp.servers`),
-`qwen` (`~/.qwen/settings.json`, `mcpServers` — the key did not exist before),
-`copilot` (`~/.copilot/mcp-config.json`, `"type": "local"` — its own
-`mcp add` *and* `mcp list` both fail with "The shared writer lock or its directory
-changed", which is pre-existing and not caused by the edit).
-
-`hermes` is registered too, through its own CLI rather than a hand-edit of
-`~/.hermes/`: `hermes mcp add token-savior --command …`. Its `add` is interactive
-— it connects, enumerates the tools and asks "Enable all 15 tools? [Y/n/select]",
-cancelling if stdin is closed, so pipe a `Y` into it. The resulting entry is three
-clean lines (`command`, `enabled: true`, no tool allow-list, no env) and
-`basic-memory` stays `enabled: false` beside it, untouched.
+**Removed 2026-10-18.** The registration commands and hand-edit recipes that stood
+here (`uv tool install "token-savior-recall[mcp]"`, `<cli> mcp add token-savior`,
+the cursor, zcode, qwen, copilot and hermes hand-edits) are gone on purpose: do
+not re-register it. See the banner under the section heading.
 
 Not possible: `gemini` and `openclaw` are not installed (`~/.gemini` belongs to
 `agy`, which reads `~/.gemini/config/mcp_config.json`; upstream Gemini CLI would
@@ -393,7 +385,7 @@ immediately. It also appears to have been what broke copilot's headless `-p`
 mode, which worked on the first try afterwards — so the long-standing "prefer
 codex for headless" note in `home-agents.md` has been withdrawn.
 
-`token-savior-mcp` is a launcher in
+(Removed 2026-10-18, with the launcher.) `token-savior-mcp` was a launcher in
 [`site-private/bin/`](https://github.com/djbclark/site-private/blob/master/bin/token-savior-mcp),
 symlinked into `~/.local/bin/`. It exists because neither way of configuring the
 roots works on this machine:
@@ -492,8 +484,8 @@ cost was negligible either way (~0.1 s: 0.53 s vs 0.44 s to `tools/list`).
 Removing it reclaimed ~285 MB (venv 186 MB → 33 MB, model cache 132 MB, state dir
 1.1 MB → 444 KB) and both degradations are clean and fast: `ts_search` reports
 `method: "substring"` and still works, and `semantic: true` now fails in 2.3 s with
-`semantic index unavailable: sqlite-vec not loadable` instead of hanging. To put it
-back is one command: `uv tool install --force "token-savior-recall[mcp,memory-vector]"`.
+`semantic index unavailable: sqlite-vec not loadable` instead of hanging. (The whole package was
+uninstalled on 2026-10-18.)
 
 ## Python environments — proposed standard (site-private#66, 2026-10-09)
 

@@ -16,8 +16,9 @@ numbered once across the file.
 
 ## Tools and habits (2026-10-03, 2026-10-06)
 
-**`graft` is the navigator in every repo** (`graft build` if no `graft/`): graft
-or `token-savior` before `cat`/`rg`/`Grep` for _code discovery_. **Relay graft's
+**`graft` is the navigator in every repo** (`graft build` if no `graft/`): the
+`graft` CLI (MCP tools only where a host exposes them) before `cat`/`rg`/`Grep` for _code discovery_;
+`token-savior` removed 2026-10-18 (0 calls in 14 days). **Relay graft's
 "tokens saved ≈ N" banner** as a total. `rtk` compacts Bash output: **never run
 `ts init`**; no-hit `graft grep`: retry short ([[reference_agent_rules_code_discovery_and_cli_table]]).
 

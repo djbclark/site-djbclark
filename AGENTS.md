@@ -186,8 +186,8 @@ because it is reference material and this file loads every session.
 Short version: **`graft` before `cat`/`rg` for anything about code** (run
 `graft build` first if a repo has no `graft/` — free, seconds); then `rg` over
 `grep`, `fd` over `find`, `ast-grep` for structural code search, and `gh` over
-raw API calls. The same file covers the `token-savior` MCP server — what it is
-for and the traps it carries.
+raw API calls. The `token-savior` MCP server was removed 2026-10-18 (0 calls in
+14 days); the file keeps its benchmark and traps as history.
 
 ## Multi-Agent Protocol
 

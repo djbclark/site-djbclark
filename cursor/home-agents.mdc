@@ -315,9 +315,9 @@ credit a hook (pre-push `just ci`) you have not seen run. Likewise never feed a
 **`graft` is the navigator in every repo** (`graft build` first if it has no
 `graft/`; its footprint is djbclark's call, not a concern). Use a symbol lookup
 before `cat`/`rg`/Grep for **code discovery**; plain text search is right for
-prose and config. `token-savior` is kept only for what graft cannot do
-(`find_dead_code`, `detect_breaking_changes`, `analyze_config`,
-`find_semantic_duplicates`, index-aware edits), never as a navigator; `rtk` owns
+prose and config. `token-savior` was removed everywhere on 2026-10-18 (0 real calls in 14
+days of transcripts) and `graft`'s MCP registration with it (95 MCP calls
+against ~24,000 CLI uses): use the `graft` CLI; `rtk` owns
 Bash output compaction, so **never run `ts init`**. A no-hit `graft grep` is
 usually over-specific; immediately retry with the bare symbol or a short literal,
 not the full signature. Defects and the registration list:
