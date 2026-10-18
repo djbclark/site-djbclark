@@ -88,6 +88,23 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
     fi
   done
 fi
+# CI-only repos (2026-10-18): a repo registered with `load-watch ci-only add DIR "CMD"` (after
+# load-watch caught its builds loading this Mac and its agent moved them to Forgejo CI) is built
+# there only. bg runs only builds and tests, so refuse any command in one. Registry:
+# ~/.config/load-watch/ci-only.tsv. BG_ALLOW_LOCAL_CI_ONLY=1 on djbclark's say only (don't
+# advertise it in messages agents see).
+ci_reg="$HOME/.config/load-watch/ci-only.tsv"
+if [ -s "$ci_reg" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ]; then
+  top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || top=
+  if [ -n "$top" ]; then
+    ci_cmd=$(gawk -F'\t' -v t="$top" '$1 == t { print $2; exit }' "$ci_reg")
+    if [ -n "$ci_cmd" ]; then
+      echo "bg: $top builds and tests on Forgejo CI only, never on this Mac (load-watch ci-only)." >&2
+      echo "bg: run instead: $ci_cmd" >&2
+      exit 3
+    fi
+  fi
+fi
 is_test=0
 for a in "$@"; do
   case "$a" in
