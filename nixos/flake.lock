@@ -10,11 +10,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792198465,
-        "narHash": "sha256-ePdmFVMWtTo+UV82Q3zdXWFuQOz+Pte+b071OLLEi8A=",
+        "lastModified": 1792338398,
+        "narHash": "sha256-W1jvGHrvGYx2MTrwoWxV8xnW/+ivbn2DF8QbU7RFqdI=",
         "ref": "refs/heads/main",
-        "rev": "91f1e186971e6e56db32c644bd429981c9551470",
-        "revCount": 2,
+        "rev": "3c7611ce12629f55d18bc7fbffdc3b968fa4b1af",
+        "revCount": 4,
         "type": "git",
         "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
       },
