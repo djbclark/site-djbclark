@@ -117,6 +117,8 @@ numbered once across the file.
     vps-primary `master` promoted to `deploy-vps-primary`; never a local, side-branch or older commit. A deploy
     in flight: wait, then redeploy the new head; then check the deployed revision is that head. Heavy builds
     and `nix flake update` run on Forgejo CI (bb-build `nix-build`, `update` input), not on vps-primary.
+37. **CI for a GitHub-sourced repo runs on free GitHub runners (`ci/base` + `ci/run/**`, `scripts/github-*`
+    wrappers); Forgejo/Hyades CI only for MIT/SIPB work** (djbclark, 2026-10-18; `forgejo-ci` skill, item 6).
 
 ## Other agents and delegation
 
@@ -189,7 +191,7 @@ numbered once across the file.
 34. **Run builds and tests (pytest, tox, nox, `run_tests*.py` too) via `~/ops/site-private/bin/bg`**
     (**always the full path: bare `bg` is the shell builtin**), **with `run_in_background`: it waits up to 6 h
     for load and slots, never starts "anyway", exits 75 past that (3 = refused) and pings djbclark when a run
-    goes long**; **first see whether it can run on Forgejo CI (`forgejo-ci` skill): bg refuses a repo without
+    goes long**; **first see whether it can run on CI (GitHub runners; `forgejo-ci` skill): bg refuses a repo without
     a `load-watch ci decide DIR ci|local` decision** (2026-10-18). **Never set `BG_LOAD_WAIT=0` on a build or Gradle
     command** (2026-10-10; one small test file only). **Never `taskpolicy -b` for
     builds**; never throttle or SIGSTOP another session's processes. **Gradle: one

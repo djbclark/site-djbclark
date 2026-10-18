@@ -162,6 +162,12 @@ new head, and check the deployed revision is that head. Heavy builds and `nix fl
 update` run on Forgejo CI (bb-build `nix-build` workflow, `update` input), not on
 vps-primary.
 
+## CI for GitHub-sourced repos (2026-10-18)
+
+**CI for a GitHub-sourced repo runs on free GitHub runners (`ci/base` + `ci/run/**`,
+`scripts/github-*` wrappers); Forgejo/Hyades CI only for MIT/SIPB work** (djbclark,
+2026-10-18; `forgejo-ci` skill, item 6).
+
 ## Reply formatting — number every list
 
 **Every bulleted list in a reply to djbclark uses numbers or letters, never
@@ -278,7 +284,7 @@ results as work finishes or fails. A one-shot scheduled check is fine.
 ## Heavy builds and tests: run them through `bg` (2026-10-04)
 
 **CI first, then a long wait (2026-10-18).** Before building or testing locally, see whether the work
-can run on Forgejo CI (`forgejo-ci` skill); `bg` refuses a repo with no `load-watch ci decide DIR
+can run on CI (GitHub runners; `forgejo-ci` skill); `bg` refuses a repo with no `load-watch ci decide DIR
 ci|local "..."` decision (exit 3). `bg` never starts a command "anyway": it waits up to 6 h for low
 load and a free slot, then exits 75 without running it, so start it in the background. It pings
 djbclark once when a run takes much longer than usual.
