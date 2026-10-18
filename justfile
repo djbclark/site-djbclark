@@ -187,7 +187,7 @@ shared-mcp-apply *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}
 
 shared-mcp-apply-secrets *args:
-    sudo-secretspec run --reason "apply shared MCP servers (firecrawl gate token and fallback key)" -- just shared-mcp-apply {{ args }}
+    sudo-secretspec run --reason "apply shared MCP servers (firecrawl gate token, router LLM keys)" -- just shared-mcp-apply {{ args }}
 
 shared-mcp-check *args:
     sudo-secretspec run --reason "check shared MCP apply (dry run)" -- env ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}

@@ -112,6 +112,10 @@ shared_mcp_servers:
       FIRECRAWL_SELFHOST_URL: "{{ shared_mcp_firecrawl_api_url }}"
       FIRECRAWL_SELFHOST_API_KEY: "{{ shared_mcp_firecrawl_api_key }}"
       FIRECRAWL_API_KEY: "{{ shared_mcp_firecrawl_fallback_api_key }}"
+      # LLM formats (query, json) run in the router, not on Hyades (2026-10-18): SIPB LLMs
+      # first, then the free LiteLLM pool. The router hides both keys from firecrawl-mcp.
+      FIRECRAWL_ROUTER_SIPB_KEY: "{{ lookup('env', 'MIT_SIPB_API_KEY') | default('', true) }}"
+      FIRECRAWL_ROUTER_LITELLM_KEY: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
 
 # The self-hosted Firecrawl and its gate token. The token is a real secret (the
 # gate is on the public internet): it comes from sudo-secretspec
