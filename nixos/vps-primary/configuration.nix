@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   bb-nix,
   ...
@@ -20,6 +21,10 @@
   athena-afs.pushKeys = [
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAhjpIb8xyRFKfrYvZuwsaH4GgV/ViZfvq5XoNn3SgRy djbclark@mac-athena-tgt-push"
   ];
+  # athena-afs hard-codes a 3000000 KiB (2.9 GiB) cache; the root disk had 8.4 GB free and AFS
+  # use here is light, so cap it at about 490 MiB (djbclark, 2026-10-18). afsd reads this at start;
+  # the running client was resized with `fs setcachesize 500000`.
+  services.openafsClient.cache.blocks = lib.mkForce 500000;
 
   boot.loader.grub.enable = true;
   boot.loader.grub.device = "/dev/sda";
