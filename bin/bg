@@ -69,7 +69,9 @@
 #
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
-export PATH="/opt/homebrew/bin:$PATH"
+# Add brew only when missing: prepending it put brew's python3 (3.15, no pytest) ahead of the
+# caller's ~/.local/bin pin to 3.14, so `bg python3 -m pytest` failed (2026-10-18).
+case ":$PATH:" in *:/opt/homebrew/bin:*) ;; *) export PATH="/opt/homebrew/bin:$PATH" ;; esac
 if [ "$#" -eq 0 ]; then
   echo "usage: bg <command> [args...]" >&2
   exit 2
