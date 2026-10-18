@@ -57,6 +57,11 @@
 
   environment.systemPackages = [ pkgs.vim pkgs.python3 ];
 
+  # /etc/hosts as a writable regular file instead of a store symlink: vpn-slice
+  # (the GlobalProtect split-tunnel script, modules/packages.nix) aborts with
+  # "Cannot read/write /etc/hosts" otherwise (2026-10-17).
+  environment.etc.hosts.mode = "0644";
+
   # Joined to the tailnet 2026-10-13 with a one-time tagged auth key
   # (tag:server: no key expiry); node state lives in /var/lib/tailscale.
   # Public SSH on 22 stays open until the tailnet path is proven.
