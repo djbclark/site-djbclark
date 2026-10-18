@@ -174,7 +174,7 @@ numbered once across the file.
     `high`; codex `gpt-6-astra` and Fable (`high`) only via the `frontier` kind, for what
     really needs them; codex one slice in flight; Fable `xhigh` almost never
     (`ACP_OPERATOR_APPROVED=fable-xhigh`)**; everyday work on other pools. **Fable is a <=50% sublimit of the
-    one Claude weekly** (2026-10-10's "9% left" was a misread). One copy: `skills/model-routing/SKILL.md` *Routing policy* (`memory/feedback_routing_policy_cost_quality.md`).
+    one Claude weekly** (2026-10-10's "9% left" was a misread). One copy: `skills/model-routing/SKILL.md` *Routing policy*; its numbers are `djbclark-ade/config/routing.toml` (`route_agent.py policy --md`). **`acp-dispatch` needs `--kind` and refuses an ineligible pool; `frontier` advises, never edits, unless `ACP_OPERATOR_APPROVED=frontier-exec`; cheapest eligible tier first** (2026-10-18; `memory/feedback_routing_policy_cost_quality.md`).
 33. **Anything likely to take over ~10-15 s starts with `run_in_background:
     true`** (2026-10-04); wait on the notification, never poll; kill your strays.
     **Exception: an Agent-tool sub-agent** waits in bounded foreground calls

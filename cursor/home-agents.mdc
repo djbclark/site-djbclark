@@ -200,7 +200,10 @@ work that really needs them (codex one slice in flight, Fable `xhigh` almost
 never), everyday work on the other pools at
 the minimum spec, proactively via `bigteam`/sub-agents; Fable is a <=50%
 sublimit of the one Claude weekly, not a separate pool (one copy:
-`skills/model-routing/SKILL.md` *Routing policy*). **omp (oh-my-pi), by any route
+`skills/model-routing/SKILL.md` *Routing policy*; numbers in
+`djbclark-ade/config/routing.toml`, `route_agent.py policy --md`). `acp-dispatch`
+needs `--kind`, refuses an ineligible pool, and runs `frontier` as an advisor
+unless `ACP_OPERATOR_APPROVED=frontier-exec`; cheapest eligible tier first (2026-10-18). **omp (oh-my-pi), by any route
 (`omp`, `omp acp`, acp-run, Orca, Herdr), never without djbclark's specific,
 explicit approval for that run** (2026-10-15; acp-run and acp-dispatch refuse it
 unless `ACP_OPERATOR_APPROVED=omp`). **cline** uninstalled 2026-10-17, gated the
