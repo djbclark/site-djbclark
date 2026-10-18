@@ -187,7 +187,10 @@ numbered once across the file.
     `tail`'s: read `out.rc`, never the notification** (2026-10-17: red pytest
     reported green). **Never credit a hook you have not seen run** (`memory/feedback_exit_status_through_pipe.md`)
 34. **Run builds and tests (pytest, tox, nox, `run_tests*.py` too) via `~/ops/site-private/bin/bg`**
-    (**always the full path: bare `bg` is the shell builtin**). **Never set `BG_LOAD_WAIT=0` on a build or Gradle
+    (**always the full path: bare `bg` is the shell builtin**), **with `run_in_background`: it waits up to 6 h
+    for load and slots, never starts "anyway", exits 75 past that (3 = refused) and pings djbclark when a run
+    goes long**; **first see whether it can run on Forgejo CI (`forgejo-ci` skill): bg refuses a repo without
+    a `load-watch ci decide DIR ci|local` decision** (2026-10-18). **Never set `BG_LOAD_WAIT=0` on a build or Gradle
     command** (2026-10-10; one small test file only). **Never `taskpolicy -b` for
     builds**; never throttle or SIGSTOP another session's processes. **Gradle: one
     build at a time, machine-wide** (`memory/feedback_tests_through_bg_caps_and_slots.md`,

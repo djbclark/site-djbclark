@@ -17,16 +17,31 @@
 # mode; there is no per-pid utility clamp, restart the command through bg instead.
 #
 # Admission gate: before starting, wait while the 1-minute load average per core is above
-# BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s for at most
-# BG_LOAD_WAIT seconds (default 900), then start anyway so nothing starves. Piling another
+# BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s. Piling another
 # build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate for a
-# test or a small command, never for a Gradle command (bg raises it back to 900; 2026-10-10).
-# Also reverts an expired Gradle profile (gradle-limits check). When testing bg itself, pass
-# BG_LOAD_WAIT=0, or a busy machine holds the test for the full 15 minutes.
+# test or a small command, never for a Gradle command (2026-10-10); any other value just means
+# "gate on". When the load drops after a wait, bg pauses 5-30 s at random and reads it again, so
+# queued commands don't all start in the same second. Also reverts an expired Gradle profile
+# (gradle-limits check). When testing bg itself, pass BG_LOAD_WAIT=0.
+#
+# Wait budget (djbclark, 2026-10-18): bg never starts a command "anyway". Until then the load gate
+# gave up after 900 s and the slots after 1800 s, so on a day at load 40-70 every queued build ran at
+# once regardless. Now the load gate and the slot waits share one budget, BG_MAX_WAIT seconds
+# (default 21600, 6 h); past it bg exits 75 (EX_TEMPFAIL) without running anything. Agents start bg
+# with run_in_background: a foreground tool call is cut off long before 6 h. Exit 3 stays "refused"
+# (CI-first, Plektra), so a caller can tell the two apart. The command, once started, is never
+# killed by bg.
+#
+# Long-run ping (2026-10-18): a small watcher, forked just before the exec and detached from the
+# caller's output, records each run's duration in ~/.local/state/bg/history.tsv, keyed by repo and
+# the command's first two words ("python pytest", "cargo test", "gradlew assembleDebug"). It sends
+# djbclark one hermes-ping when the run passes max(2 x the median of the last 10 runs,
+# BG_RUN_PING_MIN, default 1800 s), or BG_RUN_PING_DEFAULT (3600 s) with no history, and one when
+# the wait passes BG_PING_WAIT (3600 s). BG_PING_CMD replaces hermes-ping (tests).
 #
 # Gradle slots: a command that runs gradle or gradlew (also behind `env VAR=… ./gradlew`) takes
 # one of BG_GRADLE_SLOTS machine-wide slots (default 1) for its whole run, waiting up to
-# BG_GRADLE_WAIT seconds (default 1800) for one, then starts anyway. On 2026-10-06 eight agents
+# up to the wait budget (BG_MAX_WAIT) for one. On 2026-10-06 eight agents
 # built at once, each worktree started its own daemon, and the 16 GB Mac went 11 GB into swap.
 # A slot is a shlock(1) file holding the build's pid (exec keeps the pid), so a killed build
 # frees its slot. --stop/--status/--version don't take one. BG_GRADLE_SLOTS=0 disables it
@@ -46,7 +61,7 @@
 # Rust/C pools and Python < 3.13 ignore PYTHON_CPU_COUNT; pass the tool's own worker flag too.
 #
 # Test slots: a pytest/tox/nox/run_tests*.py, `swift build|test|run` or xcodebuild command takes one of BG_TEST_SLOTS machine-wide slots
-# (default 2) for its whole run, waiting up to BG_TEST_WAIT seconds (default 1800), the same
+# (default 2) for its whole run, waiting up to the wait budget (BG_MAX_WAIT), the same
 # shlock mechanism as the Gradle slot. --version/--help/--collect-only don't take one.
 # BG_TEST_SLOTS=0 disables it (don't advertise that in messages agents see).
 #
@@ -171,35 +186,81 @@ if [ "$xcode" = 1 ]; then
   done
   [ "$has_jobs" = 1 ] || set -- "$@" -jobs "${BG_CPUS:-3}"
 fi
+bg_t0=$(gdate +%s)
+max_wait="${BG_MAX_WAIT:-21600}"
+bg_repo=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || bg_repo=$PWD
+bg_ping="${BG_PING_CMD:-$HOME/.local/bin/hermes-ping}"
+# bg_key: the command's first two words, past wrappers (nice -n N, env, VAR=x, timeouts) and flags.
+bg_key() {
+  local a skip=0 out=()
+  for a in "$@"; do
+    if [ "$skip" -gt 0 ]; then skip=$((skip - 1)); continue; fi
+    if [ "${#out[@]}" = 0 ]; then
+      case "$a" in
+        nice|env|time|caffeinate|taskpolicy|timeout|gtimeout|[0-9]*|*=*) continue ;;
+        -n) skip=1; continue ;;
+      esac
+    fi
+    case "$a" in -*) continue ;; esac
+    out+=("${a##*/}")
+    [ "${#out[@]}" -ge 2 ] && break
+  done
+  echo "${out[*]}"
+}
+bg_k=$(bg_key "$@")
+waited_s() { echo $(( $(gdate +%s) - bg_t0 )); }
+# dur <seconds>: "6 h" / "45 min" / "20 s" for messages.
+dur() { if [ "$1" -ge 3600 ]; then echo "$(($1 / 3600)) h"; elif [ "$1" -ge 60 ]; then echo "$(($1 / 60)) min"; else echo "$1 s"; fi; }
+wait_pinged=0
+# wait_tick <what>: give up past the budget; ping djbclark once past BG_PING_WAIT.
+wait_tick() {
+  local w; w=$(waited_s)
+  if [ "$w" -ge "$max_wait" ]; then
+    echo "bg: still waiting for $1 after ${w}s (BG_MAX_WAIT=$max_wait); giving up without running it" >&2
+    exit 75
+  fi
+  if [ "$wait_pinged" = 0 ] && [ "$w" -ge "${BG_PING_WAIT:-3600}" ]; then
+    wait_pinged=1
+    "$bg_ping" "${bg_repo##*/}: bg job \"$bg_k\" has waited $(dur "$w") for $1; it gives up at $(dur "$max_wait")" >/dev/null 2>&1 &
+  fi
+}
+
 max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
 wait_s="${BG_LOAD_WAIT:-900}"
 # A Gradle build always keeps the load gate (2026-10-10: a release build started with
 # BG_LOAD_WAIT=0 at load 30 and the machine went to 50-70). BG_LOAD_WAIT=0 is for small test files.
-if [ "$is_gradle" = 1 ] && [ "$wait_s" -lt 900 ]; then
-  echo "bg: Gradle builds always wait for low load (BG_LOAD_WAIT=$wait_s ignored)" >&2
+if [ "$is_gradle" = 1 ] && [ "$wait_s" = 0 ]; then
+  echo "bg: Gradle builds always wait for low load (BG_LOAD_WAIT=0 ignored)" >&2
   wait_s=900
 fi
-if [ "$wait_s" -gt 0 ]; then
+if [ "$wait_s" != 0 ]; then
   cores=$(sysctl -n hw.ncpu)
-  waited=0
+  announced=0
+  clear=0
   while :; do
     load1=$(sysctl -n vm.loadavg | gawk '{print $2}')
     over=$(gawk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
-    [ "$over" = 1 ] || break
-    if [ "$waited" -ge "$wait_s" ]; then
-      echo "bg: load $load1 still above $max_per_core per core after ${waited}s; starting anyway" >&2
-      break
+    if [ "$over" = 0 ]; then
+      # Straight through at low load; after a wait, read it twice with a random pause between.
+      [ "$announced" = 0 ] || [ "$clear" = 1 ] && break
+      clear=1
+      sleep $((5 + RANDOM % 26))
+      continue
     fi
-    [ "$waited" -eq 0 ] && echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting" >&2
+    clear=0
+    wait_tick "load below $max_per_core per core (now $load1)"
+    if [ "$announced" = 0 ]; then
+      announced=1
+      echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
+    fi
     sleep 15
-    waited=$((waited + 15))
   done
 fi
 
-# take_slot <label> <slots> <wait_s> <dir> <hint>: wait for a free shlock slot; the lock holds
-# this shell's pid, which exec keeps, so a killed command frees its slot.
+# take_slot <label> <slots> <dir>: wait for a free shlock slot, within the wait budget; the lock
+# holds this shell's pid, which exec keeps, so a killed command frees its slot.
 take_slot() {
-  local label="$1" slots="$2" wait_s="$3" dir="$4" i got waited=0 held
+  local label="$1" slots="$2" dir="$3" i got announced=0 held
   mkdir -p "$dir"
   while :; do
     got=
@@ -207,28 +268,53 @@ take_slot() {
       if shlock -f "$dir/slot.$i" -p $$ 2>/dev/null; then got=$i; break; fi
     done
     [ -n "$got" ] && return 0
-    if [ "$waited" -ge "$wait_s" ]; then
-      echo "bg: no $label slot free after ${waited}s; starting anyway" >&2
-      return 0
-    fi
-    if [ "$waited" -eq 0 ]; then
+    wait_tick "a machine-wide $label slot"
+    if [ "$announced" = 0 ]; then
+      announced=1
       held=$(cat "$dir"/slot.* 2>/dev/null | gtr '\n' ' ')
       echo "bg: waiting for a machine-wide $label slot (held by pid $held); this is normal, do not kill or retry" >&2
     fi
     sleep 10
-    waited=$((waited + 10))
   done
 }
 
 slots="${BG_GRADLE_SLOTS:-1}"
 if [ "$is_gradle" = 1 ] && [ "$slots" -gt 0 ]; then
-  take_slot Gradle "$slots" "${BG_GRADLE_WAIT:-1800}" "$HOME/.local/state/bg/gradle-slots"
+  take_slot Gradle "$slots" "$HOME/.local/state/bg/gradle-slots"
 fi
 
 tslots="${BG_TEST_SLOTS:-2}"
 if [ "$is_test" = 1 ] && [ "$tslots" -gt 0 ]; then
-  take_slot test "$tslots" "${BG_TEST_WAIT:-1800}" "$HOME/.local/state/bg/test-slots"
+  take_slot test "$tslots" "$HOME/.local/state/bg/test-slots"
 fi
+
+# Long-run watcher (see the header): forked here, so it watches this pid through the exec.
+bg_hist="$HOME/.local/state/bg/history.tsv"
+mkdir -p "${bg_hist%/*}"
+bg_watch() {
+  local pid="$1" t0 lstart now el med limit pinged=0 poll="${BG_WATCH_POLL:-30}"
+  t0=$(gdate +%s)
+  lstart=$(ps -o lstart= -p "$pid" 2>/dev/null)
+  med=$(gawk -F'\t' -v r="$bg_repo" -v k="$bg_k" '$3 == r && $4 == k { d[n++] = $2 }
+    END { if (!n) exit; s = (n > 10) ? n - 10 : 0; m = 0
+          for (i = s; i < n; i++) v[m++] = d[i]
+          asort(v); print (m % 2) ? v[(m + 1) / 2] : int((v[m / 2] + v[m / 2 + 1]) / 2) }' "$bg_hist" 2>/dev/null)
+  if [ -n "$med" ]; then
+    limit=$((2 * med)); [ "$limit" -lt "${BG_RUN_PING_MIN:-1800}" ] && limit=${BG_RUN_PING_MIN:-1800}
+  else
+    limit=${BG_RUN_PING_DEFAULT:-3600}
+  fi
+  while [ -n "$lstart" ] && [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" = "$lstart" ]; do
+    sleep "$poll"
+    now=$(gdate +%s); el=$((now - t0))
+    if [ "$pinged" = 0 ] && [ "$el" -ge "$limit" ]; then
+      pinged=1
+      "$bg_ping" "${bg_repo##*/}: bg job \"$bg_k\" (pid $pid) has run $(dur "$el")${med:+, usually ~$(dur "$med")}; still running, check whether it is stuck" >/dev/null 2>&1
+    fi
+  done
+  printf '%s\t%s\t%s\t%s\n' "$(gdate +%s)" "$(( $(gdate +%s) - t0 ))" "$bg_repo" "$bg_k" >> "$bg_hist"
+}
+bg_watch $$ </dev/null >/dev/null 2>&1 &
 
 cpus="${BG_CPUS:-3}"
 export PYTHON_CPU_COUNT="${PYTHON_CPU_COUNT:-$cpus}"
