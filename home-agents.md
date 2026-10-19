@@ -122,7 +122,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     `acp-run agy`, never `agy -p`** ([[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by default, at the minimum model ×
     effort × context that does it well, unasked**; when `context_size_nudge.py` says delegate, delegate.
-    **Compaction is automatic, never a question to djbclark**; **in a herdr pane or Orca terminal compact yourself
+    **Compaction is automatic, never a question to djbclark**; **in herdr, Orca or Paseo compact yourself
     earlier**, once, at a natural boundary, then end the turn: `~/src/djbclark-ade/bin/self-slash "/compact
     <focus>"`; topic change: `handoff` skill, then `/new` (`memory/feedback_self_compact.md`); **it refuses on
     input-line text: only then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).

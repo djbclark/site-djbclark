@@ -169,8 +169,8 @@ git copy, never a TUI copy; list: `docs/skills.md`), e.g. `bigteam`, `model-rout
 
 **Keep context small: by default send discrete, separable tasks to `bigteam`** (or a sub-agent) at the
 minimum model × effort × context that does it well; past ~40k tokens of growth, delegate from then
-on. Compaction is **automatic, never a question to djbclark** (2026-10-15); in a herdr pane or an Orca
-terminal compact earlier, once, at a natural boundary: `~/src/djbclark-ade/bin/self-slash "/compact
+on. Compaction is **automatic, never a question to djbclark** (2026-10-15); in herdr, Orca or Paseo
+compact earlier, once, at a natural boundary: `~/src/djbclark-ade/bin/self-slash "/compact
 <focus>"`; a topic change runs the `handoff` skill then `/new`. self-slash refuses while anything is
 on the input line; only then ask djbclark to type it, never send over a draft. Never touch another
 bigteam session's claimed files or panes (herdr tab `coord`).
