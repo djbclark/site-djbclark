@@ -3,6 +3,9 @@
 # neofinder-batch-watch — keep the NeoFinder batch volume searchable across
 # restarts and downtime (watchdogd rule "neofinder-batch", roles/watchdogd).
 #
+# UNUSED since 2026-10-19: the watchdogd rule was removed (operator: no
+# automatic runs; ~/.local/bin/neofinder-update by hand). Kept for re-adding.
+#
 # 2026-10-15: the Mac was shut down at 00:03 and booted at 05:00. The 01:15
 # nightly never ran (Jobber does not catch up a missed run), nothing
 # re-attached the image, and at boot macOS created fresh Spotlight stores on
