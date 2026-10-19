@@ -21,9 +21,16 @@
 # enable -> kickstart (works if loaded-but-not-running) -> bootstrap
 # (RunAtLoad fires) if kickstart couldn't find the service.
 #
+# A launchd target is NOT started when its program (the plist's
+# ProgramArguments, exact command line) already runs under another label, e.g.
+# started by LaunchServices (`open`, session restore, an agent's CLI call) as
+# application.<bundle>.*: a KeepAlive job whose single-instance program exits
+# at once would respawn every ~10 s (cua-driver, 2026-10-17: ~6,000 loops, 17 h).
+#
 # Heal pass: STAGGER_HEAL seconds after the last target, re-disable any
-# launchd target found enabled and delete any login item named after an
-# app target. Vendors undo the login skip after a late launch (first real
+# launchd target found enabled, bootout any launchd target that is respawning
+# (runs > 3) and delete any login item named after an app target. Vendors
+# undo the login skip after a late launch (first real
 # boot, 2026-10-15: Default Folder X re-added its login item, Logi's
 # updater re-enabled cp-dev-mgr). Login items go through System Events:
 # needs Automation consent for the responsible process, Homebrew's
@@ -80,6 +87,23 @@ is_disabled() {
     launchctl print-disabled "gui/$UID_" 2>/dev/null | ggrep -qF "\"$1\" => disabled"
 }
 
+svc_runs() {
+    launchctl print "$1" 2>/dev/null | gawk -F' = ' '/^[[:space:]]*runs =/ { print $2; exit }'
+}
+
+# Exact command line of a plist's ProgramArguments, space-joined.
+plist_cmd() {
+    /usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$1" 2>/dev/null \
+        | gsed '1d;$d;s/^ *//' | gpaste -sd' ' -
+}
+
+# True if a process with exactly that command line runs (any label).
+cmd_running() {
+    [ -n "$1" ] || return 1
+    pat=$(printf '%s' "$1" | gsed 's/[][\\.*^$(){}+?|]/\\&/g')
+    pgrep -f "^${pat}\$" > /dev/null 2>&1
+}
+
 heal() {
     log "heal: checking login skips"
     items_ok=1
@@ -95,6 +119,15 @@ heal() {
                     log "heal would re-disable: $a"
                 else
                     launchctl disable "$a" && log "heal: re-disabled $a (was re-enabled)"
+                fi
+                runs=$(svc_runs "$a")
+                if [ "${runs:-0}" -gt 3 ] 2>/dev/null; then
+                    if [ "$DRY" = 1 ]; then
+                        log "heal would bootout (respawning, runs=$runs): $a"
+                    else
+                        launchctl bootout "$a" 2>/dev/null
+                        log "heal: bootout $a (respawning, runs=$runs)"
+                    fi
                 fi ;;
             app)
                 name=$(basename "$a" .app)
@@ -160,8 +193,11 @@ do_app() {
 
 do_launchd() {
     svc="$1"; plist="$2"
+    cmd=$(plist_cmd "$plist")
     if [ "$(svc_state "$svc")" = "running" ]; then
         log "skip (running): $svc"
+    elif cmd_running "$cmd"; then
+        log "skip (program already running under another label): $cmd"
     else
         log "start: $svc"
         if [ "$DRY" = 0 ]; then
