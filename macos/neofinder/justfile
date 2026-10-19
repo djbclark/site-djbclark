@@ -28,7 +28,7 @@ status:
     @echo "image:   $(ls -lh '{{image}}' 2>/dev/null | gawk '{ print $5, $NF }' || echo 'missing (just image)')"
     @echo "mount:   $(mount | ggrep -q ' on {{mount}} ' && echo 'attached at {{mount}}' || echo 'not attached')"
     @echo "index:   $(sudo -n {{applier}} status 2>/dev/null || echo 'unknown (just setup)')"
-    @echo "items:   $(mdfind -onlyin {{mount}} -count 'kMDItemContentType == "*"' 2>/dev/null || echo 0) indexed"
+    @echo "items:   $(mount | ggrep -q ' on {{mount}} ' && echo "$(mdfind -onlyin {{mount}} -count 'kMDItemContentType == "*"' 2>/dev/null || echo 0) indexed" || echo '0 (not attached)')"
     @echo "search:  $([ -f '{{saved}}' ] && echo 'NF Recents saved search installed' || echo 'NF Recents missing (just saved-search)')"
     @echo "last:    $(ggrep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | gtail -n 1 | gcut -c1-160 || true)"
     @echo "services: $({{services}} --check >/dev/null 2>&1 && echo 'Apple background daemons still disabled' || echo 'REGRESSED or unchecked (just services-status)')"
