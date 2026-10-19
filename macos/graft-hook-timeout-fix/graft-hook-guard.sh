@@ -28,6 +28,12 @@ deny_stop=(
 )
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 event="${*: -1}"
+# graft's per-prompt pack (UserPromptSubmit `prompt`) was removed on 2026-10-10 and
+# `graft init` puts it back: ~120-300 tokens on every prompt, kept in history, often
+# off-target (djbclark-ade docs/disabled-skills.md). Skip it unless GRAFT_PROMPT_HOOK=1.
+if [ "$event" = prompt ] && [ -z "${GRAFT_PROMPT_HOOK-}" ]; then
+  exit 0
+fi
 for d in "${deny[@]}"; do
   case "$dir/" in
     "$d"/*) exit 0 ;;
