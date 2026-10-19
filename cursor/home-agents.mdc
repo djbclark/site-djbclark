@@ -145,9 +145,11 @@ too; check its `applied:` line; yolo-only since 2026-10-14, `--perm deny` for re
 0 is not success, verify tests/diff); (2) Orca `worker-start`; (3) a Herdr pane; (4) non-ACP CLIs:
 their own headless recipe. **copilot is the only reserve: floor 60% left, one small GitHub slice**;
 grok is an ordinary pool (2026-10-18; `acp-run grok --model grok-4.7`). **hermes is never a delegation target. Never an all-vendor
-fan-out**: `route_agent.py plan` picks vendor × model × effort per slice. **omp and cline (uninstalled
+fan-out**: `route_agent.py plan` picks vendor × model × effort per slice. **cline (uninstalled
 2026-10-17) never without djbclark's explicit approval for that run** (refused unless
-`ACP_OPERATOR_APPROVED=omp`/`cline`).
+`ACP_OPERATOR_APPROVED=cline`). **The Claude API credits (`omp`, 2026-10-19) are a normal tier,
+used with discernment: `api-only` work first, else code/bulk slices via `acp-run omp --model anthropic/claude-...`,
+never left unspent** (`djbclark-ade/skills/model-routing/SKILL.md`).
 
 **Routing policy (2026-10-15): minimise cost, maximise code quality.** Frontier models are scarce:
 judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only for work that really needs them
