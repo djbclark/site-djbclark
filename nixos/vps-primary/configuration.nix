@@ -75,11 +75,14 @@
   # path to MITnet (home ISP SYNs to forgejo.mit.edu go unanswered; this host reaches it).
   # "server" turns on IPv4/IPv6 forwarding; the route still needs approving once in the
   # admin console (the policy has no autoApprovers).
+  # Subnet route 18.0.0.0/8 (2026-10-18): the Mac now sends only MITnet here and the rest
+  # direct; the full exit node hairpinned everything via Nuremberg (~240 ms, 30% loss).
+  # The exit node stays advertised as a fallback.
   services.tailscale = {
     enable = true;
     openFirewall = true;
     useRoutingFeatures = "server";
-    extraSetFlags = [ "--advertise-exit-node" ];
+    extraSetFlags = [ "--advertise-exit-node" "--advertise-routes=18.0.0.0/8" ];
   };
 
   # Shared Gradle remote build cache: FosterStack cache (github.com/fosterstack/cache,
