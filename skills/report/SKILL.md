@@ -76,7 +76,15 @@ screencapture -x -l "$WID" <scratchpad>/marked-win.png
 ```
 
 (`python3` has no `Quartz` module on this machine; `swift -e` takes ~20 s the
-first time.) Read the PNG with the Read tool and check: superscripts rendered
+first time.) A Marked window opened by `open` has no `kCGWindowName` until it is
+focused, so match on owner name alone if the stem lookup returns nothing. If
+`screencapture -l` (or `-R`) answers "could not create image", this process has
+no Screen Recording permission (seen 2026-10-19 from a Paseo-hosted session):
+do not retry; check the render with
+`pandoc -f markdown -t html <file> -o /tmp/x.html`, count `<sup>` runs and
+`id="..."` anchors, confirm no `href="#id"` lacks an anchor and no literal
+`[^` or `[E` is left, and say in the delivery message that the visual check was
+skipped and why. Read the PNG with the Read tool and check: superscripts rendered
 (no literal `[^E...` or `^E0100` text), repeated citations rendered, paragraphs
 separated, table not wider than the window.
 
