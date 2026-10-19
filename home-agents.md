@@ -139,8 +139,8 @@ numbered once across the file.
     `--effort`/`--context` too, check its `applied:` line; exit 0 is not success; it is
     `~/.local/bin/acp-run`, not in `djbclark-ade/bin`, 2026-10-17); (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing`
     headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice.
-    grok and copilot are reserves: floor 60% left, one small slice, only when that
-    vendor is the point. agy only via `acp-run agy`; gemini deprecated, not installed;
+    copilot is the only reserve: floor 60% left, one small slice, GitHub work only; grok is an ordinary pool
+    (GrokBot moved to its own Cursor pool, 2026-10-18). agy only via `acp-run agy`; gemini deprecated, not installed;
     hermes never a target; omp never without djbclark's explicit yes for that run; cline uninstalled 2026-10-17, gated likewise (Hermes keeps its ClinePass pool)**
     (2026-10-15; acp-run/acp-dispatch gate both); all but muse speak ACP (`acp-run
     --list`). Binary names differ from provider ids ([[reference_agent_rules_code_discovery_and_cli_table]]).

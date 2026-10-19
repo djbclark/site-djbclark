@@ -195,9 +195,9 @@ tests/diff); (2) supervised
 in an Orca repo: `orca orchestration worker-start --agent …`; (3) interactive
 work djbclark watches, and Hermes's TUI: a Herdr pane; (4) non-ACP CLIs: their
 own headless recipe. cline (ClinePass) is a reserve pool, never bulk; copilot
-**grok and copilot are reserves (2026-10-15): floor 60% left, one small slice,
-only when that vendor is the point** (GrokBot and GitHub-side Copilot review run
-on them; `acp-run grok --model grok-4.7`). **hermes is never a delegation
+**copilot is the only reserve (2026-10-15): floor 60% left, one small slice,
+GitHub work only** (GitHub-side Copilot review runs on it). grok is an ordinary
+pool since GrokBot moved to its own Cursor pool (2026-10-18; `acp-run grok --model grok-4.7`). **hermes is never a delegation
 target** (acp-run/acp-dispatch gate it). **Never an all-vendor fan-out**:
 `route_agent.py plan` picks vendor × model × effort per slice. **Routing policy
 (2026-10-15): minimise cost, maximise code quality**; frontier models are scarce
