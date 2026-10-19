@@ -227,9 +227,8 @@ fi
 #   opencode           -> .local/bin (OpenCode v2, npm @opencode/cli) beats
 #                         homebrew's v2 formula; v1's ~/.opencode/bin is off
 #                         PATH since the v2 switch (2026-10-13)
-#   codex              -> .opencodex/bin (opencodex 2.78+ autostart shim, kept
-#                         off package-manager paths; it execs the native
-#                         launcher it recorded) beats .local/bin and homebrew
+#   codex              -> .local/bin (official standalone installer's launcher) beats
+#                         homebrew (the opencodex shim was retired 2026-10-18)
 #   collie             -> .collie/current/bin (Herdr-managed install; `current` follows
 #                         `collie update`, so never pin a versions/vX dir here). No collision.
 #
@@ -305,7 +304,6 @@ if [ -e "$HOME/.cache/go-mod/.moved-from-usb" ]; then
 fi
 
 __path_prepend_force \
-  "$HOME/.opencodex/bin" \
   "$HOME/.local/bin" \
   "$HOME/.collie/current/bin" \
   "/opt/homebrew/opt/rustup/bin" \

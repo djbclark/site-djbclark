@@ -270,13 +270,13 @@ check_resolves adb /opt/homebrew/bin
 check_resolves sqlite3 /usr/bin
 check_resolves grok  /opt/homebrew/bin   # cask grok-build, reinstalled after the 2026-10-08 removal
 check_resolves opencode "$HOME/.local/bin"   # OpenCode v2 (npm @opencode/cli), 2026-10-13
-check_resolves codex "$HOME/.opencodex/bin"   # opencodex 2.78+ shim beats the native launcher
+check_resolves codex "$HOME/.local/bin"   # official standalone launcher (opencodex shim retired 2026-10-18)
 check_resolves aiuse "$HOME/.local/bin"
 # codex is a shell function in interactive bash, so ask for the binary path.
 got=$("${CLEAN_INTERACTIVE[@]}" 'type -P codex' 2>/dev/null </dev/null | gtail -1)
 case $got in
-  "$HOME/.opencodex/bin/"*) ok "codex -> $got (interactive shell)" ;;
-  *) bad "codex -> ${got:-nothing} in interactive bash (expected under ~/.opencodex/bin)"
+  "$HOME/.local/bin/"*) ok "codex -> $got (interactive shell)" ;;
+  *) bad "codex -> ${got:-nothing} in interactive bash (expected under ~/.local/bin)"
      note "look for an installer's 'export PATH=' appended to the END of ~/.bashrc" ;;
 esac
 
