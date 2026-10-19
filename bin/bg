@@ -104,12 +104,50 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
   done
 fi
 # CI-first (djbclark, 2026-10-18): before a build or test runs here, its repo needs a recorded decision
-# about Forgejo CI: `load-watch ci decide DIR ci "CMD"` (bg refuses and names the command), `local "why"`
+# about CI: `load-watch ci decide DIR ci "CMD"` (bg refuses and names the command), `local "why"`
 # (runs here) or `pending` (seeded from repos bg already ran in; runs here, with a reminder). No decision:
 # refuse until the agent has looked at offloading it (forgejo-ci skill) and recorded one. Worktrees and
 # cow pastures take their main repo's decision. BG_ALLOW_LOCAL_CI_ONLY=1 on djbclark's say only (don't
 # advertise it in messages agents see); BG_CI_UNDECIDED_OK=1 lets one small test file through undecided.
 # Fails open if load-watch is missing or errors.
+# In `ci` mode a small targeted test run still runs here (djbclark via djbclark-ade-4d, 2026-10-18): one
+# that names test files, path::test ids or -k (pytest, python -m unittest ids), a cargo test/nextest filter,
+# or gradle --tests. A bare suite, a directory and any build still go to CI.
+ci_targeted() {
+  local a prev="" runner="" sel=0 broad=0 sub=0
+  for a in "$@"; do
+    [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
+    case "${a##*/}" in
+      pytest|py.test) runner=pytest ;;
+      gradle|gradlew) runner=gradle ;;
+      cargo) runner=cargo ;;
+    esac
+    case "$a" in -k|-k?*|--tests|--tests=*|*::*) sel=1 ;; esac
+    case "$runner" in
+      pytest|unittest)
+        case "$a" in
+          -*) ;;
+          *.py) [ -f "$a" ] && sel=1 ;;
+          *) [ -d "$a" ] && broad=1 ;;
+        esac
+        if [ "$runner" = unittest ] && [ "$a" != unittest ]; then
+          case "$a" in -*|*/*) ;; test*.*|*.test*|*.Test*) sel=1 ;; esac
+        fi
+        ;;
+      cargo)
+        if [ "$sub" = 1 ]; then
+          case "$prev" in
+            -p|--package|-F|--features|-j|--jobs|--target|--manifest-path|--profile) ;;
+            *) case "$a" in -*|run) ;; *) sel=1 ;; esac ;;
+          esac
+        fi
+        case "$a" in test|nextest) sub=1 ;; esac
+        ;;
+    esac
+    prev=$a
+  done
+  [ -n "$runner" ] && [ "$sel" = 1 ] && [ "$broad" = 0 ]
+}
 lw="$HOME/src/djbclark-ade/bin/load-watch"
 if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     && top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
@@ -123,13 +161,16 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     echo "bg:   $lw ci decide $top ci \"<command that runs it on CI>\"" >&2
     echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"" >&2
     exit 3
+  elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_targeted "$@"; then
+    echo "bg: $top runs full suites and builds on CI (load-watch ci); this targeted test run stays here." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
-    echo "bg: $top builds and tests on CI only, never on this Mac (load-watch ci)." >&2
+    echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
+    echo "bg: a targeted run may stay here: test files, path::test ids or -k, a cargo test filter, gradle --tests." >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then
     echo "bg: reminder: $top runs locally pending a CI-first decision; see whether it can move to" >&2
-    echo "bg: Forgejo CI (forgejo-ci skill), then: $lw ci decide $top ci|local \"...\"" >&2
+    echo "bg: CI (GitHub runners, forgejo-ci skill), then: $lw ci decide $top ci|local \"...\"" >&2
   fi
 fi
 is_test=0
