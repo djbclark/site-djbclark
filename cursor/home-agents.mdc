@@ -19,8 +19,9 @@ conflict. This is its condensed copy for `cursor-agent`, which reads
 > A deliberate **subset** (`alwaysApply: true`: every section costs context on
 > every Cursor turn); omitted: backups, LLM gateway, Claude Code agent teams.
 > Agents maintain both copies without asking; keep home-agents.md under 200 lines
-> (2026-10-11; Anthropic's CLAUDE.md target) and this copy under 360 lines (≈ its
-> old ~20 KB cap).
+> (2026-10-11; Anthropic's CLAUDE.md target) and 13,500 bytes (2026-10-18; its
+> moved detail is in `memory/reference_agent_rules_ops_housekeeping.md`), and this
+> copy under 360 lines (≈ its old ~20 KB cap).
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
@@ -252,6 +253,12 @@ than it saves. self-slash refuses while anything is on his input line; only then
 ask him to type it, never send over a draft. Another
 session may be running bigteam (herdr tab `coord`): never touch its claimed files
 or panes (bigteam Step 0).
+
+**Compact Instructions** (2026-10-18): when compacting or summarising, keep the
+current task and its status; files touched (absolute paths); djbclark's rulings
+and decisions this session; open items and the exact next step; handoff, report
+and scratchpad paths. Omit tool output, dead ends and anything already in a
+committed file.
 
 ## Fix the cause of a tool-calling mistake (2026-10-06)
 
