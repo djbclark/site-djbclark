@@ -22,7 +22,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
    with `\` goes through Python with an assert**; `sd` is retired. **Mac code uses GNU `g*` where BSD differs**
    (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**;
    **test a NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`) **on the `realpath`**
+2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**
    (`memory/feedback_edit_running_scripts_atomically.md`).
 3. **Default browser:** `open <url>` (Orion), not Chrome (`memory/feedback_always_use_default_browser_orion.md`).
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list (`memory/feedback_all_agents_includes_hermes.md`).

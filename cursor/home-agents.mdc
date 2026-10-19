@@ -249,7 +249,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
    2026-10-14); **always `gsed`, never bare `sed`** (2026-10-15; `bash_habits_gate.py` denies it as a
    Cursor `beforeShellExecution` hook too). **Root/NOPASSWD scripts keep `/usr/bin` tools**; **test a
    NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file, then `mv -f`) **on the `realpath`**, never in
+2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**, never in
    place. (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` (Orion), not Chrome. (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
