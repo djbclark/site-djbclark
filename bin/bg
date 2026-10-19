@@ -111,18 +111,23 @@ fi
 # advertise it in messages agents see); BG_CI_UNDECIDED_OK=1 lets one small test file through undecided.
 # Fails open if load-watch is missing or errors.
 # In `ci` mode a small targeted test run still runs here (djbclark via djbclark-ade-4d, 2026-10-18): one
-# that names test files, path::test ids or -k (pytest, python -m unittest ids), a cargo test/nextest filter,
-# or gradle --tests. A bare suite, a directory and any build still go to CI.
+# that names test files, path::test ids or -k (pytest, python -m unittest ids) or gradle --tests; -k or a
+# ::id also narrows a directory (`pytest tests/ -k foo`). A bare suite, a bare directory and any build go
+# to CI. cargo stays out: a filtered `cargo test` still compiles the whole crate graph here. A filter
+# that matches nearly everything (`-k "not slow"`, `--tests '*'`) gets through: this guards against
+# honest mistakes, not evasion.
 ci_targeted() {
-  local a prev="" runner="" sel=0 broad=0 sub=0
+  local a prev="" runner="" sel=0 narrow=0 broad=0
   for a in "$@"; do
     [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
       pytest|py.test) runner=pytest ;;
       gradle|gradlew) runner=gradle ;;
-      cargo) runner=cargo ;;
     esac
-    case "$a" in -k|-k?*|--tests|--tests=*|*::*) sel=1 ;; esac
+    case "$a" in
+      -k|-k?*|*::*) sel=1; narrow=1 ;;
+      --tests|--tests=*) sel=1 ;;
+    esac
     case "$runner" in
       pytest|unittest)
         case "$a" in
@@ -134,19 +139,10 @@ ci_targeted() {
           case "$a" in -*|*/*) ;; test*.*|*.test*|*.Test*) sel=1 ;; esac
         fi
         ;;
-      cargo)
-        if [ "$sub" = 1 ]; then
-          case "$prev" in
-            -p|--package|-F|--features|-j|--jobs|--target|--manifest-path|--profile) ;;
-            *) case "$a" in -*|run) ;; *) sel=1 ;; esac ;;
-          esac
-        fi
-        case "$a" in test|nextest) sub=1 ;; esac
-        ;;
     esac
     prev=$a
   done
-  [ -n "$runner" ] && [ "$sel" = 1 ] && [ "$broad" = 0 ]
+  [ -n "$runner" ] && [ "$sel" = 1 ] && { [ "$broad" = 0 ] || [ "$narrow" = 1 ]; }
 }
 lw="$HOME/src/djbclark-ade/bin/load-watch"
 if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
@@ -166,7 +162,7 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
     echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
-    echo "bg: a targeted run may stay here: test files, path::test ids or -k, a cargo test filter, gradle --tests." >&2
+    echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests." >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then
     echo "bg: reminder: $top runs locally pending a CI-first decision; see whether it can move to" >&2
