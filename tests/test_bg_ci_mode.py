@@ -92,3 +92,33 @@ def test_bg_refuses_a_bare_suite_in_a_ci_repo(repo, tmp_path_factory):
     assert "FAKE-PYTEST" not in r.stdout
     assert "run instead: scripts/github-test-ref REF" in r.stderr
     assert "a targeted run may stay here" in r.stderr
+
+
+def ci_release(*argv):
+    """Run bg's ci_release() on ARGV."""
+    text = BG.read_text()
+    body = re.search(r"^ci_release\(\) \{.*?^\}", text, re.M | re.S).group(0)
+    return subprocess.run(["bash", "-c", body + '\nci_release "$@"\n', "bg", *argv]).returncode == 0
+
+
+@pytest.mark.parametrize("argv", [
+    ["just", "release", "0.19.1-sudo.26"],
+    ["just", "release-dry", "0.19.1-sudo.26"],
+    ["/opt/homebrew/bin/just", "--yes", "release", "1.0"],
+    ["packaging/release.py", "--version", "1.0"],
+    ["python3", "packaging/release.py", "--version", "1.0"],
+])
+def test_releases_are_recognised(argv):
+    assert ci_release(*argv)
+
+
+@pytest.mark.parametrize("argv", [
+    ["just", "test"],
+    ["just", "build", "release"],
+    ["packaging/release.py", "--version", "1.0", "--local-tests"],
+    ["just", "release", "1.0", "--local-tests"],
+    ["cargo", "build", "--release"],
+    ["./gradlew", "assembleRelease"],
+])
+def test_other_commands_are_not_releases(argv):
+    assert not ci_release(*argv)

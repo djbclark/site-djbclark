@@ -144,6 +144,23 @@ ci_targeted() {
   done
   [ -n "$runner" ] && [ "$sel" = 1 ] && { [ "$broad" = 0 ] || [ "$narrow" = 1 ]; }
 }
+# A release also runs here in `ci` mode (djbclark, 2026-10-18): `just release*` or a release.py, whose
+# test gate is the CI run itself; what stays local is the publish step (tag, tap sync, brew reinstall and
+# brew test on this Mac). `--local-tests` asks a release to run its suites here, so it goes to CI as usual.
+ci_release() {
+  local a runner=""
+  for a in "$@"; do [ "$a" = --local-tests ] && return 1; done
+  for a in "$@"; do
+    case "${a##*/}" in
+      just) runner=just; continue ;;
+      release.py) return 0 ;;
+    esac
+    if [ "$runner" = just ]; then
+      case "$a" in -*) ;; release|release-*) return 0 ;; *) return 1 ;; esac
+    fi
+  done
+  return 1
+}
 lw="$HOME/src/djbclark-ade/bin/load-watch"
 if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     && top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
@@ -159,10 +176,12 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_targeted "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); this targeted test run stays here." >&2
+  elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_release "$@"; then
+    echo "bg: $top runs full suites and builds on CI (load-watch ci); a release gates on CI and publishes here." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
     echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
-    echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests." >&2
+    echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests; so may a release." >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then
     echo "bg: reminder: $top runs locally pending a CI-first decision; see whether it can move to" >&2
