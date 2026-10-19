@@ -134,10 +134,10 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     and Fable `high` only via the `frontier` kind; Fable `xhigh` almost never; claude codes on Sonnet 5.5, never
     Fable**; climb tiers on evidence. **`acp-dispatch` needs `--kind`; `frontier` advises, never edits; cheapest
     eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
-33. **Anything likely over ~10-15 s starts with `run_in_background: true`**; wait on the notification, never poll
+33. **Anything over ~10-15 s uses `run_in_background: true`**; wait on the notification, never poll
     (**Agent-tool sub-agents** wait in bounded foreground calls; `memory/feedback_start_slow_commands_in_background.md`). **Wait on a file or a PID; never `pgrep -f`/`pkill
-    -f` a pattern**; kill your saved `$!`. **Never read a result or exit status through a pipe**: `cmd > out.log
-    2>&1; echo "rc=$?" > out.rc`, and read `out.rc`, never the notification. **Never credit a hook you have not
+    -f` a pattern**; kill your saved `$!`. **Never read a result or exit status through a pipe, or feed `--body-file` from one**: `cmd > out.log
+    2>&1; echo "rc=$?" > out.rc`; read `out.rc`, not the notification. **Never credit a hook you have not
     seen run** (`memory/feedback_exit_status_through_pipe.md`).
 34. **Run builds and tests via `~/ops/site-private/bin/bg`** (**always the full path**) in the background; **first
     see whether CI can run it** (`load-watch ci decide`). **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy
