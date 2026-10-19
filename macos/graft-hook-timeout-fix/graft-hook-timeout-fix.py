@@ -28,10 +28,21 @@ It also routes every graft hook through graft-hook-guard.sh (2026-10-18), which 
 the hook for denied project dirs (~/src/hermes-worktrees): graft's Stop hook otherwise
 runs a detached `graft build .` there that splits into five full hermes-agent trees.
 
+`strip-project DIR...` (2026-10-18) removes graft's hooks from DIR/.claude/settings.json.
+`graft init` in a repo also writes project-scope copies there, as
+`node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs" <event>`. Claude Code runs
+project hooks on top of user hooks, so every graft hook ran twice, and the project's
+UserPromptSubmit `prompt` hook bypassed the guard and put the per-prompt pack back
+(djbclark-ade aef5f51, 2026-10-16). graft-hook-guard.sh calls this on `session-start`, so a
+re-init is undone at the next session. Only graft-hooks.cjs entries go; other hooks and keys
+stay. It does nothing unless the user settings already run graft through the guard (so the
+project copies are duplicates), and never in KEEP_PROJECTS. The file is usually tracked, so
+the edit shows up in `git status` and gets a log line; commit it like any other change.
+
 Remove the timeout part once graft writes seconds (check its settings-merge.js), and the
 refresh part once graft's prompt hook stops rebuilding inline.
 """
-import json, os, tempfile, time
+import json, os, sys, tempfile, time
 
 SETTINGS = os.path.expanduser(os.environ.get("CLAUDE_SETTINGS", "~/.claude/settings.json"))
 LOG = os.path.expanduser("~/.local/state/graft-hook-timeout-fix.log")
@@ -41,6 +52,9 @@ MAX_SANE = 600
 NO_REFRESH = "GRAFT_NO_REFRESH=1 "
 GUARD = os.path.join(os.path.dirname(os.path.realpath(__file__)), "graft-hook-guard.sh")
 SECONDS = {"prompt": 60, "post-edit": 15, "tool-savings": 12, "session-start": 12, "stop": 12}
+# Repos whose project graft hooks are meant to be there: graft's own source tree ships them
+# (upstream trailhq/Graft), and a stripped copy there would ride into an upstream PR.
+KEEP_PROJECTS = [os.path.expanduser("~/src/Graft")]
 
 
 def log(msg):
@@ -73,32 +87,92 @@ def fix(d):
     return changes
 
 
-def main():
+def graft_hooks(d):
+    for event, matchers in (d.get("hooks") or {}).items():
+        for m in matchers if isinstance(matchers, list) else []:
+            for h in m.get("hooks", []) if isinstance(m, dict) else []:
+                if "graft-hooks.cjs" in h.get("command", ""):
+                    yield event, h
+
+
+def strip(d):
+    """Drop graft-hooks.cjs entries; drop matchers, events and `hooks` left empty."""
+    changes = []
+    hooks = d.get("hooks")
+    if not isinstance(hooks, dict):
+        return changes
+    for event in list(hooks):
+        matchers = hooks[event]
+        if not isinstance(matchers, list):
+            continue
+        for m in matchers:
+            if not isinstance(m, dict) or not isinstance(m.get("hooks"), list):
+                continue
+            keep = [h for h in m["hooks"] if "graft-hooks.cjs" not in h.get("command", "")]
+            for h in m["hooks"]:
+                if h not in keep:
+                    changes.append(f"{event}/{h['command'].rstrip().split()[-1]}: removed")
+            m["hooks"] = keep
+        hooks[event] = [m for m in matchers if not (isinstance(m, dict) and m.get("hooks") == [])]
+        if not hooks[event]:
+            del hooks[event]
+    if not hooks:
+        del d["hooks"]
+    return changes
+
+
+def update(path, fn, label):
+    """Apply fn to the JSON file at path and replace it atomically if fn changed anything."""
     for attempt in range(3):
         try:
-            st = os.stat(SETTINGS)
-            with open(SETTINGS) as f:
+            st = os.stat(path)
+            with open(path) as f:
                 d = json.load(f)
         except (OSError, ValueError) as e:
-            log(f"skip: cannot read/parse {SETTINGS}: {e}")  # mid-write or broken: next change retriggers
+            log(f"skip: cannot read/parse {path}: {e}")  # mid-write or broken: next change retriggers
             return
-        changes = fix(d)
+        changes = fn(d)
         if not changes:
             return
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(SETTINGS), prefix=".settings.", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".settings.", suffix=".tmp")
         with os.fdopen(fd, "w") as f:
             json.dump(d, f, indent=2, ensure_ascii=False)
             f.write("\n")
         os.chmod(tmp, st.st_mode & 0o7777)
         # Don't clobber a write that landed while we were working.
-        if os.stat(SETTINGS).st_mtime_ns != st.st_mtime_ns:
+        if os.stat(path).st_mtime_ns != st.st_mtime_ns:
             os.unlink(tmp)
             time.sleep(0.5)
             continue
-        os.replace(tmp, SETTINGS)
-        log("fixed " + "; ".join(changes))
+        os.replace(tmp, path)
+        log(label + "; ".join(changes))
         return
-    log("gave up: settings.json kept changing underneath")
+    log(f"gave up: {path} kept changing underneath")
+
+
+def strip_project(dirs):
+    try:
+        with open(SETTINGS) as f:
+            user = json.load(f)
+    except (OSError, ValueError) as e:
+        log(f"strip-project skip: cannot read/parse {SETTINGS}: {e}")
+        return
+    if not any(GUARD in h["command"] for _, h in graft_hooks(user)):
+        return  # the project copies may be the only graft hooks: leave them
+    for d in dirs:
+        root = os.path.realpath(d)
+        if any(root == os.path.realpath(k) for k in KEEP_PROJECTS):
+            continue
+        path = os.path.join(root, ".claude", "settings.json")
+        if os.path.isfile(path):
+            update(path, strip, f"strip-project {path}: ")
+
+
+def main():
+    if sys.argv[1:2] == ["strip-project"]:
+        strip_project(sys.argv[2:])
+    else:
+        update(SETTINGS, fix, "fixed ")
 
 
 if __name__ == "__main__":

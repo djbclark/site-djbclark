@@ -39,6 +39,18 @@ for d in "${deny[@]}"; do
     "$d"/*) exit 0 ;;
   esac
 done
+# `graft init` in a repo also writes project-scope copies of these hooks to
+# .claude/settings.json: they run on top of the user ones, unguarded (the per-prompt pack
+# included). Strip them in the background; the next session runs without them
+# (graft-hook-timeout-fix.py strip-project, which logs every edit).
+if [ "$event" = session-start ] && [[ -f "$dir/.claude/settings.json" && "$(<"$dir/.claude/settings.json")" == *graft-hooks.cjs* ]]; then
+  fixer="$(dirname "$(realpath "$0")")/graft-hook-timeout-fix.py"
+  for py in /opt/homebrew/bin/python3 /usr/bin/python3; do
+    "$py" -c pass 2>/dev/null || continue
+    "$py" "$fixer" strip-project "$dir" </dev/null >/dev/null 2>&1 &
+    break
+  done
+fi
 if [ "$event" = stop ]; then
   for d in "${deny_stop[@]}"; do
     case "$dir/" in
