@@ -67,7 +67,9 @@ watchdogd_services:
   - funnel-beeper
   - provider-health
   - apple-daemons
-  - neofinder-batch
+  # neofinder-batch removed 2026-10-19 (operator): no scheduled or automatic
+  # NeoFinder runs; ~/.local/bin/neofinder-update runs one by hand. The
+  # template stays in watchdogd.d/ so re-adding the name here restores it.
   - auxkc-heal
 
 # shutdown-thaw: a second, persistent LaunchAgent next to the watchdog

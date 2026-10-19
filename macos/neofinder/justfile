@@ -18,21 +18,19 @@ saved := env_var("HOME") / "Library/Saved Searches/NF Recents.savedSearch"
 default:
     @just --list --unsorted
 
-# Everything below except services: image, root applier + sudoers, Jobber job, saved search.
-install: image setup jobber saved-search
+# Everything below except services: image, root applier + sudoers, saved search.
+install: image setup saved-search
     @echo "install: done (just status shows the state)"
 
 # Read-only overview of every piece.
 status:
     @{{here}}/neofinder-index-setup.sh --status
-    @echo "jobber:  $(jobber list 2>/dev/null | gawk '$1 == "neofinder-nightly" { print $2, "next", $9, $10, $11 }' || true)"
     @echo "image:   $(ls -lh '{{image}}' 2>/dev/null | gawk '{ print $5, $NF }' || echo 'missing (just image)')"
     @echo "mount:   $(mount | ggrep -q ' on {{mount}} ' && echo 'attached at {{mount}}' || echo 'not attached')"
     @echo "index:   $(sudo -n {{applier}} status 2>/dev/null || echo 'unknown (just setup)')"
     @echo "items:   $(mdfind -onlyin {{mount}} -count 'kMDItemContentType == "*"' 2>/dev/null || echo 0) indexed"
     @echo "search:  $([ -f '{{saved}}' ] && echo 'NF Recents saved search installed' || echo 'NF Recents missing (just saved-search)')"
     @echo "last:    $(ggrep 'nightly: ' ~/Library/Logs/neofinder-stub-export/subcommands.log 2>/dev/null | gtail -n 1 | gcut -c1-160 || true)"
-    @echo "watch:   $({{here}}/neofinder-batch-watch probe 2>&1 || true)"
     @echo "services: $({{services}} --check >/dev/null 2>&1 && echo 'Apple background daemons still disabled' || echo 'REGRESSED or unchecked (just services-status)')"
 
 # Create the batch sparse image if it is missing (4 GB APFS, grows on demand).
@@ -56,7 +54,7 @@ saved-search:
     @mkdir -p "$(dirname '{{saved}}')"
     @if cmp -s '{{here}}/nf-recents.savedSearch' '{{saved}}'; then echo "saved-search: current"; else cp '{{here}}/nf-recents.savedSearch' '{{saved}}' && echo "saved-search: installed {{saved}} (add it to the Finder sidebar once: File > Add to Sidebar)"; fi
 
-# Run tonight's job now: retag, stub dates, then index and leave attached.
+# One update now (~/.local/bin/neofinder-update): retag, stub dates, then index and leave attached.
 nightly *args:
     {{python}} {{exporter}} nightly --index {{args}}
 
@@ -79,6 +77,40 @@ index-on:
 # Turn Spotlight indexing off for the batch volume.
 index-off:
     sudo -n {{applier}} off
+
+# Stop everything (~/.local/bin/neofinder-stop): SIGTERM a running nightly (the
+# pid holding its lock), index off + detach the batch volume, then the usual
+# disables: Spotlight off on every volume and the Apple daemons, each with
+# Touch ID only if it has drifted. No schedule restarts anything (2026-10-19).
+stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    lock="$HOME/Library/Application Support/neofinder-stub-export/nightly.lock"
+    pids=$(lsof -t "$lock" 2>/dev/null || true)
+    for p in $pids; do echo "stop: SIGTERM nightly pid $p"; kill -TERM "$p" || true; done
+    for p in $pids; do
+      for _ in $(seq 120); do kill -0 "$p" 2>/dev/null || break; sleep 1; done
+      kill -0 "$p" 2>/dev/null && { echo "stop: pid $p ignored SIGTERM for 120 s, SIGKILL"; kill -KILL "$p" || true; }
+    done
+    [ -n "$pids" ] || echo "stop: no nightly running"
+    if mount | ggrep -q ' on {{mount}} '; then
+      sudo -n {{applier}} off
+      hdiutil detach {{mount}} || hdiutil detach -force {{mount}}
+    else
+      echo "stop: {{mount}} not attached"
+    fi
+    if mdutil -s -a 2>/dev/null | ggrep -q 'Indexing enabled'; then
+      echo "stop: a volume still has Spotlight on; turning it off everywhere (Touch ID)"
+      sudo-ask mdutil -a -i off
+    else
+      echo "stop: Spotlight indexing off on every volume"
+    fi
+    if {{services}} --check >/dev/null 2>&1; then
+      echo "stop: Apple background daemons still disabled"
+    else
+      echo "stop: Apple background daemons regressed; re-applying (Touch ID)"
+      sudo-ask {{services}}
+    fi
 
 # The exporter itself (NeoFinder catalogues -> stubs and aliases), e.g. `just export --list`.
 export *args:
