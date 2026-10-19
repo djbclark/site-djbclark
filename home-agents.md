@@ -5,7 +5,7 @@
 **Loaded into every session: under 200 lines and 13,500 bytes** (2026-10-18;
 `memory/reference_instruction_file_size.md`). Rule plus pointer; dates, cases and narrative go to the
 `site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
-**Agents maintain this file unasked** (djbclark, 2026-10-05), keeping `cursor/home-agents.mdc` in step. A condense
+**Agents maintain this file unasked** (djbclark, 2026-10-05), `cursor/home-agents.mdc` in step. A condense
 proves nothing was lost: `rg -o` every date, `memory/*.md` pointer and `[[link]]` before and after, diff, show each
 dropped one in its new home. Item numbers are unique and stable (other files cite them).
 
@@ -18,7 +18,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 1. **Fast tools:** `rg` **with a path, never `-r`**, `fd`, `ast-grep`, `uv` not `pip`, **`aria2c -x8 -s8` for big
    files**, **`dust`/`gdu` not `du`/`find` for cache sizing**. **Literal replace: `srgn -L --fail-none
    --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
-   means nothing in scope (absolute glob, ignored or dot-dir file, FIND starting `-`: use the Edit tool); **REPL
+   means nothing in scope (cases in the memory file: use the Edit tool); **REPL
    with `\` goes through Python with an assert**. **Mac code uses GNU `g*` where BSD differs**
    (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**;
    **test a NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
@@ -28,19 +28,18 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 4. **"All agents" includes Hermes**, absent from `aiuse` (`memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`;
    a new skill goes in unasked unless sensitive** (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **AI
-   TUIs, agent CLIs and their ACP servers stay on the latest release everywhere: upgrade unasked, never hard-code a
-   version path** (`memory/feedback_ai_tuis_always_latest.md`).
-6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only for agents). **Secrets:
+   TUIs, agent CLIs and ACP servers stay on the latest release: upgrade unasked, never hard-code a version path**
+   (`memory/feedback_ai_tuis_always_latest.md`).
+6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only). **Secrets:
    `sudo-secretspec` only; load its skill first** (every subcommand needs `--reason`).
    (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains`, `web-get`): **search first with the shared
    `mcp__firecrawl__*`; never the paid cloud `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every needed
-   page is eventually fetched**: fall back, fix the tool, or pause and fix it with djbclark; never accept
-   "unfetchable" (`memory/feedback_web_failover_pause.md`).
+   page is eventually fetched**: fall back, fix the tool, or pause and fix it with djbclark; never "unfetchable" (`memory/feedback_web_failover_pause.md`).
 8. **Every list in a reply to djbclark is numbered or lettered, never plain `-`/`*` bullets** (tables are fine);
    **never restart at 1** in one reply: `1.1`/`2.1` or `1a`/`2b`, **each item labelled once**
-   (`memory/feedback_numbered_bullets.md`). **Every URL is a markdown link; copyable details go in prose before
-   a question card** (`memory/feedback_links_clickable_markdown.md`).
+   (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a
+   question card** (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway,
    restarting, or rerunning what has a result; quota tight or pause asked: stop scheduling, let running work finish.
 10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type
@@ -82,14 +81,14 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     stash/add/reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f ~/s/justfile`.
 23. **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo** (`site-private` is
-    private-only; the rest is public `site-djbclark`). **Exception: a new agent skill goes in
+    private; the rest is public `site-djbclark`). **Exception: a new agent skill goes in
     `~/src/djbclark-ade/skills/<name>/` unasked** (`memory/feedback_ask_where_new_things_go.md`).
 35. **MIT/SIPB/Athena work lives in public repos on forgejo.mit.edu under `djbclark/`**, each with a README, listed
     in `djbclark/mit`; never in an ops repo (`memory/feedback_mit_things_live_on_forgejo.md`). **Push with
     `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo`**; plain `git push` fails by design.
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` promoted to
     `deploy-vps-primary`); never a local, side-branch or older commit. Deploy in flight: wait, redeploy the new head,
-    check the deployed revision. Heavy builds and `nix flake update` run on Forgejo CI, not vps-primary.
+    verify the revision. Heavy builds and `nix flake update` run on Forgejo CI, not vps-primary.
 37. **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos; Forgejo/Hyades CI for
     MIT/SIPB and private work that needs it** (`forgejo-ci` item 6).
 
@@ -138,7 +137,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 33. **Anything over ~10-15 s uses `run_in_background: true`**; wait on the notification, never poll
     (**Agent-tool sub-agents** wait in bounded foreground calls; `memory/feedback_start_slow_commands_in_background.md`). **Wait on a file or a PID; never `pgrep -f`/`pkill
     -f` a pattern**; kill your saved `$!`. **Never read a result or exit status through a pipe, or feed `--body-file` from one**: `cmd > out.log
-    2>&1; echo "rc=$?" > out.rc`; read `out.rc`, not the notification. **Never credit a hook you have not
+    2>&1; echo "rc=$?" > out.rc`; read `out.rc`. **Never credit a hook you have not
     seen run** (`memory/feedback_exit_status_through_pipe.md`).
 34. **Run builds and tests via `~/ops/site-private/bin/bg`** (**always the full path**) in the background; **first
     see whether CI can run it** (`load-watch ci decide`). **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy

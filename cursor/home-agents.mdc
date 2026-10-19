@@ -129,7 +129,9 @@ skill, item 6; djbclark 2026-10-19).
 
 **Every bulleted list in a reply to djbclark uses numbers or letters, never plain `-`/`*` bullets**
 (tables are fine). With more than one list, never restart at 1: `1.1`/`2.1` or `1a`/`2b`. Label each
-item once: never a `1.` list marker plus a `1.1` label (2026-10-14).
+item once: never a `1.` list marker plus a `1.1` label (2026-10-14). Every URL is a markdown link
+`[label](url)`; anything to click, copy or paste goes in prose before a question card, which Paseo
+renders unselectable and unlinkified (getpaseo/paseo#3164; 2026-10-19).
 
 ## Other agent CLIs, and delegating to them
 
@@ -257,7 +259,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive.**
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay
-   on the latest release on every machine: upgrade unasked, never hard-code a version path.**
+   on the latest release: upgrade unasked, never hard-code a version path.**
    (`memory/feedback_ai_tuis_always_latest.md`)
 6. **Never pass `--help` to a live-service CLI subcommand**; `collie` is read-only for agents.
    **Secrets: `sudo-secretspec` only; load its skill before scripting it** (every subcommand needs
