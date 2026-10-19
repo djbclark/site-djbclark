@@ -19,13 +19,13 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
    files**, **`dust`/`gdu` not `du`/`find` for cache sizing**. **Literal replace: `srgn -L --fail-none
    --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
    means nothing in scope (absolute glob, ignored or dot-dir file, FIND starting `-`: use the Edit tool); **REPL
-   with `\` goes through Python with an assert**; `sd` is retired. **Mac code uses GNU `g*` where BSD differs**
+   with `\` goes through Python with an assert**. **Mac code uses GNU `g*` where BSD differs**
    (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**;
    **test a NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
-2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**
+2. **Replace shared scripts atomically** (temp file alongside, then `mv -f`) **on the `realpath`**
    (`memory/feedback_edit_running_scripts_atomically.md`).
 3. **Default browser:** `open <url>` (Orion), not Chrome (`memory/feedback_always_use_default_browser_orion.md`).
-4. **"All agents" includes Hermes**, which `aiuse` doesn't list (`memory/feedback_all_agents_includes_hermes.md`).
+4. **"All agents" includes Hermes**, absent from `aiuse` (`memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`;
    a new skill goes in unasked unless sensitive** (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **AI
    TUIs, agent CLIs and their ACP servers stay on the latest release everywhere: upgrade unasked, never hard-code a
@@ -89,8 +89,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` promoted to
     `deploy-vps-primary`); never a local, side-branch or older commit. Deploy in flight: wait, redeploy the new head,
     check the deployed revision. Heavy builds and `nix flake update` run on Forgejo CI, not vps-primary.
-37. **CI for a GitHub-sourced repo runs on free GitHub runners; Forgejo/Hyades CI only for MIT/SIPB work**
-    (`forgejo-ci` skill, item 6).
+37. **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos; Forgejo/Hyades CI for
+    MIT/SIPB and private work that needs it** (`forgejo-ci` item 6).
 
 ## Other agents and delegation
 

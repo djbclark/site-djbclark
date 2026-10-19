@@ -121,8 +121,9 @@ repo; a path moved out of GitHub keeps a stub README (`memory/feedback_mit_thing
 a local, side-branch or older commit. A deploy in flight: wait, redeploy the new head, check the
 deployed revision. Heavy builds and `nix flake update` run on Forgejo CI, not on vps-primary.
 
-**CI for a GitHub-sourced repo runs on free GitHub runners (`ci/base` + `ci/run/**`, `scripts/github-*`
-wrappers); Forgejo/Hyades CI only for MIT/SIPB work** (`forgejo-ci` skill, item 6).
+**Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos (`ci/base` + `ci/run/**`,
+`scripts/github-*` wrappers); Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci`
+skill, item 6; djbclark 2026-10-19).
 
 ## Reply formatting — number every list
 
