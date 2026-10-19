@@ -239,7 +239,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 
 ## Tools and habits (2026-10-06)
 
-1. **Fast tools:** `rg` **always with a path** (2026-10-09; `rtk grep` is BSD grep), `fd`, `ast-grep`,
+1. **Fast tools:** `rg` **with a path, never `-r`** (2026-10-09; `rtk grep` is BSD grep), `fd`, `ast-grep`,
    `uv` not `pip`, **`aria2c -x8 -s8` for big files** (2026-10-17), **`dust`/`gdu` not `du`/`find` for
    cache sizing** (2026-10-11). **Literal replace: `srgn -L --fail-none --stdin-detection
    force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
