@@ -48,7 +48,7 @@ Spotlight indexes only that tree, and Finder search, saved searches and
 
 ```sh
 cd macos/neofinder
-just install   # image, root applier + sudoers line, saved search
+just install   # image, root applier + sudoers line, saved search, ~/.local/bin links
 just status    # everything at a glance
 just services  # optional: disable the Apple background daemons (Touch ID)
 ```
@@ -130,6 +130,7 @@ name there and running `just watchdogd-apply` restores it.
 | `neofinder-spotlight-batch.sh` | Hands-on search window: index, hold, tear down |
 | `neofinder-spotlight-index` | The root-owned applier (`on`/`off`/`status`) |
 | `neofinder-index-setup.sh` | Installs the applier, its config and the sudoers line, idempotently |
+| `neofinder-update` / `neofinder-stop` | `just nightly` / `just stop` by hand; `just links` symlinks them into `~/.local/bin` |
 | `neofinder-batch-watch` | Former watchdogd `probe`/`heal` (rule removed 2026-10-19) |
 | `nf-recents.savedSearch` | The NF Recents saved search |
 | `neofinder-stub-export.example.toml` | Example exporter config |

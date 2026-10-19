@@ -1,0 +1,8 @@
+#!/bin/bash
+# neofinder-update: run one NeoFinder -> Spotlight update by hand (retag,
+# stub dates, then index the batch volume and leave it attached). Nothing is
+# scheduled since 2026-10-19; neofinder-stop undoes the indexing. Extra
+# arguments go to `just nightly`, e.g. --stop-by 18:00.
+# Linked from ~/.local/bin by `just links` (README.md here).
+cd "$(dirname "$(realpath "$0")")" || exit 1
+exec just nightly "$@"

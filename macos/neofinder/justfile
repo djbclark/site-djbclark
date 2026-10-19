@@ -18,8 +18,8 @@ saved := env_var("HOME") / "Library/Saved Searches/NF Recents.savedSearch"
 default:
     @just --list --unsorted
 
-# Everything below except services: image, root applier + sudoers, saved search.
-install: image setup saved-search
+# Everything below except services: image, root applier + sudoers, saved search, ~/.local/bin links.
+install: image setup saved-search links
     @echo "install: done (just status shows the state)"
 
 # Read-only overview of every piece.
@@ -36,6 +36,10 @@ status:
 # Create the batch sparse image if it is missing (4 GB APFS, grows on demand).
 image:
     @if [ -e '{{image}}' ]; then echo "image: {{image}} exists"; else hdiutil create -size 4g -fs APFS -volname NeoFinderBatch -type SPARSE '{{image}}'; fi
+
+# Symlink neofinder-update and neofinder-stop into ~/.local/bin (replaces plain files there).
+links:
+    @for n in neofinder-update neofinder-stop; do ln -sfn '{{here}}'/$n "$HOME/.local/bin/$n" && echo "links: ~/.local/bin/$n -> {{here}}/$n"; done
 
 # Root-owned index applier, its config and the one NOPASSWD sudoers line (Touch ID if changed).
 setup:

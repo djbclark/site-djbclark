@@ -1,0 +1,7 @@
+#!/bin/bash
+# neofinder-stop: stop a running update, turn Spotlight indexing off and
+# detach the batch volume, then the usual disables (Spotlight off on every
+# volume, Apple background daemons). Logic: `just stop`.
+# Linked from ~/.local/bin by `just links` (README.md here).
+cd "$(dirname "$(realpath "$0")")" || exit 1
+exec just stop "$@"
