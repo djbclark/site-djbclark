@@ -30,7 +30,8 @@ opens the URLs above (the bundled web UI); the CLI takes `--host <name>.greyhoun
 Status 2026-10-18: all three daemons answer `/api/health` and the web UI over the tailnet (vps-primary at
 site-djbclark f919386, get at image `ci-eb12788`, Mac app 0.11.4). Android `sh.paseo` 0.11.4 (stayturgid
 `bootstrap_apks`, `just deploy-apks`) is on s24 and t2e; hd8 and p7a were off the tailnet and get it on their
-next `deploy-apks`.
+next `deploy-apks`. t2e has all three hosts. On s24 the app ignores taps (finger and adb alike, even
+after `pm clear`); djbclark will debug it later.
 
 ## Skills
 
