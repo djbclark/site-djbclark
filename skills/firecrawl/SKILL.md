@@ -144,8 +144,9 @@ working around it. The usual failures, in the order to check:
 1. Don't curl the commercial API directly — bypasses the fallback.
 2. Don't paste keys into shell history or notes; the keys live only in the
    0600 LaunchAgent.
-3. Don't bind `firecrawl-router --open` to a non-loopback address; the router
-   refuses it on purpose.
+3. Don't bind `firecrawl-router --open`, or the serve-only form (no child command), to a
+   non-loopback address; the router refuses both on purpose (exit 2; since 2026-10-20 it also
+   checks the address it actually bound, before it accepts a single request).
 4. Don't record a source as "unverified" and move on; pause and `hermes-ping`.
 5. Don't retry the same query against the same tool on an empty result; walk
    the ladder or pause.
