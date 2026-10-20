@@ -164,6 +164,12 @@ def strip_project(dirs):
         if any(root == os.path.realpath(k) for k in KEEP_PROJECTS):
             continue
         path = os.path.join(root, ".claude", "settings.json")
+        # A session whose project dir is $HOME (~ is a working directory here, not a repo)
+        # makes this path the USER settings file. Stripping that removes graft's only
+        # hooks, and the GUARD precondition above then fails forever, so they never come
+        # back (2026-10-18/19: it fired twice; the global wiring was off for a day).
+        if os.path.realpath(path) == os.path.realpath(SETTINGS):
+            continue
         if os.path.isfile(path):
             update(path, strip, f"strip-project {path}: ")
 
