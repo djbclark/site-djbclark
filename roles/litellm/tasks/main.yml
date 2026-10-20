@@ -72,7 +72,7 @@
 # {{ litellm_source_dir }}, so local provider work can be contributed upstream.
 # It is installed by hand, outside Ansible:
 #
-#   uv tool install --editable "{{ litellm_source_dir }}[proxy,caching]"
+#   uv tool install --editable "{{ litellm_source_dir }}[proxy,caching,extra_proxy]"
 #
 # Ansible has no way to express a git-checkout source today, and the
 # `uv tool install <pypi-spec>` install/repair tasks that used to live here
@@ -97,7 +97,7 @@
     fail_msg: >-
       No runnable LiteLLM at {{ litellm_bin }}. This role does not install it —
       install the git checkout by hand with:
-      uv tool install --editable "{{ litellm_source_dir }}[proxy,caching]"
+      uv tool install --editable "{{ litellm_source_dir }}[proxy,caching,extra_proxy]"
 
 - name: Parse installed LiteLLM version
   ansible.builtin.set_fact:
@@ -140,7 +140,7 @@
       not the expected checkout "{{ litellm_source_dir }}/litellm". Something
       reinstalled LiteLLM from PyPI, which drops any provider only present in
       the fork. Reinstall with:
-      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching]"
+      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching,extra_proxy]"
 
 - name: Verify the disk-cache extra is present in the LiteLLM tool environment
   ansible.builtin.command:
@@ -159,7 +159,29 @@
     fail_msg: >-
       `import diskcache` failed in {{ litellm_tool_python }}, so the configured
       disk cache would not work. Reinstall the checkout including extras:
-      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching]"
+      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching,extra_proxy]"
+
+# Upstream moved prisma and psycopg out of `proxy` into `extra_proxy` (2026-10);
+# a `--reinstall` with the old `[proxy,caching]` spec silently dropped prisma
+# (2026-10-20), and without it the proxy cannot use its database.
+- name: Verify the DB extra is present in the LiteLLM tool environment
+  ansible.builtin.command:
+    argv:
+      - "{{ litellm_tool_python }}"
+      - -c
+      - import prisma, psycopg
+  register: _litellm_db_extra
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require the DB extra
+  ansible.builtin.assert:
+    that: _litellm_db_extra.rc == 0
+    fail_msg: >-
+      `import prisma, psycopg` failed in {{ litellm_tool_python }}, so the proxy
+      cannot reach its database. Reinstall the checkout including extras:
+      uv tool install --force --editable "{{ litellm_source_dir }}[proxy,caching,extra_proxy]"
 
 - name: Ensure LiteLLM runtime directories exist
   ansible.builtin.file:

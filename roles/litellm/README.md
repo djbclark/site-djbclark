@@ -18,7 +18,7 @@ Since 2026-08-21 LiteLLM runs from a **git checkout** — a fork of
 contributed upstream. It is installed by hand:
 
 ```bash
-uv tool install --editable "$HOME/src/litellm[proxy,caching]"
+uv tool install --editable "$HOME/src/litellm[proxy,caching,extra_proxy]"
 ```
 
 That keeps the same `~/.local/bin/litellm` shim the service unit already
