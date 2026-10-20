@@ -57,8 +57,11 @@
     <false/>
     <key>ThrottleInterval</key>
     <integer>{{ litellm_throttle_interval }}</integer>
+{# Standard, not Background (2026-10-20): Background puts every thread, children
+   included, in the darwin background band: the 4 E cores only, with throttled disk
+   and network. Agents block on this gateway; under load that band gets ~0.02 of a core. #}
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
     <key>Umask</key>
     <integer>63</integer>
     {#- Only the shell/pipe itself can write here (e.g. python3 missing). #}
