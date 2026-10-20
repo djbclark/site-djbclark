@@ -129,7 +129,7 @@ VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
 VPS_DOWN_AFTER="${FLEET_WATCH_VPS_DOWN_AFTER:-3}"
 # get backup staleness (2026-10-16, asked by the sipb-fa session, approved by djbclark): defeat
-# pulls a nightly restic backup of get; ~/src/get's `scripts/backup-check stale` prints one line
+# pulls nightly rsync snapshots of get (restic until 2026-10-20; get parked since then, so "stale"); ~/src/get's `scripts/backup-check stale` prints one line
 # and exits 1 when the last success is older than 30 h or defeat is unreachable (ssh defeat).
 # Probed at most every GETBACKUP_INTERVAL seconds; "unreachable" is announced only after
 # GETBACKUP_DOWN_AFTER consecutive failed probes (the Mac off the network is not news), "stale" at once.
