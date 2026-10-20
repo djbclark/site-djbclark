@@ -76,7 +76,7 @@ One shared MCP server, `http://127.0.0.1:18796/mcp`; never register a per-client
 
 Edit `~/ops/{stayturgid,site-djbclark,site-private}` in place on `master`; **commit and push your own
 changes as each unit lands, unasked** (2026-10-12). A file also holding another agent's edits: stage
-only your hunks (`git apply --cached`); **always `git commit -- <your paths>`**, never a bare `git
+only your hunks (`git apply --cached`); **always `git commit -m MSG -- <paths>`**, never a bare `git
 commit` (it takes what another agent staged too, 2026-10-18). **Running deployments read `~/ops`**:
 check what reads a file first, keep commits small, prefer a quick revert.
 

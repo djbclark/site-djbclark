@@ -61,7 +61,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`
     (`memory/feedback_claude_md_symlink_to_agents_md.md`).
 21. **Commit and push your own changes, every repo, as each unit lands, unasked. A file shared with another agent's edits: stage only your hunks (`git apply --cached`);
-    always `git commit -- <your paths>`**, never a bare `git commit` (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments
+    always `git commit -m MSG -- <paths>`**, never bare `git commit` (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments
     read it**). Never stage `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits
     ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f
