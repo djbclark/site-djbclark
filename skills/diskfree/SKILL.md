@@ -33,7 +33,9 @@ numbers.
 3. **Nothing mid-build, nothing that belongs to another live agent.** Check
    before deleting (the trust rule cuts both ways — peers' running work is the
    operator's): `pgrep -fl` for the tool, `lsof` for open files. When unsure,
-   ask the operator or the session that owns it.
+   ask the operator or the session that owns it. **Re-check in the same command
+   as the delete** (`pgrep ... || rm ...`): an idle check made when you asked the
+   question is stale by the time the answer comes back (2026-10-20).
 4. **Never `rm -rf ~/.cache` or `~/.cargo` wholesale** — clear per tool (step 2).
 5. Ask before each destructive step; one category per confirmation. Never
    delete: live SQLite/WAL stores (`~/.local/share/s1-evidence`, hermes
@@ -65,7 +67,7 @@ thorough but slow.
 | pnpm | `pnpm store prune` | none (compression also works, step 4) |
 | go modules | `go clean -modcache` | **never plain `rm -rf`**: files are mode 0444, a plain rm fails halfway and leaves a broken tree |
 | go build | `go clean -cache` | no go build running |
-| cargo shared targets | `rm -rf ~/.cargo/target-shared` | no `cargo`/`rustc` running — this was 56 GB once |
+| cargo shared targets | `pgrep -x cargo >/dev/null \|\| pgrep -x rustc >/dev/null \|\| pgrep -f maturin >/dev/null \|\| rm -rf ~/.cargo/target-shared` | no `cargo`/`rustc`/`maturin` running **at the moment of the delete**: the guard is in the same command, never only at question time (2026-10-20: a delete approved minutes earlier broke a live maturin build) — this was 56 GB once |
 | pre-commit | `rm -rf ~/.cache/pre-commit` | none |
 | pip | `pip cache purge` | none |
 | gradle | `rm -rf ~/.cache/gradle` | **idle only**: `pgrep -fl 'GradleWrapperMain\|gradle-wrapper.jar'` empty AND `~/.local/state/gradle-slot/STATUS` shows no holder (one build at a time machine-wide); mostly jars, so compression gains little — deleting is the move, but it forces full re-downloads |
