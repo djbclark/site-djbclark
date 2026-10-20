@@ -1,0 +1,179 @@
+#!/bin/bash
+# tired-backlight-watchdog — turn the MacBook's screen and keyboard backlights
+# off whenever the lid is closed, in every power configuration (tired awake /
+# normal / revert, AC or battery, with or without an external display).
+#
+#   tired-backlight-watchdog --loop     Run forever (the LaunchAgent does this)
+#   tired-backlight-watchdog --once     One enforcement pass, then exit
+#   tired-backlight-watchdog --status   Print lid, display and keyboard state
+#
+# Why it is needed: with `pmset -a disablesleep 1` (tired awake) a closed lid no
+# longer sleeps the Mac, so nothing takes the usual sleep path that darkens the
+# panel and keyboard; caffeinate-style assertions cannot help either. Apple's own
+# clamshell mode (external display + power) blanks the built-in panel but may
+# leave the keyboard backlight on.
+#
+# What it does while the lid is closed (no root needed for any of it):
+#   - keyboard backlight -> 0 (mac-brightnessctl), level saved for lid open
+#   - no external display active: `pmset displaysleepnow` while the built-in
+#     panel is awake (this blanks every display, so never with an external one)
+#   - built-in panel still lit despite that (or alongside an external display):
+#     built-in brightness -> 0 via DisplayServices, level saved for lid open
+# On lid open it restores the saved levels. A saved level found at start-up with
+# the lid open is restored at once, so a crash or reboot cannot leave a dark panel.
+#
+# Absolute paths throughout: launchd gives agents a minimal environment.
+set -u
+
+STATE_DIR="${HOME}/.local/state/tired"
+LOG_FILE="${STATE_DIR}/backlight-watchdog.log"
+KEYBOARD_SNAPSHOT="${STATE_DIR}/keyboard-brightness-before-lid-close"
+DISPLAY_SNAPSHOT="${STATE_DIR}/display-brightness-before-lid-close"
+BRIGHTNESSCTL=/opt/homebrew/bin/mac-brightnessctl
+PYTHON=/usr/bin/python3
+POLL_SECONDS="${TIRED_WATCHDOG_POLL:-2}"        # lid-state poll interval
+ENFORCE_SECONDS="${TIRED_WATCHDOG_ENFORCE:-15}" # re-check while closed
+LOG_MAX_BYTES=1048576
+/bin/mkdir -p "$STATE_DIR"
+
+log() {
+    if [[ -f "$LOG_FILE" ]] && (( $(/usr/bin/stat -f %z "$LOG_FILE") > LOG_MAX_BYTES )); then
+        /bin/mv -f "$LOG_FILE" "${LOG_FILE}.1"
+    fi
+    printf '%s %s\n' "$(/bin/date '+%Y-%m-%d %H:%M:%S%z')" "$*" >> "$LOG_FILE"
+}
+
+# Built-in display via CoreGraphics (public) and DisplayServices (private, the
+# same call the brightness keys use). `state` prints:
+#   builtin_id builtin_active builtin_asleep external_active brightness
+# `set ID LEVEL` sets the built-in panel's brightness (0.0-1.0).
+# shellcheck disable=SC2016
+DISPLAY_PY='
+import ctypes, sys
+cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+ds = ctypes.CDLL("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices")
+for f in ("CGDisplayIsBuiltin", "CGDisplayIsActive", "CGDisplayIsAsleep"):
+    getattr(cg, f).restype = ctypes.c_bool
+ds.DisplayServicesSetBrightness.argtypes = [ctypes.c_uint32, ctypes.c_float]
+if sys.argv[1] == "set":
+    sys.exit(ds.DisplayServicesSetBrightness(int(sys.argv[2]), float(sys.argv[3])))
+ids = (ctypes.c_uint32 * 16)(); n = ctypes.c_uint32()
+cg.CGGetOnlineDisplayList(16, ids, ctypes.byref(n))
+builtin, active, asleep, external, level = 0, 0, 0, 0, -1.0
+for d in ids[:n.value]:
+    if cg.CGDisplayIsBuiltin(d):
+        builtin, active, asleep = d, int(cg.CGDisplayIsActive(d)), int(cg.CGDisplayIsAsleep(d))
+        b = ctypes.c_float()
+        if ds.DisplayServicesGetBrightness(d, ctypes.byref(b)) == 0:
+            level = b.value
+    elif cg.CGDisplayIsActive(d):
+        external = 1
+print(builtin, active, asleep, external, "%.4f" % level)
+'
+
+display_state() { "$PYTHON" -I -c "$DISPLAY_PY" state 2>/dev/null; }
+set_display_brightness() { "$PYTHON" -I -c "$DISPLAY_PY" set "$1" "$2" >/dev/null 2>&1; }
+
+# AppleClamshellState is Yes when the lid is closed (~13 ms per call).
+lid_closed() {
+    [[ "$(/usr/sbin/ioreg -r -k AppleClamshellState -d 1 2>/dev/null \
+        | /usr/bin/awk -F'= ' '/"AppleClamshellState"/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')" == "Yes" ]]
+}
+
+keyboard_level() {
+    "$BRIGHTNESSCTL" 2>/dev/null | /usr/bin/awk -F': ' '/Current brightness:/ {print $2; exit}'
+}
+
+is_level() { [[ "$1" =~ ^[0-9]*\.?[0-9]+$ ]]; }
+above_zero() { is_level "$1" && /usr/bin/awk "BEGIN {exit !($1 > 0.001)}"; }
+
+enforce_closed() {
+    local kb builtin active asleep external level
+    kb=$(keyboard_level)
+    if above_zero "$kb"; then
+        [[ -s "$KEYBOARD_SNAPSHOT" ]] || printf '%s\n' "$kb" > "$KEYBOARD_SNAPSHOT"
+        "$BRIGHTNESSCTL" 0 >/dev/null 2>&1 \
+            && log "keyboard backlight ${kb} -> 0 (lid closed)"
+    fi
+
+    read -r builtin active asleep external level <<< "$(display_state)"
+    [[ -n "${builtin:-}" && "$builtin" != "0" ]] || return 0
+    if [[ "$active" == "1" && "$asleep" == "0" && "$external" == "0" ]]; then
+        /usr/bin/pmset displaysleepnow >/dev/null 2>&1 \
+            && log "display sleep forced (lid closed, built-in panel was awake)"
+        /bin/sleep 2
+        read -r builtin active asleep external level <<< "$(display_state)"
+    fi
+    # Still lit: the panel ignored display sleep, or an external display is up
+    # and the built-in one was not switched off. Darken the built-in panel only.
+    if [[ "$active" == "1" && "$asleep" == "0" ]] && above_zero "$level"; then
+        [[ -s "$DISPLAY_SNAPSHOT" ]] || printf '%s\n' "$level" > "$DISPLAY_SNAPSHOT"
+        set_display_brightness "$builtin" 0 \
+            && log "built-in display brightness ${level} -> 0 (lid closed, panel still awake, external=${external})"
+    fi
+}
+
+restore_open() {
+    local saved builtin rest
+    if [[ -s "$DISPLAY_SNAPSHOT" ]]; then
+        saved=$(/usr/bin/tr -d '[:space:]' < "$DISPLAY_SNAPSHOT")
+        read -r builtin rest <<< "$(display_state)"
+        if is_level "$saved" && [[ -n "${builtin:-}" && "$builtin" != "0" ]]; then
+            set_display_brightness "$builtin" "$saved" \
+                && log "restored built-in display brightness to ${saved} (lid open)"
+        fi
+        /bin/rm -f "$DISPLAY_SNAPSHOT"
+    fi
+    if [[ -s "$KEYBOARD_SNAPSHOT" ]]; then
+        saved=$(/usr/bin/tr -d '[:space:]' < "$KEYBOARD_SNAPSHOT")
+        # Leave it alone if something (the user, auto-brightness) already lit it.
+        if is_level "$saved" && ! above_zero "$(keyboard_level)"; then
+            "$BRIGHTNESSCTL" "$saved" >/dev/null 2>&1 \
+                && log "restored keyboard backlight to ${saved} (lid open)"
+        fi
+        /bin/rm -f "$KEYBOARD_SNAPSHOT"
+    fi
+}
+
+cmd_loop() {
+    local was_closed=unknown last_enforce=0 now kb_raw kb_rc
+    log "watchdog started (pid $$, poll ${POLL_SECONDS}s, enforce ${ENFORCE_SECONDS}s)"
+    while :; do
+        now=$(/bin/date +%s)
+        if lid_closed; then
+            if [[ "$was_closed" != "yes" ]]; then
+                # Raw reading, to tell "macOS already dimmed it" from "no reading".
+                kb_raw=$("$BRIGHTNESSCTL" 2>&1); kb_rc=$?
+                log "lid closed (mac-brightnessctl rc=${kb_rc}: $(/usr/bin/tr '\n' ' ' <<< "$kb_raw" | /usr/bin/cut -c1-120))"
+                was_closed=yes
+                last_enforce=0
+            fi
+            if (( now - last_enforce >= ENFORCE_SECONDS )); then
+                enforce_closed
+                last_enforce=$now
+            fi
+        else
+            if [[ "$was_closed" != "no" ]]; then
+                [[ "$was_closed" == "yes" ]] && log "lid opened"
+                restore_open
+                was_closed=no
+            fi
+        fi
+        /bin/sleep "$POLL_SECONDS"
+    done
+}
+
+cmd_status() {
+    local lid builtin active asleep external level
+    if lid_closed; then lid=closed; else lid=open; fi
+    read -r builtin active asleep external level <<< "$(display_state)"
+    echo "lid=${lid} keyboard=$(keyboard_level) builtin_display=${builtin:-?} active=${active:-?}" \
+        "asleep=${asleep:-?} brightness=${level:-?} external_display=${external:-?}"
+}
+
+case "${1:---once}" in
+    --loop) cmd_loop ;;
+    --once) if lid_closed; then enforce_closed; else restore_open; fi ;;
+    --status) cmd_status ;;
+    *) echo "usage: tired-backlight-watchdog [--loop|--once|--status]" >&2; exit 2 ;;
+esac

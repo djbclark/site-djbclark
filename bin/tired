@@ -1,0 +1,739 @@
+#!/usr/bin/env bash
+# tired — power-mode helper for this Mac
+#
+#   tired hibernate   [-y|--yes]  True hibernation (mode 25), then restore mode 3
+#   tired awake              Ignore lid close / never sleep (AC + battery)
+#   tired normal                  Restore day-to-day sleep settings
+#   tired help                    This help
+#
+# After every mutating subcommand, prints BEFORE and AFTER power state.
+set -euo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tired"
+SNAPSHOT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/power-mode-snapshots"
+NORMAL_SNAPSHOT="$STATE_DIR/normal-snapshot.txt"
+MODE_FILE="$STATE_DIR/mode"   # "normal" | "awake"
+# Closed-lid backlight watchdog: a user LaunchAgent in every mode, not just awake.
+WATCHDOG_BIN="$HOME/.local/bin/tired-backlight-watchdog"
+WATCHDOG_LABEL="com.djbclark.tired-backlight-watchdog"
+# awake mode's caffeinate -ims, owned by launchd so it survives reboot.
+CAFFEINATE_LABEL="com.djbclark.tired-awake-caffeinate"
+# Same default as ~/.local/bin/hibernate-disk-check
+HIBERNATE_DISK_THRESHOLD_GB="${HIBERNATE_DISK_THRESHOLD_GB:-25}"
+
+# ---- known-good "normal" profile for this machine (MacBook Air M1) --------
+# Captured 2026-07-19 / restored 2026-07-20. A live snapshot is also saved
+# whenever awake is entered from a non-awake state.
+apply_normal_defaults() {
+    /usr/bin/pmset -a disablesleep 0
+    # Battery
+    /usr/bin/pmset -b sleep 1
+    /usr/bin/pmset -b displaysleep 2
+    /usr/bin/pmset -b disksleep 10
+    /usr/bin/pmset -b standby 1
+    /usr/bin/pmset -b hibernatemode 3
+    /usr/bin/pmset -b lowpowermode 0
+    /usr/bin/pmset -b powernap 0
+    /usr/bin/pmset -b ttyskeepawake 1
+    /usr/bin/pmset -b tcpkeepalive 0
+    /usr/bin/pmset -b womp 0
+    /usr/bin/pmset -b lessbright 0
+    # AC
+    /usr/bin/pmset -c sleep 0
+    /usr/bin/pmset -c displaysleep 180
+    /usr/bin/pmset -c disksleep 10
+    /usr/bin/pmset -c standby 1
+    /usr/bin/pmset -c hibernatemode 3
+    /usr/bin/pmset -c lowpowermode 0
+    /usr/bin/pmset -c powernap 0
+    /usr/bin/pmset -c ttyskeepawake 1
+    /usr/bin/pmset -c tcpkeepalive 0
+    /usr/bin/pmset -c womp 0
+}
+
+apply_awake() {
+    # Ignore lid close and never auto-sleep on any power source.
+    # Keep the display on while the lid is open; the backlight watchdog
+    # darkens the panel and keyboard within seconds of the lid closing.
+    /usr/bin/pmset -a disablesleep 1
+    /usr/bin/pmset -a sleep 0
+    /usr/bin/pmset -a disksleep 0
+    /usr/bin/pmset -a displaysleep 0
+    /usr/bin/pmset -a standby 0
+    /usr/bin/pmset -a autopoweroff 0 2>/dev/null || true
+    /usr/bin/pmset -a hibernatemode 0
+    /usr/bin/pmset -a ttyskeepawake 1
+}
+
+# ---- helpers ---------------------------------------------------------------
+
+# One-line command list (status / bare `tired`).
+commands_oneline() {
+    cat <<'EOF'
+Commands:
+  tired / tired status           Current power state + this command list
+  tired help                     Full multi-line help for every subcommand
+  tired hibernate [-y|--yes]     True hibernate now (mode 25→3); type yes unless -y
+  tired awake                    Ignore lid close / never sleep (AC + battery)
+  tired normal                   Restore as-shipped Apple defaults (SleepDisabled off, mode 3)
+  tired revert                   Restore previous state from snapshot
+EOF
+}
+
+usage() {
+    cat <<'EOF'
+tired — switch this Mac between normal sleep, forced no-sleep, and true hibernate
+
+Usage:
+  tired                 Current power state + one-line command list
+  tired status          Same as bare tired
+  tired help            Full help (this message)
+  tired <subcommand> [options]
+
+Subcommands:
+
+  hibernate [-y | --yes]
+      Force a true hibernation right now:
+        • Writes a full RAM image to disk (hibernatemode 25)
+        • Powers off RAM (zero-battery draw while stashed)
+        • On wake, restores hibernatemode 3 (instant-wake lid sleep)
+      Requires typing "yes" to confirm, unless -y / --yes is given.
+      Always runs a hibernate-disk-check style report (free GB on /,
+        RAM size, alert threshold default 25GB via HIBERNATE_DISK_THRESHOLD_GB)
+        and refuses to hibernate if free space is below the image size or
+        the safe margin (RAM + 4GB). Low-but-usable space (under the alert
+        threshold) is reported as a warning but still allowed after confirm.
+      Keep this terminal open until the Mac wakes — restore runs after wake.
+
+  awake
+      Put the Mac in the "walk away with lid closed" profile:
+        • SleepDisabled = 1  (ignore lid close)
+        • sleep = 0 / disksleep = 0 / displaysleep = 0 while lid is open
+        • lid closed: the backlight watchdog turns screen + keyboard off
+        • standby = 0, hibernatemode = 0
+        • Starts caffeinate -ims as belt-and-suspenders, under the LaunchAgent
+          com.djbclark.tired-awake-caffeinate so it survives logout and reboot
+      Snapshots the current power profile first (if not already awake)
+      so "tired revert" can put you back exactly.
+
+  normal
+      Restore day-to-day as-shipped Apple defaults:
+        • SleepDisabled = 0
+        • Battery: sleep 1m, display 2m, disk 10m, standby on, hibernatemode 3
+        • AC:      sleep never, display 180m, disk 10m, standby on, hibernatemode 3
+        • Stops the awake caffeinate process
+      Uses known-good defaults for this machine.
+
+  revert
+      Restore the exact sleep state from the last snapshot taken before awake mode.
+      • Stops the awake caffeinate process.
+
+  status
+      Print current power state and the one-line command list (same as bare tired).
+
+  help
+      Show this full help message.
+
+Notes:
+  • In every mode, closing the lid turns the screen and keyboard backlights
+    off within seconds, and opening it restores them. tired-backlight-watchdog
+    does this from the LaunchAgent com.djbclark.tired-backlight-watchdog,
+    which every tired command reinstalls if it is missing.
+    Log: ~/.local/state/tired/backlight-watchdog.log
+  • Mutating subcommands require admin (sudo / password prompt).
+  • After every mutating subcommand, BEFORE and AFTER power state are printed.
+  • hibernate-now is a compatibility wrapper for: tired hibernate
+EOF
+}
+
+cmd_status() {
+    dump_power_state "CURRENT STATE"
+    echo
+    commands_oneline
+}
+
+need_state_dir() {
+    mkdir -p "$STATE_DIR" "$SNAPSHOT_DIR"
+}
+
+# Mirrors ~/.local/bin/hibernate-disk-check: free space on /, RAM-sized
+# hibernation image, and the same alert threshold (default 25GB).
+# Always prints findings. Sets globals:
+#   HIBERNATE_DISK_FREE_GB, HIBERNATE_DISK_RAM_GB, HIBERNATE_DISK_STATUS
+#   (ok | low | insufficient)
+# Returns 0 if hibernate is safe enough to proceed, 1 if it must be blocked.
+check_and_report_hibernate_disk() {
+    local free_gb ram_gb threshold margin
+    free_gb=$(df -g / | awk 'NR==2 {print $4}')
+    ram_gb=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
+    threshold="${HIBERNATE_DISK_THRESHOLD_GB}"
+    # Same safety margin hibernate-now used: room for the image + headroom.
+    margin=$(( ram_gb + 4 ))
+
+    HIBERNATE_DISK_FREE_GB=$free_gb
+    HIBERNATE_DISK_RAM_GB=$ram_gb
+
+    local status verdict
+    if (( free_gb < ram_gb )); then
+        status="INSUFFICIENT"
+        verdict="cannot fit a full RAM hibernation image"
+        HIBERNATE_DISK_STATUS="insufficient"
+    elif (( free_gb < margin )); then
+        status="INSUFFICIENT"
+        verdict="below safe margin (RAM + 4GB = ${margin}GB)"
+        HIBERNATE_DISK_STATUS="insufficient"
+    elif (( free_gb < threshold )); then
+        status="LOW"
+        verdict="under alert threshold (${threshold}GB) — same as hibernate-disk-check"
+        HIBERNATE_DISK_STATUS="low"
+    else
+        status="OK"
+        verdict="enough free space for hibernation"
+        HIBERNATE_DISK_STATUS="ok"
+    fi
+
+    echo "========== Hibernate disk check =========="
+    echo "  Free on /:              ${free_gb} GB"
+    echo "  RAM (max image size):   ${ram_gb} GB"
+    echo "  Safe margin:            ${margin} GB  (RAM + 4)"
+    echo "  Alert threshold:        ${threshold} GB  (HIBERNATE_DISK_THRESHOLD_GB)"
+    echo "  Status:                 ${status}"
+    echo "  Detail:                 ${verdict}"
+    if [[ "$HIBERNATE_DISK_STATUS" == "low" ]]; then
+        echo
+        echo "  Note: hibernate-disk-check would notify that only ${free_gb}GB is free"
+        echo "  and an emergency hibernate write can need up to ${ram_gb}GB."
+        echo "  Free up space soon; hibernate is still allowed if you confirm."
+    elif [[ "$HIBERNATE_DISK_STATUS" == "insufficient" ]]; then
+        echo
+        echo "  Refusing hibernate: free space is too low to safely write the"
+        echo "  sleepimage. Free more disk and try again."
+    else
+        echo
+        echo "  Disk space looks fine for hibernation (${free_gb}GB free)."
+    fi
+    echo "=========================================="
+
+    if [[ "$HIBERNATE_DISK_STATUS" == "insufficient" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Extract a pmset key from a block of text (first match). Value may have notes.
+_pmset_val() {
+    local key="$1" text="$2"
+    printf '%s\n' "$text" | awk -v k="$key" '
+        $1 == k { $1 = ""; sub(/^[[:space:]]+/, ""); print; exit }
+    '
+}
+
+# Format sleep-timer minutes: 0 → "never", else "Nm"
+_fmt_min() {
+    local v="${1%% *}"  # strip trailing notes like "(sleep prevented by …)"
+    v="${v//$'\t'/}"
+    if [[ -z "$v" || "$v" == "-" ]]; then
+        echo "?"
+    elif [[ "$v" == "0" ]]; then
+        echo "never"
+    else
+        echo "${v}m"
+    fi
+}
+
+# Parse "sleep 0 (sleep prevented by a, b)" → blockers list (or empty)
+_pmset_blockers() {
+    local line="$1"
+    printf '%s\n' "$line" | sed -n 's/.*prevented by \([^)]*\).*/\1/p'
+}
+
+# Compact one-line profile summary: sleep/display/disk/hibernate/standby
+_profile_line() {
+    local block="$1"
+    local sleep displaysleep disksleep hibernatemode standby lowpowermode
+    sleep=$(_pmset_val sleep "$block")
+    displaysleep=$(_pmset_val displaysleep "$block")
+    disksleep=$(_pmset_val disksleep "$block")
+    hibernatemode=$(_pmset_val hibernatemode "$block")
+    standby=$(_pmset_val standby "$block")
+    lowpowermode=$(_pmset_val lowpowermode "$block")
+    printf "sleep=%s display=%s disk=%s hibernate=%s standby=%s lpm=%s" \
+        "$(_fmt_min "$sleep")" \
+        "$(_fmt_min "$displaysleep")" \
+        "$(_fmt_min "$disksleep")" \
+        "${hibernatemode:-?}" \
+        "${standby:-?}" \
+        "${lowpowermode:-?}"
+}
+
+# Split pmset -g custom into Battery / AC sections
+_pmset_section() {
+    local which="$1" custom="$2"  # which = Battery|AC
+    printf '%s\n' "$custom" | awk -v w="$which" '
+        $0 ~ "^" w " Power:" { grab=1; next }
+        grab && / Power:$/ { exit }
+        grab { print }
+    '
+}
+
+dump_power_state() {
+    local label="${1:-STATE}"
+    local live custom batt free_gb ram_gb
+    local source batt_pct batt_extra sleep_line display_line
+    local sleep_blockers display_blockers sleepdisabled mode caff
+    local live_summary batt_summary ac_summary
+
+    live=$(pmset -g 2>/dev/null)
+    custom=$(pmset -g custom 2>/dev/null)
+    batt=$(pmset -g batt 2>/dev/null)
+    free_gb=$(df -g / | awk 'NR==2 {print $4}')
+    ram_gb=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
+
+    # Power source + battery percent / charge state
+    source=$(printf '%s\n' "$batt" | awk -F"'" '/Now drawing from/{print $2; exit}')
+    source="${source:-?}"
+    batt_pct=$(printf '%s\n' "$batt" | grep -oE '[0-9]+%' | head -1)
+    batt_pct="${batt_pct:-?}"
+    if printf '%s\n' "$batt" | grep -qi 'not charging'; then
+        batt_extra="not charging"
+    elif printf '%s\n' "$batt" | grep -qi 'charging'; then
+        batt_extra="charging"
+    elif printf '%s\n' "$batt" | grep -qi 'charged'; then
+        batt_extra="charged"
+    else
+        batt_extra="on battery"
+    fi
+
+    sleep_line=$(_pmset_val sleep "$live")
+    display_line=$(_pmset_val displaysleep "$live")
+    sleep_blockers=$(_pmset_blockers "$sleep_line")
+    display_blockers=$(_pmset_blockers "$display_line")
+
+    # SleepDisabled appears as "SleepDisabled 1" or glued "SleepDisabled1"
+    sleepdisabled=$(printf '%s\n' "$live" | sed -n 's/.*SleepDisabled[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
+    sleepdisabled="${sleepdisabled:-0}"
+
+    live_summary=$(_profile_line "$live")
+    # Live block uses "Currently in use" keys; also surface SleepDisabled
+    live_summary="${live_summary} SleepDisabled=${sleepdisabled}"
+
+    batt_summary=$(_profile_line "$(_pmset_section Battery "$custom")")
+    ac_summary=$(_profile_line "$(_pmset_section AC "$custom")")
+
+    if [[ -f "$MODE_FILE" ]]; then
+        mode=$(cat "$MODE_FILE")
+    else
+        mode="?"
+    fi
+    if [[ -n "$(agent_pid "$CAFFEINATE_LABEL")" ]]; then
+        caff="yes"
+    else
+        caff="no"
+    fi
+
+    echo "── ${label} ──  $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "  power:  ${source} · battery ${batt_pct} · ${batt_extra}"
+    echo "  live:   ${live_summary}"
+    echo "  ac:     ${ac_summary}"
+    echo "  batt:   ${batt_summary}"
+    if [[ -n "$sleep_blockers" || -n "$display_blockers" ]]; then
+        echo "  hold:   sleep[${sleep_blockers:-none}]  display[${display_blockers:-none}]"
+    fi
+    echo "  tired:  mode=${mode}  awake-caffeinate=${caff}"
+    echo "  lid:    $("$WATCHDOG_BIN" --status 2>/dev/null || echo '?')"
+    echo "          backlight watchdog $(agent_summary "$WATCHDOG_LABEL")"
+    echo "  disk:   ${free_gb}GB free  (hibernate ≤${ram_gb}GB image · alert <${HIBERNATE_DISK_THRESHOLD_GB}GB)"
+}
+
+is_awake_now() {
+    # SleepDisabled shows under System-wide when set.
+    pmset -g 2>/dev/null | grep -qE 'SleepDisabled[[:space:]]+1'
+}
+
+save_normal_snapshot() {
+    need_state_dir
+    {
+        echo "# Snapshot taken $(date) before awake"
+        echo "# Reference for: tired normal"
+        pmset -g custom
+        echo
+        pmset -g
+    } > "$NORMAL_SNAPSHOT"
+    cp "$NORMAL_SNAPSHOT" \
+        "$SNAPSHOT_DIR/tired-normal-$(date +%Y%m%d-%H%M%S).txt" 2>/dev/null || true
+}
+
+# ---- LaunchAgents (watchdog always; caffeinate only in awake mode) ----------
+
+# agent_plist_body LABEL STDERR_LOG PROGRAM [ARG...]
+agent_plist_body() {
+    local label="$1" errlog="$2" arg
+    shift 2
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${label}</string>
+    <key>ProgramArguments</key>
+    <array>
+EOF
+    for arg in "$@"; do
+        printf '        <string>%s</string>\n' "$arg"
+    done
+    cat <<EOF
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>${errlog}</string>
+</dict>
+</plist>
+EOF
+}
+
+agent_plist_path() { echo "$HOME/Library/LaunchAgents/$1.plist"; }
+
+# install_agent LABEL STDERR_LOG PROGRAM [ARG...]: write the plist if it
+# differs, (re)load it if needed. Returns 0 if it changed anything, 1 if not.
+install_agent() {
+    local label="$1" domain plist body tmp changed=1
+    domain="gui/$(id -u)"
+    plist=$(agent_plist_path "$label")
+    body=$(agent_plist_body "$@")
+    need_state_dir
+    if [[ "$body" != "$(cat "$plist" 2>/dev/null)" ]]; then
+        mkdir -p "$(dirname "$plist")"
+        tmp=$(mktemp "${plist}.XXXXXX")
+        printf '%s\n' "$body" > "$tmp" && mv -f "$tmp" "$plist"
+        launchctl bootout "$domain/$label" 2>/dev/null || true
+        changed=0
+    fi
+    if ! launchctl print "$domain/$label" >/dev/null 2>&1; then
+        launchctl enable "$domain/$label" 2>/dev/null || true
+        launchctl bootstrap "$domain" "$plist" 2>/dev/null || true
+        changed=0
+    fi
+    return "$changed"
+}
+
+# remove_agent LABEL: unload it and delete its plist so login won't restart it.
+remove_agent() {
+    local label="$1"
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    rm -f "$(agent_plist_path "$label")"
+}
+
+agent_pid() {
+    launchctl print "gui/$(id -u)/$1" 2>/dev/null | awk '/^[[:space:]]*pid = / {print $3; exit}'
+}
+
+agent_summary() {
+    local pid
+    pid=$(agent_pid "$1")
+    if [[ -n "$pid" ]]; then
+        echo "running (pid ${pid})"
+    else
+        echo "NOT running"
+    fi
+}
+
+# The watchdog runs in every mode. Quiet unless it changed something.
+ensure_watchdog_agent() {
+    if [[ ! -x "$WATCHDOG_BIN" ]]; then
+        echo "WARNING: $WATCHDOG_BIN missing; lid-closed backlights not managed." >&2
+        return 0
+    fi
+    if install_agent "$WATCHDOG_LABEL" "$STATE_DIR/backlight-watchdog.err.log" \
+        "$WATCHDOG_BIN" --loop; then
+        echo "Backlight watchdog LaunchAgent (re)installed: $WATCHDOG_LABEL"
+    fi
+}
+
+# A launchd-owned caffeinate survives logout and reboot (as SleepDisabled does)
+# and is stopped by label, never by matching a process pattern.
+start_awake_caffeinate() {
+    install_agent "$CAFFEINATE_LABEL" "$STATE_DIR/awake-caffeinate.err.log" \
+        /usr/bin/caffeinate -ims || true
+}
+
+stop_awake_caffeinate() {
+    remove_agent "$CAFFEINATE_LABEL"
+}
+
+# Keep the caffeinate agent in step with the recorded mode.
+reconcile_awake_caffeinate() {
+    local mode
+    mode=$(cat "$MODE_FILE" 2>/dev/null || true)
+    if [[ "$mode" == "awake" ]]; then
+        if [[ -z "$(agent_pid "$CAFFEINATE_LABEL")" ]]; then
+            start_awake_caffeinate
+            echo "Awake caffeinate LaunchAgent (re)started: $CAFFEINATE_LABEL"
+        fi
+    elif [[ -f "$(agent_plist_path "$CAFFEINATE_LABEL")" ]]; then
+        stop_awake_caffeinate
+        echo "Stray awake caffeinate LaunchAgent removed (mode=${mode:-unset})"
+    fi
+}
+
+run_privileged() {
+    # Run a shell script body as root. Prefer sudo (TTY password); fall back
+    # to an osascript admin dialog when sudo cannot prompt.
+    local body="$1"
+    local tmp rc=0
+    tmp=$(mktemp "${TMPDIR:-/tmp}/tired-pmset.XXXXXX")
+    printf '%s\n' "$body" > "$tmp"
+    chmod 700 "$tmp"
+
+    if sudo -n true 2>/dev/null; then
+        sudo /bin/bash "$tmp" || rc=$?
+        rm -f "$tmp"
+        return "$rc"
+    fi
+
+    if [[ -t 0 || -t 2 ]] && sudo -v 2>/dev/null; then
+        sudo /bin/bash "$tmp" || rc=$?
+        rm -f "$tmp"
+        return "$rc"
+    fi
+
+    # GUI password dialog (works from non-interactive agents / no TTY)
+    osascript -e "do shell script \"/bin/bash $(printf %q "$tmp")\" with administrator privileges" || rc=$?
+    rm -f "$tmp"
+    return "$rc"
+}
+
+# ---- subcommands -----------------------------------------------------------
+
+cmd_hibernate() {
+    local auto_yes=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -y|--yes) auto_yes=1; shift ;;
+            -h|--help|help)
+                usage
+                return 0
+                ;;
+            *)
+                echo "Unknown option for hibernate: $1" >&2
+                echo "Usage: tired hibernate [-y|--yes]" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    # Always report free space / threshold findings (hibernate-disk-check style).
+    # Blocks when free space cannot safely hold the RAM image.
+    if ! check_and_report_hibernate_disk; then
+        return 1
+    fi
+    echo
+
+    if (( auto_yes == 0 )); then
+        echo "This will hibernate the Mac now (hibernatemode 25 → sleepnow)."
+        echo "Wake takes ~15–20s. This terminal must stay open until after wake."
+        if [[ "${HIBERNATE_DISK_STATUS:-}" == "low" ]]; then
+            echo "WARNING: only ${HIBERNATE_DISK_FREE_GB}GB free (alert threshold ${HIBERNATE_DISK_THRESHOLD_GB}GB)."
+        else
+            echo "Disk: ${HIBERNATE_DISK_FREE_GB}GB free on / (OK for up to ${HIBERNATE_DISK_RAM_GB}GB image)."
+        fi
+        read -r -p "Type yes to hibernate: " reply
+        if [[ "$reply" != "yes" ]]; then
+            echo "Aborted (typed ${reply:-<empty>}, needed exactly: yes)."
+            return 1
+        fi
+    else
+        echo "Auto-confirmed (-y). Disk: ${HIBERNATE_DISK_FREE_GB}GB free on / (status: ${HIBERNATE_DISK_STATUS})."
+    fi
+
+    if is_awake_now; then
+        echo "WARNING: You are currently in 'awake' mode (SleepDisabled=1)."
+        echo "Hibernating now would fail or break your awake state."
+        echo "Auto-restoring previous state before hibernating..."
+        echo
+        cmd_revert
+        echo
+    fi
+
+    dump_power_state "BEFORE (hibernate)"
+
+    echo
+    echo "Switching to hibernatemode 25 and sleeping now..."
+    run_privileged "/usr/bin/pmset -a hibernatemode 25"
+
+    restore_hibernate() {
+        until run_privileged "/usr/bin/pmset -a hibernatemode 3"; do
+            echo "Restoring hibernatemode 3 failed (sudo). Retrying in 3s..." >&2
+            sleep 3
+        done
+        echo
+        dump_power_state "AFTER (wake — hibernatemode restored to 3)"
+        echo "Awake — hibernatemode restored to 3 (instant-wake sleep)."
+    }
+    trap restore_hibernate EXIT
+
+    dump_power_state "AFTER (pre-sleep — hibernatemode 25)"
+    pmset sleepnow || run_privileged "/usr/bin/pmset sleepnow"
+    # Freezes here during hibernation; resumes on wake; EXIT trap restores.
+    sleep 20
+}
+
+cmd_awake() {
+    if [[ "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        usage
+        return 0
+    fi
+
+    need_state_dir
+    dump_power_state "BEFORE (awake)"
+
+    if ! is_awake_now; then
+        save_normal_snapshot
+        echo
+        echo "Saved current profile as normal snapshot:"
+        echo "  $NORMAL_SNAPSHOT"
+    else
+        echo
+        echo "Already in awake (SleepDisabled=1); not overwriting normal snapshot."
+    fi
+
+    echo
+    echo "Applying awake profile (requires admin)..."
+    run_privileged "$(declare -f apply_awake)
+apply_awake"
+    start_awake_caffeinate
+    echo "awake" > "$MODE_FILE"
+
+    echo
+    dump_power_state "AFTER (awake)"
+    echo
+    echo "Lid close is ignored on AC and battery; the screen and keyboard backlights"
+    echo "still go off when it closes. Run:  tired normal   when done."
+}
+
+cmd_normal() {
+    if [[ "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        usage
+        return 0
+    fi
+
+    need_state_dir
+    dump_power_state "BEFORE (normal)"
+
+    echo
+    echo "Restoring normal profile (requires admin)..."
+    
+    local script_body
+    script_body="$(declare -f apply_normal_defaults)
+apply_normal_defaults"
+    run_privileged "$script_body"
+    stop_awake_caffeinate
+    echo "normal" > "$MODE_FILE"
+
+    echo
+    dump_power_state "AFTER (normal)"
+    echo
+    echo "As-shipped Apple defaults restored. Lid close will sleep the machine again."
+}
+
+cmd_revert() {
+    if [[ "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        usage
+        return 0
+    fi
+
+    need_state_dir
+    dump_power_state "BEFORE (revert)"
+
+    echo
+    echo "Restoring previous profile from snapshot (requires admin)..."
+    
+    local script_body
+    if [[ -f "$NORMAL_SNAPSHOT" ]]; then
+        echo "Restoring from snapshot: $NORMAL_SNAPSHOT"
+        script_body=$(awk '/^Battery Power:/ { s="-b"; next } /^AC Power:/ { s="-c"; next } /^[^[:space:]]/ { s=""; next } s != "" && /^[[:space:]]+[a-z]+[[:space:]]+[0-9]+$/ { print "/usr/bin/pmset " s " " $1 " " $2 }' "$NORMAL_SNAPSHOT")
+        script_body="/usr/bin/pmset -a disablesleep 0
+$script_body"
+    else
+        echo "No snapshot found, using hardcoded fallback defaults."
+        script_body="$(declare -f apply_normal_defaults)
+apply_normal_defaults"
+    fi
+
+    run_privileged "$script_body"
+    stop_awake_caffeinate
+    echo "normal" > "$MODE_FILE"
+
+    echo
+    dump_power_state "AFTER (revert)"
+    if [[ -f "$NORMAL_SNAPSHOT" ]]; then
+        echo
+        echo "Last pre-awake snapshot kept at:"
+        echo "  $NORMAL_SNAPSHOT"
+    fi
+    echo
+    echo "Previous sleep state restored. Lid close will sleep the machine again."
+}
+
+# ---- main ------------------------------------------------------------------
+
+main() {
+    # Bare `tired` → status (state + one-line commands), not full help.
+    if [[ $# -eq 0 ]]; then
+        ensure_watchdog_agent
+        reconcile_awake_caffeinate
+        cmd_status
+        return 0
+    fi
+
+    local sub="$1"
+    shift || true
+
+    # Lid-closed backlights must be handled in every mode, so every subcommand
+    # makes sure the watchdog agent exists (help excepted).
+    case "$sub" in
+        hibernate|awake|no-sleep|nosleep|normal|restore|revert)
+            ensure_watchdog_agent
+            ;;
+        status)
+            ensure_watchdog_agent
+            reconcile_awake_caffeinate
+            ;;
+    esac
+
+    case "$sub" in
+        hibernate)
+            cmd_hibernate "$@"
+            ;;
+        awake|no-sleep|nosleep)
+            cmd_awake "$@"
+            ;;
+        normal|restore)
+            cmd_normal "$@"
+            ;;
+        revert)
+            cmd_revert "$@"
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        help|-h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown subcommand: $sub" >&2
+            echo >&2
+            commands_oneline >&2
+            echo >&2
+            echo "Run: tired help    for full details." >&2
+            return 2
+            ;;
+    esac
+}
+
+main "$@"
