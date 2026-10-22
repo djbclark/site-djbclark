@@ -15,7 +15,7 @@ dropped one in its new home. Item numbers are unique and stable (other files cit
 for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk` compacts Bash output: **never run
 `ts init`**; no-hit `graft grep`: retry short ([[reference_agent_rules_code_discovery_and_cli_table]]).
 
-1. **Fast tools:** `rg` **with a path, never `-r`**, `fd`, `ast-grep`, `uv` not `pip`, **`aria2c -x8 -s8` for big files**, **`dust`/`gdu` not `du`/`find` for cache
+1. **Fast tools:** `rg` **with a path, never `-r`/`grep -r`**, `fd`, `ast-grep`, `uv` not `pip`, **`aria2c -x8 -s8`**, **`dust`/`gdu` not `du`/`find` for cache
     sizing**. **Literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
     means nothing in scope (cases in the memory file: use the Edit tool); **REPL with `\` goes through Python with an assert**. **Mac code uses GNU `g*` where BSD
     differs** (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**; **test a NOPASSWD rule with `sudo -k -n CMD`**,
