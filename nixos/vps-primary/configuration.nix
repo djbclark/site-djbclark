@@ -36,6 +36,8 @@
 
   users.users.root.openssh.authorizedKeys.keys = [
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKaWfTezsujYpykja7WRikq6jjw3r5vKgcO8o1nSaNoB djbclark@vps-primary-automation"
+    # Radar security-watch inventory (restrict,pty; needs root for rootful podman ps/images)
+    "restrict,pty ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQXxbEeAZywfsQt/WRbFgYHKhTNjcQP7wLmFVnvHxpt radar-security-watch@box"
   ];
 
   services.openssh = {
