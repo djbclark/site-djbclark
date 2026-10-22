@@ -242,6 +242,15 @@
     "flakes"
   ];
 
+  # Builds happen off-host (docs/nixos-in-git.md): gpclient/gpauth come prebuilt from the signed
+  # cache that GitHub Actions publishes on GitHub Pages (github.com/djbclark/nix-globalprotect,
+  # mirrored from forgejo.mit.edu). cache.nixos.org stays first (Priority 40 vs 50); on a miss
+  # (nixpkgs rev not built there yet) Nix just compiles locally as before.
+  nix.settings.extra-substituters = [ "https://djbclark.github.io/nix-globalprotect" ];
+  nix.settings.extra-trusted-public-keys = [
+    "djbclark-nix-globalprotect-1:bV0OVului8Zgq+MiJjq0CBGg+zlI6Vz6/4mVyqx68WQ="
+  ];
+
   system.autoUpgrade = {
     enable = true;
     operation = "switch";
