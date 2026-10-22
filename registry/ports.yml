@@ -88,7 +88,8 @@ hosts:
          tailscale_serve_port: 8086,
          note: "Open WebUI private AI workspace; exposed via tailscale serve --https=8086 (not Caddy -- Open WebUI has no reverse-proxy-subpath support, confirmed upstream limitation 2026-08-03, so /chat/* under Caddy served a broken bundle; see docs/notes or handoff for the incident)"}
       - {port: 6736,  bind: "127.0.0.1", owner: site, service: openusage-limits, status: active,
-         note: "OpenUsage.app loopback limits API (aiuse collector + landing); brew cask openusage; CLI optional"}
+         must_be_up: false,  # OpenUsage.app quit and removed 2026-10-22
+         note: "2026-10-22: OpenUsage.app removed. aiuse no longer collects it (deprecated; every live card overlapped cswap, CodexBar, tokscale, or native OpenCode Go). Do not reinstall the cask or reclaim this port for it."}
       - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo,            status: active,
          must_be_up: false,  # the desktop app owns the daemon; down while Paseo.app is quit
          tailscale_serve_port: 7263,
