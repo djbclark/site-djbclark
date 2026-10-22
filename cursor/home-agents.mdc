@@ -112,7 +112,9 @@ rest is public `site-djbclark`. **Exception, no question: a new agent skill goes
 README for other SIPB members, listed in `djbclark/mit` (`~/src/mit`)**; never a directory in an ops
 repo; a path moved out of GitHub keeps a stub README (`memory/feedback_mit_things_live_on_forgejo.md`).
 **Push with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE BRANCH`**; plain
-`git push` fails there (2026-10-18).
+`git push` fails there (2026-10-18). **No agent posts on `SIPB/*`** (2026-10-22): AI issue + human-draft
+comment on the `djbclark/` fork only (`memory/feedback_sipb_two_tier_issues.md`; `forgejo` skill); djbclark
+files upstream himself.
 
 ## NixOS rebuilds and CI (2026-10-18)
 
