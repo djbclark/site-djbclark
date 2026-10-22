@@ -17,7 +17,7 @@ add; it is not a policy.
 
 | Instead of | Use | Command pattern | Here |
 |---|---|---|---|
-| `grep -r` | ripgrep `rg` | `rg -n '<pat>' <path>` — **always pass a path** | ✅ |
+| `grep -r` | ripgrep `rg` | `rg -n '<pat>' <path>` — **always pass a path**. A filename is `plocate -i` when the nightly db is fresh. `bash_habits_gate` denies recursive `grep`/`ggrep` | ✅ |
 | `grep -r --include` | `rg` glob/type | `rg -n -g '*.py' '<pat>' <path>`, `rg -t py '<pat>' <path>` | ✅ |
 | `find . -name '*.py'` | `fd` | `fd -e py`, `fd -g '*.ts'`, `fd -e py --changed-within 1d` | ✅ |
 | `find … \| xargs grep …` | `rg` (one command) | `rg -n -g '*.py' '<pat>' <path>`; `rg -l` files, `rg -c` counts | ✅ |

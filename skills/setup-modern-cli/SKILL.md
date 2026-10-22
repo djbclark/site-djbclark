@@ -37,7 +37,12 @@ is the full, versioned installer for a new machine or repo.
    the same test, `vendor/` among them); or the tree changed since the last
    index — `ig` returns nothing *silently* until `ig index` is re-run, which is
    the normal case mid-edit.
-4. **Never `ayg`** (aygrep): it indexes only git-tracked files, so untracked
+4. **Almost never bare `grep`.** A recursive `grep` or `ggrep` (`-r`, `-R`, `--recursive`)
+   is denied by `bash_habits_gate` (2026-10-22: `grep -rl` over `~/src` and `~/ops`
+   ran 38 minutes at one core). Content search is `rg` with a path. One file that
+   needs a GNU flag is `ggrep`. A filename, when the nightly index is fresh enough,
+   is `plocate` (step 2 below). `rtk grep` is BSD grep, not ripgrep.
+5. **Never `ayg`** (aygrep): it indexes only git-tracked files, so untracked
    work is invisible even after a rebuild, and it writes `ayg_index/` inside the
    repo. `xg`, `sift` and `ag` earn no place ahead of `rg`; numbers in
    `references/indexed-search-benchmarks.md`.
@@ -51,20 +56,24 @@ pick the *cheapest tool that can actually answer*, not to always reach for `rg`.
 
 1. **You already know the file** → Read it (or `bat -n --line-range`). Do not
    search to re-find something you have the path for.
-2. **The repo has a code graph** (a `graft/` directory, or the harness's own
+2. **A filename, and today's index is enough** → `plocate -i NAME`. The db is
+   `/opt/homebrew/var/lib/plocate/plocate.db`, rebuilt nightly at 03:30 by
+   `com.djbclark.plocate-updatedb`. It does not search file contents. If the
+   path may have appeared since that rebuild, use `fd` in a scoped directory.
+3. **The repo has a code graph** (a `graft/` directory, or the harness's own
    index) → ask it first; `graft ask` / `graft grep` return ranked `file:line`
    spans without a filesystem sweep.
-3. **Exact literal, few expected hits, index current** → `ig search -l '<lit>' .`.
-4. **Default: `rg`.** One command for the whole `find | grep` shape, exhaustive:
+4. **Exact literal, few expected hits, index current** → `ig search -l '<lit>' .`.
+5. **Default: `rg`.** One command for the whole `find | grep` shape, exhaustive:
    `rg -n -g '*.py' '<pat>' <path>`. Add `-F` when the literal contains regex
    metacharacters (`.is_file()`, `a[0]`), `-w` for whole words, `-C3` for
    context, `-t py` instead of `-g '*.py'` for known languages.
-5. **A shape question, not a text question** ("every call site of X with two
+6. **A shape question, not a text question** ("every call site of X with two
    args", "async fns with no await") → `ast-grep`, not `rg`. See below.
-6. **Not in the working tree** → history, not a bigger sweep:
+7. **Not in the working tree** → history, not a bigger sweep:
    `git log -S'<literal>' --oneline` (who introduced/removed it),
    `git grep '<pat>' <rev>`, `git log -L` for one symbol's history.
-7. **Broaden only deliberately.** `rg` skips hidden, ignored and binary files by
+8. **Broaden only deliberately.** `rg` skips hidden, ignored and binary files by
    design; `-u` removes ignore rules, `-uu` adds hidden, `-uuu` adds binary. If
    a search "found nothing" and you expected a hit, run it again with `--debug`
    (it prints the ignore rule that excluded the file) before reaching for `-uuu`.
