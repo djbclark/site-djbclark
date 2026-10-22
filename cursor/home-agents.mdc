@@ -260,7 +260,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
    NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**, never in
    place. (`memory/feedback_edit_running_scripts_atomically.md`)
-3. **Default browser:** `open <url>` (Orion), not Chrome. (`memory/feedback_always_use_default_browser_orion.md`)
+3. **Default browser:** `open <url>` only, never Orion or Chrome by name. (`memory/feedback_always_use_default_browser_orion.md`)
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive.**

@@ -21,7 +21,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     differs** (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**; **test a NOPASSWD rule with `sudo -k -n CMD`**,
     never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file alongside, then `mv -f`) **on the `realpath`** (`memory/feedback_edit_running_scripts_atomically.md`).
-3. **Default browser:** `open <url>` (Orion), not Chrome (`memory/feedback_always_use_default_browser_orion.md`).
+3. **Default browser:** `open <url>` only, never Orion or Chrome by name (`memory/feedback_always_use_default_browser_orion.md`).
 4. **"All agents" includes Hermes**, absent from `aiuse` (`memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive**
     (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **AI TUIs, agent CLIs and ACP servers stay on the latest release: upgrade unasked, never hard-code a version
