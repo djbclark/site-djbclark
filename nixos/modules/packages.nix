@@ -73,6 +73,7 @@
     # Touchstone/Duo SAML login with `--browser remote` (URL opened on the Mac),
     # openconnect carries the tunnel, vpn-slice keeps only MIT routes in it so
     # the VPS's default route (and the Tailscale exit node) stay intact.
+    # gpclient/gpauth are 3.1.0 from the nix-globalprotect overlay (nixos/flake.nix).
     openconnect
     gpclient
     gpauth
