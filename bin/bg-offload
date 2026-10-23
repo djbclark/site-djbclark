@@ -118,8 +118,8 @@ command -v gdate >/dev/null 2>&1 || { say "offload: gdate not found"; exit 69; }
 
 tmp=$(gmktemp -d "${TMPDIR:-/tmp}/bg-offload.XXXXXX") || exit 69
 trap 'rm -rf "$tmp"' EXIT
-# bg may kill us (it runs us as a child, 2026-10-23 review): clean up and stop polling.
-trap 'exit 143' TERM INT HUP
+# bg may kill us (it runs us as a child): bash runs the EXIT trap above when a TERM ends it (checked 2026-10-23), so
+# no TERM trap is needed while polling; only the push phase below traps TERM, to kill the runner's process group.
 
 # 1. Tree state.
 porc="$tmp/porcelain"
@@ -261,7 +261,7 @@ set +m
 trap 'kill -TERM -- "-$rpid" 2>/dev/null; kill -TERM "$rpid" 2>/dev/null; exit 143' TERM INT HUP
 wait "$rpid"
 rc=$?
-trap 'exit 143' TERM INT HUP
+trap - TERM INT HUP
 if [ "$rc" != 0 ]; then
   say "offload: the CI runner exited $rc (it may have pushed before failing; no run is followed). Its stderr tail:"
   gtail -n 8 "$tmp/runner.err" | gsed 's/^/bg:   /' >&2
