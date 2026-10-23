@@ -43,26 +43,6 @@
         "type": "github"
       }
     },
-    "nix-globalprotect": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1792709419,
-        "narHash": "sha256-118PbV1qkFGm6xR7GzcqLkkLFZKe5AvYz6tR/Y+uh+k=",
-        "ref": "refs/heads/main",
-        "rev": "4aafacc9f0cd9ce700890515a4a4652dee575114",
-        "revCount": 1,
-        "type": "git",
-        "url": "https://forgejo.mit.edu/djbclark/nix-globalprotect"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://forgejo.mit.edu/djbclark/nix-globalprotect"
-      }
-    },
     "nixathena": {
       "inputs": {
         "nixpkgs": [
@@ -123,7 +103,6 @@
       "inputs": {
         "athena-nixos": "athena-nixos",
         "bb-nix": "bb-nix",
-        "nix-globalprotect": "nix-globalprotect",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs",
         "paseo-nix": "paseo-nix"

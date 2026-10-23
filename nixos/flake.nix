@@ -32,13 +32,6 @@
     inputs.nixathena.follows = "nixathena";
   };
 
-  # GlobalProtect-openconnect 3.1.0 (gpclient + gpauth built from source) as an overlay over
-  # nixpkgs' 2.6.x; packages.nix keeps listing pkgs.gpclient/pkgs.gpauth (2026-10-22).
-  inputs.nix-globalprotect = {
-    url = "git+https://forgejo.mit.edu/djbclark/nix-globalprotect";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-
   outputs =
     {
       self,
@@ -46,7 +39,6 @@
       athena-nixos,
       bb-nix,
       paseo-nix,
-      nix-globalprotect,
       ...
     }:
     {
@@ -56,7 +48,6 @@
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           bb-nix.nixosModules.default
           paseo-nix.nixosModules.default
-          { nixpkgs.overlays = [ nix-globalprotect.overlays.default ]; }
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

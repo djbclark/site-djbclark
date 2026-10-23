@@ -69,15 +69,6 @@
     doggo
     tailscale
     traceroute
-    # MIT GlobalProtect VPN from a headless box (2026-10-17): gpclient does the
-    # Touchstone/Duo SAML login with `--browser remote` (URL opened on the Mac),
-    # openconnect carries the tunnel, vpn-slice keeps only MIT routes in it so
-    # the VPS's default route (and the Tailscale exit node) stay intact.
-    # gpclient/gpauth are 3.1.0 from the nix-globalprotect overlay (nixos/flake.nix).
-    openconnect
-    gpclient
-    gpauth
-    vpn-slice
 
     # --- editors / terminal ---
     ghostty.terminfo

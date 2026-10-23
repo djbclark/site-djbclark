@@ -65,11 +65,6 @@
 
   environment.systemPackages = [ pkgs.vim pkgs.python3 ];
 
-  # /etc/hosts as a writable regular file instead of a store symlink: vpn-slice
-  # (the GlobalProtect split-tunnel script, modules/packages.nix) aborts with
-  # "Cannot read/write /etc/hosts" otherwise (2026-10-17).
-  environment.etc.hosts.mode = "0644";
-
   # Joined to the tailnet 2026-10-13 with a one-time tagged auth key
   # (tag:server: no key expiry); node state lives in /var/lib/tailscale.
   # Public SSH on 22 stays open until the tailnet path is proven.
@@ -80,11 +75,15 @@
   # Subnet route 18.0.0.0/8 (2026-10-18): the Mac now sends only MITnet here and the rest
   # direct; the full exit node hairpinned everything via Nuremberg (~240 ms, 30% loss).
   # The exit node stays advertised as a fallback.
+  # 2026-10-23: GlobalProtect removed; MITnet now reaches the tailnet through
+  # pastebin.xvm.mit.edu (an XVM VM on MITnet advertising 18.0.0.0/8). This host's
+  # own SYNs to 18/8 were timing out. The empty --advertise-routes= drops 18/8
+  # (tailscale set only changes the flags given), the exit node stays.
   services.tailscale = {
     enable = true;
     openFirewall = true;
     useRoutingFeatures = "server";
-    extraSetFlags = [ "--advertise-exit-node" "--advertise-routes=18.0.0.0/8" ];
+    extraSetFlags = [ "--advertise-exit-node" "--advertise-routes=" ];
   };
 
   # Shared Gradle remote build cache: FosterStack cache (github.com/fosterstack/cache,
@@ -240,15 +239,6 @@
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"
-  ];
-
-  # Builds happen off-host (docs/nixos-in-git.md): gpclient/gpauth come prebuilt from the signed
-  # cache that GitHub Actions publishes on GitHub Pages (github.com/djbclark/nix-globalprotect,
-  # mirrored from forgejo.mit.edu). cache.nixos.org stays first (Priority 40 vs 50); on a miss
-  # (nixpkgs rev not built there yet) Nix just compiles locally as before.
-  nix.settings.extra-substituters = [ "https://djbclark.github.io/nix-globalprotect" ];
-  nix.settings.extra-trusted-public-keys = [
-    "djbclark-nix-globalprotect-1:bV0OVului8Zgq+MiJjq0CBGg+zlI6Vz6/4mVyqx68WQ="
   ];
 
   system.autoUpgrade = {
