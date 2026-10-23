@@ -348,7 +348,7 @@ if [ "$wait_s" != 0 ]; then
     wait_tick "$why"
     if [ "$announced" = 0 ]; then
       announced=1
-      echo "bg: $why is not met (load $load1 on $cores cores); waiting up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
+      echo "bg: holding for $why ($cores cores); will wait up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
     fi
     sleep 15
   done
