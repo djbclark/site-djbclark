@@ -60,6 +60,9 @@ printf '%s\\n' "$*" >> "$d/runner.calls"
 git rev-parse HEAD > "$d/head"
 printf '%s\\n' "$2" > "$d/ref"
 git grep -q "SECRETXY[Z]" "$2" -- . && echo yes > "$d/ref.hassecret" || echo no > "$d/ref.hassecret"
+git config --get push.followTags > "$d/cfg.followTags" 2>/dev/null; git config --get push.recurseSubmodules > "$d/cfg.recurse" 2>/dev/null
+git config --get core.testmarker > "$d/cfg.marker" 2>/dev/null
+if [ -f "$d/runner.push" ]; then git push -q --force "${{GITHUB_CI_REMOTE:-origin}}" "$2:refs/heads/ci/run/x-abc" || exit 3; fi
 if [ -f "$d/runner.slow" ]; then
   echo $$ > "$d/runner.pid"
   # a child that outlives its parent if only the parent is killed (like the git push inside github-ci-run)
@@ -90,6 +93,10 @@ case "$1 $2" in
     done
     [ "$branch" = ci/run/x-abc ] || exit 0
     jq -c ".[0:$limit]" < "$d/runs.json" | jq -r "$expr"
+    # gh.rearm: after serving one good poll, fail the next N polls and then show runs.final (no timer involved)
+    if [ -f "$d/gh.rearm" ]; then
+      mv "$d/gh.rearm" "$d/gh.fail"; cp "$d/runs.final" "$d/runs.json"
+    fi
     ;;
   "run view") cat "$d/failed.log" ;;
 esac
@@ -386,22 +393,16 @@ def test_malformed_runner_output_is_no_verdict_and_gh_is_never_called(s, garbage
 
 
 def test_transient_gh_errors_do_not_add_up(s):
-    # four failures, a good poll that sees the run still going, four more failures, then it finishes: the
-    # error count must reset on the good poll, or the 5th failure overall would end it with 77.
+    # four failures, a good poll that sees the run still going, four more failures, then it finishes: the error
+    # count must reset on the good poll, or the 5th failure overall would end it with 77. The stub re-arms itself
+    # after serving the good poll (gh.rearm), so the sequence does not depend on a timer or on machine load.
     (s.state / "gh.fail").write_text("4\n")
+    (s.state / "gh.rearm").write_text("4\n")
     (s.state / "runs.json").write_text(json.dumps([run(23, status="in_progress", conclusion=None)]))
-    import threading
-
-    def finish():
-        time.sleep(3)
-        (s.state / "gh.fail").write_text("4\n")
-        (s.state / "runs.json").write_text(json.dumps([run(23)]))
-
-    t = threading.Thread(target=finish)
-    t.start()
+    (s.state / "runs.final").write_text(json.dumps([run(23)]))
     r = s.bg(BG_OFFLOAD_WAIT="60")
-    t.join()
     assert r.returncode == 0, r.stderr
+    assert len([c for c in s.read("gh.calls").splitlines() if c.startswith("run list")]) == 10  # 4 + 1 + 4 + 1
 
 
 def test_killing_bg_stops_the_offload_poller(s):
@@ -600,7 +601,7 @@ def test_an_unpushed_commit_is_not_offloaded(s):
     (s.work / "feature.txt").write_text("work in progress\n")
     s.commit_all("local feature", on_remote=False)
     r = s.bg(BG_MAX_WAIT="4")
-    _refused(s, r, "1 commit(s) in HEAD are not on remote origin", "local feature")
+    _refused(s, r, "1 commit(s) in HEAD are not on the remote origin", "local feature")
 
 
 def test_ci_base_ahead_of_the_remote_is_not_offloaded(s):
@@ -609,7 +610,7 @@ def test_ci_base_ahead_of_the_remote_is_not_offloaded(s):
     git(s.work, "add", "-A")
     git(s.work, "commit", "-q", "-m", "overlay content")
     git(s.work, "checkout", "-q", "main")  # HEAD is clean and pushed; only ci/base is local-only
-    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "refs/heads/ci/base (overlaid onto the run) has 1 commit(s) that are not on the remote")
 
 
 def test_ci_base_ahead_of_a_pushed_ci_base_is_not_offloaded(s):
@@ -619,7 +620,7 @@ def test_ci_base_ahead_of_a_pushed_ci_base_is_not_offloaded(s):
     git(s.work, "add", "-A")
     git(s.work, "commit", "-q", "-m", "more overlay")
     git(s.work, "checkout", "-q", "main")
-    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base (1 commit(s))")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "refs/heads/ci/base (overlaid onto the run) has 1 commit(s) that are not on the remote")
 
 
 def test_ci_base_that_is_pushed_does_not_block(s):
@@ -680,7 +681,7 @@ def test_a_refusal_reports_every_reason_and_caps_the_dirty_list(s):
     git(s.work, "commit", "-q", "-m", "overlay")
     git(s.work, "checkout", "-q", "main")
     r = s.bg(BG_MAX_WAIT="4")
-    _refused(s, r, "25 tracked file(s) with uncommitted changes", "... and 5 more", "unpushed one", "ci/base is ahead")
+    _refused(s, r, "25 tracked file(s) with uncommitted changes", "... and 5 more", "unpushed one", "refs/heads/ci/base (overlaid onto the run) has 2 commit(s) that are not on the remote")
 
 
 def test_hooks_are_ignored_without_the_testing_variable(s):
@@ -696,14 +697,15 @@ def test_hooks_are_ignored_without_the_testing_variable(s):
     assert off.returncode != 0
 
 
-def test_ci_base_behind_by_public_commits_still_counts_as_ahead_of_the_remote_ci_base(s):
-    # The ruling's rule is literal: local ci/base must not be ahead of refs/remotes/<remote>/ci/base.
+def test_a_ci_base_ahead_of_the_remotes_ci_base_by_commits_that_are_public_offloads(s):
+    # What is checked is what the push target advertises (any ref), not the remote-tracking name: these commits are on main.
     git(s.work, "branch", "ci/base")
     git(s.work, "push", "-q", "origin", "ci/base")
     (s.work / "more.txt").write_text("m\n")
     s.commit_all("more on main")  # pushed to main
-    git(s.work, "branch", "-f", "ci/base", "HEAD")  # now ahead of origin/ci/base, though every commit is public
-    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base (1 commit(s))")
+    git(s.work, "branch", "-f", "ci/base", "HEAD")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
 
 
 def test_the_remote_is_the_one_the_runners_use(s):
@@ -711,7 +713,7 @@ def test_the_remote_is_the_one_the_runners_use(s):
     git(s.root, "init", "-q", "--bare", str(other))
     git(s.work, "remote", "add", "mirror", str(other))
     git(s.work, "fetch", "-q", "mirror")  # an empty remote: HEAD is on origin, not on mirror
-    _refused(s, s.bg(BG_MAX_WAIT="4", GITHUB_CI_REMOTE="mirror"), "not on remote mirror")
+    _refused(s, s.bg(BG_MAX_WAIT="4", GITHUB_CI_REMOTE="mirror"), "not on the remote mirror")
     r = s.bg()  # control: origin (the default)
     assert r.returncode == 0, r.stderr
 
@@ -731,16 +733,37 @@ def test_a_failed_ci_base_comparison_counts_as_ahead(s):
     ref = s.work / ".git" / "refs" / "heads" / "ci" / "base"
     ref.write_text("b" * 40 + "\n")  # a local ci/base whose object is missing: show-ref sees it, rev-list fails
     r = s.bg(BG_MAX_WAIT="4")
-    _refused(s, r, "could not compare local ci/base")
+    _refused(s, r, "could not read ci/base")
 
 
-def test_an_unreadable_remote_ci_base_counts_as_ahead(s):
+def test_an_unreadable_remote_tracking_ci_base_is_refused_when_it_is_the_one_the_runner_uses(s):
     git(s.work, "branch", "ci/base")
     git(s.work, "push", "-q", "origin", "ci/base")
+    git(s.work, "branch", "-D", "ci/base")  # no local ci/base: the runner falls back to origin/ci/base
     (s.work / ".git" / "refs" / "remotes" / "origin" / "ci" / "base").write_text("b" * 40 + "\n")
     r = s.bg(BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr  # whichever step trips first (rev-list on the remotes, or this one), it refuses
-    assert s.read("runner.calls") == ""
+    _refused(s, r, "could not read ci/base")
+
+
+def test_a_remote_tracking_ci_base_that_is_on_the_remote_is_fine_without_a_local_one(s):
+    git(s.work, "branch", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    git(s.work, "branch", "-D", "ci/base")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_stale_remote_tracking_ci_base_is_refused(s):
+    # origin/ci/base carries a commit that another clone has since removed from the remote.
+    git(s.work, "checkout", "-q", "-b", "ci/base")
+    (s.work / "overlay.txt").write_text("overlay\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "overlay content")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    git(s.work, "checkout", "-q", "main")
+    git(s.work, "branch", "-D", "ci/base")
+    git(s.remote, "update-ref", "-d", "refs/heads/ci/base")  # the remote no longer has it; the tracking ref stays
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "refs/remotes/origin/ci/base (overlaid onto the run) has 1 commit(s)")
 
 
 def test_a_ci_base_whose_history_cannot_be_walked_counts_as_ahead(s):
@@ -752,4 +775,157 @@ def test_a_ci_base_whose_history_cannot_be_walked_counts_as_ahead(s):
                          capture_output=True, text=True, check=True).stdout.strip()
     git(s.work, "update-ref", "refs/heads/ci/base", sha)  # readable ref, but its parent object is missing: rev-list fails
     r = s.bg(BG_MAX_WAIT="4")
-    _refused(s, r, "could not compare local ci/base")
+    _refused(s, r, "could not compare refs/heads/ci/base")
+
+
+# --- review 4 (ae917f7): the push target is asked, not guessed; push config cannot widen the push -------------
+
+def _bare(s, name):
+    p = s.root / name
+    git(s.root, "init", "-q", "--bare", str(p))
+    return p
+
+
+def _commit_on_new_branch(s, branch, name="private.txt"):
+    git(s.work, "checkout", "-q", "-b", branch)
+    (s.work / name).write_text("private\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", f"work on {branch}")
+
+
+def test_a_commit_removed_from_the_remote_by_another_clone_is_not_on_the_remote(s):
+    _commit_on_new_branch(s, "oops")
+    git(s.work, "push", "-q", "origin", "oops")  # refs/remotes/origin/oops now exists here
+    git(s.remote, "update-ref", "-d", "refs/heads/oops")  # another clone deleted the branch on the remote
+    git(s.work, "checkout", "-q", "--detach", "oops")
+    assert subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/oops"], cwd=s.work).returncode == 0
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "commit(s) in HEAD are not on the remote origin", "work on oops")
+
+
+def test_after_set_url_the_old_remote_tracking_refs_prove_nothing(s):
+    public = _bare(s, "public.git")
+    _commit_on_new_branch(s, "private-work")
+    git(s.work, "push", "-q", "origin", "private-work")  # pushed to the PRIVATE origin
+    git(s.work, "remote", "set-url", "origin", str(public))  # origin is now the public repo; old tracking refs stay
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "not on the remote origin", "work on private-work")
+    assert subprocess.run(["git", "branch", "-a", "--list"], cwd=public, capture_output=True, text=True).stdout.strip() == ""
+
+
+def test_a_separate_pushurl_is_refused(s):
+    public = _bare(s, "public.git")
+    git(s.work, "config", "remote.origin.pushurl", str(public))
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "does not have exactly one url")
+
+
+def test_several_push_urls_are_refused(s):
+    git(s.work, "config", "--add", "remote.origin.pushurl", str(s.remote))
+    git(s.work, "config", "--add", "remote.origin.pushurl", str(_bare(s, "other.git")))
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "does not have exactly one url")
+
+
+def test_a_push_insteadof_rewrite_is_refused(s):
+    other = _bare(s, "rewritten.git")
+    git(s.work, "config", f"url.{other}/.pushInsteadOf", str(s.remote))
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "does not have exactly one url")
+
+
+def test_an_unreachable_push_target_fails_closed(s):
+    git(s.work, "remote", "set-url", "origin", str(s.root / "no-such-remote.git"))
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "could not list the refs at the push target")
+
+
+def test_the_url_of_a_failing_remote_is_not_echoed_with_credentials(s):
+    git(s.work, "remote", "set-url", "origin", "https://user:s3cr3t@127.0.0.1:9/x.git")
+    r = s.bg(BG_MAX_WAIT="4", BG_OFFLOAD_LSREMOTE_TIMEOUT="20")
+    assert r.returncode == 75, r.stderr
+    assert "s3cr3t" not in r.stderr and "s3cr3t" not in r.stdout
+    assert s.read("runner.calls") == ""
+
+
+def test_the_runner_push_cannot_carry_tags_or_submodule_commits_whatever_the_config_says(s):
+    git(s.work, "config", "push.followTags", "true")
+    git(s.work, "config", "push.recurseSubmodules", "on-demand")
+    git(s.work, "tag", "-a", "v-internal", "-m", "internal tag", "HEAD")
+    (s.state / "runner.push").write_text("")  # the stub really pushes HEAD to ci/run/x-abc, like the real runners
+    # sanity: the same push WITHOUT the helper's override does carry the tag (so the test can see the leak)
+    subprocess.run(["git", "push", "-q", "--force", "origin", "HEAD:refs/heads/ci/run/probe"], cwd=s.work, check=True, capture_output=True)
+    assert "v-internal" in subprocess.run(["git", "tag", "-l"], cwd=s.remote, capture_output=True, text=True).stdout
+    git(s.remote, "tag", "-d", "v-internal")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert s.read("cfg.followTags").strip() == "false" and s.read("cfg.recurse").strip() == "no"
+    assert subprocess.run(["git", "tag", "-l"], cwd=s.remote, capture_output=True, text=True).stdout.strip() == ""
+    assert "ci/run/x-abc" in subprocess.run(["git", "branch", "--list"], cwd=s.remote, capture_output=True, text=True).stdout
+
+
+def test_the_callers_own_git_config_env_entries_are_kept(s):
+    r = s.bg(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.testmarker", GIT_CONFIG_VALUE_0="kept")
+    assert r.returncode == 0, r.stderr
+    assert s.read("cfg.marker").strip() == "kept"
+    assert s.read("cfg.followTags").strip() == "false"
+
+
+def test_an_untracked_route_script_is_never_used(s):
+    mark = s.root / "untracked-route-ran"
+    (s.work / "scripts" / "bg-offload-run").write_text(f"#!/bin/bash\ntouch {shlex.quote(str(mark))}\n"
+                                                      f"echo 'overlay {COMMIT} for x -> origin ci/run/x-abc'\n"
+                                                      "echo 'pushed https://github.com/djbclark/stubrepo/tree/ci/run/x-abc'\n")
+    (s.work / "scripts" / "bg-offload-run").chmod(0o755)
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert not mark.exists()
+    assert s.read("runner.calls").strip() == f"--no-wait {s.read('head').strip()}"  # the tracked github-ci-run
+
+
+def test_an_untracked_route_script_alone_is_no_route(s):
+    # the tracked route is removed from git and the work tree: only an untracked script is left
+    git(s.work, "rm", "-q", "-f", "scripts/github-ci-run")
+    git(s.work, "commit", "-q", "-m", "drop route")
+    git(s.work, "push", "-q", "origin", "HEAD:main")
+    (s.work / "scripts").mkdir(exist_ok=True)
+    (s.work / "scripts" / "bg-offload-run").write_text("#!/bin/bash\nexit 0\n")
+    (s.work / "scripts" / "bg-offload-run").chmod(0o755)
+    r = s.bg(BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert "unless the load gate" not in r.stderr
+
+
+def test_a_missing_required_tool_refuses_instead_of_passing(s):
+    e = {**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"),
+         "BG_OFFLOAD_TOOLS_EXTRA": "no-such-tool-xyz"}
+    r = subprocess.run([str(OFFLOAD), str(s.work), "--", "pytest", "tests/test_a.py"], cwd=s.work, env=e, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 69, r.stderr
+    assert "required tool 'no-such-tool-xyz' not found" in r.stderr
+    assert s.read("runner.calls") == "" and s.read("gh.calls") == ""
+    p = subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env=e, capture_output=True, text=True)
+    assert p.returncode != 0  # and bg's up-front probe says no
+    e.pop("BG_OFFLOAD_TOOLS_EXTRA")
+    assert subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env=e).returncode == 0  # control
+
+
+@pytest.mark.parametrize("remote", ["*", "-x", "a b", "o;touch x"])
+def test_an_odd_remote_name_is_refused(s, remote):
+    r = s.bg(BG_MAX_WAIT="4", GITHUB_CI_REMOTE=remote)
+    assert r.returncode == 75, r.stderr
+    assert "odd remote name" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+@pytest.mark.parametrize("cmd", [("python3", "-m", "pytest"), ("py.test",), ("pytest",), ("/usr/local/bin/pytest",)])
+def test_an_untracked_test_is_found_whichever_way_pytest_is_spelled(s, cmd):
+    (s.work / "tests" / "test_new.py").write_text("def test_n(): pass\n")
+    r = s.bg(*cmd, "tests/test_new.py::test_n", BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert "tests/test_new.py is untracked" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_a_head_whose_history_cannot_be_walked_is_refused(s):
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=s.work, capture_output=True, text=True).stdout.strip()
+    body = f"tree {tree}\nparent {'c' * 40}\nauthor t <t@example.invalid> 1 +0000\ncommitter t <t@example.invalid> 1 +0000\n\nbroken\n"
+    sha = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin", "--literally"], cwd=s.work, input=body,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    git(s.work, "update-ref", "--no-deref", "HEAD", sha)
+    r = s.bg(BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert s.read("runner.calls") == ""

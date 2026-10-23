@@ -70,20 +70,22 @@
 # here, and on 2026-10-23 a 2 s pytest file sat over an hour in the load gate at load 25-93 on 8 cores:
 # the carve-out defeated CI-first exactly when the machine is busiest. So once the gate has held such a
 # run for BG_OFFLOAD_AFTER seconds (default 60), bg hands it to bin/bg-offload instead of waiting on:
-# the repo's HEAD (untracked files are never in it) goes to its CI through its executable
+# the repo's HEAD (untracked files are never in it) goes to its CI through its tracked, executable
 # scripts/bg-offload-run or scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s; the offload has its own budget, outside
-# BG_MAX_WAIT) and exits with CI's verdict, never running the command here. It needs such a route, `gh` and
-# `git`; without them, or if the push fails, bg says so and keeps waiting as before. Exit codes: 0 CI's
+# BG_MAX_WAIT) and exits with CI's verdict, never running the command here. It needs such a route, `gh`, `git` and the GNU
+# tools bg-offload lists (gdate, gawk, gtimeout...); without them, or if the push fails, bg says so and keeps waiting as before. Exit codes: 0 CI's
 # workflow passed on this tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI
 # failed (log tail printed; it can come from a test you did not name), 76 CI still running at
 # BG_OFFLOAD_WAIT, 77 pushed but no verdict (nothing succeeded, cancelled, no run); 3 and 75 keep their
 # meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. bg-offload publishes NOTHING that is not already on
 # the remote (a public repo's CI is outward-facing, the checkout may hold another session's work; djbclark's
-# ruling 2026-10-23 after three review rounds on scanning): it offloads only when no tracked file is modified
-# (working tree or index), HEAD is on the remote and a local ci/base is not ahead of the remote's. Otherwise it
-# says why and bg keeps waiting at the gate: commit and push, then bg offloads. A named test path that is
-# missing, untracked, a directory with no tracked file or outside the repo stops the offload too (header of
-# bin/bg-offload).
+# ruling 2026-10-23 after four review rounds): it offloads only when no tracked file is modified (working tree
+# or index), every commit of HEAD is reachable from a ref the REAL push target advertises (`git ls-remote` of
+# the remote's single fetch-and-push url, not the local remote-tracking refs, which go stale), and the ci/base
+# the runner overlays is too. The runner's git config is forced to push.followTags=false (no local tags go
+# along). Otherwise bg-offload says why and bg keeps waiting at the gate: commit and push, then bg offloads. A
+# named test path that is missing, untracked, a directory with no tracked file or outside the repo stops the
+# offload too (header of bin/bg-offload).
 # Not a way round the gate: builds, non-targeted runs and `local` repos never offload and still wait.
 #
 # Agents must call `~/ops/site-private/bin/bg`: bare `bg` is the shell job-control builtin.
