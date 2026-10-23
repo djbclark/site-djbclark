@@ -948,3 +948,134 @@ def test_a_head_that_is_only_reachable_from_a_pushed_annotated_tag_is_on_the_rem
     r = s.bg()
     assert r.returncode == 0, r.stderr
     assert "already on origin" in r.stderr
+
+
+# --- review 5 (75dbe21): the checked target is the pushed target; the walked history is the pushed history ------
+
+def _tags(repo):
+    return subprocess.run(["git", "tag", "-l"], cwd=repo, capture_output=True, text=True).stdout.strip()
+
+
+def _has(repo, sha):
+    return subprocess.run(["git", "cat-file", "-e", sha], cwd=repo, capture_output=True).returncode == 0
+
+
+def _head(repo):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_an_insteadof_chain_cannot_make_ls_remote_ask_another_repo_than_the_push(s):
+    # origin = stubalias:x -> (insteadOf) public; public -> (insteadOf) the private remote. get-url prints the public
+    # path; ls-remote of that STRING is rewritten again, to the private remote, which has the commit. `git push origin`
+    # (the runner) rewrites once and goes to public.
+    public = _bare(s, "public.git")
+    (s.work / "private.txt").write_text("SECRETXYZ\n")
+    s.commit_all("private commit")  # on the private remote (s.remote) only
+    p = _head(s.work)
+    git(s.work, "remote", "set-url", "origin", "stubalias:x")
+    git(s.work, "config", f"url.{public}.insteadOf", "stubalias:x")
+    git(s.work, "config", f"url.{s.remote}.insteadOf", str(public))
+    (s.state / "runner.push").write_text("")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "not on the remote origin", "private commit")
+    assert not _has(public, p)
+
+
+def test_a_replace_ref_cannot_hide_a_private_parent(s):
+    t = _head(s.work)  # on the remote
+    _commit_on_new_branch(s, "priv")
+    p = _head(s.work)
+    tree = subprocess.run(["git", "rev-parse", f"{t}^{{tree}}"], cwd=s.work, capture_output=True, text=True, check=True).stdout.strip()
+    r = subprocess.run(["git", "commit-tree", tree, "-p", p, "-m", "base"], cwd=s.work, capture_output=True, text=True, check=True).stdout.strip()
+    git(s.work, "replace", t, r)  # t now "has" parent p, so `rev-list HEAD ^t` counts 0
+    assert subprocess.run(["git", "rev-list", "--count", "HEAD", f"^{t}"], cwd=s.work, capture_output=True, text=True).stdout.strip() == "0"
+    (s.state / "runner.push").write_text("")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "1 commit(s) in HEAD are not on the remote origin", "work on priv")
+    assert not _has(s.remote, p)
+
+
+@pytest.mark.parametrize("where", ["info", "env"])
+def test_a_graft_file_is_refused(s, where):
+    t = _head(s.work)
+    _commit_on_new_branch(s, "priv")
+    p = _head(s.work)
+    if where == "info":
+        graft, env = s.work / ".git" / "info" / "grafts", {}
+    else:
+        graft = s.root / "grafts"
+        env = {"GIT_GRAFT_FILE": str(graft)}
+    graft.parent.mkdir(exist_ok=True)
+    graft.write_text(f"{t} {p}\n")  # t "has" parent p
+    (s.state / "runner.push").write_text("")
+    _refused(s, s.bg(BG_MAX_WAIT="4", **env), "a graft file", str(graft.name))
+    assert not _has(s.remote, p)
+
+
+def test_a_callers_git_config_parameters_cannot_turn_follow_tags_back_on(s):
+    git(s.work, "tag", "-a", "v9-private", "-m", "unpublished tag", "HEAD")
+    (s.state / "runner.push").write_text("")
+    r = s.bg(GIT_CONFIG_PARAMETERS="'push.followtags'='true' 'push.recursesubmodules'='on-demand' 'core.testmarker'='kept'")
+    assert r.returncode == 0, r.stderr
+    assert s.read("cfg.followTags").strip() == "false" and s.read("cfg.recurse").strip() == "no"
+    assert s.read("cfg.marker").strip() == "kept"  # the caller's other entries stay
+    assert _tags(s.remote) == ""
+    assert "ci/run/x-abc" in subprocess.run(["git", "branch", "--list"], cwd=s.remote, capture_output=True, text=True).stdout
+
+
+def test_a_leading_zero_git_config_count_still_gets_the_override(s):
+    env = {"GIT_CONFIG_COUNT": "08", **{f"GIT_CONFIG_KEY_{i}": f"core.x{i}" for i in range(8)},
+           **{f"GIT_CONFIG_VALUE_{i}": "v" for i in range(8)}, "GIT_CONFIG_KEY_7": "push.followTags", "GIT_CONFIG_VALUE_7": "true"}
+    git(s.work, "tag", "-a", "v9-private", "-m", "unpublished tag", "HEAD")
+    (s.state / "runner.push").write_text("")
+    r = s.bg(**env)
+    assert r.returncode == 0, r.stderr
+    assert "value too great" not in r.stderr
+    assert s.read("cfg.followTags").strip() == "false"
+    assert _tags(s.remote) == ""
+
+
+def _offload(s, cwd, cmd=("pytest", "tests/test_a.py"), **env):
+    e = {**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"),
+         "BG_OFFLOAD_RUNNER": str(s.work / "scripts" / "github-ci-run"), "BG_OFFLOAD_POLL": "0", **env}
+    return subprocess.run([str(OFFLOAD), str(cwd), "--", *cmd], cwd=cwd, env=e,
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_a_failing_git_status_refuses(s):
+    (s.work / ".git" / "index").write_bytes(b"garbage")  # every index read fails; HEAD and the remote are fine
+    r = _offload(s, s.work, cmd=("pytest",))  # no test path: the path check (which reads the index too) is not reached
+    assert r.returncode == 69, r.stderr
+    assert "git status failed" in r.stderr
+    assert s.read("runner.calls") == "" and s.read("gh.calls") == ""
+
+
+def _other_clone_pushes(s, branch="other"):
+    other = s.root / "other"
+    git(s.root, "clone", "-q", str(s.remote), str(other))
+    git(other, "config", "user.name", "o")
+    git(other, "config", "user.email", "o@example.invalid")
+    (other / "o.txt").write_text("o\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-q", "-m", "other")
+    git(other, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+    return _head(other)
+
+
+def test_an_advertised_tip_missing_here_is_skipped_not_fatal(s):
+    x = _other_clone_pushes(s)
+    assert not _has(s.work, x)
+    r = s.bg()
+    assert r.returncode == 0, r.stderr  # HEAD is on the remote; the unknown tip is not an exclusion, nor an error
+    assert "already on origin" in r.stderr
+    assert not _has(s.work, x)
+
+
+def test_a_partial_clone_never_lazy_fetches_an_advertised_tip(s):
+    git(s.remote, "config", "uploadpack.allowFilter", "true")
+    git(s.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
+    part = s.root / "partial"
+    git(s.root, "clone", "-q", "-b", "main", "--filter=blob:none", f"file://{s.remote}", str(part))
+    x = _other_clone_pushes(s)
+    r = _offload(s, part)
+    assert r.returncode == 0, r.stderr
+    assert subprocess.run(["git", "cat-file", "-e", x], cwd=part, capture_output=True,
+                          env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}).returncode != 0

@@ -26,8 +26,8 @@
 # is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no GNU tool, nothing
 # publishable (see below): this helper says so and exits 69, and bg goes on waiting at the gate as it always did.
 #
-# What may be offloaded (adversary reviews of c7cab20 to ae917f7, 2026-10-23, and djbclark's ruling that followed:
-# bg-offload publishes NOTHING that is not already on the remote; four review rounds, the first three on scanning
+# What may be offloaded (adversary reviews of c7cab20 to 75dbe21, 2026-10-23, and djbclark's ruling that followed:
+# bg-offload publishes NOTHING that is not already on the remote; five review rounds, the first three on scanning
 # what would be pushed, so there is no scan and no opt-in): all of
 #   (a) no tracked file is modified, in the working tree or the index (`git status --porcelain
 #       --untracked-files=no`; untracked files never travel and never block, they are listed). A tracked file
@@ -35,17 +35,26 @@
 #   (b) the push target is asked, not guessed from local remote-tracking refs (which go stale after a `set-url`, a
 #       remote branch deleted by another clone, or a separate pushurl): the remote's fetch url and push url
 #       (`git remote get-url [--push] --all $remote`, remote = $GITHUB_CI_REMOTE or origin, the name the runners
-#       use) must be the same single url, and `git ls-remote --refs` of it (60 s, BatchMode, no prompt; any
-#       failure refuses) lists the refs there; every commit of HEAD must be reachable from one of them (`git
-#       rev-list --count HEAD --stdin` with those tips excluded is 0);
+#       use) must be the same single url, and `git ls-remote --refs $remote` (60 s, BatchMode, no prompt; any
+#       failure refuses) lists the refs there. It is asked by NAME, as the runner's `git push $remote` resolves it:
+#       the url get-url prints is already rewritten by url.*.insteadOf, and handing that string to ls-remote would
+#       rewrite it a second time, to a repository the push never goes to (adversary round 5). Every commit of HEAD
+#       must be reachable from one of the advertised refs (`git rev-list --count HEAD --stdin` with those tips
+#       excluded is 0);
 #   (c) the ref the runner overlays, local refs/heads/ci/base (else refs/remotes/$remote/ci/base), is reachable
 #       from those same advertised refs too (it is published content). It may be behind or level with the
 #       remote's ci/base, and a stale remote-tracking copy no longer on the remote fails this check.
+# The history walked is the real one, for the checks and the runner's push alike: GIT_NO_REPLACE_OBJECTS=1 is
+# exported for the whole helper (a `git replace` of a public commit by one with a private parent would hide that
+# parent from rev-list while the push sends it), and a graft file (info/grafts or $GIT_GRAFT_FILE, which that
+# variable does not turn off) refuses. GIT_NO_LAZY_FETCH=1: a partial clone never fetches an advertised tip it
+# lacks; such a tip is just not an exclusion.
 # If any fails: one line per reason (dirty files capped, N unpushed commits, ci/base commits not on the remote, url
-# mismatch, ls-remote failure), nothing is pushed or built, exit 69, and bg keeps waiting at the gate as it always
-# did. The dev flow: commit and push, then bg offloads. The runner is then called on HEAD itself with git config
-# forced from the environment (GIT_CONFIG_COUNT/KEY/VALUE appended to the caller's: push.followTags=false and
-# push.recurseSubmodules=no, so the user's config cannot make its `git push` carry tags or submodule commits), and
+# mismatch, ls-remote failure, grafts), nothing is pushed or built, exit 69, and bg keeps waiting at the gate as it
+# always did. The dev flow: commit and push, then bg offloads. The runner is then called on HEAD itself with git
+# config forced from the environment (push.followTags=false and push.recurseSubmodules=no appended to
+# GIT_CONFIG_PARAMETERS, which git reads after every config file and after GIT_CONFIG_COUNT/KEY/VALUE, so neither
+# the user's config nor a caller's environment can make its `git push` carry tags or submodule commits), and
 # the only thing it pushes is the CI overlay branch: HEAD's tree, the ci/base overlay and .ci-target-sha.
 # A named test path that does not exist, is untracked or git-ignored, is a directory with no tracked file, or
 # resolves outside the repo top also exits 69 (pytest/unittest arguments that look like paths: end in .py,
@@ -73,6 +82,7 @@
 # real run): BG_GH (gh binary), BG_OFFLOAD_RUNNER (route), BG_OFFLOAD_TOOLS_EXTRA (more required tools). Timing knobs: BG_OFFLOAD_POLL
 # (poll seconds, default 20), BG_OFFLOAD_APPEAR (seconds to wait for the run to show up, default 240).
 export PATH="/opt/homebrew/bin:$PATH"
+export GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1  # header: the real history, never a lazy fetch
 if [ "${BG_OFFLOAD_TESTING:-0}" = 1 ]; then
   gh_bin="${BG_GH:-gh}"; runner_override="${BG_OFFLOAD_RUNNER:-}"
 else
@@ -194,6 +204,13 @@ done
 # 3. Publish NOTHING that is not already on the remote (header: (a) clean tracked tree, (b) HEAD reachable from a ref
 # the real push target advertises, (c) the overlaid ci/base too). One line per failed reason, exit 69, bg keeps waiting.
 refuse=0
+# Grafts rewrite parents for every git command here and in the runner's push; GIT_NO_REPLACE_OBJECTS does not turn
+# them off. rev-parse --git-path honours $GIT_GRAFT_FILE. A failing rev-parse refuses too.
+graft_file=$(git -C "$top" rev-parse --path-format=absolute --git-path info/grafts 2>/dev/null) || graft_file=""
+if [ -z "$graft_file" ] || [ -e "$graft_file" ] || [ -L "$graft_file" ]; then
+  refuse=1
+  say "offload: a graft file (${graft_file:-unknown path}) rewrites history here, so what is on the remote cannot be checked"
+fi
 if [ "$tracked_dirty" != 0 ]; then
   refuse=1
   say "offload: $tracked_dirty tracked file(s) with uncommitted changes (working tree or index) in $top; CI would not see them:"
@@ -214,7 +231,7 @@ elif [ "$fetch_urls" != "$push_urls" ] || [ "$(printf '%s\n' "$push_urls" | gwc 
   say "offload: remote $remote does not have exactly one url that is both its fetch and push url (set-url, pushurl, pushInsteadOf or several urls); the push target cannot be verified"
 else
   [ -n "${GIT_SSH_COMMAND:-}" ] || export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
-  GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_LSREMOTE_TIMEOUT:-60}" "$tmp/lsr" "$tmp/lsr.err" git -C "$top" ls-remote --refs -- "$push_urls"
+  GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_LSREMOTE_TIMEOUT:-60}" "$tmp/lsr" "$tmp/lsr.err" git -C "$top" ls-remote --refs "$remote"
   if [ "$rc" != 0 ]; then
     refuse=1
     say "offload: could not list the refs at the push target of $remote (rc $rc); not offloading: $(ghead -n 1 "$tmp/lsr.err" | gsed -E 's#//[^/@ ]*@#//#g')"
@@ -279,14 +296,10 @@ say "offload: running the repo's CI on $what via ${runner#$top/}"
 out="$tmp/runner.out"
 cd "$top" || exit 69
 # The runner's `git push` must carry the one ref and nothing else, whatever the caller's git config says:
-# push.followTags would publish local annotated tags, push.recurseSubmodules submodule commits. Environment config
-# overrides every config file and is appended after any entries the caller already has.
-n=${GIT_CONFIG_COUNT:-0}
-case "$n" in ""|*[!0-9]*) n=0 ;; esac
-export "GIT_CONFIG_KEY_$n=push.followTags" "GIT_CONFIG_VALUE_$n=false"
-n=$((n + 1))
-export "GIT_CONFIG_KEY_$n=push.recurseSubmodules" "GIT_CONFIG_VALUE_$n=no"
-export GIT_CONFIG_COUNT=$((n + 1))
+# push.followTags would publish local annotated tags, push.recurseSubmodules submodule commits. GIT_CONFIG_PARAMETERS
+# is read after every config file and after GIT_CONFIG_COUNT/KEY/VALUE, and the last value wins, so appending to it
+# overrides both (a caller's own entries are kept). A malformed caller value already failed `git status` above.
+export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'push.followtags'='false' 'push.recursesubmodules'='no'"
 run_group "${BG_OFFLOAD_PUSH_TIMEOUT:-900}" "$out" "$tmp/runner.err" "$runner" --no-wait "$ref"
 if [ "$rc" != 0 ]; then
   say "offload: the CI runner exited $rc (it may have pushed before failing; no run is followed). Its stderr tail:"

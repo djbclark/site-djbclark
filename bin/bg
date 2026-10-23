@@ -79,9 +79,10 @@
 # BG_OFFLOAD_WAIT, 77 pushed but no verdict (nothing succeeded, cancelled, no run); 3 and 75 keep their
 # meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. bg-offload publishes NOTHING that is not already on
 # the remote (a public repo's CI is outward-facing, the checkout may hold another session's work; djbclark's
-# ruling 2026-10-23 after four review rounds): it offloads only when no tracked file is modified (working tree
+# ruling 2026-10-23 after five review rounds): it offloads only when no tracked file is modified (working tree
 # or index), every commit of HEAD is reachable from a ref the REAL push target advertises (`git ls-remote` of
-# the remote's single fetch-and-push url, not the local remote-tracking refs, which go stale), and the ci/base
+# the remote by name, resolved as the runner's push resolves it, with the remote's fetch and push url the same
+# single url; not the local remote-tracking refs, which go stale; no replace refs, no grafts), and the ci/base
 # the runner overlays is too. The runner's git config is forced to push.followTags=false (no local tags go
 # along). Otherwise bg-offload says why and bg keeps waiting at the gate: commit and push, then bg offloads. A
 # named test path that is missing, untracked, a directory with no tracked file or outside the repo stops the
