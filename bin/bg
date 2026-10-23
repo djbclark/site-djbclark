@@ -70,10 +70,42 @@
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
 export PATH="/opt/homebrew/bin:$PATH"
+# bg has no flags of its own: everything after the name is the command. Agents
+# sometimes invent `--name`/`--log`/`--` (from other wrappers); those become
+# `taskpolicy -c utility --name …` and macOS taskpolicy errors with
+# `illegal option -- -` (seen 2026-10-22). Catch that before the QoS exec.
+bg_usage() {
+  cat >&2 <<'EOF'
+usage: bg <command> [args...]
+
+Runs <command> at utility QoS (taskpolicy -c utility). No bg-owned flags:
+  right:  bg ./build-searxng-image
+  right:  bg pytest -q tests/
+  wrong:  bg --name job --log out.log -- ./build   # those args go to taskpolicy
+
+Redirect or name the run yourself (bg does not take --log/--name):
+  bg bash -lc './build >out.log 2>&1'
+EOF
+}
 if [ "$#" -eq 0 ]; then
-  echo "usage: bg <command> [args...]" >&2
+  bg_usage
   exit 2
 fi
+case "$1" in
+  -h|--help)
+    bg_usage
+    exit 0
+    ;;
+  --)
+    echo "bg: lone -- is not supported; pass the command directly (see bg --help)" >&2
+    exit 2
+    ;;
+  --*)
+    echo "bg: unknown option '$1' (bg has no flags; the first argument must be the command)" >&2
+    echo "bg: example: bg ./build-searxng-image   — not: bg --name x -- ./build-searxng-image" >&2
+    exit 2
+    ;;
+esac
 "$(dirname "$0")/gradle-limits" check 2>/dev/null || true
 
 is_gradle=0
