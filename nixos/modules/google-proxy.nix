@@ -15,12 +15,20 @@
 # 2026-10-22: allowlist widened from Google-only to every engine the firecrawl-searxng
 # image enables (general + !shortcuts). Round-robin peer: pastebin.xvm:26370
 # (firecrawl-hyades/scripts/install-pastebin-egress-proxy).
+#
+# 2026-10-22: MIT GlobalProtect (openconnect tun0 + vpn-slice) installs 18.0.0.0/8
+# via tun0. Replies to Hyades (18.4.60.84) then leave the VPN instead of enp1s0,
+# so Hyades→public-IP TCP blackholes (neighbors in the same /24 still work).
+# Policy-route anything sourced from the public address out enp1s0.
 { pkgs, lib, ... }:
 let
   port = 26369;
   # hyades.mit.edu; every Hyades microVM leaves through this one address.
   hyadesEgress = "18.4.60.84";
   publicInterface = "enp1s0";
+  # Separate routing table so "from $publicIp" does not follow tun0's 18/8.
+  returnPathTable = 100;
+  returnPathPriority = 100;
   # Hosts a CONNECT may reach (extended regex, case-insensitive, matched against the
   # host name only). Keep in sync with firecrawl-hyades/docs/searxng-egress.md.
   allowedHosts = [
@@ -133,4 +141,45 @@ in
       --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
     iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
   '';
+
+  # Keep Hyades→public-IP replies on enp1s0 even while GlobalProtect owns 18/8.
+  systemd.services.hyades-public-return-path = {
+    description = "Policy-route replies from public IP via ${publicInterface} (not MIT VPN tun0)";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    # Re-run after DHCP renews the public address / default via.
+    partOf = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = pkgs.writeShellScript "hyades-public-return-path-up" ''
+        set -eu
+        IF=${publicInterface}
+        TABLE=${toString returnPathTable}
+        PRIO=${toString returnPathPriority}
+        IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
+        GW=$(${pkgs.iproute2}/bin/ip -4 route show default dev "$IF" \
+          | ${pkgs.gawk}/bin/awk '{ print $3; exit }')
+        [ -n "$IP" ] || { echo "hyades-public-return-path: no IPv4 on $IF" >&2; exit 1; }
+        [ -n "$GW" ] || { echo "hyades-public-return-path: no default via on $IF" >&2; exit 1; }
+        ${pkgs.iproute2}/bin/ip route replace default via "$GW" dev "$IF" table "$TABLE"
+        ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
+        ${pkgs.iproute2}/bin/ip rule add from "$IP" table "$TABLE" priority "$PRIO"
+        echo "hyades-public-return-path: from $IP via $GW dev $IF table $TABLE"
+      '';
+      ExecStop = pkgs.writeShellScript "hyades-public-return-path-down" ''
+        set -eu
+        IF=${publicInterface}
+        TABLE=${toString returnPathTable}
+        IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
+        if [ -n "''${IP:-}" ]; then
+          ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
+        fi
+        ${pkgs.iproute2}/bin/ip route flush table "$TABLE" 2>/dev/null || true
+      '';
+    };
+  };
 }

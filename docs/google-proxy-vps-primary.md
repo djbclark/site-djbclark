@@ -7,10 +7,15 @@ firecrawl-searxng image enables. Every Hyades microVM leaves through one shared 
 instrumentation: firecrawl-hyades [`docs/searxng-egress.md`](https://forgejo.mit.edu/djbclark/firecrawl-hyades/src/branch/main/docs/searxng-egress.md).
 
 **Status (2026-10-22):** allowlist covers Google CSE, Bing, Yahoo, DuckDuckGo, Wikipedia,
-Wikidata, Grokipedia, and the enabled !shortcut hosts. SearXNG `r7+` sets
+Wikidata, Grokipedia, and the enabled !shortcut hosts. SearXNG sets
 `outgoing.proxies.all://` to both legs (round-robin) via `SEARXNG_EGRESS_PROXIES`. Plain
 `google` stays off (403 everywhere; searxng#6835). `fleet-watch vps` still alerts if
 `tinyproxy-google` stops.
+
+**Return path (2026-10-22):** GlobalProtect (`tun0`) owns `18.0.0.0/8`, which stole
+replies to Hyades (`18.4.60.84`) and blackholed Hyades→`178.105.34.223` while neighbors
+in the same `/24` still worked. Unit `hyades-public-return-path` policy-routes
+`from $publicIp` via `enp1s0` (table 100). Without it, keep SearXNG on pastebin-only.
 
 ## 1. Why tinyproxy, and what was searched first
 
