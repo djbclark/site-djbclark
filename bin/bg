@@ -21,7 +21,8 @@
 # build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate for a
 # test or a small command, never for a Gradle command (2026-10-10); any other value just means
 # "gate on". When the load drops after a wait, bg pauses 5-30 s at random and reads it again, so
-# queued commands don't all start in the same second. Also reverts an expired Gradle profile
+# queued commands don't all start in the same second. The gate also asks `load-watch admit` for the
+# memory side (compressor churn, 2026-10-23); it fails open if load-watch is missing or errors. Also reverts an expired Gradle profile
 # (gradle-limits check). When testing bg itself, pass BG_LOAD_WAIT=0.
 #
 # Wait budget (djbclark, 2026-10-18): bg never starts a command "anyway". Until then the load gate
@@ -328,6 +329,14 @@ if [ "$wait_s" != 0 ]; then
   while :; do
     load1=$(sysctl -n vm.loadavg | gawk '{print $2}')
     over=$(gawk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
+    why="load below $max_per_core per core (now $load1)"
+    if [ "$over" = 0 ] && [ -x "$lw" ]; then
+      # The load is fine: also ask the watcher's memory gate (compressor churn, 2026-10-23), which
+      # load alone cannot show. Exit 75 is "too hot"; anything else (missing, error) fails open.
+      lw_rc=0
+      "$lw" admit --wait 0 --max-per-core "$max_per_core" >/dev/null 2>&1 || lw_rc=$?
+      if [ "$lw_rc" = 75 ]; then over=1; why="memory churn below the load-watch limit (load $load1 is fine)"; fi
+    fi
     if [ "$over" = 0 ]; then
       # Straight through at low load; after a wait, read it twice with a random pause between.
       [ "$announced" = 0 ] || [ "$clear" = 1 ] && break
@@ -336,10 +345,10 @@ if [ "$wait_s" != 0 ]; then
       continue
     fi
     clear=0
-    wait_tick "load below $max_per_core per core (now $load1)"
+    wait_tick "$why"
     if [ "$announced" = 0 ]; then
       announced=1
-      echo "bg: load $load1 on $cores cores is above $max_per_core per core; waiting up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
+      echo "bg: $why is not met (load $load1 on $cores cores); waiting up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
     fi
     sleep 15
   done
