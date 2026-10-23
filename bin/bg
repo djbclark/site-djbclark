@@ -66,6 +66,29 @@
 # shlock mechanism as the Gradle slot. --version/--help/--collect-only don't take one.
 # BG_TEST_SLOTS=0 disables it (don't advertise that in messages agents see).
 #
+# CI offload (djbclark, 2026-10-23): in a repo recorded `ci` (load-watch ci) a targeted test run stays
+# here, and on 2026-10-23 a 2 s pytest file sat over an hour in the load gate at load 25-93 on 8 cores:
+# the carve-out defeated CI-first exactly when the machine is busiest. So once the gate has held such a
+# run for BG_OFFLOAD_AFTER seconds (default 60), bg hands it to bin/bg-offload instead of waiting on:
+# the repo's HEAD (untracked files are never in it) goes to its CI through its tracked, executable
+# scripts/bg-offload-run or scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s; the offload has its own budget, outside
+# BG_MAX_WAIT) and exits with CI's verdict, never running the command here. It needs such a route, `gh`, `git` and the GNU
+# tools bg-offload lists (gdate, gawk, gtimeout...); without them, or if the push fails, bg says so and keeps waiting as before. Exit codes: 0 CI's
+# workflow passed on this tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI
+# failed (log tail printed; it can come from a test you did not name), 76 CI still running at
+# BG_OFFLOAD_WAIT, 77 pushed but no verdict (nothing succeeded, cancelled, no run); 3 and 75 keep their
+# meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. bg-offload publishes NOTHING that is not already on
+# the remote (a public repo's CI is outward-facing, the checkout may hold another session's work; djbclark's
+# ruling 2026-10-23 after six review rounds): it offloads only when no tracked file is modified (working tree
+# or index), every commit of HEAD is reachable from a ref the REAL push target advertises (`git ls-remote` of
+# the remote by name, resolved as the runner's push resolves it, with the remote's fetch and push url the same
+# single url; not the local remote-tracking refs, which go stale; no replace refs, no grafts), and the ci/base
+# the runner overlays is too. The runner's git config is forced to push.followTags=false (no local tags go
+# along). Otherwise bg-offload says why and bg keeps waiting at the gate: commit and push, then bg offloads. A
+# named test path that is missing, untracked, a directory with no tracked file or outside the repo stops the
+# offload too (header of bin/bg-offload).
+# Not a way round the gate: builds, non-targeted runs and `local` repos never offload and still wait.
+#
 # Agents must call `~/ops/site-private/bin/bg`: bare `bg` is the shell job-control builtin.
 #
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
@@ -195,6 +218,11 @@ ci_release() {
   return 1
 }
 lw="$HOME/src/djbclark-ade/bin/load-watch"
+# Offload (header): set below only for a targeted run in a `ci` repo that has a runnable CI route.
+offload_ok=0
+# A failed greadlink must leave this empty, never "./bg-offload" (a file in the caller's repo).
+bg_offload=$(greadlink -f "$0") && bg_offload="${bg_offload%/*}/bg-offload" || bg_offload=
+offload_after="${BG_OFFLOAD_AFTER:-60}"
 if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     && top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
   dec=$("$lw" ci check "$top" 2>/dev/null); rc=$?
@@ -208,7 +236,13 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"" >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_targeted "$@"; then
-    echo "bg: $top runs full suites and builds on CI (load-watch ci); this targeted test run stays here." >&2
+    if [ "${BG_OFFLOAD:-1}" != 0 ] && [ -x "$bg_offload" ] && "$bg_offload" --probe "$top"; then
+      offload_ok=1
+      echo "bg: $top runs full suites and builds on CI (load-watch ci); this targeted test run stays here," >&2
+      echo "bg: unless the load gate holds it past ${offload_after} s, when it runs on CI instead (BG_OFFLOAD=0: wait here)." >&2
+    else
+      echo "bg: $top runs full suites and builds on CI (load-watch ci); this targeted test run stays here." >&2
+    fi
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_release "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); a release gates on CI and publishes here." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
@@ -346,6 +380,19 @@ if [ "$wait_s" != 0 ]; then
     fi
     clear=0
     wait_tick "$why"
+    if [ "$offload_ok" = 1 ] && [ "$(waited_s)" -ge "$offload_after" ]; then
+      # Held past the threshold in a `ci` repo: CI runs the test instead of a busy Mac (header).
+      echo "bg: held $(dur "$(waited_s)") for $why; running it on CI instead of waiting longer" >&2
+      # A child, not an exec: killing bg must stop it too, or it polls on as an orphan.
+      "$bg_offload" "$top" -- "$@" &
+      off_pid=$!
+      trap 'kill "$off_pid" 2>/dev/null; exit 143' TERM INT HUP
+      wait "$off_pid"; off_rc=$?
+      trap - TERM INT HUP
+      [ "$off_rc" = 69 ] || exit "$off_rc"
+      offload_ok=0
+      echo "bg: could not offload to CI (reason above); waiting for the gate as usual" >&2
+    fi
     if [ "$announced" = 0 ]; then
       announced=1
       echo "bg: holding for $why ($cores cores); will wait up to $(dur "$max_wait") (normal: do not kill or retry)" >&2
