@@ -70,18 +70,20 @@
 # here, and on 2026-10-23 a 2 s pytest file sat over an hour in the load gate at load 25-93 on 8 cores:
 # the carve-out defeated CI-first exactly when the machine is busiest. So once the gate has held such a
 # run for BG_OFFLOAD_AFTER seconds (default 60), bg hands it to bin/bg-offload instead of waiting on:
-# a commit of the working tree (HEAD when clean, `git stash create` when dirty; untracked files are not
-# in it and are listed) goes to the repo's CI through its executable scripts/bg-offload-run or
-# scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s; the offload has its own budget, outside
+# the repo's HEAD (untracked files are never in it) goes to its CI through its executable
+# scripts/bg-offload-run or scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s; the offload has its own budget, outside
 # BG_MAX_WAIT) and exits with CI's verdict, never running the command here. It needs such a route, `gh` and
 # `git`; without them, or if the push fails, bg says so and keeps waiting as before. Exit codes: 0 CI's
 # workflow passed on this tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI
 # failed (log tail printed; it can come from a test you did not name), 76 CI still running at
 # BG_OFFLOAD_WAIT, 77 pushed but no verdict (nothing succeeded, cancelled, no run); 3 and 75 keep their
-# meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. A tree with uncommitted tracked changes is NOT
-# pushed (the checkout may hold another session's edits; a public repo's CI is outward-facing): bg keeps
-# waiting and says which files, unless the caller sets BG_OFFLOAD_DIRTY=1, which pushes the tracked changes
-# as a commit on HEAD after a gitleaks scan (bin/bg-offload header).
+# meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. Only HEAD goes, and only when the tree is clean and HEAD
+# is already on the remote: uncommitted tracked changes and local-only commits are NOT published for the caller
+# (a public repo's CI is outward-facing, the checkout may hold another session's work). bg lists them and keeps
+# waiting, unless the caller sets BG_OFFLOAD_DIRTY=1 on that command (never export it in a pane: that makes
+# every later run a yes): then they are pushed after a binary-file check and a hardened gitleaks scan, as a
+# commit whose only parent is HEAD (bin/bg-offload header). A named test path that is missing, untracked,
+# a directory with no tracked file or outside the repo stops the offload too.
 # Not a way round the gate: builds, non-targeted runs and `local` repos never offload and still wait.
 #
 # Agents must call `~/ops/site-private/bin/bg`: bare `bg` is the shell job-control builtin.
