@@ -16,6 +16,8 @@ paseo_desktop_config:
   daemon.hostnames: '["{{ caddy_public_hostname }}"]'
   daemon.relay.enabled: "false"
   features.webUi.enabled: "true"
+  # Archive a clean, fully pushed Paseo-owned worktree workspace once its PR merges (djbclark, 2026-10-23).
+  daemon.autoArchiveAfterMerge: "true"
 # Paseo.app's own settings (desktop-settings.json "settings", merged key by key). The daemon outlives the
 # app (djbclark, 2026-10-18), so quitting the window never stops running agents. The app reads it at start.
 paseo_desktop_settings_path: "{{ ansible_facts.user_dir }}/Library/Application Support/Paseo/desktop-settings.json"
