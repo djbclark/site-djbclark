@@ -2,8 +2,8 @@
 # bg-offload — run a held test command on CI instead, and report CI's verdict (bg's helper, 2026-10-23).
 #
 #   bg-offload --probe TOP            exit 0 when TOP has a runnable CI route (bg asks once, up front)
-#   bg-offload TOP -- CMD [ARGS...]   push TOP's HEAD (or, opted in, its tracked working tree) to the repo's CI
-#                                     route, wait, print the result; CMD is only used to name the run and to
+#   bg-offload TOP -- CMD [ARGS...]   run the repo's CI route on TOP's HEAD (which must already be on the
+#                                     remote), wait, print the result; CMD is only used to name the run and to
 #                                     check the test paths it names (CI cannot see a path that is missing,
 #                                     untracked or outside the repo)
 #
@@ -23,33 +23,25 @@
 # A repo with a faster route than the whole CI workflow (sudo-secretspec: a plain push runs only the
 # 2-minute `packaging` job) ships its own scripts/bg-offload-run with the same contract. A linked git
 # worktree (.git is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no
-# git, no clean tree (see below): this helper says so and exits 69, and bg goes on waiting at the gate as it
+# git, nothing publishable (see below): this helper says so and exits 69, and bg goes on waiting at the gate as it
 # always did.
 #
-# What may be pushed (adversary reviews of c7cab20 and 200776a, 2026-10-23: a load threshold must not publish
-# anything the caller did not choose to publish, to a public repo whose pushed commits stay fetchable by SHA):
-# only HEAD, when the tracked tree is clean AND every commit in HEAD is already on the remote
-# (`rev-list HEAD --not --remotes=$remote`, remote = $GITHUB_CI_REMOTE or origin). Anything else needs
-# BG_OFFLOAD_DIRTY=1 on the command, the caller saying "these are my edits/commits and may go to the public CI":
-# uncommitted tracked changes (working tree or index; the checkout is shared and they may be another session's)
-# and local-only commits. Do not export it in a pane's environment: that turns every later run into a yes.
-# Without it the helper lists the dirty files and the local-only commits (capped), says how to opt in and exits
-# 69 (bg keeps waiting). With it:
-#   - a dirty tree becomes a commit whose only parent is HEAD (the index is copied to a temp file, `git add -u`
-#     runs on the copy, write-tree, commit-tree; so a secret staged and later removed has no commit to travel
-#     in, untracked files are never in it, and the real tree and index are untouched);
-#   - the whole range `REF --not --remotes=$remote` is checked: any changed file that git treats as binary
-#     (`git log --numstat` shows `-  -`: NUL bytes, `binary`/`-diff` attributes) is invisible to gitleaks, so
-#     it exits 69 listing the paths; then `gitleaks git` scans the range with its own config (`[extend]
-#     useDefault`, so a repo .gitleaks.toml or GITLEAKS_* env cannot loosen it), an empty ignore directory and
-#     `--ignore-gitleaks-allow` (no inline allow) and from an empty directory; a .gitleaksignore in the repo top is
-#     honoured by gitleaks whatever -i says, so its presence exits 69; with
-#     --redact; any hit, any error or a missing gitleaks exits 69 (the output is filtered to rule/file/line);
-#   - `git diff --name-status HEAD REF` (what actually goes) is printed right before the push.
-# Untracked files are NOT pushed and are listed. A named test path that does not exist, is untracked or
-# git-ignored, is a directory with no tracked file, or resolves outside the repo top exits 69 (pytest/unittest
-# arguments that look like paths: end in .py, contain `/` or `::`, or are directories; a unittest dotted id is not
-# checked).
+# What may be offloaded (adversary reviews of c7cab20, 200776a and 3bf4122, 2026-10-23, and djbclark's ruling
+# that followed: bg-offload publishes NOTHING that is not already on the remote. Three review rounds each found
+# another way past a scan of what would be pushed, so there is no scan and no opt-in): all of
+#   (a) no tracked file is modified, in the working tree or the index (`git status --porcelain`, untracked files
+#       aside: they never travel and never block; they are listed);
+#   (b) HEAD is contained in the remote: `git rev-list --count HEAD --not --remotes=$remote` is 0, remote =
+#       $GITHUB_CI_REMOTE or origin, the name the runners use;
+#   (c) a local branch ci/base, if there is one, is not ahead of refs/remotes/$remote/ci/base (the runners overlay
+#       it onto the run, so it is published content).
+# If any fails: one line per reason (dirty files capped, N unpushed commits, ci/base ahead), nothing is pushed or
+# built, exit 69, and bg keeps waiting at the gate as it always did. The dev flow: commit and push, then bg
+# offloads. The runner is then called on HEAD itself, and the only thing it pushes is the CI overlay branch
+# built from commits that are already public.
+# A named test path that does not exist, is untracked or git-ignored, is a directory with no tracked file, or
+# resolves outside the repo top also exits 69 (pytest/unittest arguments that look like paths: end in .py,
+# contain `/` or `::`, or are directories; a unittest dotted id is not checked).
 #
 # Budget: the offload has its own budget, not BG_MAX_WAIT: up to BG_OFFLOAD_PUSH_TIMEOUT (900 s) for the runner
 # plus BG_OFFLOAD_WAIT (2400 s) for CI, after the hold that triggered it. bg's own ping is not sent for it.
@@ -63,20 +55,20 @@
 #   0   at least one CI run concluded success and none failed: "CI's workflow passed on this tree". It does NOT
 #       mean the test the caller named passed on its own: CI ran the repo's whole workflow
 #   1   a CI run concluded failure: the failed-step log tail and the full log's path are printed
-#   69  not offloaded (no route, no gh, dirty tree or local-only commits without BG_OFFLOAD_DIRTY=1, a binary
-#       changed file, gitleaks hit or missing, a named test path CI cannot see, ref building failed, or the runner
-#       failed: it may have pushed before failing, but no run is followed): bg falls back to waiting at the gate
+#   69  not offloaded (no route, no gh, a tracked change, an unpushed commit, ci/base ahead, a named test path CI
+#       cannot see, or the runner failed: it may have pushed before failing, but no run is followed): bg falls
+#       back to waiting at the gate
 #   76  CI did not finish within BG_OFFLOAD_WAIT; the run is still going, its URL is printed
 #   77  pushed, but no verdict: no run appeared, gh kept failing, every run was skipped/neutral, or a run
 #       was cancelled/timed out
-# Test hooks, honoured ONLY with BG_OFFLOAD_TESTING=1 (an inherited BG_GITLEAKS=/usr/bin/true must not switch the
-# scan off): BG_GH (gh binary), BG_GITLEAKS (gitleaks binary), BG_OFFLOAD_RUNNER (route). Timing knobs: BG_OFFLOAD_POLL
+# Test hooks, honoured ONLY with BG_OFFLOAD_TESTING=1 (an inherited BG_GH or BG_OFFLOAD_RUNNER must not redirect a
+# real run): BG_GH (gh binary), BG_OFFLOAD_RUNNER (route). Timing knobs: BG_OFFLOAD_POLL
 # (poll seconds, default 20), BG_OFFLOAD_APPEAR (seconds to wait for the run to show up, default 240).
 export PATH="/opt/homebrew/bin:$PATH"
 if [ "${BG_OFFLOAD_TESTING:-0}" = 1 ]; then
-  gh_bin="${BG_GH:-gh}"; gl_bin="${BG_GITLEAKS:-gitleaks}"; runner_override="${BG_OFFLOAD_RUNNER:-}"
+  gh_bin="${BG_GH:-gh}"; runner_override="${BG_OFFLOAD_RUNNER:-}"
 else
-  gh_bin=gh; gl_bin=gitleaks; runner_override=""
+  gh_bin=gh; runner_override=""
 fi
 poll="${BG_OFFLOAD_POLL:-20}"
 
@@ -166,86 +158,49 @@ for a in "$@"; do
   fi
 done
 
-# 3. What gets pushed: HEAD if the tree is clean and HEAD is on the remote; else only with the opt-in, scanned.
-if [ "$tracked_dirty" != 0 ] || [ "$local_n" != 0 ]; then
-  if [ "$tracked_dirty" != 0 ]; then
-    say "offload: tracked files with uncommitted changes (working tree or index) in $top:"
-    ghead -n 40 "$tmp/tracked" | gsed 's/^/bg:   /' >&2
-    [ "$tracked_dirty" -gt 40 ] && say "offload:   ... and $((tracked_dirty - 40)) more"
-  fi
-  if [ "$local_n" != 0 ]; then
-    say "offload: $local_n commit(s) in HEAD are not on remote $remote and would be pushed with the run:"
-    git -C "$top" log --oneline -n 10 "$head_sha" --not "--remotes=$remote" | gsed 's/^/bg:   /' >&2
-    [ "$local_n" -gt 10 ] && say "offload:   ... and $((local_n - 10)) more"
-  fi
-  if [ "${BG_OFFLOAD_DIRTY:-0}" != 1 ]; then
-    say "offload: not publishing these to GitHub just because the machine is busy (the checkout may hold another session's work)."
-    say "offload: if they are yours and may go to the repo's public CI, set BG_OFFLOAD_DIRTY=1 on the bg command; waiting at the gate instead."
-    exit 69
-  fi
-  command -v "$gl_bin" >/dev/null 2>&1 || { say "offload: gitleaks not found; will not publish unscanned work"; exit 69; }
-  if [ "$tracked_dirty" != 0 ]; then
-    # A commit whose only parent is HEAD: the index (copied to a temporary file, so the real one is untouched)
-    # plus `git add -u` for working-tree changes, so a secret staged and then removed leaves no commit behind.
-    idx=$(git -C "$top" rev-parse --path-format=absolute --git-path index 2>/dev/null) && [ -f "$idx" ] || { say "offload: cannot find the git index"; exit 69; }
-    cp "$idx" "$tmp/index" || exit 69
-    GIT_INDEX_FILE="$tmp/index" git -C "$top" add -u >/dev/null 2>&1 || { say "offload: git add -u on a temporary index failed"; exit 69; }
-    tree=$(GIT_INDEX_FILE="$tmp/index" git -C "$top" write-tree 2>/dev/null) || { say "offload: write-tree failed"; exit 69; }
-    ref=$(git -C "$top" -c commit.gpgsign=false commit-tree "$tree" -p "$head_sha" -m "bg-offload: tracked working tree on ${head_sha:0:8}" 2>/dev/null)
-    case "$ref" in *[!0-9a-f]*|"") say "offload: could not build a commit of the dirty tree; not offloading"; exit 69 ;; esac
-  else
-    ref="$head_sha"
-  fi
-  # Binary changed files: gitleaks reads diff hunks, so it cannot see inside them.
-  git -C "$top" log -m --numstat --format= "$ref" --not "--remotes=$remote" > "$tmp/numstat" 2>/dev/null || { say "offload: git log --numstat failed"; exit 69; }
-  gawk -F'\t' '$1 == "-" && $2 == "-" { print $3 }' "$tmp/numstat" | gsort -u > "$tmp/binary"
-  if [ -s "$tmp/binary" ]; then
-    say "offload: these changed files are binary to git (NUL bytes or a binary/-diff attribute), so gitleaks cannot scan them; not publishing:"
-    ghead -n 20 "$tmp/binary" | gsed 's/^/bg:   /' >&2
-    exit 69
-  fi
-  # gitleaks reads a .gitleaksignore in the scanned repo's top whatever -i says (checked 2026-10-23, 8.30.1), and
-  # its fingerprints would silence findings: such a repo cannot be scanned reliably, so it is not published.
-  if [ -e "$top/.gitleaksignore" ]; then
-    say "offload: $top/.gitleaksignore exists and gitleaks would honour it, so a scan proves nothing; not publishing"
-    exit 69
-  fi
-  # gitleaks with its own rules: neither the repo's .gitleaks.toml / .gitleaksignore, nor GITLEAKS_* from the
-  # environment, nor inline `gitleaks:allow` may loosen it; run from an empty directory.
-  gmkdir "$tmp/glignore" "$tmp/glcwd" || exit 69
-  printf '[extend]\nuseDefault = true\n' > "$tmp/gl.toml"
-  unset_args=()
-  for v in $(compgen -e | ggrep '^GITLEAKS_'); do unset_args+=(-u "$v"); done
-  ( cd "$tmp/glcwd" && env "${unset_args[@]}" "$gl_bin" git "$top" -c "$tmp/gl.toml" -i "$tmp/glignore" \
-      --ignore-gitleaks-allow -v --log-opts="-m $ref --not --remotes=$remote" --redact --no-banner --no-color --exit-code 1 ) \
-    > "$tmp/gitleaks.out" 2>&1
-  glrc=$?
-  if [ "$glrc" != 0 ]; then
-    say "offload: gitleaks found a possible secret in what would be published (or failed, rc $glrc); not pushing it:"
-    ggrep -E '^(RuleID|File|Line|Commit):|leaks found|ERR' "$tmp/gitleaks.out" | ghead -n 30 | gsed 's/^/bg:   /' >&2
-    exit 69
-  fi
-  if [ "$ref" != "$head_sha" ]; then
-    what="a commit of the tracked working tree (index + working-tree changes, parent only HEAD ${head_sha:0:8}), scanned by gitleaks"
-  else
-    what="HEAD ${head_sha:0:8} with $local_n local-only commit(s), scanned by gitleaks"
-  fi
-else
-  ref="$head_sha"
-  if [ -n "$untracked" ]; then what="clean HEAD ${head_sha:0:8} (the tree has only untracked files, which CI does not get)"
-  else what="clean HEAD ${head_sha:0:8}"; fi
+# 3. Publish NOTHING that is not already on the remote (adversary reviews of c7cab20, 200776a and 3bf4122,
+# 2026-10-23: three rounds of "scan what we publish" each found another way past the scan, so the mechanism is
+# gone: a load threshold must not push anything). All of (a) no tracked modification, working tree or index,
+# (b) HEAD contained in the remote, (c) local ci/base, if any, not ahead of the remote's, must hold; else one
+# line per reason, exit 69, and bg keeps waiting at the gate. The caller can commit and push, then retry.
+refuse=0
+if [ "$tracked_dirty" != 0 ]; then
+  refuse=1
+  say "offload: $tracked_dirty tracked file(s) with uncommitted changes (working tree or index) in $top; CI would not see them:"
+  ghead -n 20 "$tmp/tracked" | gsed 's/^/bg:   /' >&2
+  [ "$tracked_dirty" -gt 20 ] && say "offload:   ... and $((tracked_dirty - 20)) more"
 fi
-case "$ref" in *[!0-9a-f]*|"") say "offload: unexpected ref '$ref'"; exit 69 ;; esac
+if [ "$local_n" != 0 ]; then
+  refuse=1
+  say "offload: $local_n commit(s) in HEAD are not on remote $remote (unpushed):"
+  git -C "$top" log --oneline -n 10 "$head_sha" --not "--remotes=$remote" | gsed 's/^/bg:   /' >&2
+  [ "$local_n" -gt 10 ] && say "offload:   ... and $((local_n - 10)) more"
+fi
+# The runners overlay the local branch ci/base onto the run, so it is published content too.
+if git -C "$top" show-ref --verify --quiet refs/heads/ci/base; then
+  if git -C "$top" show-ref --verify --quiet "refs/remotes/$remote/ci/base"; then
+    base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "refs/remotes/$remote/ci/base" 2>/dev/null) || base_n=-1
+  else
+    base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "--remotes=$remote" 2>/dev/null) || base_n=-1
+  fi
+  if [ "$base_n" != 0 ]; then
+    refuse=1
+    say "offload: local branch ci/base is ahead of $remote/ci/base ($base_n commit(s)); the runners overlay it onto the run, so it would be published"
+  fi
+fi
+if [ "$refuse" = 1 ]; then
+  say "offload: not publishing anything just because the machine is busy; commit and push, then run bg again to offload. Waiting at the gate instead."
+  exit 69
+fi
+ref="$head_sha"
+if [ -n "$untracked" ]; then what="HEAD ${head_sha:0:8}, already on $remote (the tree has untracked files, which CI does not get)"
+else what="HEAD ${head_sha:0:8}, already on $remote"; fi
 
 # Untracked files are never in the ref: listed.
 if [ -n "$untracked" ]; then
   say "offload: untracked files are NOT in the CI run:"
   printf '%s\n' "$untracked" | ghead -n 20 | gsed 's/^/bg:   ?? /' >&2
   [ "$(printf '%s\n' "$untracked" | gwc -l)" -gt 20 ] && say "offload:   ... and more"
-fi
-if [ "$ref" != "$head_sha" ]; then
-  say "offload: what goes beyond HEAD (git diff --name-status HEAD REF):"
-  git -C "$top" diff --name-status "$head_sha" "$ref" | ghead -n 40 | gsed 's/^/bg:   /' >&2
 fi
 
 # 4. Push the run (the runner's own wait is skipped: --no-wait).

@@ -2,7 +2,9 @@
 
 On 2026-10-23 a 2 s pytest file sat over an hour in bg's load gate in a `ci`-mode repo at load 25-93. Now,
 once the gate has held a targeted run for BG_OFFLOAD_AFTER seconds, bg hands it to bin/bg-offload, which
-runs the repo's CI route on a commit of the working tree and exits with CI's verdict.
+runs the repo's CI route on HEAD, which must already be on the remote, and exits with CI's verdict.
+bg-offload publishes nothing that is not already public: a tracked change, an unpushed commit or a local ci/base ahead
+of the remote's is a refusal (djbclark's ruling 2026-10-23 after three review rounds on scanning what would be pushed).
 
 Nothing here reaches GitHub. Each run gets a throwaway HOME and a throwaway git repo, with stubs for:
   load-watch  ($HOME/src/djbclark-ade/bin/load-watch): `ci check` answers the repo's mode, `admit` exits 75
@@ -12,7 +14,7 @@ Nothing here reaches GitHub. Each run gets a throwaway HOME and a throwaway git 
   gh          (BG_GH): `run list` answers from runs.json through the real jq expression bg-offload passes,
               but only for `--branch ci/run/x-abc` and no more rows than `--limit` (as the real one), `run view`
               prints failed.log. Like real gh, an unfinished run has `"conclusion": ""`.
-  gitleaks    the real one (installed; those tests skip without it), BG_GITLEAKS points at a missing one.
+  a remote    a real bare repository (remote.git) that the work repo pushes to, so refs/remotes/origin/* are real.
 BG_MAX_LOAD_PER_CORE=1000 keeps bg's own load check passing, so the stub `admit` alone holds the gate. A
 BASH_ENV shim turns every `sleep` into 0.2 s, so the 15 s gate poll and bg-offload's poll cost nothing
 while the real clock still drives BG_OFFLOAD_AFTER and BG_MAX_WAIT.
@@ -35,9 +37,6 @@ OFFLOAD = BIN / "bg-offload"
 COMMIT = "a" * 40
 
 pytestmark = pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq")
-needs_gitleaks = pytest.mark.skipif(shutil.which("gitleaks") is None, reason="needs the real gitleaks")
-# Shaped like a GitHub personal access token; gitleaks' github-pat rule matches it (made up, not a credential).
-FAKE_TOKEN = "ghp_" + "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5"
 
 LW_STUB = """#!/bin/bash
 d={state}
@@ -58,12 +57,9 @@ exit 0
 RUNNER_STUB = """#!/bin/bash
 d={state}
 printf '%s\\n' "$*" >> "$d/runner.calls"
-git show "$2:tests/test_a.py" > "$d/ref.testfile"
 git rev-parse HEAD > "$d/head"
 printf '%s\\n' "$2" > "$d/ref"
-git rev-list --parents -n 1 "$2" > "$d/ref.parents"
 git grep -q "SECRETXY[Z]" "$2" -- . && echo yes > "$d/ref.hassecret" || echo no > "$d/ref.hassecret"
-git log -1 --format=%B "$2" > "$d/ref.msg"
 if [ -f "$d/runner.slow" ]; then
   echo $$ > "$d/runner.pid"
   # a child that outlives its parent if only the parent is killed (like the git push inside github-ci-run)
@@ -128,12 +124,15 @@ class Setup:
         fake.chmod(0o755)
         (self.work / "tests" / "test_a.py").write_text("def test_x(): pass\n")
         self.route(True)
-        git(self.work, "init", "-q")
+        git(self.work, "init", "-q", "-b", "main")
         git(self.work, "config", "user.name", "t")
         git(self.work, "config", "user.email", "t@example.invalid")
         git(self.work, "add", "-A")
         git(self.work, "commit", "-q", "-m", "init")
-        git(self.work, "update-ref", "refs/remotes/origin/main", "HEAD")  # HEAD is on the remote: nothing unpushed
+        self.remote = tmp_path / "remote.git"
+        git(tmp_path, "init", "-q", "--bare", str(self.remote))
+        git(self.work, "remote", "add", "origin", str(self.remote))
+        git(self.work, "push", "-q", "origin", "main")  # HEAD is on the remote: nothing unpushed
         self.load_watch("ci")
         self.codes([75])
         gh = self.home / "fakebin" / "gh"
@@ -170,20 +169,11 @@ class Setup:
         cmd = argv or (str(self.home / "fakebin" / "pytest"), "tests/test_a.py")
         return subprocess.run([str(BG), *cmd], cwd=self.work, env=e, capture_output=True, text=True, timeout=120)
 
-    def gl_wrapper(self):
-        """A BG_GITLEAKS that records argv, the GITLEAKS_* environment and the full output, then runs the real one."""
-        w = self.root / "gitleaks-wrap"
-        w.write_text(f'#!/bin/bash\nd={shlex.quote(str(self.state))}\nprintf "%s\\n" "$@" > "$d/gl.args"\n'
-                     f'env | grep ^GITLEAKS_ > "$d/gl.env"\npwd > "$d/gl.cwd"\n'
-                     f'{shutil.which("gitleaks")} "$@" > "$d/gl.full" 2>&1; rc=$?\ncat "$d/gl.full"\nexit $rc\n')
-        w.chmod(0o755)
-        return str(w)
-
     def commit_all(self, msg, on_remote=True):
         git(self.work, "add", "-A")
         git(self.work, "commit", "-q", "-m", msg)
         if on_remote:
-            git(self.work, "update-ref", "refs/remotes/origin/main", "HEAD")
+            git(self.work, "push", "-q", "origin", "HEAD:main")
 
     def read(self, name):
         p = self.state / name
@@ -222,86 +212,6 @@ def test_a_ci_failure_is_exit_1_with_the_failed_log_tail(s):
     calls = s.read("gh.calls").splitlines()
     assert any(c.startswith("run view 12") for c in calls)
     assert all("-R djbclark/stubrepo" in c for c in calls)  # incl. `run view`
-
-
-def test_a_dirty_tree_is_not_pushed_without_the_opt_in(s):
-    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
-    r = s.bg(BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr  # fell back to waiting; the command never ran, nothing was pushed
-    assert s.read("runner.calls") == ""
-    assert "tests/test_a.py" in r.stderr  # names the dirty file
-    assert "BG_OFFLOAD_DIRTY=1" in r.stderr  # and how to opt in
-    assert "could not offload to CI" in r.stderr
-
-
-def test_a_staged_only_change_also_counts_as_dirty(s):
-    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # staged\n")
-    git(s.work, "add", "tests/test_a.py")
-    r = s.bg(BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert s.read("runner.calls") == ""
-
-
-@needs_gitleaks
-def test_an_opted_in_dirty_tree_goes_as_a_commit_on_head_with_its_files_listed(s):
-    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
-    (s.work / "notes.txt").write_text("SECRETXYZ in an untracked file\n")
-    r = s.bg(BG_OFFLOAD_DIRTY="1")
-    assert r.returncode == 0, r.stderr
-    assert s.read("ref.hassecret").strip() == "no"  # untracked content never travels (git add -u, not -A)
-    assert "A\tnotes.txt" not in r.stderr and "notes.txt" not in s.read("ref.parents")
-    assert "git diff --name-status" in r.stderr and "M\ttests/test_a.py" in r.stderr  # what goes, before the push
-    assert s.read("ref").strip() != s.read("head").strip()  # a new commit, not HEAD
-    assert "# edited" in s.read("ref.testfile")  # carrying the tracked edit
-    assert s.read("ref.parents").split() == [s.read("ref").strip(), s.read("head").strip()]  # parent: HEAD only
-    assert "tracked files with uncommitted changes" in r.stderr and "tests/test_a.py" in r.stderr  # listed first
-    assert "scanned by gitleaks" in r.stderr
-    assert "?? notes.txt" in r.stderr
-    # the working tree and the index were not touched
-    assert "# edited" in (s.work / "tests" / "test_a.py").read_text()
-    assert (s.work / "notes.txt").exists()
-    assert subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=s.work).returncode == 0
-
-
-@needs_gitleaks
-def test_a_secret_staged_and_then_removed_does_not_travel(s):
-    (s.work / "tests" / "test_a.py").write_text("SECRETXYZ = 1\n")
-    git(s.work, "add", "tests/test_a.py")
-    (s.work / "tests" / "test_a.py").write_text("def test_x(): pass  # cleaned\n")
-    r = s.bg(BG_OFFLOAD_DIRTY="1")
-    assert r.returncode == 0, r.stderr
-    assert s.read("ref.hassecret").strip() == "no"
-    assert len(s.read("ref.parents").split()) == 2  # itself and HEAD: no index commit in the history
-    # the secret is not reachable from the pushed ref at all
-    out = subprocess.run(["git", "log", "-p", s.read("ref").strip()], cwd=s.work, capture_output=True, text=True).stdout
-    assert "SECRETXYZ" not in out
-
-
-@needs_gitleaks
-def test_a_secret_in_the_dirty_diff_stops_the_offload(s):
-    (s.work / "tests" / "test_a.py").write_text(f'TOKEN = "{FAKE_TOKEN}"\ndef test_x(): pass\n')
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "gitleaks found a possible secret" in r.stderr
-    assert FAKE_TOKEN not in r.stderr and FAKE_TOKEN not in r.stdout  # redacted
-    assert s.read("runner.calls") == ""
-
-
-def test_a_dirty_tree_without_gitleaks_is_not_pushed(s):
-    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_GITLEAKS=str(s.root / "no-gitleaks"), BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "gitleaks not found" in r.stderr
-    assert s.read("runner.calls") == ""
-
-
-def test_only_untracked_files_means_clean_head_with_a_note(s):
-    (s.work / "notes.txt").write_text("not tracked\n")
-    r = s.bg()
-    assert r.returncode == 0, r.stderr
-    assert s.read("ref").strip() == s.read("head").strip()
-    assert "?? notes.txt" in r.stderr
-    assert "only untracked files" in r.stderr
 
 
 def test_a_test_file_that_is_untracked_cannot_go_to_ci(s):
@@ -557,124 +467,6 @@ def test_a_non_numeric_run_id_is_never_used_for_the_log(s):
     assert not any(c.startswith("run view") for c in s.read("gh.calls").splitlines())
 
 
-def _new_file_commit(s, name, data):
-    (s.work / name).write_bytes(data)
-    s.commit_all(f"add {name}")
-
-
-@needs_gitleaks
-def test_a_binary_changed_file_is_not_published(s):
-    _new_file_commit(s, "data.bin", b"\x00old\n")
-    (s.work / "data.bin").write_bytes(b"\x00" + FAKE_TOKEN.encode() + b"\n")  # gitleaks cannot see into this
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "binary to git" in r.stderr and "data.bin" in r.stderr
-    assert s.read("runner.calls") == ""
-
-
-@needs_gitleaks
-def test_a_file_marked_minus_diff_is_not_published(s):
-    (s.work / ".gitattributes").write_text("*.cfg -diff\n")
-    _new_file_commit(s, "app.cfg", b"a = 1\n")
-    (s.work / "app.cfg").write_text(f'token = "{FAKE_TOKEN}"\n')
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "binary to git" in r.stderr and "app.cfg" in r.stderr
-    assert s.read("runner.calls") == ""
-
-
-def _token_in_test_file(s, suffix=""):
-    (s.work / "tests" / "test_a.py").write_text(f'TOKEN = "{FAKE_TOKEN}"{suffix}\ndef test_x(): pass\n')
-
-
-@needs_gitleaks
-@pytest.mark.parametrize("how", ["planted_config", "inline_allow", "env_config", "gitleaksignore"])
-def test_the_scan_cannot_be_loosened_from_the_checkout_or_the_environment(s, how):
-    env = {}
-    permissive = '[extend]\nuseDefault = true\n[allowlist]\npaths = [\'\'\'.*\'\'\']\n'
-    if how == "planted_config":
-        (s.work / ".gitleaks.toml").write_text(permissive)  # untracked, in the repo top
-    if how == "env_config":
-        (s.root / "permissive.toml").write_text(permissive)
-        env["GITLEAKS_CONFIG"] = str(s.root / "permissive.toml")
-    if how == "gitleaksignore":
-        (s.work / ".gitleaksignore").write_text("0000:tests/test_a.py:github-pat:1\n")
-    _token_in_test_file(s, "  # gitleaks:allow" if how == "inline_allow" else "")
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4", **env)
-    assert r.returncode == 75, r.stderr
-    assert s.read("runner.calls") == ""
-    assert ("gitleaksignore" in r.stderr) if how == "gitleaksignore" else ("possible secret" in r.stderr)
-
-
-@needs_gitleaks
-def test_gitleaks_runs_hardened_and_never_shows_the_secret(s):
-    _token_in_test_file(s)
-    (s.root / "permissive.toml").write_text("[allowlist]\npaths = ['''.*''']\n")
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4", BG_GITLEAKS=s.gl_wrapper(), GITLEAKS_CONFIG=str(s.root / "permissive.toml"))
-    assert r.returncode == 75, r.stderr
-    args = s.read("gl.args").split("\n")
-    assert "--redact" in args and "--ignore-gitleaks-allow" in args
-    cfg = args[args.index("-c") + 1]
-    assert Path(cfg).name == "gl.toml"
-    ign = args[args.index("-i") + 1]
-    assert Path(ign).name == "glignore"
-    assert s.read("gl.env").strip() == ""  # GITLEAKS_* removed from its environment
-    assert Path(s.read("gl.cwd").strip()).name == "glcwd"  # run from an empty directory
-    # gitleaks' own full output (what --redact controls), not just what bg prints
-    full = s.read("gl.full")
-    assert "leaks found" in full and FAKE_TOKEN not in full and "REDACTED" in full
-    assert FAKE_TOKEN not in r.stderr and FAKE_TOKEN not in r.stdout
-
-
-def test_test_hooks_are_ignored_without_the_testing_variable(s):
-    # An inherited BG_GITLEAKS=/usr/bin/true must not switch the scan off.
-    _token_in_test_file(s)
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4", BG_GITLEAKS="/usr/bin/true", BG_OFFLOAD_TESTING=None)
-    assert r.returncode == 75, r.stderr
-    assert s.read("runner.calls") == ""
-    assert s.read("gh.calls") == ""
-
-
-def test_local_only_commits_are_not_published_without_the_opt_in(s):
-    (s.work / "feature.txt").write_text("work in progress\n")
-    s.commit_all("local feature", on_remote=False)
-    r = s.bg(BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert s.read("runner.calls") == ""
-    assert "not on remote origin" in r.stderr and "local feature" in r.stderr
-    assert "BG_OFFLOAD_DIRTY=1" in r.stderr
-
-
-@needs_gitleaks
-def test_a_token_in_a_local_only_commit_is_found_with_the_opt_in(s):
-    (s.work / "conf.txt").write_text(f'token = "{FAKE_TOKEN}"\n')
-    s.commit_all("add conf", on_remote=False)
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "possible secret" in r.stderr and "conf.txt" in r.stderr
-    assert s.read("runner.calls") == ""
-
-
-@needs_gitleaks
-def test_a_clean_local_only_commit_goes_with_the_opt_in(s):
-    (s.work / "feature.txt").write_text("harmless\n")
-    s.commit_all("local feature", on_remote=False)
-    r = s.bg(BG_OFFLOAD_DIRTY="1")
-    assert r.returncode == 0, r.stderr
-    assert s.read("ref").strip() == s.read("head").strip()  # HEAD itself
-    assert "local-only commit(s), scanned by gitleaks" in r.stderr
-
-
-@needs_gitleaks
-def test_a_binary_file_in_a_local_only_commit_is_not_published(s):
-    _new_file_commit(s, "blob.bin", b"\x00\x01")
-    git(s.work, "update-ref", "-d", "refs/remotes/origin/main")
-    git(s.work, "update-ref", "refs/remotes/origin/main", "HEAD~1")
-    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
-    assert r.returncode == 75, r.stderr
-    assert "blob.bin" in r.stderr and "binary to git" in r.stderr
-
-
 def test_killing_bg_stops_an_in_flight_push(s):
     (s.state / "runner.slow").write_text("")
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"), "BG_OFFLOAD_TESTING": "1",
@@ -763,3 +555,142 @@ def test_the_output_shape_of_shizukutendcf_github_ci_run_is_accepted(s):
     r = s.bg()
     assert r.returncode == 0, r.stderr
     assert "CI workflow PASSED" in r.stdout
+
+
+# --- bg-offload publishes nothing that is not already on the remote (ruling 2026-10-23) ---------------------
+
+def _refused(s, r, *needles):
+    assert r.returncode == 75, r.stderr  # fell back to waiting at the gate; the command never ran
+    assert s.read("runner.calls") == ""  # nothing was pushed or built
+    assert s.read("gh.calls") == ""
+    assert not s.marker.exists()
+    assert "could not offload to CI" in r.stderr
+    assert "commit and push" in r.stderr
+    for n in needles:
+        assert n in r.stderr, (n, r.stderr)
+
+
+def test_a_modified_tracked_file_is_not_offloaded(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
+    r = s.bg(BG_MAX_WAIT="4")
+    _refused(s, r, "1 tracked file(s) with uncommitted changes", "tests/test_a.py")
+    assert "BG_OFFLOAD_DIRTY" not in r.stderr  # there is no opt-in any more
+
+
+def test_a_modified_tracked_file_that_is_not_the_named_test_is_not_offloaded_either(s):
+    (s.work / "README").write_text("x\n")
+    s.commit_all("add README")
+    (s.work / "README").write_text("y\n")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "README")
+
+
+def test_a_staged_change_is_not_offloaded(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # staged\n")
+    git(s.work, "add", "tests/test_a.py")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "tests/test_a.py")
+
+
+def test_a_newly_added_file_in_the_index_is_not_offloaded(s):
+    (s.work / "new.txt").write_text("new\n")
+    git(s.work, "add", "new.txt")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "new.txt")
+
+
+def test_an_unpushed_commit_is_not_offloaded(s):
+    (s.work / "feature.txt").write_text("work in progress\n")
+    s.commit_all("local feature", on_remote=False)
+    r = s.bg(BG_MAX_WAIT="4")
+    _refused(s, r, "1 commit(s) in HEAD are not on remote origin", "local feature")
+
+
+def test_ci_base_ahead_of_the_remote_is_not_offloaded(s):
+    git(s.work, "checkout", "-q", "-b", "ci/base")
+    (s.work / "overlay.txt").write_text("overlay\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "overlay content")
+    git(s.work, "checkout", "-q", "main")  # HEAD is clean and pushed; only ci/base is local-only
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base")
+
+
+def test_ci_base_ahead_of_a_pushed_ci_base_is_not_offloaded(s):
+    git(s.work, "checkout", "-q", "-b", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    (s.work / "overlay.txt").write_text("overlay\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "more overlay")
+    git(s.work, "checkout", "-q", "main")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base (1 commit(s))")
+
+
+def test_ci_base_that_is_pushed_does_not_block(s):
+    git(s.work, "checkout", "-q", "-b", "ci/base")
+    (s.work / "overlay.txt").write_text("overlay\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "overlay content")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    git(s.work, "checkout", "-q", "main")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert s.read("runner.calls").strip() == f"--no-wait {s.read('head').strip()}"
+
+
+def test_a_ci_base_at_an_already_pushed_commit_does_not_block(s):
+    git(s.work, "branch", "ci/base")  # a local branch with no remote copy, but all its commits are public
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_head_that_is_only_on_a_remote_branch_is_offloaded(s):
+    git(s.work, "checkout", "-q", "-b", "feature")
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert True  # pushed on feature\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "feature work")
+    git(s.work, "push", "-q", "origin", "feature")
+    git(s.work, "checkout", "-q", "main")
+    git(s.work, "checkout", "-q", "--detach", "origin/feature")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert s.read("ref").strip() == s.read("head").strip()  # HEAD itself, never a new commit
+    assert "already on origin" in r.stderr
+
+
+def test_untracked_files_do_not_block_and_are_not_pushed(s):
+    (s.work / "notes.txt").write_text("SECRETXYZ untracked\n")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert s.read("ref").strip() == s.read("head").strip()  # HEAD itself
+    assert s.read("ref.hassecret").strip() == "no"
+    assert "?? notes.txt" in r.stderr and "untracked files" in r.stderr
+    assert (s.work / "notes.txt").exists()
+
+
+def test_a_refusal_reports_every_reason_and_caps_the_dirty_list(s):
+    for i in range(25):
+        (s.work / f"f{i:02d}.txt").write_text("a\n")
+    s.commit_all("many files")
+    for i in range(25):
+        (s.work / f"f{i:02d}.txt").write_text("b\n")
+    (s.work / "unpushed.txt").write_text("u\n")
+    git(s.work, "add", "unpushed.txt")
+    git(s.work, "commit", "-q", "-m", "unpushed one")
+    git(s.work, "branch", "ci/base")
+    git(s.work, "checkout", "-q", "ci/base")
+    (s.work / "o.txt").write_text("o\n")
+    git(s.work, "add", "o.txt")
+    git(s.work, "commit", "-q", "-m", "overlay")
+    git(s.work, "checkout", "-q", "main")
+    r = s.bg(BG_MAX_WAIT="4")
+    _refused(s, r, "25 tracked file(s) with uncommitted changes", "... and 5 more", "unpushed one", "ci/base is ahead")
+
+
+def test_hooks_are_ignored_without_the_testing_variable(s):
+    # BG_OFFLOAD_RUNNER must not give a repo without a route one: only with BG_OFFLOAD_TESTING=1.
+    s.route(False)
+    hook = s.root / "hook-runner"
+    hook.write_text("#!/bin/bash\nexit 0\n")
+    hook.chmod(0o755)
+    base = {**os.environ, "BG_GH": str(s.home / "fakebin" / "gh"), "BG_OFFLOAD_RUNNER": str(hook)}
+    on = subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env={**base, "BG_OFFLOAD_TESTING": "1"})
+    assert on.returncode == 0  # control: with the variable the hook is the route
+    off = subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env={k: v for k, v in base.items() if k != "BG_OFFLOAD_TESTING"})
+    assert off.returncode != 0
