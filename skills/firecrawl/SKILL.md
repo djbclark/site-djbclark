@@ -93,9 +93,10 @@ walk the ladder, do not retry the same query against the same tool forever.
 **Repeating failure (2026-10-22, mitigated):** Hyades SearXNG engines used to
 time out on the shared egress IP `18.4.60.84`. Mitigations: (1) router caps
 `/search` at `FIRECRAWL_ROUTER_SEARCH_TIMEOUT` (default 35 s); (2) SearXNG
-`r10+` sends engines through pastebin.xvm:26370 (`outgoing.proxies`, 5 s engine
-timeout) — vps-primary:26369 is **unreachable from Hyades** (do not round-robin
-it). Docs: firecrawl-hyades `docs/searxng-egress.md`. Health JSONL:
+`r10+` round-robins `outgoing.proxies` across vps-primary:26369 and
+pastebin.xvm:26370 (5 s engine timeout). vps needs `hyades-public-return-path`
+(MIT VPN `tun0` otherwise steals replies to Hyades). Docs: firecrawl-hyades
+`docs/searxng-egress.md`. Health JSONL:
 `~/src/firecrawl-hyades/scripts/check-searxng-egress` →
 `~/.local/state/firecrawl-searxng/checks.jsonl`. Scrape stays fine (~1–2 s).
 Log `POST /v2/search -> primary ERR …; no fallback` → climb Exa/Parallel/Jina,
