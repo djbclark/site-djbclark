@@ -9,6 +9,7 @@
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch upstream [--dry-run] [--once]  only the upstream-PR watcher (see Upstream PR watcher)
+#   fleet-watch upstream --relay-to <session> | --relay-off | --relay-status  hand events to a session
 #   fleet-watch install   write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
 #
@@ -83,7 +84,16 @@
 # open: no `closed`, no `finished`, no done marker, and younger than its timeout + 15 min), or no
 # Claude pool has FLEET_WATCH_UPSTREAM_MIN_HEADROOM percent left (aiuse --available; acp-dispatch
 # also refuses, exit 5). A dispatch that fails 3 times, or an event pending over 24 h, is dropped
-# with a ping. The check runs at most every FLEET_WATCH_UPSTREAM_INTERVAL seconds (default 600;
+# with a ping. Relay (2026-10-23, djbclark: "start work on that immediately, using /bigteam"): when
+# a session has registered with `fleet-watch upstream --relay-to <session>` ($STATE_DIR/
+# upstream-pr.relay, one line: anything relay.py takes, a Paseo agent id, session id or herdr
+# pane), each pending event is first handed to that session instead: a brief file
+# ($STATE_DIR/<name>-relay.md: what to do, then the event, its text fenced as untrusted data) and
+# one relay.py line naming the brief. The relayed line carries the item, event and login only,
+# never the third party's text, since it lands in the session as a typed message. A merge or a
+# close is relayed as a notice too. A refused relay (session ended, blocked on a question, a draft
+# in its input box) pings once and falls back to the worker dispatch above. The check runs at
+# most every FLEET_WATCH_UPSTREAM_INTERVAL seconds (default 300, 600 until 2026-10-23;
 # the launchd job ticks every 5 min); `fleet-watch upstream` always runs now. --dry-run reads
 # GitHub and aiuse but pings, dispatches and writes nothing, and prints each tracked thread's
 # newest non-operator activity as a candidate; --once is accepted (a manual pass is single anyway).
@@ -143,7 +153,7 @@ UPSTREAM="${FLEET_WATCH_UPSTREAM:-on}"
 UPSTREAM_REPOS="${FLEET_WATCH_UPSTREAM_REPOS-cfengine/core cfengine/libntech NorthernTechHQ/libntech}"
 UPSTREAM_IGNORE="${FLEET_WATCH_UPSTREAM_IGNORE-cf-bottom}"
 UPSTREAM_SELF="${FLEET_WATCH_UPSTREAM_SELF:-}"
-UPSTREAM_INTERVAL="${FLEET_WATCH_UPSTREAM_INTERVAL:-600}"
+UPSTREAM_INTERVAL="${FLEET_WATCH_UPSTREAM_INTERVAL:-300}"
 UPSTREAM_MIN_HEADROOM="${FLEET_WATCH_UPSTREAM_MIN_HEADROOM:-10}"
 UPSTREAM_TIMEOUT="${FLEET_WATCH_UPSTREAM_TIMEOUT:-3600}"
 UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
@@ -153,6 +163,8 @@ UPSTREAM_PROMPT="${FLEET_WATCH_UPSTREAM_PROMPT:-$HOME/ops/site-private/prompts/u
 UPSTREAM_CHAIN="${FLEET_WATCH_UPSTREAM_CHAIN:-$HOME/.local/state/handoffs/chains/standalone-3fd9}"
 UPSTREAM_STATE="$STATE_DIR/upstream-pr.json"
 UPSTREAM_LOCK="$STATE_DIR/upstream-pr.lock"
+UPSTREAM_RELAY_FILE="$STATE_DIR/upstream-pr.relay"
+UPSTREAM_RELAY="${FLEET_WATCH_RELAY:-$HOME/src/djbclark-ade/skills/session-finder/relay.py}"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
 UPSTREAM_AIUSE="${FLEET_WATCH_AIUSE:-$HOME/.local/bin/aiuse}"
 UPSTREAM_DISPATCH="${FLEET_WATCH_DISPATCH:-$HOME/src/djbclark-ade/bin/acp-dispatch}"
@@ -746,6 +758,11 @@ upr_brief() {
   # $1 = pending event JSON, $2 = reply draft path: the prompt plus the event, on stdout. The
   # event text is a third party's words: it goes in a fenced block labelled as data.
   cat "$UPSTREAM_PROMPT"
+  upr_event "$@"
+}
+
+upr_event() {
+  # $1 = event JSON, $2 = reply draft path: the numbered Event list and the fenced text.
   jq -r --arg draft "$2" '
     "",
     "1. Item: `\(.repo)#\(.n)` (\(.type)), https://github.com/\(.repo)/\(if .type == "Issue" then "issues" else "pull" end)/\(.n)",
@@ -762,6 +779,57 @@ upr_brief() {
     "~~~~"' <<<"$1"
 }
 
+upr_relay_brief() {
+  # $1 = event JSON, $2 = reply draft path: the brief a registered session gets, on stdout.
+  cat <<EOF
+# fleet-watch upstream event, relayed to this session
+
+\`fleet-watch\` (upstream-pr check) handed you this event because this session registered with
+\`fleet-watch upstream --relay-to\`. djbclark (2026-10-23): start work on it at once, using
+\`/bigteam\` appropriately.
+
+1. Follow \`$UPSTREAM_PROMPT\`, its Standing rules and Steps 2 to 9, with this
+   session as the owner: skip its \`/baton\` and unattended-run lines, and slice the work through
+   \`/bigteam\` (read the whole review; change and test on \`<branch>-prep\`; build and gate; draft
+   the reply) at the cheapest tier that does each part well.
+2. Prepare and stop. Nothing is posted upstream and nothing is pushed to the PR's own branch
+   without djbclark's explicit go: show him the reply text and the code diff, then hermes-ping.
+3. A merge or a close needs no prep: update the records (\`~/src/cfengine-all/texts/\`, the
+   Tier 1 log) and tell djbclark. Offering the next upstream PR still waits for his go.
+
+## Event
+EOF
+  upr_event "$@"
+}
+
+upr_relay() {
+  # $1 = event JSON (a pending entry's shape): hand it to the session registered in
+  # UPSTREAM_RELAY_FILE. 0 when relay.py delivered or queued it (--dry-run: would try); 1 when no
+  # session is registered or the relay was refused. The relayed line names the item, the event
+  # and the login, never the event text: that is third-party words, kept fenced in the brief.
+  local ev=$1 target repo n type event login url name brief msg out rc
+  [[ -s "$UPSTREAM_RELAY_FILE" ]] || return 1
+  target=$(ghead -n 1 "$UPSTREAM_RELAY_FILE")
+  if ! [[ "$target" =~ ^[A-Za-z0-9:._-]+$ ]]; then
+    ulog "relay target in $UPSTREAM_RELAY_FILE is not a session id, not relaying"
+    return 1
+  fi
+  IFS=$'\t' read -r repo n type event login <<<"$(jq -r '[.repo, .n, .type, .event, .login] | @tsv' <<<"$ev")"
+  url="https://github.com/$repo/$([[ "$type" == Issue ]] && echo issues || echo pull)/$n"
+  name="upstream-pr-${repo#*/}-$n-$(gdate -u +%Y%m%dt%H%M%S)"
+  brief="$STATE_DIR/$name-relay.md"
+  msg="fleet-watch upstream: $url $event by $login. Brief: $brief. Handle it now as the brief says (/bigteam; prepare and stop, nothing goes upstream without djbclark's go)."
+  if ((UPSTREAM_DRY)); then
+    echo "would relay to $target: $msg"
+    return 0
+  fi
+  upr_relay_brief "$ev" "$UPSTREAM_CHAIN/upstream-reply-${repo//\//-}-$n.md" >"$brief"
+  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" 2>&1)
+  rc=$?
+  ulog "relay $name to $target rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
+  ((rc == 0))
+}
+
 upr_dispatch() {
   # Try to dispatch ONE worker for the oldest pending event; updates STATE_JSON.
   local ev repo n age name brief draft out rc line why n_att
@@ -776,6 +844,14 @@ upr_dispatch() {
     STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
     return 0
   fi
+  if upr_relay "$ev"; then
+    ((UPSTREAM_DRY)) && return 0
+    # The session reads every comment on the item, as a worker would: one relay covers them all.
+    STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
+    return 0
+  fi
+  [[ -s "$UPSTREAM_RELAY_FILE" ]] &&
+    upr_flag relayfail "$ev" "$line: relay to $(ghead -n 1 "$UPSTREAM_RELAY_FILE") refused (see $LOG), falling back to a worker"
   if why=$(upr_busy); then
     upr_flag busy "$ev" "$line: a session is already on it ($why), not dispatching yet"
     return 0
@@ -832,7 +908,7 @@ upr_save() {
 
 upr_pass() {
   # One pass. STATE_JSON is the state (kept in memory, written by upr_save).
-  local notes threads t id repo n type upd stored handled enr latest isnew line fails nf
+  local notes threads t id repo n type upd stored handled enr latest isnew line fails nf ev
   notes=$(gmktemp "$STATE_DIR/upr-notes.XXXXXX") || return 1
   fails="$STATE_DIR/upstream-pr.fails"
   if ! upr_api notifications --paginate -X GET -f all=false -f participating=true --jq '.[]' >"$notes"; then
@@ -899,14 +975,18 @@ upr_pass() {
     if [[ "$isnew" == new ]]; then
       line="$repo#$n $(jq -r '"\(.latest.event) by \(.latest.login): \(.latest.text[0:80])"' <<<"$enr")"
       upr_ping "$line" || { ulog "ping failed for $line, will retry"; continue; }
-      STATE_JSON=$(jq --arg id "$id" --argjson thread "$t" --argjson e "$enr" --argjson now "$(gdate +%s)" \
+      ev=$(jq -n -c --argjson thread "$t" --argjson e "$enr" --argjson now "$(gdate +%s)" \
         --arg nowiso "$(gdate -u +%FT%TZ)" '
+        {key: ($thread.id + ":" + $e.latest.key), repo: $thread.repo, n: $thread.n,
+         type: $thread.type, title: $e.title, head: $e.head, event: $e.latest.event,
+         login: $e.latest.login, at: $e.latest.at, text: $e.latest.text[0:400],
+         detected: $now, detected_iso: $nowiso, attempts: 0, flags: []}')
+      STATE_JSON=$(jq --arg id "$id" --argjson thread "$t" --argjson e "$enr" --argjson ev "$ev" '
         .threads[$id] = {repo: $thread.repo, n: $thread.n, updated_at: $thread.updated_at, handled_at: $e.latest.at}
-        | if ($e.latest.event | IN("merged", "closed")) or any(.pending[]; .key == ($thread.id + ":" + $e.latest.key)) then .
-          else .pending += [{key: ($thread.id + ":" + $e.latest.key), repo: $thread.repo, n: $thread.n,
-            type: $thread.type, title: $e.title, head: $e.head, event: $e.latest.event,
-            login: $e.latest.login, at: $e.latest.at, text: $e.latest.text[0:400],
-            detected: $now, detected_iso: $nowiso, attempts: 0, flags: []}] end' <<<"$STATE_JSON")
+        | if ($e.latest.event | IN("merged", "closed")) or any(.pending[]; .key == $ev.key) then .
+          else .pending += [$ev] end' <<<"$STATE_JSON")
+      # A merge or a close is never queued (nothing to prepare); a registered session still hears.
+      if jq -e '.event | IN("merged", "closed")' >/dev/null <<<"$ev"; then upr_relay "$ev" || true; fi
     else
       STATE_JSON=$(jq --arg id "$id" --argjson thread "$t" --arg h "$handled" \
         '.threads[$id] = {repo: $thread.repo, n: $thread.n, updated_at: $thread.updated_at, handled_at: $h}' <<<"$STATE_JSON")
@@ -1054,11 +1134,37 @@ case "${1:-check}" in
     ;;
   upstream)
     shift
+    case ${1:-} in
+      --relay-to)
+        if ! [[ "${2:-}" =~ ^[A-Za-z0-9:._-]+$ ]]; then
+          echo "usage: fleet-watch upstream --relay-to <session id, Paseo agent id or herdr pane>" >&2
+          exit 2
+        fi
+        printf '%s\n' "$2" >"$UPSTREAM_RELAY_FILE.new" && mv -f "$UPSTREAM_RELAY_FILE.new" "$UPSTREAM_RELAY_FILE"
+        ulog "relay target set to $2"
+        echo "upstream events now relay to $2 (falls back to a worker when refused)"
+        exit 0
+        ;;
+      --relay-off)
+        rm -f "$UPSTREAM_RELAY_FILE"
+        ulog "relay target cleared"
+        echo "upstream events go to a worker again"
+        exit 0
+        ;;
+      --relay-status)
+        if [[ -s "$UPSTREAM_RELAY_FILE" ]]; then
+          echo "relay to $(ghead -n 1 "$UPSTREAM_RELAY_FILE") (set $(gdate -r "$UPSTREAM_RELAY_FILE" '+%F %T'))"
+        else
+          echo "no relay: events go to a worker"
+        fi
+        exit 0
+        ;;
+    esac
     for a in "$@"; do
       case $a in
         --dry-run) UPSTREAM_DRY=1 ;;
         --once) ;;
-        *) echo "usage: fleet-watch upstream [--dry-run] [--once]" >&2; exit 2 ;;
+        *) echo "usage: fleet-watch upstream [--dry-run] [--once] | --relay-to <session> | --relay-off | --relay-status" >&2; exit 2 ;;
       esac
     done
     upstream_watch manual
