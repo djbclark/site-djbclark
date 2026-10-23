@@ -929,3 +929,20 @@ def test_a_head_whose_history_cannot_be_walked_is_refused(s):
     r = s.bg(BG_MAX_WAIT="4")
     assert r.returncode == 75, r.stderr
     assert s.read("runner.calls") == ""
+
+
+def test_a_remote_with_two_urls_is_refused(s):
+    # `git push origin` goes to every url of a remote: fetch url == push url but there are two of them.
+    git(s.work, "config", "--add", "remote.origin.url", str(_bare(s, "second.git")))
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "does not have exactly one url")
+
+
+def test_a_head_that_is_only_reachable_from_a_pushed_annotated_tag_is_on_the_remote(s):
+    _commit_on_new_branch(s, "tagged-work")
+    git(s.work, "tag", "-a", "v9", "-m", "release")
+    git(s.work, "push", "-q", "origin", "v9")  # the tag only; no branch has the commit
+    git(s.work, "checkout", "-q", "--detach", "v9")
+    git(s.work, "branch", "-D", "tagged-work")
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert "already on origin" in r.stderr
