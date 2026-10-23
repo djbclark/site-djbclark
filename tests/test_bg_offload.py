@@ -694,3 +694,32 @@ def test_hooks_are_ignored_without_the_testing_variable(s):
     assert on.returncode == 0  # control: with the variable the hook is the route
     off = subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env={k: v for k, v in base.items() if k != "BG_OFFLOAD_TESTING"})
     assert off.returncode != 0
+
+
+def test_ci_base_behind_by_public_commits_still_counts_as_ahead_of_the_remote_ci_base(s):
+    # The ruling's rule is literal: local ci/base must not be ahead of refs/remotes/<remote>/ci/base.
+    git(s.work, "branch", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    (s.work / "more.txt").write_text("m\n")
+    s.commit_all("more on main")  # pushed to main
+    git(s.work, "branch", "-f", "ci/base", "HEAD")  # now ahead of origin/ci/base, though every commit is public
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "ci/base is ahead of origin/ci/base (1 commit(s))")
+
+
+def test_the_remote_is_the_one_the_runners_use(s):
+    other = s.root / "mirror.git"
+    git(s.root, "init", "-q", "--bare", str(other))
+    git(s.work, "remote", "add", "mirror", str(other))
+    git(s.work, "fetch", "-q", "mirror")  # an empty remote: HEAD is on origin, not on mirror
+    _refused(s, s.bg(BG_MAX_WAIT="4", GITHUB_CI_REMOTE="mirror"), "not on remote mirror")
+    r = s.bg()  # control: origin (the default)
+    assert r.returncode == 0, r.stderr
+
+
+def test_commit_and_push_then_retry_offloads(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
+    _refused(s, s.bg(BG_MAX_WAIT="4"), "tests/test_a.py")
+    s.commit_all("edit test")  # the dev flow the refusal asks for
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert s.read("ref").strip() == subprocess.run(["git", "rev-parse", "HEAD"], cwd=s.work, capture_output=True, text=True).stdout.strip()
