@@ -723,3 +723,21 @@ def test_commit_and_push_then_retry_offloads(s):
     r = s.bg()
     assert r.returncode == 0, r.stderr
     assert s.read("ref").strip() == subprocess.run(["git", "rev-parse", "HEAD"], cwd=s.work, capture_output=True, text=True).stdout.strip()
+
+
+def test_a_failed_ci_base_comparison_counts_as_ahead(s):
+    git(s.work, "branch", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    ref = s.work / ".git" / "refs" / "heads" / "ci" / "base"
+    ref.write_text("b" * 40 + "\n")  # a local ci/base whose object is missing: show-ref sees it, rev-list fails
+    r = s.bg(BG_MAX_WAIT="4")
+    _refused(s, r, "could not compare local ci/base")
+
+
+def test_an_unreadable_remote_ci_base_counts_as_ahead(s):
+    git(s.work, "branch", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    (s.work / ".git" / "refs" / "remotes" / "origin" / "ci" / "base").write_text("b" * 40 + "\n")
+    r = s.bg(BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr  # whichever step trips first (rev-list on the remotes, or this one), it refuses
+    assert s.read("runner.calls") == ""

@@ -176,14 +176,25 @@ if [ "$local_n" != 0 ]; then
   git -C "$top" log --oneline -n 10 "$head_sha" --not "--remotes=$remote" | gsed 's/^/bg:   /' >&2
   [ "$local_n" -gt 10 ] && say "offload:   ... and $((local_n - 10)) more"
 fi
-# The runners overlay the local branch ci/base onto the run, so it is published content too.
-if git -C "$top" show-ref --verify --quiet refs/heads/ci/base; then
-  if git -C "$top" show-ref --verify --quiet "refs/remotes/$remote/ci/base"; then
-    base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "refs/remotes/$remote/ci/base" 2>/dev/null) || base_n=-1
-  else
-    base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "--remotes=$remote" 2>/dev/null) || base_n=-1
+# The runners overlay the local branch ci/base onto the run, so it is published content too. show-ref exits 0
+# (exists), 1 (absent) or 128 (a ref that cannot be read, e.g. its object is missing): only 1 means "no ci/base";
+# anything unreadable is treated as ahead, never as absent.
+git -C "$top" show-ref --verify --quiet refs/heads/ci/base; base_state=$?
+if [ "$base_state" != 1 ]; then
+  base_n=-1
+  if [ "$base_state" = 0 ]; then
+    git -C "$top" show-ref --verify --quiet "refs/remotes/$remote/ci/base"; rem_state=$?
+    if [ "$rem_state" = 0 ]; then
+      base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "refs/remotes/$remote/ci/base" 2>/dev/null) || base_n=-1
+    elif [ "$rem_state" = 1 ]; then
+      base_n=$(git -C "$top" rev-list --count refs/heads/ci/base --not "--remotes=$remote" 2>/dev/null) || base_n=-1
+    fi
   fi
-  if [ "$base_n" != 0 ]; then
+  case "$base_n" in ""|*[!0-9-]*) base_n=-1 ;; esac
+  if [ "$base_n" = -1 ]; then
+    refuse=1
+    say "offload: could not compare local ci/base with $remote/ci/base (git could not read a ref); treating it as ahead"
+  elif [ "$base_n" != 0 ]; then
     refuse=1
     say "offload: local branch ci/base is ahead of $remote/ci/base ($base_n commit(s)); the runners overlay it onto the run, so it would be published"
   fi
