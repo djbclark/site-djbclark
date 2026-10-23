@@ -741,3 +741,15 @@ def test_an_unreadable_remote_ci_base_counts_as_ahead(s):
     r = s.bg(BG_MAX_WAIT="4")
     assert r.returncode == 75, r.stderr  # whichever step trips first (rev-list on the remotes, or this one), it refuses
     assert s.read("runner.calls") == ""
+
+
+def test_a_ci_base_whose_history_cannot_be_walked_counts_as_ahead(s):
+    git(s.work, "branch", "ci/base")
+    git(s.work, "push", "-q", "origin", "ci/base")  # origin/ci/base is readable
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=s.work, capture_output=True, text=True).stdout.strip()
+    body = f"tree {tree}\nparent {'c' * 40}\nauthor t <t@example.invalid> 1 +0000\ncommitter t <t@example.invalid> 1 +0000\n\nbroken\n"
+    sha = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin", "--literally"], cwd=s.work, input=body,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    git(s.work, "update-ref", "refs/heads/ci/base", sha)  # readable ref, but its parent object is missing: rev-list fails
+    r = s.bg(BG_MAX_WAIT="4")
+    _refused(s, r, "could not compare local ci/base")
