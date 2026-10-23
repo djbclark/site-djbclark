@@ -72,11 +72,16 @@
 # run for BG_OFFLOAD_AFTER seconds (default 60), bg hands it to bin/bg-offload instead of waiting on:
 # a commit of the working tree (HEAD when clean, `git stash create` when dirty; untracked files are not
 # in it and are listed) goes to the repo's CI through its executable scripts/bg-offload-run or
-# scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s) and exits with CI's verdict, never running
-# the command here. It needs such a route, `gh` and `git`; without them, or if the push fails, bg says so and
-# keeps waiting as before. Exit codes: 0 CI passed, 1 CI failed (log tail printed), 76 CI still running
-# at BG_OFFLOAD_WAIT, 77 pushed but no verdict; 3 and 75 keep their meaning. CI runs the repo's whole
-# workflow, so a 1 can come from a test you did not name. BG_OFFLOAD=0 keeps the old waiting behaviour.
+# scripts/github-ci-run, bg waits (BG_OFFLOAD_WAIT, 2400 s; the offload has its own budget, outside
+# BG_MAX_WAIT) and exits with CI's verdict, never running the command here. It needs such a route, `gh` and
+# `git`; without them, or if the push fails, bg says so and keeps waiting as before. Exit codes: 0 CI's
+# workflow passed on this tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI
+# failed (log tail printed; it can come from a test you did not name), 76 CI still running at
+# BG_OFFLOAD_WAIT, 77 pushed but no verdict (nothing succeeded, cancelled, no run); 3 and 75 keep their
+# meaning. BG_OFFLOAD=0 keeps the old waiting behaviour. A tree with uncommitted tracked changes is NOT
+# pushed (the checkout may hold another session's edits; a public repo's CI is outward-facing): bg keeps
+# waiting and says which files, unless the caller sets BG_OFFLOAD_DIRTY=1, which pushes the tracked changes
+# as a commit on HEAD after a gitleaks scan (bin/bg-offload header).
 # Not a way round the gate: builds, non-targeted runs and `local` repos never offload and still wait.
 #
 # Agents must call `~/ops/site-private/bin/bg`: bare `bg` is the shell job-control builtin.
@@ -210,7 +215,8 @@ ci_release() {
 lw="$HOME/src/djbclark-ade/bin/load-watch"
 # Offload (header): set below only for a targeted run in a `ci` repo that has a runnable CI route.
 offload_ok=0
-bg_offload="$(dirname "$(greadlink -f "$0")")/bg-offload"
+# A failed greadlink must leave this empty, never "./bg-offload" (a file in the caller's repo).
+bg_offload=$(greadlink -f "$0") && bg_offload="${bg_offload%/*}/bg-offload" || bg_offload=
 offload_after="${BG_OFFLOAD_AFTER:-60}"
 if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     && top=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
@@ -372,7 +378,12 @@ if [ "$wait_s" != 0 ]; then
     if [ "$offload_ok" = 1 ] && [ "$(waited_s)" -ge "$offload_after" ]; then
       # Held past the threshold in a `ci` repo: CI runs the test instead of a busy Mac (header).
       echo "bg: held $(dur "$(waited_s)") for $why; running it on CI instead of waiting longer" >&2
-      "$bg_offload" "$top" -- "$@"; off_rc=$?
+      # A child, not an exec: killing bg must stop it too, or it polls on as an orphan.
+      "$bg_offload" "$top" -- "$@" &
+      off_pid=$!
+      trap 'kill "$off_pid" 2>/dev/null; exit 143' TERM INT HUP
+      wait "$off_pid"; off_rc=$?
+      trap - TERM INT HUP
       [ "$off_rc" = 69 ] || exit "$off_rc"
       offload_ok=0
       echo "bg: could not offload to CI (reason above); waiting for the gate as usual" >&2

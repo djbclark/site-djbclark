@@ -10,7 +10,9 @@ Nothing here reaches GitHub. Each run gets a throwaway HOME and a throwaway git 
   the route   (scripts/github-ci-run in the repo, called as `--no-wait REF`): records the ref and the
               test file's content in that ref, then prints the two lines the real script prints;
   gh          (BG_GH): `run list` answers from runs.json through the real jq expression bg-offload passes,
-              `run view` prints failed.log.
+              but only for `--branch ci/run/x-abc` and no more rows than `--limit` (as the real one), `run view`
+              prints failed.log. Like real gh, an unfinished run has `"conclusion": ""`.
+  gitleaks    the real one (installed; those tests skip without it), BG_GITLEAKS points at a missing one.
 BG_MAX_LOAD_PER_CORE=1000 keeps bg's own load check passing, so the stub `admit` alone holds the gate. A
 BASH_ENV shim turns every `sleep` into 0.2 s, so the 15 s gate poll and bg-offload's poll cost nothing
 while the real clock still drives BG_OFFLOAD_AFTER and BG_MAX_WAIT.
@@ -20,7 +22,9 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -31,6 +35,9 @@ OFFLOAD = BIN / "bg-offload"
 COMMIT = "a" * 40
 
 pytestmark = pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq")
+needs_gitleaks = pytest.mark.skipif(shutil.which("gitleaks") is None, reason="needs the real gitleaks")
+# Shaped like a GitHub personal access token; gitleaks' github-pat rule matches it (made up, not a credential).
+FAKE_TOKEN = "ghp_" + "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5"
 
 LW_STUB = """#!/bin/bash
 d={state}
@@ -54,6 +61,10 @@ printf '%s\\n' "$*" >> "$d/runner.calls"
 git show "$2:tests/test_a.py" > "$d/ref.testfile"
 git rev-parse HEAD > "$d/head"
 printf '%s\\n' "$2" > "$d/ref"
+git rev-list --parents -n 1 "$2" > "$d/ref.parents"
+git grep -q "SECRETXY[Z]" "$2" -- . && echo yes > "$d/ref.hassecret" || echo no > "$d/ref.hassecret"
+git log -1 --format=%B "$2" > "$d/ref.msg"
+if [ -f "$d/runner.garbage" ]; then cat "$d/runner.garbage"; exit 0; fi
 if [ -f "$d/runner.fail" ]; then echo "runner exploded" >&2; exit 1; fi
 echo "overlay {commit} for $2 -> origin ci/run/x-abc"
 echo "pushed https://github.com/djbclark/stubrepo/tree/ci/run/x-abc"
@@ -64,10 +75,20 @@ d={state}
 printf '%s\\n' "$*" >> "$d/gh.calls"
 case "$1 $2" in
   "run list")
-    expr=
-    while [ $# -gt 0 ]; do [ "$1" = --jq ] && expr=$2; shift; done
-    if [ -f "$d/gh.fail" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
-    jq -r "$expr" < "$d/runs.json"
+    echo $PPID > "$d/gh.ppid"
+    if [ -f "$d/gh.fail" ]; then
+      n=$(cat "$d/gh.fail")
+      if [ -z "$n" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
+      if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$d/gh.fail"; echo "gh: HTTP 502" >&2; exit 1; fi
+    fi
+    # args after "run list": -R REPO --branch BR --limit N --json F --jq EXPR
+    shift 2; branch=; limit=30; expr=
+    while [ $# -gt 0 ]; do
+      case "$1" in --branch) branch=$2 ;; --limit) limit=$2 ;; --jq) expr=$2 ;; esac
+      shift
+    done
+    [ "$branch" = ci/run/x-abc ] || exit 0
+    jq -c ".[0:$limit]" < "$d/runs.json" | jq -r "$expr"
     ;;
   "run view") cat "$d/failed.log" ;;
 esac
@@ -79,6 +100,8 @@ def git(cwd, *args):
 
 
 def run(rid, status="completed", conclusion="success", sha=COMMIT, name="linux-ci"):
+    if conclusion is None:
+        conclusion = ""  # real gh: "" for an unfinished run (adversary review, 2026-10-23)
     return {"databaseId": rid, "headSha": sha, "status": status, "conclusion": conclusion,
             "url": f"https://github.com/djbclark/stubrepo/actions/runs/{rid}", "name": name}
 
@@ -155,7 +178,7 @@ def test_a_held_targeted_run_is_offloaded_and_passes(s):
     r = s.bg()
     assert r.returncode == 0, r.stderr
     assert not s.marker.exists()  # the command never ran here
-    assert "CI PASSED" in r.stdout and "actions/runs/11" in r.stdout
+    assert "CI workflow PASSED" in r.stdout and "actions/runs/11" in r.stdout
     assert "running it on CI instead of waiting longer" in r.stderr
     assert "unless the load gate holds it past 1 s" in r.stderr
     # clean tree: CI builds HEAD
@@ -174,20 +197,78 @@ def test_a_ci_failure_is_exit_1_with_the_failed_log_tail(s):
     assert "FAILED test_x" in r.stdout and "line 100" in r.stdout and "line 20\n" not in r.stdout  # last 60 lines
     assert (s.home / ".local" / "state" / "bg" / "offload" / "12.log").read_text().startswith("line 1\n")
     assert "whole CI workflow" in r.stderr
+    assert (s.home / ".local" / "state" / "bg" / "offload" / "12.log").stat().st_mode & 0o777 == 0o600
+    calls = s.read("gh.calls").splitlines()
+    assert any(c.startswith("run view 12") for c in calls)
+    assert all("-R djbclark/stubrepo" in c for c in calls)  # incl. `run view`
 
 
-def test_a_dirty_tree_goes_as_a_stash_commit_and_untracked_files_are_listed(s):
+def test_a_dirty_tree_is_not_pushed_without_the_opt_in(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
+    r = s.bg(BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr  # fell back to waiting; the command never ran, nothing was pushed
+    assert s.read("runner.calls") == ""
+    assert "tests/test_a.py" in r.stderr  # names the dirty file
+    assert "BG_OFFLOAD_DIRTY=1" in r.stderr  # and how to opt in
+    assert "could not offload to CI" in r.stderr
+
+
+def test_a_staged_only_change_also_counts_as_dirty(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # staged\n")
+    git(s.work, "add", "tests/test_a.py")
+    r = s.bg(BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert s.read("runner.calls") == ""
+
+
+@needs_gitleaks
+def test_an_opted_in_dirty_tree_goes_as_a_commit_on_head_with_its_files_listed(s):
     (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
     (s.work / "notes.txt").write_text("not tracked\n")
-    r = s.bg()
+    r = s.bg(BG_OFFLOAD_DIRTY="1")
     assert r.returncode == 0, r.stderr
-    assert s.read("ref").strip() != s.read("head").strip()  # a stash commit, not HEAD
+    assert s.read("ref").strip() != s.read("head").strip()  # a new commit, not HEAD
     assert "# edited" in s.read("ref.testfile")  # carrying the tracked edit
-    assert "untracked files are NOT in the CI run" in r.stderr
+    assert s.read("ref.parents").split() == [s.read("ref").strip(), s.read("head").strip()]  # parent: HEAD only
+    assert "tracked files with uncommitted changes" in r.stderr and "tests/test_a.py" in r.stderr  # listed first
+    assert "scanned by gitleaks" in r.stderr
     assert "?? notes.txt" in r.stderr
-    # the working tree itself was not touched
+    # the working tree and the index were not touched
     assert "# edited" in (s.work / "tests" / "test_a.py").read_text()
     assert (s.work / "notes.txt").exists()
+    assert subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=s.work).returncode == 0
+
+
+@needs_gitleaks
+def test_a_secret_staged_and_then_removed_does_not_travel(s):
+    (s.work / "tests" / "test_a.py").write_text("SECRETXYZ = 1\n")
+    git(s.work, "add", "tests/test_a.py")
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): pass  # cleaned\n")
+    r = s.bg(BG_OFFLOAD_DIRTY="1")
+    assert r.returncode == 0, r.stderr
+    assert s.read("ref.hassecret").strip() == "no"
+    assert len(s.read("ref.parents").split()) == 2  # itself and HEAD: no index commit in the history
+    # the secret is not reachable from the pushed ref at all
+    out = subprocess.run(["git", "log", "-p", s.read("ref").strip()], cwd=s.work, capture_output=True, text=True).stdout
+    assert "SECRETXYZ" not in out
+
+
+@needs_gitleaks
+def test_a_secret_in_the_dirty_diff_stops_the_offload(s):
+    (s.work / "tests" / "test_a.py").write_text(f'TOKEN = "{FAKE_TOKEN}"\ndef test_x(): pass\n')
+    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert "gitleaks found a possible secret" in r.stderr
+    assert FAKE_TOKEN not in r.stderr and FAKE_TOKEN not in r.stdout  # redacted
+    assert s.read("runner.calls") == ""
+
+
+def test_a_dirty_tree_without_gitleaks_is_not_pushed(s):
+    (s.work / "tests" / "test_a.py").write_text("def test_x(): assert 1 == 1  # edited\n")
+    r = s.bg(BG_OFFLOAD_DIRTY="1", BG_GITLEAKS=str(s.root / "no-gitleaks"), BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert "gitleaks not found" in r.stderr
+    assert s.read("runner.calls") == ""
 
 
 def test_only_untracked_files_means_clean_head_with_a_note(s):
@@ -299,7 +380,7 @@ def test_a_stale_run_for_another_commit_is_not_the_verdict(s):
     (s.state / "runs.json").write_text(json.dumps([run(14, sha="b" * 40)]))
     r = s.bg(BG_OFFLOAD_APPEAR="1")
     assert r.returncode == 77, r.stderr
-    assert "CI PASSED" not in r.stdout
+    assert "CI workflow PASSED" not in r.stdout
 
 
 def test_a_cancelled_run_is_77(s):
@@ -321,3 +402,127 @@ def test_every_run_on_the_commit_must_pass(s):
     r = s.bg()
     assert r.returncode == 1, r.stderr
     assert "actions/runs/17" in r.stdout
+
+
+def test_a_named_test_outside_the_repo_is_not_offloaded(s):
+    other = s.root / "elsewhere"
+    other.mkdir()
+    (other / "test_b.py").write_text("def test_b(): assert False\n")
+    r = s.bg(str(s.home / "fakebin" / "pytest"), str(other / "test_b.py"), BG_MAX_WAIT="4")
+    assert r.returncode == 75, r.stderr
+    assert "is outside the repo" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_every_run_skipped_is_no_verdict(s):
+    (s.state / "runs.json").write_text(json.dumps([run(18, conclusion="skipped"), run(19, conclusion="neutral")]))
+    r = s.bg()
+    assert r.returncode == 77, r.stderr
+    assert "nothing was tested" in r.stderr
+    assert "PASSED" not in r.stdout
+
+
+def test_a_skipped_run_next_to_a_success_still_passes(s):
+    (s.state / "runs.json").write_text(json.dumps([run(20, conclusion="skipped"), run(21)]))
+    r = s.bg()
+    assert r.returncode == 0, r.stderr
+    assert "1 of 2 run(s) succeeded" in r.stdout
+
+
+@pytest.mark.parametrize("status", ["queued", "waiting", "in_progress", "pending", "requested"])
+def test_an_unfinished_status_keeps_polling(s, status):
+    (s.state / "runs.json").write_text(json.dumps([run(22, status=status, conclusion=None)]))
+    r = s.bg(BG_OFFLOAD_WAIT="1")
+    assert r.returncode == 76, r.stderr
+    assert "actions/runs/22" in r.stderr  # the run URL, not its name (the "" conclusion must not shift fields)
+
+
+@pytest.mark.parametrize("garbage", [
+    "overlay nothex for x -> o b\npushed https://github.com/djbclark/stubrepo/tree/ci/run/x-abc\n",
+    f"overlay {COMMIT} for x -> o b\npushed https://github.com/a/b/c/tree/ci/run/x-abc\n",
+    f"overlay {COMMIT} for x -> o b\npushed https://github.com/djbclark/stubrepo/tree/x;touch$IFS/tmp/pwn\n",
+    f"overlay {COMMIT[:39]} for x -> o b\npushed https://github.com/djbclark/stubrepo/tree/ci/run/x-abc\n",
+    "nothing useful\n",
+])
+def test_malformed_runner_output_is_no_verdict_and_gh_is_never_called(s, garbage):
+    (s.state / "runner.garbage").write_text(garbage)
+    r = s.bg()
+    assert r.returncode == 77, r.stderr
+    assert s.read("gh.calls") == ""
+
+
+def test_transient_gh_errors_do_not_add_up(s):
+    # four failures, a good poll that sees the run still going, four more failures, then it finishes: the
+    # error count must reset on the good poll, or the 5th failure overall would end it with 77.
+    (s.state / "gh.fail").write_text("4\n")
+    (s.state / "runs.json").write_text(json.dumps([run(23, status="in_progress", conclusion=None)]))
+    import threading
+
+    def finish():
+        time.sleep(3)
+        (s.state / "gh.fail").write_text("4\n")
+        (s.state / "runs.json").write_text(json.dumps([run(23)]))
+
+    t = threading.Thread(target=finish)
+    t.start()
+    r = s.bg(BG_OFFLOAD_WAIT="60")
+    t.join()
+    assert r.returncode == 0, r.stderr
+
+
+def test_killing_bg_stops_the_offload_poller(s):
+    (s.state / "runs.json").write_text(json.dumps([run(24, status="in_progress", conclusion=None)]))
+    e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"),
+         "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "60",
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_WAIT": "120"}
+    e.pop("BG_LOAD_WAIT", None)
+    p = subprocess.Popen([str(BG), str(s.home / "fakebin" / "pytest"), "tests/test_a.py"], cwd=s.work, env=e,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ppid = None
+    for _ in range(100):
+        if (s.state / "gh.ppid").exists() and (s.state / "gh.ppid").read_text().strip():
+            ppid = int(s.read("gh.ppid"))
+            break
+        time.sleep(0.2)
+    assert ppid, "the poller never started"
+    os.kill(ppid, 0)  # alive: the helper is polling
+    p.send_signal(signal.SIGTERM)
+    p.wait(timeout=20)
+    for _ in range(50):
+        try:
+            os.kill(ppid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.2)
+    else:
+        os.kill(ppid, signal.SIGKILL)
+        pytest.fail("bg-offload kept polling after bg was killed")
+
+
+def test_a_failed_greadlink_never_runs_a_helper_from_the_cwd(s):
+    # A repo-planted ./bg-offload must not run: with greadlink gone bg has no helper and just waits.
+    planted = s.work / "bg-offload"
+    planted.write_text(f"#!/bin/bash\ntouch {shlex.quote(str(s.root / 'planted-ran'))}\nexit 0\n")
+    planted.chmod(0o755)
+    # bg puts /opt/homebrew/bin first, so greadlink is shadowed by an exported shell function: the wrapper
+    # defines it and a function wins over any file lookup.
+    wrapper = s.root / "wrap.sh"
+    wrapper.write_text(f'greadlink() {{ return 1; }}\nexport -f greadlink\nexec {shlex.quote(str(BG))} "$@"\n')
+    e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"),
+         "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "4",
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true"}
+    e.pop("BG_LOAD_WAIT", None)
+    r = subprocess.run(["bash", str(wrapper), str(s.home / "fakebin" / "pytest"), "tests/test_a.py"], cwd=s.work,
+                       env=e, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 75, r.stderr
+    assert not (s.root / "planted-ran").exists()
+    assert s.read("runner.calls") == ""
+
+
+def test_a_non_numeric_run_id_is_never_used_for_the_log(s):
+    bad = run("12;touch", conclusion="failure")
+    (s.state / "runs.json").write_text(json.dumps([bad]))
+    r = s.bg()
+    assert r.returncode == 77, r.stderr
+    assert "odd run id" in r.stderr
+    assert not any(c.startswith("run view") for c in s.read("gh.calls").splitlines())
