@@ -20,13 +20,17 @@
 # via tun0. Replies to Hyades (18.4.60.84) then leave the VPN instead of enp1s0,
 # so Hyades→public-IP TCP blackholes (neighbors in the same /24 still work).
 # Policy-route anything sourced from the public address out enp1s0.
+# 2026-10-23: GlobalProtect removed everywhere; this host has no tun0/18-8 route now and
+# cannot reach MIT at all (it is only a Tailscale exit node). The tailnet reaches
+# 18.0.0.0/8 via the subnet route on pastebin.xvm.mit.edu (100.104.212.89). The table-100
+# rule stays as a cheap guard in case an 18/8 route ever returns.
 { pkgs, lib, ... }:
 let
   port = 26369;
   # hyades.mit.edu; every Hyades microVM leaves through this one address.
   hyadesEgress = "18.4.60.84";
   publicInterface = "enp1s0";
-  # Separate routing table so "from $publicIp" does not follow tun0's 18/8.
+  # Separate routing table so "from $publicIp" never follows an 18/8 route (was GP tun0).
   returnPathTable = 100;
   returnPathPriority = 100;
   # Hosts a CONNECT may reach (extended regex, case-insensitive, matched against the
@@ -142,7 +146,8 @@ in
     iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
   '';
 
-  # Keep Hyades→public-IP replies on enp1s0 even while GlobalProtect owns 18/8.
+  # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
+  # owns 18/8.
   systemd.services.hyades-public-return-path = {
     description = "Policy-route replies from public IP via ${publicInterface} (not MIT VPN tun0)";
     wantedBy = [ "multi-user.target" ];

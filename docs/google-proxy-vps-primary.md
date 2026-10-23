@@ -12,10 +12,15 @@ Wikidata, Grokipedia, and the enabled !shortcut hosts. SearXNG sets
 `google` stays off (403 everywhere; searxng#6835). `fleet-watch vps` still alerts if
 `tinyproxy-google` stops.
 
-**Return path (2026-10-22):** GlobalProtect (`tun0`) owns `18.0.0.0/8`, which stole
-replies to Hyades (`18.4.60.84`) and blackholed Hyades→`178.105.34.223` while neighbors
-in the same `/24` still worked. Unit `hyades-public-return-path` policy-routes
-`from $publicIp` via `enp1s0` (table 100). Without it, keep SearXNG on pastebin-only.
+**Return path (2026-10-22; GlobalProtect removed 2026-10-23):** GlobalProtect (`tun0`)
+used to own `18.0.0.0/8` here, which stole replies to Hyades (`18.4.60.84`) and
+blackholed Hyades→`178.105.34.223` while neighbors in the same `/24` still worked.
+GP was removed everywhere on 2026-10-23: the tailnet now reaches MIT 18.0.0.0/8 through a
+Tailscale subnet route on pastebin.xvm.mit.edu (100.104.212.89); vps-primary cannot reach
+MIT at all and is only an exit node. Unit `hyades-public-return-path` still policy-routes
+`from $publicIp` via `enp1s0` (table 100) as a guard should any 18/8 route return; it is a
+no-op without one. On pastebin (the other egress leg), restarting nftables drops
+Tailscale's rules: restart tailscaled right after it.
 
 ## 1. Why tinyproxy, and what was searched first
 

@@ -70,7 +70,14 @@ the host: nothing stopped the copy and the host from drifting apart.
    `readlink -f` of it, which resolves to the multi-call `nix` binary and changes its meaning
    (coreutils is multi-call too: use `.../bin/readlink`, `.../bin/sleep`).
 
-   **Dead-man switch for a risky deploy** (used for gpclient 3.1.0, 2026-10-22). A timer that
+   **Network note (2026-10-23):** GlobalProtect (gpclient, `gp-mit`) was removed everywhere
+   (6875819). vps-primary cannot reach MIT 18.0.0.0/8 at all and is only a Tailscale exit
+   node; the tailnet reaches MITnet through the subnet route advertised by
+   pastebin.xvm.mit.edu (100.104.212.89). On pastebin, restarting nftables drops Tailscale's
+   rules: restart tailscaled right after it.
+
+   **Dead-man switch for a risky deploy** (used for gpclient 3.1.0, 2026-10-22; gpclient is
+   gone since 2026-10-23, the recipe still applies). A timer that
    rolls back unless cancelled. `nixos-upgrade` can spend most of its time compiling (26 minutes
    for gpclient on the VPS), so a timer armed before `systemctl start nixos-upgrade` can fire
    before the switch: arm it **at the profile switch, not before the build**:
