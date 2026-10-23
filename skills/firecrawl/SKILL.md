@@ -90,6 +90,15 @@ Exa, Parallel, Jina, the built-in tools, the Crawl4AI MCP, the low-credit
 Firecrawl connector or Composio. Empty result means "no answer from SearXNG" —
 walk the ladder, do not retry the same query against the same tool forever.
 
+**Repeating failure (2026-10-22):** Hyades SearXNG engines (Bing/Yahoo/DDG/Wikipedia/…)
+time out on the shared egress IP; `/v2/search` then returns `data:{}` in ~5–20 s
+or used to hang until the router's 120 s floor (Cursor MCP `-32001`). Commercial
+fallback is off, so there is no second try. The router now caps `/search` at
+`FIRECRAWL_ROUTER_SEARCH_TIMEOUT` (default 35 s). Scrape/crawl stay on the 120 s
+floor and are usually fine (~1–2 s). Log line
+`POST /v2/search -> primary ERR …s [unreachable (TimeoutError…); no fallback]`
+means climb the ladder immediately, not "MCP is down".
+
 ## Fetch order
 
 `bin/web-get fetch` runs `exa-api → exa-mcp → parallel → jina-reader → pdf →
