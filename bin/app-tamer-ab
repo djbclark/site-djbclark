@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# app-tamer-ab: A/B log for "does App Tamer cost more than it saves" (djbclark, 2026-10-23).
+#
+#   app-tamer-ab run               sample every 60 s into the CSV until killed (run it with nohup)
+#   app-tamer-ab phase LABEL       set the phase label stamped on each row (e.g. with-trimmed, without, with-full)
+#   app-tamer-ab summary [HOURS]   per-phase mean/p90 of load per core, swap and compressor churn
+#
+# CSV: ~/.local/state/load-watch/app-tamer-ab/samples.csv
+#   utc,phase,load1,per_core,churn_pages_s,swap_used_mb,at_running,at_cpu_s
+# at_cpu_s is cumulative CPU seconds of App Tamer plus its helper (0 when not running); its delta is the cost.
+# Read-only on the system: it signals and kills nothing. Phase changes are explicit commands, never automatic.
+set -u
+dir="${AB_DIR:-$HOME/.local/state/load-watch/app-tamer-ab}"
+csv="$dir/samples.csv"
+mkdir -p "$dir"
+lw="${LOAD_WATCH:-$HOME/src/djbclark-ade/bin/load-watch}"
+
+cpu_s() { # cumulative CPU seconds of the named process, 0 if absent
+  ps -axo time=,comm= | awk -v n="$1" 'index($0, n) { split($1, t, /[:.]/); s += t[1]*60 + t[2] + t[3]/100 } END { printf "%.2f", s+0 }'
+}
+
+sample() {
+  local phase adm running cpu swap
+  phase=$(cat "$dir/phase.txt" 2>/dev/null || echo unlabelled)
+  adm=$("$lw" admit --json 2>/dev/null) || adm='{}'
+  swap=$(sysctl -n vm.swapusage | awk '{ gsub("M", "", $6); print $6 }')
+  if pgrep -x "App Tamer" > /dev/null; then running=1; else running=0; fi
+  cpu=$(awk -v a="$(cpu_s 'App Tamer')" -v b="$(cpu_s 'com.stclairsoft.AppTamer.Helper')" 'BEGIN { printf "%.2f", a+b }')
+  [ -s "$csv" ] || echo "utc,phase,load1,per_core,churn_pages_s,swap_used_mb,at_running,at_cpu_s" > "$csv"
+  python3 -I -c '
+import json, sys
+d = json.loads(sys.argv[1] or "{}")
+utc, phase, swap, run, cpu = sys.argv[2:7]
+print(",".join(str(x) for x in (utc, phase, d.get("load1", ""), d.get("per_core", ""), d.get("mem_churn_pages_s", ""), swap, run, cpu)))
+' "$adm" "$(date -u +%FT%TZ)" "$phase" "$swap" "$running" "$cpu" >> "$csv"
+}
+
+case "${1:-}" in
+  run) while :; do sample; sleep 60; done ;;
+  phase) [ -n "${2:-}" ] || { echo "usage: app-tamer-ab phase LABEL" >&2; exit 2; }
+         printf '%s\n' "$2" > "$dir/phase.txt"; echo "$(date -u +%FT%TZ) phase=$2" >> "$dir/phases.log" ;;
+  summary)
+    python3 -I - "$csv" "${2:-24}" <<'EOF'
+import csv, sys, statistics, datetime as dt
+rows = list(csv.DictReader(open(sys.argv[1])))
+cut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=float(sys.argv[2]))
+by = {}
+for r in rows:
+    if dt.datetime.fromisoformat(r["utc"].replace("Z", "+00:00")) < cut:
+        continue
+    by.setdefault(r["phase"], []).append(r)
+def col(rs, k):
+    return [float(r[k]) for r in rs if r[k] not in ("", None)]
+def p90(v):
+    v = sorted(v)
+    return v[int(0.9 * (len(v) - 1))] if v else float("nan")
+print(f"{'phase':<16}{'n':>5}{'load/core':>11}{'p90':>7}{'swapMB':>9}{'churn':>9}{'p90':>8}{'AT cores':>10}")
+for ph, rs in by.items():
+    lc, ch, sw = col(rs, "per_core"), col(rs, "churn_pages_s"), col(rs, "swap_used_mb")
+    cpu = col(rs, "at_cpu_s")
+    cores = (cpu[-1] - cpu[0]) / (len(rs) * 60) if len(cpu) > 1 and cpu[-1] >= cpu[0] else float("nan")
+    m = lambda v: statistics.mean(v) if v else float("nan")
+    print(f"{ph:<16}{len(rs):>5}{m(lc):>11.2f}{p90(lc):>7.2f}{m(sw):>9.0f}{m(ch):>9.0f}{p90(ch):>8.0f}{cores:>10.3f}")
+EOF
+    ;;
+  *) echo "usage: app-tamer-ab run | phase LABEL | summary [HOURS]" >&2; exit 2 ;;
+esac
