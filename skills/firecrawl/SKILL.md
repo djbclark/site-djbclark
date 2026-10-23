@@ -90,14 +90,16 @@ Exa, Parallel, Jina, the built-in tools, the Crawl4AI MCP, the low-credit
 Firecrawl connector or Composio. Empty result means "no answer from SearXNG" —
 walk the ladder, do not retry the same query against the same tool forever.
 
-**Repeating failure (2026-10-22):** Hyades SearXNG engines (Bing/Yahoo/DDG/Wikipedia/…)
-time out on the shared egress IP; `/v2/search` then returns `data:{}` in ~5–20 s
-or used to hang until the router's 120 s floor (Cursor MCP `-32001`). Commercial
-fallback is off, so there is no second try. The router now caps `/search` at
-`FIRECRAWL_ROUTER_SEARCH_TIMEOUT` (default 35 s). Scrape/crawl stay on the 120 s
-floor and are usually fine (~1–2 s). Log line
-`POST /v2/search -> primary ERR …s [unreachable (TimeoutError…); no fallback]`
-means climb the ladder immediately, not "MCP is down".
+**Repeating failure (2026-10-22, mitigated):** Hyades SearXNG engines used to
+time out on the shared egress IP `18.4.60.84`. Mitigations: (1) router caps
+`/search` at `FIRECRAWL_ROUTER_SEARCH_TIMEOUT` (default 35 s); (2) SearXNG
+`r10+` sends engines through pastebin.xvm:26370 (`outgoing.proxies`, 5 s engine
+timeout) — vps-primary:26369 is **unreachable from Hyades** (do not round-robin
+it). Docs: firecrawl-hyades `docs/searxng-egress.md`. Health JSONL:
+`~/src/firecrawl-hyades/scripts/check-searxng-egress` →
+`~/.local/state/firecrawl-searxng/checks.jsonl`. Scrape stays fine (~1–2 s).
+Log `POST /v2/search -> primary ERR …; no fallback` → climb Exa/Parallel/Jina,
+not "MCP down".
 
 ## Fetch order
 
