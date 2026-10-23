@@ -75,9 +75,10 @@ One shared MCP server, `http://127.0.0.1:18796/mcp`; never register a per-client
 ## Where work happens — plain git in `~/ops`
 
 Edit `~/ops/{stayturgid,site-djbclark,site-private}` in place on `master`; **commit and push your own
-changes as each unit lands, unasked** (2026-10-12). A file also holding another agent's edits: stage
-only your hunks (`git apply --cached`); **always `git commit -m MSG -- <paths>`**, never a bare `git
-commit` (it takes what another agent staged too, 2026-10-18). **Running deployments read `~/ops`**:
+changes as each unit lands, unasked** (2026-10-12); default `git commit -m MSG -- <paths>`, never a bare
+`git commit` (it takes what another agent staged too, 2026-10-18). A file also holding another agent's
+edits: stage only your hunks (`git apply --cached`), then `git commit -m MSG` with **no pathspec** (a
+pathspec commits the working tree, their hunk included; 2026-10-23). **Running deployments read `~/ops`**:
 check what reads a file first, keep commits small, prefer a quick revert.
 
 **Data, committed in place:** `site-private/memory/`, `site-djbclark/research/` (public). `git pull
