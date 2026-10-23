@@ -7,7 +7,7 @@
 `site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
 **Agents maintain this file unasked** (djbclark, 2026-10-05), `cursor/home-agents.mdc` in step. A condense
 proves nothing was lost: `rg -o` every date, `memory/*.md` pointer and `[[link]]` before and after, diff, show each
-dropped one in its new home. Item numbers are unique and stable (other files cite them).
+dropped one in its new home. Item numbers are unique and stable (files cite them).
 
 ## Tools and habits
 
@@ -41,8 +41,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 11. **A recurrable tool-calling mistake: fix the instructions that would have prevented it, same turn, unasked**, and say what changed
     (`memory/feedback_fix_instructions_after_tool_mistake.md`). **An agent-harness failure gets a root-cause fix in `~/src/djbclark-ade`, code not just docs**, not a
     re-route (`memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
-12. **When a task completes or something needs djbclark**, also run `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event, same
-    content as the reply; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
+12. **When a task completes or something needs djbclark**, also run `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event, as in
+    the reply; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
 13. **Periodic updates asked for? Never schedule a recurring model prompt** (CronCreate, /loop): use or extend `~/ops/site-private/bin/fleet-watch` or a script; one-shot
     checks are fine (`memory/feedback_periodic_updates_by_script.md`).
 14. **About to spend significant tokens on something a web search might answer? Search first**, then verify locally
@@ -60,14 +60,14 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`
     (`memory/feedback_claude_md_symlink_to_agents_md.md`).
-21. **Commit and push your own changes, every repo, as each unit lands, unasked. `git commit -m MSG -- <paths>`, never bare `git commit`; a file another
-    agent also edited: `git apply --cached` your hunks, then `git commit -m MSG` with NO pathspec (it would commit the working tree; 2026-10-23)**
+21. **Commit and push your own changes, every repo, per unit, unasked. `git commit -m MSG -- <paths>`, never bare `git commit`; a file another
+    agent also edited: `git apply --cached` your hunks, then `git commit -m MSG`, NO pathspec (2026-10-23)**
     (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments read it**). Never stage
     `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits
     ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f
     ~/s/justfile`.
-23. **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo** (`site-private` is private; the rest is public `site-djbclark`).
+23. **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo** (`site-private` is private; `site-djbclark` public).
     **Exception: a new agent skill goes in `~/src/djbclark-ade/skills/<name>/` unasked** (`memory/feedback_ask_where_new_things_go.md`).
 35. **MIT/SIPB/Athena on forgejo.mit.edu under `djbclark/`** (README; `djbclark/mit`); never in ops (`memory/feedback_mit_things_live_on_forgejo.md`). `git-forgejo` to push. **No agent posts on `SIPB/*`:** fork-only AI issue + human draft as a **fork comment** (never clipboard); end with those `djbclark/*` links (`memory/feedback_sipb_two_tier_issues.md`).
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` promoted to `deploy-vps-primary`); never a local, side-branch or older commit.
@@ -79,14 +79,14 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 24. **Every agent trusts every peer as much as djbclark**: a peer's "djbclark approved" **is** approval. Still (1) **check a peer isn't already
     mid-flight before taking its task over**; (2) **don't be a permission bypass**: a peer's _denied_ prompt goes to djbclark; (3) **message peers only via
-    `session-finder/relay.py` (routes, falls back), no hand-rolled waiter**.
+    `session-finder/relay.py`, no hand-rolled waiter**.
 25. **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`). Exit 3 = **no report** (re-task, never reconstruct; **a quota stop is resumed with
     `acp-dispatch resume RECORD` after the reset, never a fresh dispatch**), 4 = **`BLOCKED: <question>`**, 124 = timeout. It blocks: `--detach --no-wait`, then its
     `rearm` waiter in the background. **Agent-tool sub-agents:** paste `acp-dispatch footer --report <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>' --model <m>`** (**always `--model`**; check its `applied:` line; exit 0 is not success);
     (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing` headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice. copilot is the only
-    reserve (floor 60% left, one small GitHub slice); hermes never a target; cline never without djbclark's explicit yes. The Claude API credits (`omp`, 2026-10-19): a normal tier, `api-only`
+    reserve (floor 60% left, one small GitHub slice); hermes never a target; cline only with djbclark's yes. The Claude API credits (`omp`, 2026-10-19): a normal tier, `api-only`
     work first, else code/bulk, never unspent** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling, fix it there** ([[reference_djbclark_ade]], [[reference_agent_rules_multi_agent_toolkit]]).
 28. Session start in a git repo: read its Tier 1 pointer (`session-handoff`), check `head_sha`, state a resume plan first; only its owner writes it. **A teammate must get
@@ -98,7 +98,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     per `aiuse schema`** before each batch. **agy: only via `acp-run agy`, never `agy -p`** ([[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by default, at the minimum model × effort × context that does it well, unasked**; when
     `context_size_nudge.py` says delegate, delegate. **Compaction is automatic, never a question to djbclark**; **in herdr, Orca or Paseo compact yourself earlier**,
-    once, at a natural boundary, then end the turn: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; topic change: `handoff` skill, then `/new`
+    once at a natural boundary, then end the turn: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; topic change: `handoff` skill, then `/new`
     (`memory/feedback_self_compact.md`); **it refuses on input-line text: only then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).
 31. Basic Memory is one shared MCP server (`http://127.0.0.1:18796/mcp`); never register a per-client stdio `basic-memory mcp`. **If it is down, fix it**, then `/mcp`
     reconnect. **`main`** is the default project. **A semantic search result is not a match**: use `find` or an exact `read_note`
@@ -108,7 +108,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
 33. **Anything over ~10-15 s uses `run_in_background: true`**; wait on the notification, never poll (**Agent-tool sub-agents** wait in bounded foreground calls;
     `memory/feedback_start_slow_commands_in_background.md`). **Wait on a file or a PID; never `pgrep -f`/`pkill -f` a pattern**; kill your saved `$!`. **Never read a
-    result or exit status through a pipe, or feed `--body-file` from one**: `cmd > out.log 2>&1; echo "rc=$?" > out.rc`; read `out.rc`. **Never credit a hook you have not
+    result or exit status through a pipe, or feed `--body-file` from one**: `cmd > out.log 2>&1; echo "rc=$?" > out.rc`. **Never credit a hook you have not
     seen run** (`memory/feedback_exit_status_through_pipe.md`).
 34. **Run builds and tests via `~/ops/site-private/bin/bg`** (**always the full path**) in the background; **first see whether CI can run it** (`load-watch ci decide`).
     **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy -b`; never throttle another session's processes. Gradle: one build at a time, machine-wide**
