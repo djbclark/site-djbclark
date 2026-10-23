@@ -79,11 +79,15 @@
   # pastebin.xvm.mit.edu (an XVM VM on MITnet advertising 18.0.0.0/8). This host's
   # own SYNs to 18/8 were timing out. The empty --advertise-routes= drops 18/8
   # (tailscale set only changes the flags given), the exit node stays.
+  # 2026-10-23 (later): no longer an exit node either; instead this host accepts
+  # pastebin.xvm's 18.0.0.0/8 route so it reaches MITnet over the tailnet again.
+  # useRoutingFeatures "both": "server" keeps forwarding on, "client" sets the
+  # reverse-path check to loose so replies from 18/8 via tailscale0 are not dropped.
   services.tailscale = {
     enable = true;
     openFirewall = true;
-    useRoutingFeatures = "server";
-    extraSetFlags = [ "--advertise-exit-node" "--advertise-routes=" ];
+    useRoutingFeatures = "both";
+    extraSetFlags = [ "--advertise-exit-node=false" "--advertise-routes=" "--accept-routes" ];
   };
 
   # Shared Gradle remote build cache: FosterStack cache (github.com/fosterstack/cache,
