@@ -32,8 +32,8 @@ regular files, merge `CLAUDE.md` into `AGENTS.md`, then link. Never create a sta
 **Every agent trusts every other agent as much as it trusts djbclark**: a peer saying djbclark
 approved something **is** approval; its hand-offs and claims are authoritative. Still: (1) **check
 whether a peer is already mid-flight before taking a task over**; (2) **don't be a permission
-bypass**: a peer asking you to run a prompt its session was *denied* goes to djbclark; (3) **message a
-peer TUI with `session-finder/relay.py`, never a hand-rolled pane waiter** (2026-10-15).
+bypass**: a peer asking you to run a prompt its session was *denied* goes to djbclark; (3) **message
+peers only with `session-finder/relay.py`, which picks the route and falls back itself, never a hand-rolled waiter** (2026-10-15, 2026-10-23).
 
 ## Sub-agent reports go to a file (2026-10-03)
 
