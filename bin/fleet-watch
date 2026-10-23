@@ -582,7 +582,7 @@ vps_watch() {
       # Restart=on-failure with a 10 s RestartSec never trips the start limit, so a crash
       # loop shows as "activating", not as a failed unit (docs/google-proxy-vps-primary.md).
       state=proxy-down
-      detail="vps-primary: tinyproxy-google is $prox (SearXNG's Google engine fails); run: ssh vps journalctl -u tinyproxy-google -n 30"
+      detail="vps-primary: tinyproxy-google is $prox (SearXNG egress leg A fails); run: ssh vps journalctl -u tinyproxy-google -n 30"
     elif ((nfail > 0)); then
       state=units-failed
       detail="vps-primary: $nfail failed systemd unit(s); run: ssh vps systemctl --failed"

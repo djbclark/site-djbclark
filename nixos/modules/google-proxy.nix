@@ -1,5 +1,5 @@
-# Locked-down forward proxy so SearXNG on SIPB Hyades can reach Google from an IP that
-# is not shared by every Hyades user (docs/google-proxy-vps-primary.md).
+# Locked-down forward proxy so SearXNG on SIPB Hyades can reach search engines from an
+# IP that is not shared by every Hyades user (docs/google-proxy-vps-primary.md).
 #
 # Defence in depth, because the SearXNG image is public and the proxy URL carries no
 # credential:
@@ -9,7 +9,12 @@
 #      to the hosts in `allowedHosts` (FilterDefaultDeny: anything else gets 403).
 #   3. bound to the public address only (read from the interface at start, so the
 #      address is not written into git), never the tailnet, loopback or Podman bridge.
-# tinyproxy has no cache and adds no Via header; the access log goes to the journal.
+# tinyproxy has no cache and adds no Via header; the access log goes to the journal
+# (`journalctl -u tinyproxy-google`). Refused hosts: "Proxying refused on filtered domain".
+#
+# 2026-10-22: allowlist widened from Google-only to every engine the firecrawl-searxng
+# image enables (general + !shortcuts). Round-robin peer: pastebin.xvm:26370
+# (firecrawl-hyades/scripts/install-pastebin-egress-proxy).
 { pkgs, lib, ... }:
 let
   port = 26369;
@@ -17,14 +22,47 @@ let
   hyadesEgress = "18.4.60.84";
   publicInterface = "enp1s0";
   # Hosts a CONNECT may reach (extended regex, case-insensitive, matched against the
-  # host name only). Keep this the measured minimum (docs/google-proxy-vps-primary.md).
-  # cse.google.com: SearXNG's "google cse" engine (results from /cse/element/v1; its
-  # token comes from www.google.com/cse/cse.js). The plain "google" engine 403s from
-  # every address since 2026-07 (searxng#6359, #6835), so "google cse" is the one in use.
+  # host name only). Keep in sync with firecrawl-hyades/docs/searxng-egress.md.
   allowedHosts = [
+    # Google CSE (plain "google" 403s everywhere: searxng#6359 / #6835)
     "^google\\.com$"
     "^www\\.google\\.com$"
     "^cse\\.google\\.com$"
+    # Bing / Yahoo / DuckDuckGo
+    "^bing\\.com$"
+    "^www\\.bing\\.com$"
+    "^cn\\.bing\\.com$"
+    "^yahoo\\.com$"
+    "^search\\.yahoo\\.com$"
+    "^duckduckgo\\.com$"
+    "^www\\.duckduckgo\\.com$"
+    "^html\\.duckduckgo\\.com$"
+    "^links\\.duckduckgo\\.com$"
+    "^safe\\.duckduckgo\\.com$"
+    # Wikipedia / Wikidata / Grokipedia
+    "^wikipedia\\.org$"
+    "^.*\\.wikipedia\\.org$"
+    "^wikidata\\.org$"
+    "^www\\.wikidata\\.org$"
+    "^query\\.wikidata\\.org$"
+    "^grokipedia\\.com$"
+    "^www\\.grokipedia\\.com$"
+    # Shortcut engines enabled in firecrawl-searxng settings
+    "^news\\.ycombinator\\.com$"
+    "^registry\\.npmjs\\.org$"
+    "^crates\\.io$"
+    "^static\\.crates\\.io$"
+    "^lib\\.rs$"
+    "^pkg\\.go\\.dev$"
+    "^proxy\\.golang\\.org$"
+    "^huggingface\\.co$"
+    "^cdn-lfs\\.huggingface\\.co$"
+    "^codeberg\\.org$"
+    "^gitlab\\.com$"
+    "^api\\.openalex\\.org$"
+    "^api\\.crossref\\.org$"
+    "^wiki\\.nixos\\.org$"
+    "^nixos\\.org$"
   ];
 
   filterFile = pkgs.writeText "tinyproxy-google.filter" (lib.concatStringsSep "\n" allowedHosts + "\n");
@@ -33,7 +71,7 @@ let
     Port ${toString port}
     Allow ${hyadesEgress}
     Timeout 60
-    MaxClients 20
+    MaxClients 40
     ConnectPort 443
     Filter "${filterFile}"
     FilterType ere
@@ -56,7 +94,7 @@ let
 in
 {
   systemd.services.tinyproxy-google = {
-    description = "Allowlisted CONNECT proxy for SearXNG's Google engines";
+    description = "Allowlisted CONNECT proxy for Hyades SearXNG engine egress (vps-primary leg)";
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -88,11 +126,11 @@ in
   # apply; extraCommands runs after the allowed-port rules and before the final refuse.
   networking.firewall.extraCommands = ''
     iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} \
-      -m connlimit --connlimit-above 40 --connlimit-mask 32 -j DROP
+      -m connlimit --connlimit-above 80 --connlimit-mask 32 -j DROP
     iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} \
       -m conntrack --ctstate NEW \
       -m hashlimit --hashlimit-name gproxy --hashlimit-mode srcip \
-      --hashlimit-above 30/second --hashlimit-burst 60 -j DROP
+      --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
     iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
   '';
 }

@@ -1,24 +1,16 @@
-# Google proxy on vps-primary (for SearXNG on SIPB Hyades)
+# SearXNG egress proxy on vps-primary (Hyades shared IP)
 
-Decided by djbclark 2026-10-16. Every Hyades microVM leaves through one shared address
-(`hyades.mit.edu`, 18.4.60.84, measured from `get` the same day), and Google answers
-SearXNG's Google engines from it with "unusual traffic" 429s. Only the Google engines
-are routed through a proxy on vps-primary; every other engine keeps going out directly.
-Module: `nixos/modules/google-proxy.nix`. The SearXNG side (the per-engine `proxies:`
-setting) lives with the SearXNG image and its microVM's envs, not here.
+Decided by djbclark 2026-10-16 (Google-only); widened 2026-10-22 to every engine the
+firecrawl-searxng image enables. Every Hyades microVM leaves through one shared address
+(`hyades.mit.edu`, 18.4.60.84). Module: `nixos/modules/google-proxy.nix` (unit still named
+`tinyproxy-google` for continuity). Peer leg: pastebin.xvm:26370. Full design and
+instrumentation: firecrawl-hyades [`docs/searxng-egress.md`](https://forgejo.mit.edu/djbclark/firecrawl-hyades/src/branch/main/docs/searxng-egress.md).
 
-**Status (2026-10-16, later): repurposed for `google cse`.** SearXNG's plain `google`
-engine gets a 403 from every address (searxng/searxng#6359, still open as #6835), so r3
-did not use the proxy. The `google cse` engine is the Google path that still works: it
-fetches a token from `www.google.com/cse/cse.js` and results from
-`cse.google.com/cse/element/v1`, and both answered 200 with real results from the Mac and
-from Hyades. From the shared Hyades address it got "unusual traffic" 429s about a dozen
-times on 2026-10-15, so `cse.google.com` was added to the allowlist and SearXNG r5 sends
-`google cse` through the proxy. Since r6 (2026-10-17) the proxy URL is no longer baked into
-the public image: it is the `SEARXNG_GOOGLE_PROXY` env of the `djbclark-fc-searxng` microVM,
-which the image's entrypoint renders into `settings.yml` (firecrawl-hyades `searxng-entrypoint`). `fleet-watch vps` still alerts if the unit stops; if the proxy is ever
-retired, remove `google-proxy.nix`, its import, its `registry/ports.yml` entry and that
-check together.
+**Status (2026-10-22):** allowlist covers Google CSE, Bing, Yahoo, DuckDuckGo, Wikipedia,
+Wikidata, Grokipedia, and the enabled !shortcut hosts. SearXNG `r7+` sets
+`outgoing.proxies.all://` to both legs (round-robin) via `SEARXNG_EGRESS_PROXIES`. Plain
+`google` stays off (403 everywhere; searxng#6835). `fleet-watch vps` still alerts if
+`tinyproxy-google` stops.
 
 ## 1. Why tinyproxy, and what was searched first
 
