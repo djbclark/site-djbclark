@@ -9,7 +9,7 @@
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch upstream [--dry-run] [--once]  only the upstream-PR watcher (see Upstream PR watcher)
-#   fleet-watch upstream --relay-to <session> | --relay-off | --relay-status  hand events to a session
+#   fleet-watch upstream --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
 #   fleet-watch install   write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
 #
@@ -779,6 +779,21 @@ upr_event() {
     "~~~~"' <<<"$1"
 }
 
+upr_send_line() {
+  # $1 target, $2 text: one line into a session that is NOT this process. A Paseo agent id (a uuid)
+  # goes through `paseo send --behavior steer` with this process's own agent id scrubbed (relay.py
+  # refuses a caller that is the target, which a self-test from the registered session always is);
+  # anything else through relay.py. 0 only when the channel says it delivered or queued it.
+  local target=$1 text=$2 cli
+  if [[ "$target" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    cli=${PASEO_CLI:-$(command -v paseo || true)}
+    [[ -n "$cli" ]] || return 1
+    runb 60 env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD "$cli" send "$target" --no-wait --behavior steer "$text" >/dev/null 2>&1
+  else
+    runb 60 "$UPSTREAM_RELAY" "$target" "$text" >/dev/null 2>&1
+  fi
+}
+
 upr_relay_brief() {
   # $1 = event JSON, $2 = reply draft path: the brief a registered session gets, on stdout.
   cat <<EOF
@@ -1136,16 +1151,48 @@ case "${1:-check}" in
     shift
     case ${1:-} in
       --relay-to)
-        if ! [[ "${2:-}" =~ ^[A-Za-z0-9:._-]+$ ]]; then
-          echo "usage: fleet-watch upstream --relay-to <session id, Paseo agent id or herdr pane>" >&2
+        # [target] [name]: no target registers the calling session itself (a Paseo agent first,
+        # then a Claude Code session id, then a herdr pane), the way `load-watch watcher set` does.
+        shift
+        tgt=${1:-${PASEO_AGENT_ID:-${CLAUDE_CODE_SESSION_ID:-${HERDR_PANE_ID:-}}}}
+        if ! [[ "$tgt" =~ ^[A-Za-z0-9:._-]+$ ]]; then
+          echo "usage: fleet-watch upstream --relay-to [<session id, Paseo agent id or herdr pane> [<name>]]" >&2
           exit 2
         fi
-        printf '%s\n' "$2" >"$UPSTREAM_RELAY_FILE.new" && mv -f "$UPSTREAM_RELAY_FILE.new" "$UPSTREAM_RELAY_FILE"
-        ulog "relay target set to $2"
-        echo "upstream events now relay to $2 (falls back to a worker when refused)"
+        old=$(ghead -n 1 "$UPSTREAM_RELAY_FILE" 2>/dev/null || true)
+        oldname=$(gsed -n 's/^name: //p' "$UPSTREAM_RELAY_FILE" 2>/dev/null)
+        { printf '%s\n' "$tgt"; printf 'name: %s\n' "${2:-$tgt}"; printf 'since: %s\n' "$(gdate '+%F %T')"; } >"$UPSTREAM_RELAY_FILE.new" &&
+          mv -f "$UPSTREAM_RELAY_FILE.new" "$UPSTREAM_RELAY_FILE"
+        ulog "relay target set to $tgt"
+        echo "upstream events now relay to $tgt (falls back to a worker when refused)"
+        if [[ -n "$old" && "$old" != "$tgt" ]]; then
+          echo "replaced $old (${oldname:-?})"
+          if upr_send_line "$old" "fleet-watch: you are no longer the CFEngine upstream watcher; ${2:-$tgt} took over at $(gdate '+%F %T'). Stop any upstream-PR follow-up you were running; nothing else changes."; then
+            echo "told the old watcher"
+          else
+            echo "could not reach the old watcher"
+          fi
+        fi
+        exit 0
+        ;;
+      --relay-test)
+        if [[ ! -s "$UPSTREAM_RELAY_FILE" ]]; then echo "no relay registered" >&2; exit 1; fi
+        tgt=$(ghead -n 1 "$UPSTREAM_RELAY_FILE")
+        if upr_send_line "$tgt" "fleet-watch test: this session is the registered CFEngine upstream watcher. Nothing to do."; then
+          echo "sent to $tgt"
+        else
+          echo "could not reach $tgt" >&2
+          exit 1
+        fi
         exit 0
         ;;
       --relay-off)
+        # An optional target makes it conditional: only clear when that session holds the role.
+        cur=$(ghead -n 1 "$UPSTREAM_RELAY_FILE" 2>/dev/null || true)
+        if [[ -n "${2:-}" && "$2" != "$cur" ]]; then
+          echo "the relay is ${cur:-unset}, not $2; left it" >&2
+          exit 1
+        fi
         rm -f "$UPSTREAM_RELAY_FILE"
         ulog "relay target cleared"
         echo "upstream events go to a worker again"
@@ -1153,9 +1200,10 @@ case "${1:-check}" in
         ;;
       --relay-status)
         if [[ -s "$UPSTREAM_RELAY_FILE" ]]; then
-          echo "relay to $(ghead -n 1 "$UPSTREAM_RELAY_FILE") (set $(gdate -r "$UPSTREAM_RELAY_FILE" '+%F %T'))"
+          echo "relay to $(ghead -n 1 "$UPSTREAM_RELAY_FILE") ($(gsed -n 's/^name: //p' "$UPSTREAM_RELAY_FILE"), set $(gdate -r "$UPSTREAM_RELAY_FILE" '+%F %T'))"
         else
           echo "no relay: events go to a worker"
+          exit 1
         fi
         exit 0
         ;;
@@ -1164,7 +1212,7 @@ case "${1:-check}" in
       case $a in
         --dry-run) UPSTREAM_DRY=1 ;;
         --once) ;;
-        *) echo "usage: fleet-watch upstream [--dry-run] [--once] | --relay-to <session> | --relay-off | --relay-status" >&2; exit 2 ;;
+        *) echo "usage: fleet-watch upstream [--dry-run] [--once] | --relay-to [<session> [<name>]] | --relay-test | --relay-off [<session>] | --relay-status" >&2; exit 2 ;;
       esac
     done
     upstream_watch manual
