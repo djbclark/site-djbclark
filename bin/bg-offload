@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# bg-offload — run a held test command on CI instead, and report CI's verdict (bg's helper, 2026-10-23).
+#
+#   bg-offload --probe TOP            exit 0 when TOP has a runnable CI route (bg asks once, up front)
+#   bg-offload TOP -- CMD [ARGS...]   build a commit of TOP's working tree, run the CI route on it, wait,
+#                                     print the result; CMD is only used to name the run and to notice an
+#                                     untracked file it names (CI cannot see that)
+#
+# Why (djbclark, 2026-10-23, answering a question card): in a repo recorded as `ci` (load-watch ci) a
+# targeted test run stays on this Mac, and on a busy Mac bg's load gate parked a 2 s pytest file for over
+# an hour. So when the gate has held such a run past BG_OFFLOAD_AFTER seconds (bg decides that), bg calls
+# this helper instead of waiting on: the repo's CI runs and bg exits with CI's verdict. bg never execs
+# the command after an offload.
+#
+# The runnable route is a convention, not a recorded string (the `load-watch ci` text is free text of many
+# shapes and is never executed): an executable `scripts/bg-offload-run` in the repo top, else
+# `scripts/github-ci-run`. It is called as `RUNNER --no-wait REF` from the repo top and must push the run
+# and print two lines on stdout, which scripts/github-ci-run already does:
+#   overlay <40-hex commit that the CI run builds> for <ref sha> -> <remote> <branch>
+#   pushed https://github.com/<owner>/<repo>/tree/<branch>
+# A repo with a faster route than the whole CI workflow (sudo-secretspec: a plain push runs only the
+# 2-minute `packaging` job) ships its own scripts/bg-offload-run with the same contract. A linked git
+# worktree (.git is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no
+# git: this helper says so and exits 69, and bg goes on waiting at the gate as it always did.
+#
+# The ref: HEAD when the tracked tree is clean, else `git stash create` (a commit of the tracked changes,
+# staged or not; the tree and index stay untouched). Untracked files are NOT in it and are listed; if the
+# command names an untracked file, CI cannot run it and the helper exits 69.
+#
+# The wait is ours, not the runner's (github-ci-run's own wait gives up at 480 s and a full Linux CI run
+# of sudo-secretspec takes longer): the runner is started with --no-wait, then this polls `gh run list -R
+# OWNER/REPO` (always -R: gh in some checkouts resolves to an upstream remote) for the runs whose head is
+# the pushed commit until all are completed, up to BG_OFFLOAD_WAIT seconds (default 2400).
+#
+# Exit codes (bg 3 = refused CI-first and 75 = wait budget keep their meaning; neither is used here):
+#   0   every CI run concluded success (or skipped/neutral)
+#   1   a CI run concluded failure: the failed-step log tail and the full log's path are printed
+#   69  not offloaded, nothing pushed (no route, no gh, untracked file named, ref or push failed):
+#       bg falls back to waiting at the gate
+#   76  CI did not finish within BG_OFFLOAD_WAIT; the run is still going, its URL is printed
+#   77  pushed, but no verdict: no run appeared, gh kept failing, or a run was cancelled/timed out
+# Test hooks: BG_GH (gh binary), BG_OFFLOAD_RUNNER (route), BG_OFFLOAD_POLL (poll seconds, default 20),
+# BG_OFFLOAD_APPEAR (seconds to wait for the run to show up, default 240).
+export PATH="/opt/homebrew/bin:$PATH"
+gh_bin="${BG_GH:-gh}"
+poll="${BG_OFFLOAD_POLL:-20}"
+
+say() { echo "bg: $*" >&2; }
+
+# route <top>: print the runner path, or fail.
+route() {
+  local top="$1" r
+  [ -d "$top/.git" ] || return 1
+  if [ -n "${BG_OFFLOAD_RUNNER:-}" ]; then
+    [ -x "$BG_OFFLOAD_RUNNER" ] && { printf '%s\n' "$BG_OFFLOAD_RUNNER"; return 0; }
+    return 1
+  fi
+  for r in "$top/scripts/bg-offload-run" "$top/scripts/github-ci-run"; do
+    [ -f "$r" ] && [ -x "$r" ] && { printf '%s\n' "$r"; return 0; }
+  done
+  return 1
+}
+
+if [ "${1:-}" = --probe ]; then
+  top="${2:-}"
+  [ -n "$top" ] && command -v git >/dev/null 2>&1 && command -v "$gh_bin" >/dev/null 2>&1 \
+    && command -v gdate >/dev/null 2>&1 && route "$top" >/dev/null
+  exit $?
+fi
+
+top="${1:-}"
+if [ -z "$top" ] || [ "${2:-}" != -- ]; then
+  echo "usage: bg-offload --probe TOP | bg-offload TOP -- CMD [ARGS...]" >&2
+  exit 2
+fi
+shift 2
+cmd_text="$*"
+
+runner=$(route "$top") || { say "offload: no runnable CI route in $top (scripts/bg-offload-run or scripts/github-ci-run)"; exit 69; }
+command -v "$gh_bin" >/dev/null 2>&1 || { say "offload: gh not found"; exit 69; }
+command -v gdate >/dev/null 2>&1 || { say "offload: gdate not found"; exit 69; }
+
+tmp=$(gmktemp -d "${TMPDIR:-/tmp}/bg-offload.XXXXXX") || exit 69
+trap 'rm -rf "$tmp"' EXIT
+
+# 1. The ref CI will build.
+porc="$tmp/porcelain"
+git -C "$top" status --porcelain > "$porc" 2>/dev/null || { say "offload: git status failed in $top"; exit 69; }
+untracked=$(ggrep '^?? ' "$porc" | gcut -c4-)
+tracked_dirty=$(ggrep -vc '^?? ' "$porc")
+head_sha=$(git -C "$top" rev-parse --verify HEAD 2>/dev/null) || { say "offload: no HEAD commit in $top"; exit 69; }
+if [ "$tracked_dirty" != 0 ]; then
+  ref=$(git -C "$top" stash create 2>/dev/null)
+  if [ -z "$ref" ]; then
+    say "offload: git stash create made no commit for the dirty tree (conflicts?); not offloading"
+    exit 69
+  fi
+  what="a stash commit of the tracked working-tree changes on ${head_sha:0:8}"
+else
+  ref="$head_sha"
+  if [ -n "$untracked" ]; then what="clean HEAD ${head_sha:0:8} (the tree has only untracked files, which CI does not get)"
+  else what="clean HEAD ${head_sha:0:8}"; fi
+fi
+case "$ref" in *[!0-9a-f]*|"") say "offload: unexpected ref '$ref'"; exit 69 ;; esac
+
+# 2. Untracked files: listed; one the command names makes CI useless for this run.
+if [ -n "$untracked" ]; then
+  say "offload: untracked files are NOT in the CI run (git stash create ignores them):"
+  printf '%s\n' "$untracked" | ghead -n 20 | gsed 's/^/bg:   ?? /' >&2
+  [ "$(printf '%s\n' "$untracked" | gwc -l)" -gt 20 ] && say "offload:   ... and more"
+fi
+for a in "$@"; do
+  p="${a%%::*}"
+  # Only a Python file inside the repo can be a test input (not the runner itself, e.g. .venv/bin/pytest).
+  case "$p" in *.py) ;; *) continue ;; esac
+  [ -f "$p" ] || continue
+  case "$(greadlink -f "$p")/" in "$top"/*) ;; *) continue ;; esac
+  if ! git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then
+    say "offload: $p is untracked (or git-ignored), so CI cannot run it; not offloading"
+    exit 69
+  fi
+done
+
+# 3. Push the run (the runner's own wait is skipped: --no-wait).
+say "offload: running the repo's CI on $what via ${runner#$top/}"
+out="$tmp/runner.out"
+cd "$top" || exit 69
+gtimeout "${BG_OFFLOAD_PUSH_TIMEOUT:-900}" "$runner" --no-wait "$ref" > "$out" 2> "$tmp/runner.err"
+rc=$?
+if [ "$rc" != 0 ]; then
+  say "offload: the CI runner exited $rc; not offloading. Its stderr tail:"
+  gtail -n 8 "$tmp/runner.err" | gsed 's/^/bg:   /' >&2
+  exit 69
+fi
+commit=$(gawk '/^overlay [0-9a-f]+ for /{print $2; exit}' "$out")
+url=$(gawk '/^pushed https:\/\/github.com\//{print $2; exit}' "$out")
+repo=${url#https://github.com/}; repo=${repo%%/tree/*}
+branch=${url#*/tree/}
+case "$commit" in *[!0-9a-f]*|"") commit="" ;; esac
+[ "${#commit}" = 40 ] || commit=""
+case "$repo" in */*/*|*[!A-Za-z0-9._/-]*|""|/*|*/) repo="" ;; esac
+case "$branch" in *[!A-Za-z0-9._/-]*|"") branch="" ;; esac
+if [ -z "$commit" ] || [ -z "$repo" ] || [ -z "$branch" ]; then
+  say "offload: the runner pushed (rc 0) but its output has no 'overlay <sha> for ...' and 'pushed https://github.com/OWNER/REPO/tree/BRANCH' lines; no verdict. Its stdout:"
+  gtail -n 8 "$out" | gsed 's/^/bg:   /' >&2
+  exit 77
+fi
+say "offload: pushed $branch on $repo (commit ${commit:0:8}); waiting for CI, up to ${BG_OFFLOAD_WAIT:-2400} s"
+say "offload: this runs the repo's whole CI workflow, not only: $cmd_text"
+
+# 4. Wait for every run on that commit.
+t0=$(gdate +%s)
+limit="${BG_OFFLOAD_WAIT:-2400}"
+appear="${BG_OFFLOAD_APPEAR:-240}"
+errs=0
+rows="$tmp/rows"
+while :; do
+  "$gh_bin" run list -R "$repo" --branch "$branch" --limit 20 \
+    --json databaseId,headSha,status,conclusion,url,name \
+    --jq ".[] | select(.headSha==\"$commit\") | [.databaseId, .status, (.conclusion // \"-\"), .url, .name] | @tsv" \
+    > "$rows" 2> "$tmp/gh.err"
+  grc=$?
+  now=$(gdate +%s); el=$((now - t0))
+  if [ "$grc" != 0 ]; then
+    errs=$((errs + 1))
+    if [ "$errs" -ge 5 ]; then
+      say "offload: gh run list failed $errs times in a row (last: $(ghead -n 1 "$tmp/gh.err")); no verdict. Branch: https://github.com/$repo/tree/$branch"
+      exit 77
+    fi
+  else
+    errs=0
+    if [ ! -s "$rows" ]; then
+      if [ "$el" -ge "$appear" ]; then
+        say "offload: no CI run for commit ${commit:0:8} appeared on $branch after ${el} s; no verdict. Branch: https://github.com/$repo/tree/$branch"
+        exit 77
+      fi
+    else
+      pending=0 failed=0 odd=0 first_fail="" first_url="" n=0
+      while IFS=$'\t' read -r id status concl rurl rname; do
+        n=$((n + 1)); [ -n "$first_url" ] || first_url="$rurl"
+        if [ "$status" != completed ]; then pending=1; continue; fi
+        case "$concl" in
+          success|skipped|neutral) ;;
+          failure) failed=1; [ -n "$first_fail" ] || first_fail="$id" ;;
+          *) odd=1; say "offload: run $id ($rname) ended '$concl': $rurl" ;;
+        esac
+      done < "$rows"
+      if [ "$pending" = 0 ]; then
+        if [ "$failed" = 1 ]; then
+          # The failing job's log: the useful part. Kept whole in the bg state dir, tail printed.
+          logd="$HOME/.local/state/bg/offload"; mkdir -p "$logd"
+          "$gh_bin" run view "$first_fail" -R "$repo" --log-failed > "$tmp/failed.log" 2> "$tmp/gh.err"
+          if [ -s "$tmp/failed.log" ]; then
+            mv -f "$tmp/failed.log" "$logd/$first_fail.log.tmp" && mv -f "$logd/$first_fail.log.tmp" "$logd/$first_fail.log"
+            echo "bg: CI FAILED (${el} s): https://github.com/$repo/actions/runs/$first_fail"
+            echo "bg: failed-step log, last 60 lines (full: $logd/$first_fail.log):"
+            gtail -n 60 "$logd/$first_fail.log"
+          else
+            echo "bg: CI FAILED (${el} s): https://github.com/$repo/actions/runs/$first_fail"
+            echo "bg: no failed-step log available yet; gh run view $first_fail -R $repo --log-failed"
+          fi
+          exit 1
+        elif [ "$odd" = 1 ]; then
+          exit 77
+        fi
+        echo "bg: CI PASSED (${el} s, $n run(s)): $first_url"
+        echo "bg: ref: $what; the whole CI workflow ran, not only: $cmd_text"
+        exit 0
+      fi
+    fi
+  fi
+  if [ "$el" -ge "$limit" ]; then
+    say "offload: CI had not finished after ${el} s (BG_OFFLOAD_WAIT=$limit); the run is still going: ${first_url:-https://github.com/$repo/tree/$branch}"
+    exit 76
+  fi
+  sleep "$poll"
+done
