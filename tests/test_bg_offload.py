@@ -835,9 +835,11 @@ def test_an_unreachable_push_target_fails_closed(s):
 
 
 def test_the_url_of_a_failing_remote_is_not_echoed_with_credentials(s):
-    git(s.work, "remote", "set-url", "origin", "https://user:s3cr3t@127.0.0.1:9/x.git")
-    r = s.bg(BG_MAX_WAIT="4", BG_OFFLOAD_LSREMOTE_TIMEOUT="20")
+    # git prints a failing local-path url as given (it masks https passwords itself, so this is the form that can leak)
+    git(s.work, "remote", "set-url", "origin", f"{s.root}/nowhere//user:s3cr3t@host/x.git")
+    r = s.bg(BG_MAX_WAIT="4")
     assert r.returncode == 75, r.stderr
+    assert "could not list the refs" in r.stderr
     assert "s3cr3t" not in r.stderr and "s3cr3t" not in r.stdout
     assert s.read("runner.calls") == ""
 
@@ -911,10 +913,10 @@ def test_an_odd_remote_name_is_refused(s, remote):
     assert s.read("runner.calls") == ""
 
 
-@pytest.mark.parametrize("cmd", [("python3", "-m", "pytest"), ("py.test",), ("pytest",), ("/usr/local/bin/pytest",)])
+@pytest.mark.parametrize("cmd", [("python3", "-m", "pytest"), ("python3", "-m", "unittest"), ("py.test",), ("pytest",), ("/usr/local/bin/pytest",)])
 def test_an_untracked_test_is_found_whichever_way_pytest_is_spelled(s, cmd):
     (s.work / "tests" / "test_new.py").write_text("def test_n(): pass\n")
-    r = s.bg(*cmd, "tests/test_new.py::test_n", BG_MAX_WAIT="4")
+    r = s.bg(*cmd, "tests/test_new.py", BG_MAX_WAIT="4")
     assert r.returncode == 75, r.stderr
     assert "tests/test_new.py is untracked" in r.stderr
     assert s.read("runner.calls") == ""
