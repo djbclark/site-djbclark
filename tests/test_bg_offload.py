@@ -62,6 +62,7 @@ printf '%s\\n' "$2" > "$d/ref"
 git grep -q "SECRETXY[Z]" "$2" -- . && echo yes > "$d/ref.hassecret" || echo no > "$d/ref.hassecret"
 git config --get push.followTags > "$d/cfg.followTags" 2>/dev/null; git config --get push.recurseSubmodules > "$d/cfg.recurse" 2>/dev/null
 git config --get core.testmarker > "$d/cfg.marker" 2>/dev/null
+if [ -f "$d/runner.overlay" ]; then git show "$(cat "$d/runner.overlay")" > "$d/overlay.out" 2>/dev/null || echo MISSING > "$d/overlay.out"; fi
 if [ -f "$d/runner.push" ]; then git push -q --force "${{GITHUB_CI_REMOTE:-origin}}" "$2:refs/heads/ci/run/x-abc" || exit 3; fi
 if [ -f "$d/runner.slow" ]; then
   echo $$ > "$d/runner.pid"
@@ -1079,3 +1080,41 @@ def test_a_partial_clone_never_lazy_fetches_an_advertised_tip(s):
     assert r.returncode == 0, r.stderr
     assert subprocess.run(["git", "cat-file", "-e", x], cwd=part, capture_output=True,
                           env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}).returncode != 0
+
+
+# --- review 6 (2d037f7): the runner reads the ci/base overlay in a partial clone; nothing it reads may be missing ---
+
+def _partial_clone_with_a_base_only_blob(s, allow_any_want=True):
+    git(s.work, "checkout", "-q", "-b", "ci/base")
+    (s.work / "base-only.txt").write_text("overlay from ci/base\n")
+    git(s.work, "add", "-A")
+    git(s.work, "commit", "-q", "-m", "ci/base overlay")
+    git(s.work, "push", "-q", "origin", "ci/base")
+    git(s.work, "checkout", "-q", "main")
+    git(s.remote, "config", "uploadpack.allowFilter", "true")
+    git(s.remote, "config", "uploadpack.allowAnySHA1InWant", "true" if allow_any_want else "false")
+    part = s.root / "partial"
+    git(s.root, "clone", "-q", "-b", "main", "--filter=blob:none", f"file://{s.remote}", str(part))
+    git(part, "branch", "-q", "ci/base", "origin/ci/base")  # fetched, never checked out: its blob is not here
+    objs = subprocess.run(["git", "rev-list", "--objects", "--missing=print", "ci/base^{tree}"], cwd=part,
+                          capture_output=True, text=True, check=True, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}).stdout
+    assert any(l.startswith("?") for l in objs.splitlines())  # the test really has a missing overlay blob
+    (s.state / "runner.overlay").write_text("ci/base:base-only.txt\n")
+    return part
+
+
+def test_the_runner_can_read_the_ci_base_overlay_in_a_partial_clone(s):
+    part = _partial_clone_with_a_base_only_blob(s)
+    r = _offload(s, part)
+    assert r.returncode == 0, r.stderr
+    assert s.read("overlay.out") == "overlay from ci/base\n"  # 2d037f7: MISSING (GIT_NO_LAZY_FETCH reached the runner)
+    assert "fetching them" in r.stderr
+
+
+def test_an_overlay_object_that_cannot_be_fetched_refuses_before_the_runner(s):
+    part = _partial_clone_with_a_base_only_blob(s, allow_any_want=False)
+    git(part, "config", "protocol.version", "0")  # v0 refuses a want for an unadvertised blob: the fetch fails
+    r = _offload(s, part)
+    assert r.returncode == 69, r.stderr
+    assert "are missing here and could not be fetched" in r.stderr
+    assert s.read("runner.calls") == "" and s.read("gh.calls") == ""

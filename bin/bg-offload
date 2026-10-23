@@ -26,8 +26,8 @@
 # is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no GNU tool, nothing
 # publishable (see below): this helper says so and exits 69, and bg goes on waiting at the gate as it always did.
 #
-# What may be offloaded (adversary reviews of c7cab20 to 75dbe21, 2026-10-23, and djbclark's ruling that followed:
-# bg-offload publishes NOTHING that is not already on the remote; five review rounds, the first three on scanning
+# What may be offloaded (adversary reviews of c7cab20 to 2d037f7, 2026-10-23, and djbclark's ruling that followed:
+# bg-offload publishes NOTHING that is not already on the remote; six review rounds, the first three on scanning
 # what would be pushed, so there is no scan and no opt-in): all of
 #   (a) no tracked file is modified, in the working tree or the index (`git status --porcelain
 #       --untracked-files=no`; untracked files never travel and never block, they are listed). A tracked file
@@ -47,15 +47,23 @@
 # The history walked is the real one, for the checks and the runner's push alike: GIT_NO_REPLACE_OBJECTS=1 is
 # exported for the whole helper (a `git replace` of a public commit by one with a private parent would hide that
 # parent from rev-list while the push sends it), and a graft file (info/grafts or $GIT_GRAFT_FILE, which that
-# variable does not turn off) refuses. GIT_NO_LAZY_FETCH=1: a partial clone never fetches an advertised tip it
-# lacks; such a tip is just not an exclusion.
+# variable does not turn off) refuses. GIT_NO_LAZY_FETCH=1 is set on the reachability checks only (cat-file of the
+# advertised tips, rev-list, log): a partial clone never fetches an advertised tip it lacks; such a tip is just not an
+# exclusion. It is NOT passed to the runner (adversary round 6: it made github-ci-run's `cat-file -e ci/base:PATH`
+# fail in a blob:none clone, the overlay was skipped without a word and CI's PASS was for HEAD's own workflow).
+# Instead, before the runner, every object of HEAD's tree and of the overlaid ci/base tree must be here: missing ones
+# (a partial clone) are fetched (a fetch publishes nothing; BG_OFFLOAD_FETCH_TIMEOUT, 300 s), and any still missing
+# refuses, so a runner that skips what it cannot read never builds a run without the overlay.
 # If any fails: one line per reason (dirty files capped, N unpushed commits, ci/base commits not on the remote, url
-# mismatch, ls-remote failure, grafts), nothing is pushed or built, exit 69, and bg keeps waiting at the gate as it
-# always did. The dev flow: commit and push, then bg offloads. The runner is then called on HEAD itself with git
-# config forced from the environment (push.followTags=false and push.recurseSubmodules=no appended to
-# GIT_CONFIG_PARAMETERS, which git reads after every config file and after GIT_CONFIG_COUNT/KEY/VALUE, so neither
-# the user's config nor a caller's environment can make its `git push` carry tags or submodule commits), and
-# the only thing it pushes is the CI overlay branch: HEAD's tree, the ci/base overlay and .ci-target-sha.
+# mismatch, ls-remote failure, grafts, objects missing from a partial clone), nothing is pushed or built, exit 69, and
+# bg keeps waiting at the gate as it always did. The dev flow: commit and push, then bg offloads. The runner is then
+# called on HEAD itself with git config forced from the environment (push.followTags=false and
+# push.recurseSubmodules=no appended to GIT_CONFIG_PARAMETERS, which git reads after every config file and after
+# GIT_CONFIG_COUNT/KEY/VALUE, so neither the user's config nor a caller's environment can make its `git push` carry
+# tags or submodule commits), and the only thing it pushes is the CI overlay branch: HEAD's tree, the ci/base overlay
+# and .ci-target-sha. "HEAD's tree" holds up to the repo's own filters: github-ci-run checks the tree out and re-adds
+# it, so a smudge filter whose clean is not its inverse would publish the smudged text (adversary round 6, P3;
+# git-crypt, LFS and nbstripout round-trip). That is the runner's code, tracked in each repo, not this helper's.
 # A named test path that does not exist, is untracked or git-ignored, is a directory with no tracked file, or
 # resolves outside the repo top also exits 69 (pytest/unittest arguments that look like paths: end in .py,
 # contain `/` or `::`, or are directories; a unittest dotted id is not checked).
@@ -82,7 +90,7 @@
 # real run): BG_GH (gh binary), BG_OFFLOAD_RUNNER (route), BG_OFFLOAD_TOOLS_EXTRA (more required tools). Timing knobs: BG_OFFLOAD_POLL
 # (poll seconds, default 20), BG_OFFLOAD_APPEAR (seconds to wait for the run to show up, default 240).
 export PATH="/opt/homebrew/bin:$PATH"
-export GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1  # header: the real history, never a lazy fetch
+export GIT_NO_REPLACE_OBJECTS=1  # header: the real history, for the checks and the runner's push
 if [ "${BG_OFFLOAD_TESTING:-0}" = 1 ]; then
   gh_bin="${BG_GH:-gh}"; runner_override="${BG_OFFLOAD_RUNNER:-}"
 else
@@ -125,7 +133,7 @@ run_group() {
   local t="$1" o="$2" e="$3"
   shift 3
   set -m
-  gtimeout "$t" "$@" > "$o" 2> "$e" < /dev/null &
+  gtimeout "$t" "$@" > "$o" 2> "$e" < "${rg_in:-/dev/null}" &
   rpid=$!
   set +m
   trap 'kill -TERM -- "-$rpid" 2>/dev/null; kill -TERM "$rpid" 2>/dev/null; exit 143' TERM INT HUP
@@ -237,17 +245,17 @@ else
     say "offload: could not list the refs at the push target of $remote (rc $rc); not offloading: $(ghead -n 1 "$tmp/lsr.err" | gsed -E 's#//[^/@ ]*@#//#g')"
   else
     # The advertised tips that exist here, as exclusions: a commit is "on the remote" if it is reachable from one.
-    gawk '{print $1}' "$tmp/lsr" | git -C "$top" cat-file --batch-check 2>/dev/null | gawk '$2 == "commit" || $2 == "tag" { print "^" $1 }' > "$tmp/tips" || : > "$tmp/tips"
+    gawk '{print $1}' "$tmp/lsr" | GIT_NO_LAZY_FETCH=1 git -C "$top" cat-file --batch-check 2>/dev/null | gawk '$2 == "commit" || $2 == "tag" { print "^" $1 }' > "$tmp/tips" || : > "$tmp/tips"
     remote_ok=1
   fi
 fi
-published_count() { git -C "$top" rev-list --count "$1" --stdin < "$tmp/tips" 2>/dev/null; }
+published_count() { GIT_NO_LAZY_FETCH=1 git -C "$top" rev-list --count "$1" --stdin < "$tmp/tips" 2>/dev/null; }
 if [ "$remote_ok" = 1 ]; then
   local_n=$(published_count "$head_sha") || { say "offload: rev-list failed in $top"; exit 69; }
   if [ "$local_n" != 0 ]; then
     refuse=1
     say "offload: $local_n commit(s) in HEAD are not on the remote $remote (unpushed):"
-    git -C "$top" log --oneline -n 10 "$head_sha" --stdin < "$tmp/tips" | gsed 's/^/bg:   /' >&2
+    GIT_NO_LAZY_FETCH=1 git -C "$top" log --oneline -n 10 "$head_sha" --stdin < "$tmp/tips" | gsed 's/^/bg:   /' >&2
     [ "$local_n" -gt 10 ] && say "offload:   ... and $((local_n - 10)) more"
   fi
   # (c) the ref the runner overlays (its own choice: local ci/base, else the remote-tracking copy). show-ref exits 0
@@ -278,6 +286,33 @@ if [ "$remote_ok" = 1 ]; then
 fi
 if [ "$refuse" = 1 ]; then
   say "offload: not publishing anything just because the machine is busy; commit and push, then run bg again to offload. Waiting at the gate instead."
+  exit 69
+fi
+
+# 3b. Everything the runner reads must be here: HEAD's tree and the ci/base tree it overlays (adversary round 6). In
+# a partial clone a ci/base that was fetched but never checked out lacks its blobs, and github-ci-run skips an overlay
+# path whose `cat-file -e` fails. Missing objects are fetched (lazy fetch through `cat-file --batch-check`, from the
+# clone's promisor remote; a fetch publishes nothing), then any object still missing refuses.
+need_trees=("$head_sha^{tree}")
+[ -n "$base_ref" ] && need_trees+=("$base_ref^{tree}")
+missing_objects() {  # writes $tmp/missing; exit 0 = none missing, 1 = some missing, 2 = git failed
+  GIT_NO_LAZY_FETCH=1 git -C "$top" rev-list --objects --missing=print "${need_trees[@]}" > "$tmp/objs" 2>/dev/null || return 2
+  gawk '/^\?/ { print substr($1, 2) }' "$tmp/objs" > "$tmp/missing" || return 2
+  [ ! -s "$tmp/missing" ]
+}
+missing_objects; st=$?
+if [ "$st" = 1 ]; then
+  say "offload: $(gwc -l < "$tmp/missing" | gsed 's/ //g') object(s) of the trees the runner reads are not in this partial clone; fetching them"
+  rg_in="$tmp/missing"
+  GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_FETCH_TIMEOUT:-300}" "$tmp/fetch.out" "$tmp/fetch.err" git -C "$top" cat-file --batch-check
+  rg_in=""
+  missing_objects; st=$?
+fi
+if [ "$st" = 2 ]; then
+  say "offload: could not list the objects of HEAD's tree${base_ref:+ and $base_ref} (git failed); not offloading"
+  exit 69
+elif [ "$st" = 1 ]; then
+  say "offload: $(gwc -l < "$tmp/missing" | gsed 's/ //g') object(s) of HEAD's tree${base_ref:+ or $base_ref} are missing here and could not be fetched (rc $rc: $(ghead -n 1 "$tmp/fetch.err" | gsed -E 's#//[^/@ ]*@#//#g')); the runner would build without them. Not offloading; waiting at the gate instead."
   exit 69
 fi
 ref="$head_sha"
