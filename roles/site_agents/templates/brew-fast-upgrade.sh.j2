@@ -93,25 +93,42 @@ sudo_casks() {
     .casks[] | select([.artifacts[] | keys[]] | any(. == "pkg" or . == "installer")) | .token'
 }
 
+# Casks never upgraded by this script, even by hand (BREW_FAST_UPGRADE_SKIP_CASKS
+# overrides, space-separated). paseo (djbclark 2026-10-24): every cask upgrade
+# quits Paseo.app and runs `paseo daemon stop --force`, killing every agent
+# session on the production daemon, and three upgrades on 2026-10-24 still left
+# Paseo.app at 0.12.0 (cause unknown). The app updates itself; take paseo back
+# out of this list once the revert is explained and a daemon stop is acceptable.
+held_casks() {
+  printf '%s\n' ${BREW_FAST_UPGRADE_SKIP_CASKS-paseo}
+}
+
 # Outdated formulae and casks (greedy: auto_updates and :latest casks too),
-# one per line, minus the casks this run cannot upgrade (sudo_casks). Pinned
-# formulae are NOT filtered out: nothing may be pinned, so one shows up here.
+# one per line, minus the casks this run cannot or must not upgrade
+# (sudo_casks, held_casks). Pinned formulae are NOT filtered out: nothing may
+# be pinned, so one shows up here.
 brew_outdated_upgradable() {
   local skip
-  skip="$(sudo_casks)"
+  skip="$(sudo_casks; held_casks)"
   { brew outdated --formula --quiet 2>/dev/null; brew outdated --cask --greedy --quiet 2>/dev/null; } |
     gawk 'NR == FNR { if ($0 != "") skipset[$0] = 1; next } { short = $0; sub(/^.*\//, "", short); if (!(short in skipset)) print }' \
       <(printf '%s\n' "$skip") -
 }
 
-# Say which outdated casks were left for an interactive run, so they are seen.
+# Say which outdated casks were left out (sudo or held), so they are seen.
 report_sudo_casks() {
-  local skip pending
+  local skip pending held
   skip="$(sudo_casks)"
-  [ -n "$skip" ] || return 0
-  pending="$(brew outdated --cask --greedy --quiet 2>/dev/null | ggrep -Fx -f <(printf '%s\n' "$skip") || true)"
-  [ -n "$pending" ] || return 0
-  echo "[brew-fast-upgrade] needs sudo, left for an interactive run (brew-fast-upgrade from a terminal): $(printf '%s ' $pending)"
+  if [ -n "$skip" ]; then
+    pending="$(brew outdated --cask --greedy --quiet 2>/dev/null | ggrep -Fx -f <(printf '%s\n' "$skip") || true)"
+    [ -n "$pending" ] && echo "[brew-fast-upgrade] needs sudo, left for an interactive run (brew-fast-upgrade from a terminal): $(printf '%s ' $pending)"
+  fi
+  skip="$(held_casks)"
+  if [ -n "$skip" ]; then
+    held="$(brew outdated --cask --greedy --quiet 2>/dev/null | ggrep -Fx -f <(printf '%s\n' "$skip") || true)"
+    [ -n "$held" ] && echo "[brew-fast-upgrade] held, not upgraded (BREW_FAST_UPGRADE_SKIP_CASKS): $(printf '%s ' $held)"
+  fi
+  return 0
 }
 
 # Homebrew removed `--no-quarantine`, and some casks ship un-notarized helper
@@ -432,7 +449,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass uv_outdated_tools npm_global_bins npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass uv_outdated_tools npm_global_bins npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
@@ -453,6 +470,14 @@ if [ -d "$downloads_cache" ]; then
   before_size="$(gdu -sh "$downloads_cache" 2>/dev/null | gcut -f1)"
   gfind "$downloads_cache" -mindepth 1 -delete
   echo "[brew-fast-upgrade] purged $downloads_cache (was $before_size)"
+fi
+# The default cache's API copy goes stale while the volume holds the live one,
+# and something still read it: paseo's 2026-10-24 install receipt came from a
+# day-old ~/Library/Caches/Homebrew/api/internal. Drop it whenever the volume
+# is the cache, so nothing can read an old package index.
+if [ -n "$BREW_CACHE_VOLUME" ] && [ -d "$HOME/Library/Caches/Homebrew/api" ]; then
+  gfind "$HOME/Library/Caches/Homebrew/api" -mindepth 1 -delete
+  echo "[brew-fast-upgrade] purged stale $HOME/Library/Caches/Homebrew/api"
 fi
 
 exit "$rc"
