@@ -425,6 +425,32 @@ class TelegramInboxLiteralsTest(unittest.TestCase):
         registry_lint.lint_telegram_inbox_literals(findings)
         self.assertEqual(findings, [])
 
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_strict_fails_on_unallowlisted_path(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(stdout="bin/foo:1:838808636\n", stderr="")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_literals(findings, strict=True)
+        self.assertEqual(len(findings), 1)
+
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_strict_exempts_allowlisted_fallback_file(self, mock_which, mock_run):
+        allowed = sorted(registry_lint.TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST)[0]
+        mock_run.return_value = MagicMock(stdout=f"{allowed}:1:838808636\n", stderr="")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_literals(findings, strict=True)
+        self.assertEqual(findings, [])
+
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_default_still_warn_only_for_allowlisted_file(self, mock_which, mock_run):
+        allowed = sorted(registry_lint.TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST)[0]
+        mock_run.return_value = MagicMock(stdout=f"{allowed}:1:838808636\n", stderr="")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_literals(findings)
+        self.assertEqual(findings, [])
+
 
 if __name__ == '__main__':
     unittest.main()
