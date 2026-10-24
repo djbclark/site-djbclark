@@ -107,11 +107,12 @@ Tailscale's rules: restart tailscaled right after it.
    enforced on pastebin's nftables rule for `:26371` instead.
 3. **Restoring the direct path** by MIT fixing the route to `178.105.34.223` would need nothing else on this host (the public
    listener and the `18.4.60.84` rule are untouched).
-4. **The fix that worked, 2026-10-24 evening: a second public address.** MIT's border drops traffic to and from
-   `178.105.34.223` only; a Hetzner Floating IPv4, `78.47.225.34` (id 157592860, nbg1, 3.50 EUR a month, created through the
-   Hetzner Cloud API with `HETZNER_CLOUD_TOKEN`), is reachable from MIT. The module's `floatingIp`: `hyades-public-return-path`
-   puts it on `enp1s0` (Hetzner routes it here but does not configure it) and gives it the same source rule as the primary
-   address (without it, replies to 18/8 follow the tailnet subnet route and vanish), and `tinyproxy-google` listens on it.
-   Hyades connects to `http://78.47.225.34:26369` directly, so the pastebin relay and the tailnet hop are no longer needed
-   (the relay stays as a spare). Outgoing requests still leave from the primary address. Undo: `DELETE
-   /v1/floating_ips/157592860` and remove `floatingIp`. Details and the fallback plan: firecrawl-hyades `docs/rendezvous-plan.md`.
+4. **The fix that worked, 2026-10-24 night: a different primary address.** MIT's border drops traffic to and from `178.105.34.223`
+   only. A Hetzner Floating IPv4 (`78.47.225.34`) and then a fresh Primary IPv4 were both reachable from MIT, so the server's
+   primary IPv4 was swapped to **`2.28.231.104`** (Hetzner Primary IP id 157596067, 0.60 EUR a month, via the Cloud API with
+   `HETZNER_CLOUD_TOKEN`; the swap needs the server powered off and every Floating IP detached, about 3 minutes of downtime),
+   and the old primary and the Floating IP were released. The address comes from DHCP; the module's `proxyIp` names it for the
+   firewall, which redirects Hyades' connections to `proxyIp:443` and `:80` to the proxy port. Hyades connects to
+   `http://2.28.231.104:443` directly, so the pastebin relay and the tailnet hop are no longer needed (the relay stays as a
+   spare). Requests still reach the engines from this address. **Rotation recipe, test method and the gotchas:**
+   firecrawl-hyades `docs/rendezvous-plan.md` section 0.

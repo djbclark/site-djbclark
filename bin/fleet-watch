@@ -137,7 +137,7 @@ LOAD_COOLDOWN="${FLEET_WATCH_LOAD_COOLDOWN:-1800}"
 # with the public address as a second route to tell "tailnet down" from "host down".
 VPS="${FLEET_WATCH_VPS:-on}"
 VPS_TS="${FLEET_WATCH_VPS_TS:-100.125.249.107}"
-VPS_PUBLIC="${FLEET_WATCH_VPS_PUBLIC:-178.105.34.223}"
+VPS_PUBLIC="${FLEET_WATCH_VPS_PUBLIC:-2.28.231.104}"   # swapped 2026-10-24 (docs/google-proxy-vps-primary.md section 5); the old 178.105.34.223 was released
 VPS_KEY="${FLEET_WATCH_VPS_KEY:-$HOME/.ssh/vps_primary_key}"
 VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # Consecutive failed probes before "down" is announced. 3 x 5 min covers the
