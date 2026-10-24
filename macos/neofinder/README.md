@@ -59,8 +59,10 @@ what differs. Touch ID is asked for only when the root-owned part changed.
 Requirements:
 
 1. NeoFinder, running for exports and stub dates.
-2. Homebrew `python@3.12` with PyObjC (`pyobjc-framework-Cocoa`), needed
-   to write aliases.
+2. Homebrew's unversioned `python3` (its newest `python@`) with PyObjC
+   (`pyobjc-framework-Cocoa`), needed to write aliases. After Homebrew moves
+   `python3` to a new minor, reinstall it: `uv pip install --python
+   /opt/homebrew/bin/python3 --break-system-packages pyobjc-framework-Cocoa`.
 3. `just`.
 4. `sudo-ask`, for the Touch ID steps.
 

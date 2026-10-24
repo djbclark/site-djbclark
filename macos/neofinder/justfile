@@ -6,7 +6,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 here := justfile_directory()
 repo := here / ".." / ".."
-python := "/opt/homebrew/bin/python3.12"
+python := "/opt/homebrew/bin/python3"
 exporter := here / "neofinder-stub-export.py"
 batch := here / "neofinder-spotlight-batch.sh"
 services := here / ".." / "sip-doit-with-sudo.sh"

@@ -131,8 +131,9 @@ NeoFinder 9.3.1; companion script macos/neofinder/neofinder-spotlight-batch.sh):
      an idle Mac does not sleep mid-run (caffeinate forwards SIGTERM to the
      exporter and waits for it, verified 2026-10-09); ExitTimeOut 300 gives
      the exporter time to finish its page on bootout or `kickstart -k`. The
-     plist names the stable /opt/homebrew/bin/python3.X link, not the
-     versioned Cellar path that `brew cleanup` deletes.
+     plist names the stable /opt/homebrew/bin/python3 link (python3.X when
+     run on an older minor), not the versioned Cellar path that `brew
+     cleanup` deletes.
   K. State is keyed by dest: state/<sha1(dest)[:8]>/<catalogue>.json plus
      the folder-mtime journal beside it, with the dest inside the JSON, so a
      test run into $TMPDIR never touches the progress of the real staging
@@ -276,7 +277,7 @@ import sys
 if sys.version_info < (3, 11):
     print(
         f"neofinder-stub-export.py: needs Python >= 3.11 (found "
-        f"{sys.version.split()[0]}); use /opt/homebrew/bin/python3.12 "
+        f"{sys.version.split()[0]}); use /opt/homebrew/bin/python3 "
         "(or any python3 >= 3.11)",
         file=sys.stderr,
     )
@@ -2784,16 +2785,19 @@ def run_launchctl(cmd, dry_run):
 
 
 def stable_python():
-    """sys.executable unresolved, or the /opt/homebrew/bin/python3.X link
-    when it is the same interpreter: the versioned Cellar path that
-    resolve() gives disappears on `brew cleanup` (finding 10)."""
+    """The unversioned /opt/homebrew/bin/python3 (or, failing that, the
+    python3.X link) when it is the same interpreter, else sys.executable
+    unresolved: the versioned Cellar path that resolve() gives disappears on
+    `brew cleanup` (finding 10), and the unversioned link follows Homebrew's
+    newest python@ so the agent is never pinned to a minor version."""
     exe = sys.executable
-    link = Path(f"/opt/homebrew/bin/python{sys.version_info[0]}.{sys.version_info[1]}")
-    try:
-        if link.exists() and link.resolve() == Path(exe).resolve():
-            return str(link)
-    except OSError:
-        pass
+    v = sys.version_info
+    for link in (Path("/opt/homebrew/bin/python3"), Path(f"/opt/homebrew/bin/python{v[0]}.{v[1]}")):
+        try:
+            if link.exists() and link.resolve() == Path(exe).resolve():
+                return str(link)
+        except OSError:
+            pass
     return exe
 
 

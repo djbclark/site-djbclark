@@ -8,7 +8,8 @@
 
 
 # The plist runs `/usr/bin/env python3`; with Apple's 3.9 first on that PATH
-# there is no tomllib and watchdogd checks nothing.
+# there is no tomllib and watchdogd checks nothing. Any minor >= 3.11 passes
+# (none is pinned; see watchdogd_service_path in defaults).
 - name: Require Python 3.11+ first on the job's PATH
   ansible.builtin.command:
     argv: [/usr/bin/env, python3, -I, -S, -c, "import sys, tomllib; print(sys.version.split()[0])"]

@@ -45,7 +45,7 @@ set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 EXPORTER="$HERE/neofinder-stub-export.py"
-PYTHON=/opt/homebrew/bin/python3.12     # has PyObjC, same as the Jobber job
+PYTHON=/opt/homebrew/bin/python3        # has PyObjC, same as `just nightly`
 APPLIER=/usr/local/libexec/neofinder-spotlight-index
 MOUNT=/Volumes/NeoFinderBatch
 IMAGE=${NEOFINDER_IMAGE:-$HOME/nfbatch.sparseimage}

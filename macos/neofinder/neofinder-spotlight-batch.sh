@@ -33,8 +33,9 @@
 #                      without it the exporter uses its TOML config and, with
 #                      no catalogue configured, prints the table and exits 2
 #   --python PATH      interpreter for the exporter (needs Python >= 3.11;
-#                      default: first python3.14/.13/.12/.11 on PATH, in
-#                      /opt/homebrew/bin, /usr/local/bin or ~/.local/bin)
+#                      default: the first python3 >= 3.11 in
+#                      /opt/homebrew/bin, /usr/local/bin, on PATH or in
+#                      ~/.local/bin)
 #   --sudo CMD         command used for the privilege re-exec (default sudo);
 #                      e.g. --sudo sudo-ask to get a per-command Allow/Deny
 #                      dialog from an agent shell with no terminal
@@ -283,15 +284,15 @@ find_python() {
     case "$ver" in 3.1[1-9]|3.[2-9]*) return 0 ;; esac
     echo "Error: --python $PYTHON is Python $ver; the exporter needs >= 3.11 (tomllib)." >&2; exit 2
   fi
-  for name in python3.14 python3.13 python3.12 python3.11 python3; do
-    for dir in "" /opt/homebrew/bin /usr/local/bin "${SUDO_USER:+/Users/$SUDO_USER/.local/bin}" "$HOME/.local/bin"; do
-      if [ -z "$dir" ]; then cand=$(command -v "$name" 2>/dev/null) || continue; else cand="$dir/$name"; fi
-      [ -x "$cand" ] || continue
-      ver=$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || continue
-      case "$ver" in 3.1[1-9]|3.[2-9]*) PYTHON=$cand; return 0 ;; esac
-    done
+  # Homebrew's unversioned python3 first: it is the newest python@ and the one
+  # PyObjC is installed into (README.md); no minor version is pinned here.
+  for dir in /opt/homebrew/bin /usr/local/bin "" "${SUDO_USER:+/Users/$SUDO_USER/.local/bin}" "$HOME/.local/bin"; do
+    if [ -z "$dir" ]; then cand=$(command -v python3 2>/dev/null) || continue; else cand="$dir/python3"; fi
+    [ -x "$cand" ] || continue
+    ver=$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || continue
+    case "$ver" in 3.1[1-9]|3.[2-9]*) PYTHON=$cand; return 0 ;; esac
   done
-  echo "Error: no Python >= 3.11 found for the exporter (brew install python@3.14, or pass --python PATH)." >&2
+  echo "Error: no Python >= 3.11 found for the exporter (brew install python, or pass --python PATH)." >&2
   exit 2
 }
 

@@ -28,11 +28,17 @@ watchdogd_start_interval: 60
 # launchd user PATH is stored but only live after the next reboot, and a plist
 # without its own PATH gets /usr/bin:/bin until then, where `env python3` is
 # Apple's 3.9 (no tomllib). So for now the plist sets an explicit PATH with
-# Homebrew first. 2026-10-10: Homebrew no longer ships an unversioned
-# python3, and the python@3.14 install removed the old link — the watchdog
-# then errored "nothing checked" for a day. The carrier of the contract is
-# now ~/.local/bin/python3 -> /opt/homebrew/bin/python3.14 (first on this
-# PATH, outside brew's reach); the preflight task below guards it. After
+# Homebrew first. 2026-10-10: Homebrew briefly shipped no unversioned
+# python3 and the watchdog errored "nothing checked" for a day, so a
+# hand-made ~/.local/bin/python3 -> /opt/homebrew/bin/python3.14 (first on
+# this PATH) carried the contract. 2026-10-22: /opt/homebrew/bin/python3 is
+# back (python@3.15), and watchdogd.py is stdlib-only (-I -S; verified
+# `--check-config` and `--once --dry-run` on 3.15.0, 2026-10-24), so no
+# minor is pinned here: any python3 >= 3.11 first on the PATH will do, and
+# the preflight task below is the guard. That link is not this role's and
+# stays on 3.14 for now only because pip-installed packages live in 3.14's
+# site-packages (ddddocr needs onnxruntime, which has no cp315 wheel);
+# re-point it at /opt/homebrew/bin/python3 (or delete it) once they move. After
 # that reboot (and `just launchd-path-status` in sync), set this true: the
 # PATH key is dropped and the job inherits launchd's.
 watchdogd_inherit_path: false
