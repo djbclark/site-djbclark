@@ -116,6 +116,11 @@ shared_mcp_servers:
       # first, then the free LiteLLM pool. The router hides both keys from firecrawl-mcp.
       FIRECRAWL_ROUTER_SIPB_KEY: "{{ lookup('env', 'MIT_SIPB_API_KEY') | default('', true) }}"
       FIRECRAWL_ROUTER_LITELLM_KEY: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
+      # Developer search (firecrawl_developer_search, 2026-10-24) is answered by the router from the GitHub search API.
+      # The router reads this sudo-secretspec NAME itself (`sudo-secretspec get`, a name, not a value): a fine-grained
+      # public-repositories-read-only token, so no private repository is reachable through the open 127.0.0.1:18805
+      # listener. Unset it and the router falls back to GITHUB_TOKEN (a classic repo-scope PAT).
+      FIRECRAWL_ROUTER_GITHUB_SECRET: "FIRECRAWL_GITHUB_PUBLIC_TOKEN"
 
 # The self-hosted Firecrawl and its gate token. The token is a real secret (the
 # gate is on the public internet): it comes from sudo-secretspec
