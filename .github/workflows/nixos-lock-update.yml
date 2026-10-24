@@ -142,13 +142,13 @@ jobs:
           echo "pending=$pending" >>"$GITHUB_OUTPUT"
           echo "promotion: $state ${pending:+(pending: $pending)}"
 
-      - name: Report (issue and Telegram)
+      - name: Report (issue)
+        id: report
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
           PROMOTE_STATE: ${{ steps.promote.outputs.state }}
           PENDING: ${{ steps.promote.outputs.pending }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           set -euo pipefail
           label=nixos-lock
@@ -193,21 +193,21 @@ jobs:
             text="✅ NixOS lock update: back to normal, issue #${open} closed."$'\n'"${run_url}"
           else
             echo "All good; nothing to report."
+            echo "send=false" >>"$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-            echo "::warning::TELEGRAM_BOT_TOKEN is not set; the issue is the only alarm."
-            exit 0
-          fi
-          response=$(mktemp)
-          telegram_url="https://api.telegram.org/bot"
-          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
-          curl --fail-with-body --silent --show-error \
-            -X POST "$telegram_url" \
-            -d chat_id=838808636 \
-            -d message_thread_id=44130 \
-            --data-urlencode "text=${text}" \
-            --output "$response"
-          jq -e 'if .ok == true then true else error(.description) end' "$response" >/dev/null
-          echo "Telegram accepted the notification."
+          echo "send=true" >>"$GITHUB_OUTPUT"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Notify via Telegram
+        if: always() && steps.report.outputs.send == 'true'
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.nixos-lock-update
+          message: ${{ steps.report.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

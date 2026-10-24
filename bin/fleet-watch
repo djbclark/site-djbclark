@@ -102,6 +102,11 @@
 export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
 
+# Resolve through the site-private symlink (launchd invokes that path) to this repo's
+# own bin/, so bin/inbox-target is found however fleet-watch is launched.
+SELF="$(greadlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+
 LABEL=com.djbclark.fleet-watch
 STATE_DIR="$HOME/.local/state/fleet-watch"
 LAST="$STATE_DIR/last"
@@ -179,9 +184,11 @@ PY3=/usr/bin/python3
 mkdir -p "$STATE_DIR"
 
 # Where change notices go: the operator's Hermes Telegram Inbox topic (see
-# memory/feedback_ping_telegram_and_chat.md); nothing else.
+# memory/feedback_ping_telegram_and_chat.md); nothing else. Default resolved from
+# registry/telegram-inbox.toml (bin/inbox-target fleet-watch); FLEET_WATCH_TO still wins.
 HERMES="${FLEET_WATCH_HERMES:-$HOME/.local/bin/hermes}"
-HERMES_TO="${FLEET_WATCH_TO:-telegram:838808636:44130}"
+HERMES_TO="${FLEET_WATCH_TO:-$("$REPO_ROOT/bin/inbox-target" fleet-watch 2>/dev/null)}"
+HERMES_TO="${HERMES_TO:-telegram:838808636:44130}"
 
 notify() {
   # Hermes only: the operator does not want macOS notifications (2026-10-05).

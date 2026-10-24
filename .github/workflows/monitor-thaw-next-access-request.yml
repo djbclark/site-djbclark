@@ -134,10 +134,10 @@ jobs:
           echo "changed=$changed what=${what:-none} (state=$STATE" \
             "comments=$COUNT)"
 
-      - name: Notify via Hermes Telegram topic
+      - name: Compose notification text
+        id: compose
         if: steps.diff.outputs.changed == 'true'
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           WHAT: ${{ steps.diff.outputs.what }}
           ISSUE_URL: ${{ steps.upstream.outputs.url }}
           LAST_AUTHOR: ${{ steps.upstream.outputs.last_author }}
@@ -153,20 +153,19 @@ jobs:
             "${LAST_URL:-$ISSUE_URL}" \
             "${EXCERPT:-(no comment body)}" \
             "$ISSUE_URL" "$run_url"
-          response=$(mktemp)
-          telegram_url="https://api.telegram.org/bot"
-          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "$telegram_url" \
-            -d chat_id=838808636 \
-            -d message_thread_id=44130 \
-            --data-urlencode "text=${text}" \
-            --output "$response"
-
-          jq_filter='if .ok == true then true else error(.description) end'
-          jq -e "$jq_filter" "$response" >/dev/null
-          echo "Telegram accepted the notification."
+      - name: Notify via Hermes Telegram topic
+        if: steps.diff.outputs.changed == 'true'
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.thaw-next-access-request
+          message: ${{ steps.compose.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Create or update the tracking issue
         if: >-
@@ -214,25 +213,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Send test notification to Hermes Telegram topic
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      - name: Compose test notification text
+        id: compose
         run: |
           run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
           run_url="${run_url}${GITHUB_RUN_ID}"
           printf -v text '✅ thaw-next access monitor test\n%s / %s\n%s' \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
-          response=$(mktemp)
-          telegram_url="https://api.telegram.org/bot"
-          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "$telegram_url" \
-            -d chat_id=838808636 \
-            -d message_thread_id=44130 \
-            --data-urlencode "text=${text}" \
-            --output "$response"
-
-          jq_filter='if .ok == true then true else error(.description) end'
-          jq -e "$jq_filter" "$response" >/dev/null
-          echo "Telegram accepted the test notification."
+      - name: Send test notification to Hermes Telegram topic
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.thaw-next-access-request
+          message: ${{ steps.compose.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

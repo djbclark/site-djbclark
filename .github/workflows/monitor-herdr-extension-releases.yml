@@ -104,10 +104,10 @@ jobs:
             echo "Release was already reported: $title"
           fi
 
-      - name: Notify via Hermes-style Telegram delivery
+      - name: Compose notification text
+        id: compose
         if: steps.dedupe.outputs.new_update == 'true'
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           EXTENSION_REPO: ${{ matrix.extension.repo }}
           INSTALLED_VERSION: ${{ matrix.extension.installed_version }}
           LATEST_VERSION: ${{ steps.version.outputs.latest_version }}
@@ -118,20 +118,19 @@ jobs:
             '🧩 Herdr extension update: %s %s → %s\n%s / %s\n%s' \
             "$EXTENSION_REPO" "$INSTALLED_VERSION" "$LATEST_VERSION" \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
-          response=$(mktemp)
-          telegram_url="https://api.telegram.org/bot"
-          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "$telegram_url" \
-            -d chat_id=838808636 \
-            -d message_thread_id=44130 \
-            --data-urlencode "text=${text}" \
-            --output "$response"
-
-          jq_filter='if .ok == true then true else error(.description) end'
-          jq -e "$jq_filter" "$response" >/dev/null
-          echo "Telegram accepted the notification."
+      - name: Notify via Hermes-style Telegram delivery
+        if: steps.dedupe.outputs.new_update == 'true'
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.herdr-extension-releases
+          message: ${{ steps.compose.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Record reported release as a GitHub issue
         if: steps.dedupe.outputs.new_update == 'true'
@@ -169,25 +168,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Send test notification to Hermes Telegram topic
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      - name: Compose test notification text
+        id: compose
         run: |
           run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
           run_url="${run_url}${GITHUB_RUN_ID}"
           printf -v text '✅ Herdr extension monitor test\n%s / %s\n%s' \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
-          response=$(mktemp)
-          telegram_url="https://api.telegram.org/bot"
-          telegram_url="${telegram_url}${TELEGRAM_BOT_TOKEN}/sendMessage"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "$telegram_url" \
-            -d chat_id=838808636 \
-            -d message_thread_id=44130 \
-            --data-urlencode "text=${text}" \
-            --output "$response"
-
-          jq_filter='if .ok == true then true else error(.description) end'
-          jq -e "$jq_filter" "$response" >/dev/null
-          echo "Telegram accepted the test notification."
+      - name: Send test notification to Hermes Telegram topic
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.herdr-extension-releases
+          message: ${{ steps.compose.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

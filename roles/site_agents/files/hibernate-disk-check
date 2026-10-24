@@ -28,5 +28,17 @@ echo "$now" > "$STATE"
 MSG="Only ${FREE_GB}GB free — an emergency hibernate write can need up to 16GB. Free up space soon."
 # Both a macOS banner and a Hermes notice (operator's choice, 2026-10-05).
 osascript -e "display notification \"${MSG}\" with title \"Low disk space for hibernation\" sound name \"Basso\"" || true
-"${HERMES_BIN:-$HOME/.local/bin/hermes}" send -t "${HERMES_TO:-telegram:838808636:44132}" \
+
+# Destination: HERMES_TO env wins; else the register (inbox-target on PATH), falling
+# back to the literal Watch-topic thread only when inbox-target isn't available here.
+HERMES_TO="${HERMES_TO:-}"
+if [[ -z "$HERMES_TO" ]] && INBOX_TARGET_BIN="$(command -v inbox-target 2>/dev/null)"; then
+    HERMES_TO="$("$INBOX_TARGET_BIN" hibernate-disk-check 2>/dev/null)" || true
+fi
+if [[ -z "$HERMES_TO" ]]; then
+    echo "hibernate-disk-check: WARN: inbox-target not on PATH; falling back to literal destination 44132" >&2
+    HERMES_TO="telegram:838808636:44132"
+fi
+
+"${HERMES_BIN:-$HOME/.local/bin/hermes}" send -t "$HERMES_TO" \
     "Low disk space for hibernation: ${MSG}" >/dev/null 2>&1 || true

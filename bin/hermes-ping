@@ -17,10 +17,13 @@
 # Standing rule (djbclark, 2026-10-06): every Hermes ping includes the interface and,
 # where available, workspace/tab/pane, plus a link when possible. Use this, not a bare
 # `hermes send`. HERMES_PING_TARGET overrides the target, HERMES_BIN the hermes binary;
-# HERMES_PING_DRY=1 prints instead of sending.
+# HERMES_PING_DRY=1 prints instead of sending. The default target comes from this repo's
+# registry/telegram-inbox.toml (bin/inbox-target hermes-ping), resolved via this script's
+# own real path so it works however it's invoked (it's symlinked from ~/.local/bin).
 # Every lookup has a short timeout: a ping must never hang a session.
 set -u
-target="${HERMES_PING_TARGET:-telegram:838808636:44130}"
+SELF="$(greadlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 [ "$#" -gt 0 ] || { echo "usage: hermes-ping \"<repo>: <message>\"" >&2; exit 2; }
 # A lone flag is never a message: `hermes-ping --help` once reached Telegram as "--help".
 case "$1" in
@@ -107,4 +110,6 @@ $link"
 focus: $focus"
 
 if [ -n "${HERMES_PING_DRY:-}" ]; then printf '%s\n' "$text"; exit 0; fi
+target="${HERMES_PING_TARGET:-$("$REPO_ROOT/bin/inbox-target" hermes-ping)}"
+target="${target:-telegram:838808636:44130}"
 exec "${HERMES_BIN:-$HOME/.local/bin/hermes}" send -t "$target" "$text"

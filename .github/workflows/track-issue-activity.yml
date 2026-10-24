@@ -210,12 +210,10 @@ jobs:
           # Unique key per run — caches are immutable; a new key creates a new entry
           key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
 
-      - name: Notify via Telegram
+      - name: Compose notification text
+        id: compose
         if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: "838808636"
-          THREAD_ID: "44130"
           ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/${{ (matrix.issue.type || 'issue') == 'discussion' && 'discussions' || 'issues' }}/${{ matrix.issue.number }}"
         run: |
           REPO="${{ matrix.issue.repo }}"
@@ -243,8 +241,19 @@ jobs:
 
           MSG="$MSG"$'\n\n'"<a href=\"$ISSUE_URL\">Open on GitHub</a>"
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg text "$MSG" \
-              '{chat_id: $ENV.CHAT_ID | tonumber, message_thread_id: $ENV.THREAD_ID | tonumber, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('description','') if r.get('ok') else 'ERROR: '+json.dumps(r,indent=2))"
+          {
+            echo "text<<__TEXT__"
+            echo "$MSG"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Notify via Telegram
+        if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.track-issue-activity
+          message: ${{ steps.compose.outputs.text }}
+          parse_mode: HTML
+          disable_web_page_preview: "true"
+          strict: "false"
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

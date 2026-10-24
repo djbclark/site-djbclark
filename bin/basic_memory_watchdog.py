@@ -23,19 +23,39 @@ This gives three Telegram outcomes, not an endless stream:
 """
 
 import json
+import os
 import socket
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 STATE_FILE = "/Users/djbclark/.hermes/cache/basic_memory_watchdog_state.json"
 LOG_FILE = "/Users/djbclark/Library/Logs/basic-memory-mcp/watchdog.log"
 LABEL = "com.djbclark.basic-memory-mcp"
 URL = "http://127.0.0.1:18796/mcp"
 HERMES_BIN = "/Users/djbclark/.local/bin/hermes"
-NOTIFY_TARGET = "telegram:838808636:44132"  # Watch topic
+
+
+def _inbox_route(key, default):
+    """INBOX_ROUTE_<key> from the generated registry/telegram-inbox.env
+    (bin/inbox-target export); default if the file is missing or the key
+    isn't in it."""
+    env_path = Path(__file__).resolve().parent.parent / "registry" / "telegram-inbox.env"
+    try:
+        for line in env_path.read_text().splitlines():
+            if line.startswith(f"INBOX_ROUTE_{key}="):
+                return line.split("=", 1)[1]
+    except OSError:
+        pass
+    return default
+
+
+NOTIFY_TARGET = os.environ.get("NOTIFY_TARGET") or _inbox_route(
+    "BASIC_MEMORY_WATCHDOG", "telegram:838808636:44132"  # Watch topic
+)
 
 MAX_RESTART_ATTEMPTS = 3  # consecutive failed-then-restarted cycles before giving up
 # Don't re-escalate more than once per 6h while still down.

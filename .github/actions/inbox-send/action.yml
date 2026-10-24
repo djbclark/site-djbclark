@@ -1,0 +1,112 @@
+name: Send to a Telegram inbox route
+description: >-
+  Resolve a route key against the committed registry/telegram-inbox.env
+  (generated from registry/telegram-inbox.toml by bin/inbox-target export)
+  and post a Telegram message to the resulting chat/thread.
+
+inputs:
+  route:
+    description: >-
+      Route key from registry/telegram-inbox.toml [routes], e.g.
+      gha.nixos-lock-update
+    required: true
+  message:
+    description: >-
+      Message text, already formatted/escaped for the given parse_mode
+    required: true
+  subject:
+    description: Optional header line prepended to message
+    required: false
+    default: ""
+  token:
+    description: Telegram bot token (pass secrets.TELEGRAM_BOT_TOKEN)
+    required: true
+  parse_mode:
+    description: >-
+      Telegram parse_mode: MarkdownV2, HTML, or empty for plain text
+    required: false
+    default: ""
+  disable_web_page_preview:
+    description: Set "true" to disable link previews
+    required: false
+    default: "false"
+  strict:
+    description: >-
+      If "true" (default), a Telegram API error fails this step. If
+      "false", the error is printed but the step still succeeds.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the inbox register
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          registry/telegram-inbox.env
+        sparse-checkout-cone-mode: false
+
+    - name: Resolve route and send
+      shell: bash
+      env:
+        INBOX_ROUTE: ${{ inputs.route }}
+        INBOX_MESSAGE: ${{ inputs.message }}
+        INBOX_SUBJECT: ${{ inputs.subject }}
+        TELEGRAM_BOT_TOKEN: ${{ inputs.token }}
+        PARSE_MODE: ${{ inputs.parse_mode }}
+        DISABLE_PREVIEW: ${{ inputs.disable_web_page_preview }}
+        STRICT: ${{ inputs.strict }}
+      run: |
+        set -uo pipefail
+        key=$(printf '%s' "$INBOX_ROUTE" | tr '[:lower:].-' '[:upper:]__')
+        chat_var="INBOX_ROUTE_${key}_CHAT"
+        thread_var="INBOX_ROUTE_${key}_THREAD"
+
+        # shellcheck disable=SC1091
+        . registry/telegram-inbox.env
+
+        chat_id="${!chat_var:-}"
+        thread_id="${!thread_var:-}"
+        if [ -z "$chat_id" ] || [ -z "$thread_id" ]; then
+          echo "::error::unknown inbox route '${INBOX_ROUTE}' (no ${chat_var} in registry/telegram-inbox.env)"
+          exit 1
+        fi
+
+        if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+          echo "::warning::TELEGRAM_BOT_TOKEN is not set; nothing sent for route '${INBOX_ROUTE}'."
+          exit 0
+        fi
+
+        text="$INBOX_MESSAGE"
+        if [ -n "$INBOX_SUBJECT" ]; then
+          text="${INBOX_SUBJECT}"$'\n\n'"${text}"
+        fi
+
+        args=(-d "chat_id=${chat_id}" -d "message_thread_id=${thread_id}" --data-urlencode "text=${text}")
+        if [ -n "$PARSE_MODE" ]; then
+          args+=(-d "parse_mode=${PARSE_MODE}")
+        fi
+        if [ "$DISABLE_PREVIEW" = "true" ]; then
+          args+=(-d "disable_web_page_preview=true")
+        fi
+
+        response=$(mktemp)
+        telegram_url="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+
+        if ! curl --fail-with-body --silent --show-error -X POST "$telegram_url" "${args[@]}" --output "$response"; then
+          echo "::error::Telegram request failed; see curl output above."
+          [ "$STRICT" = "true" ] && exit 1 || exit 0
+        fi
+
+        if jq -e 'if .ok == true then true else error(.description) end' "$response" >/dev/null 2>&1; then
+          echo "Telegram accepted the notification."
+        else
+          desc=$(jq -r '.description // "unknown error"' "$response" 2>/dev/null || echo "unknown error")
+          if [ "$STRICT" = "true" ]; then
+            echo "::error::Telegram API error: ${desc}"
+            exit 1
+          else
+            echo "Telegram API error: ${desc}"
+          fi
+        fi
