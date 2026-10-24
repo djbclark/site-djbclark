@@ -1,14 +1,16 @@
 # Locked-down forward proxy so SearXNG on SIPB Hyades can reach search engines from an
 # IP that is not shared by every Hyades user (docs/google-proxy-vps-primary.md).
 #
-# Defence in depth, because the SearXNG image is public and the proxy URL carries no
-# credential:
+# Defence in depth, because the SearXNG image and the repo that names this address are public and every Hyades tenant
+# leaves from the same address:
 #   1. firewall: the port accepts TCP only from the Hyades egress address, with a
 #      connection cap and a new-connection rate limit; everyone else is dropped.
-#   2. tinyproxy: `Allow` repeats the source check, CONNECT only to port 443, and only
-#      to the hosts in `allowedHosts` (FilterDefaultDeny: anything else gets 403).
-#   3. bound to the public address only (read from the interface at start, so the
-#      address is not written into git), never the tailnet, loopback or Podman bridge.
+#   2. tinyproxy: `Allow` repeats the source check; HTTP basic auth (user hyades; the secrets come from
+#      /etc/tinyproxy-google.auth, root 0600, one per line: the first is current, a second is the previous one kept
+#      for a rotation; read through systemd LoadCredential, the unit refuses to start without them); CONNECT only to
+#      port 443, and only to the hosts in `allowedHosts` (FilterDefaultDeny: anything else gets 403).
+#   3. bound to the public address (read from the interface at start, so the address is not written into git) and,
+#      when the host has one, the tailnet address for the pastebin relay; never loopback or the Podman bridge.
 # tinyproxy has no cache and adds no Via header; the access log goes to the journal
 # (`journalctl -u tinyproxy-google`). Refused hosts: "Proxying refused on filtered domain".
 #
@@ -38,14 +40,12 @@ let
   proxyIp = "2.28.231.104";
   # Ports on proxyIp that Hyades may use as well as the proxy port (redirected to it, see the firewall below).
   wellKnownPorts = [ 443 80 ];
-  # 2026-10-24: MIT's border stopped forwarding anything to this host's public address (pastebin.xvm and Hyades
-  # SYNs and pings never arrive on enp1s0 while check-host.net probes do; traceroute from pastebin dies after 18.0.161.1;
-  # firecrawl-hyades/docs/hyades-watch.md). pastebin.xvm reaches this host over the tailnet, so it relays: Hyades ->
-  # pastebin:26371 (tinyproxy-vpsrelay) -> tailnet -> this proxy -> the internet from this host's address. This is
-  # pastebin's tailnet address. The proxy also listens on this host's tailnet address, but NO iptables rule guards that
-  # path: tailscaled's `ts-input` chain accepts everything arriving on tailscale0 before nixos-fw (checked 2026-10-24:
-  # `-A ts-input -i tailscale0 -j ACCEPT`, and a rule here showed 0 packets). The gates are WireGuard source
-  # authentication, the tailscale ACL (should allow only this peer to tcp/26369) and tinyproxy's `Allow` below.
+  # The pastebin relay (firecrawl-hyades scripts/install-pastebin-egress-proxy; a spare since the address swap):
+  # Hyades -> pastebin:26371 (tinyproxy-vpsrelay) -> tailnet -> this proxy. relayPeer is pastebin's tailnet address. The
+  # proxy also listens on this host's tailnet address, but NO iptables rule guards that path: tailscaled's `ts-input`
+  # chain accepts everything arriving on tailscale0 before nixos-fw (checked 2026-10-24: `-A ts-input -i tailscale0 -j
+  # ACCEPT`, and a rule here showed 0 packets). The gates there are WireGuard source authentication, the tailscale ACL
+  # (should allow only this peer to tcp/26369), tinyproxy's `Allow` below and the basic-auth credential.
   relayPeer = "100.104.212.89";
   tailnetInterface = "tailscale0";
   publicInterface = "enp1s0";
@@ -122,21 +122,31 @@ let
     ip=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${publicInterface} scope global \
       | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
     [ -n "$ip" ] || { echo "tinyproxy-google: no IPv4 address on ${publicInterface}" >&2; exit 1; }
-    # tailnet listener for the pastebin relay; tailscaled may still be coming up at boot, so wait a little for its address.
-    # No address after 30 s: exit, so systemd retries every 10 s. The public address is unreachable from MIT, so a
-    # public-only proxy would be a leg that looks up and carries nothing.
+    # Tailnet listener for the pastebin relay: tailscaled may still be coming up at boot, so wait a little for its address.
+    # No address after 15 s: start anyway, public only (Hyades reaches the public address directly now, so a tailscaled
+    # problem must not take the primary leg down); the relay's listener is then off until the unit restarts.
     ts=""
-    for _ in $(${pkgs.coreutils}/bin/seq 1 30); do
+    for _ in $(${pkgs.coreutils}/bin/seq 1 15); do
       ts=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailnetInterface} | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
       [ -n "$ts" ] && break
       ${pkgs.coreutils}/bin/sleep 1
     done
-    [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
-    # The proxy credential (`BasicAuth USER SECRET`) lives in /etc/tinyproxy-google.auth, root 0600, never in git or the store;
-    # systemd hands it to this DynamicUser service. Without it the unit does not start: never an open proxy.
+    [ -n "$ts" ] || echo "tinyproxy-google: WARNING: no IPv4 address on ${tailnetInterface}; the relay listener is off" >&2
+    # The proxy secrets live in /etc/tinyproxy-google.auth (root 0600, never in git or the store), one per line, letters and
+    # digits only; systemd hands the file to this DynamicUser service. Without it the unit does not start: never an open proxy.
     cred="$CREDENTIALS_DIRECTORY/proxyauth"
     [ -s "$cred" ] || { echo "tinyproxy-google: no proxy credential (/etc/tinyproxy-google.auth)" >&2; exit 1; }
-    { cat ${baseConf}; cat "$cred"; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    {
+      cat ${baseConf}
+      while IFS= read -r s || [ -n "$s" ]; do
+        case "$s" in
+          ""|*[!A-Za-z0-9]*) echo "tinyproxy-google: /etc/tinyproxy-google.auth must hold one secret (letters and digits) per line" >&2; exit 1 ;;
+        esac
+        echo "BasicAuth hyades $s"
+      done < "$cred"
+      echo "Listen $ip"
+      if [ -n "$ts" ]; then echo "Listen $ts"; fi
+    } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -192,19 +202,25 @@ in
     # Well-known ports on proxyIp (2026-10-24): Hyades may also connect to proxyIp:443 or :80, which land on the proxy port,
     # so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still meets the
     # final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
-    # nat rules are not flushed by a firewall reload: delete first, so a reload never stacks duplicates.
+    # nat rules survive a firewall reload and a changed generation's rules would stay (a removed port, a changed proxyIp), so
+    # they live in their own chain, flushed and rebuilt on every start. The two deletes below remove the single-rule form an
+    # earlier generation used (harmless once they are gone).
     for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
       iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
         -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
-      iptables -t nat -A PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+    done
+    iptables -t nat -N hyades-dnat 2>/dev/null || true
+    iptables -t nat -F hyades-dnat
+    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
+      iptables -t nat -A hyades-dnat -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
         -j DNAT --to-destination ${proxyIp}:${toString port}
     done
+    iptables -t nat -C PREROUTING -j hyades-dnat 2>/dev/null || iptables -t nat -A PREROUTING -j hyades-dnat
   '';
   networking.firewall.extraStopCommands = ''
-    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
-      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
-        -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
-    done
+    iptables -t nat -D PREROUTING -j hyades-dnat 2>/dev/null || true
+    iptables -t nat -F hyades-dnat 2>/dev/null || true
+    iptables -t nat -X hyades-dnat 2>/dev/null || true
   '';
 
   # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
