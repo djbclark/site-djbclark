@@ -93,7 +93,7 @@ sentence; a search that finds nothing is retried once with fewer terms (never wh
 `GITHUB_TOKEN`, held in memory from one `sudo-secretspec get` (read again at most once a minute while none is held);
 limits are GitHub's (30 searches/min, 10 for code search): a closed bucket
 shows as `coverage: "unavailable"` plus a `warning`, all closed as HTTP 429 with `Retry-After`. Only `query`, `k` and
-`types`/`repos`/`language`/`passages` over REST are honoured; the other developer filters are a 400.
+`types`/`repos` (one `owner/name`)/`language`/`passages` over REST are honoured; the other developer filters are a 400.
 `FIRECRAWL_ROUTER_DEVELOPER=off` turns it off; `FIRECRAWL_ROUTER_GITHUB_SECRET` names a different secretspec token
 (a fine-grained public-read one is the planned hardening). With a commercial key configured the request goes to
 Hyades and then the commercial index, as before.
