@@ -133,6 +133,12 @@ in
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" "tailscaled.service" ];
     wants = [ "network-online.target" "tailscaled.service" ];
+    # A crash loop stops: 5 failed starts in 15 minutes leave the unit `failed` instead of retrying every 10 s for ever.
+    # hyades-watch sees `failed`, alerts (Hermes Watch topic) and restarts it at most twice an hour (after reset-failed).
+    unitConfig = {
+      StartLimitIntervalSec = 900;
+      StartLimitBurst = 5;
+    };
     serviceConfig = {
       ExecStart = start;
       Restart = "on-failure";
