@@ -35,6 +35,8 @@ let
   # floatingIp:port directly again (firecrawl-hyades docs/rendezvous-plan.md, option 1). Outgoing connections still leave from
   # the primary address (the route's src), so what Google and the other engines see is unchanged.
   floatingIp = "78.47.225.34";
+  # Ports on the Floating IP that Hyades may use as well as the proxy port (redirected to it, see the firewall below).
+  wellKnownPorts = [ 443 80 ];
   # 2026-10-24: MIT's border stopped forwarding anything to this host's public address (pastebin.xvm and Hyades
   # SYNs and pings never arrive on enp1s0 while check-host.net probes do; traceroute from pastebin dies after 18.0.161.1;
   # firecrawl-hyades/docs/hyades-watch.md). pastebin.xvm reaches this host over the tailnet, so it relays: Hyades ->
@@ -179,6 +181,23 @@ in
       -m hashlimit --hashlimit-name gproxy --hashlimit-mode srcip \
       --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
     iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
+
+    # Well-known ports on the Floating IP (2026-10-24): Hyades may also connect to 78.47.225.34:443 or :80, which land on the
+    # proxy port, so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still
+    # meets the final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
+    # nat rules are not flushed by a firewall reload: delete first, so a reload never stacks duplicates.
+    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
+      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
+        -j DNAT --to-destination ${floatingIp}:${toString port} 2>/dev/null || true
+      iptables -t nat -A PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
+        -j DNAT --to-destination ${floatingIp}:${toString port}
+    done
+  '';
+  networking.firewall.extraStopCommands = ''
+    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
+      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
+        -j DNAT --to-destination ${floatingIp}:${toString port} 2>/dev/null || true
+    done
   '';
 
   # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
