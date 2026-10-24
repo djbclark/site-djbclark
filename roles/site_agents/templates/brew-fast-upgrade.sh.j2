@@ -285,10 +285,14 @@ run_uv_pass() {
   uv tool upgrade --all
 }
 
-# Outdated uv tools, one "name vX [latest: Y]" line each (empty when clean).
+# Outdated uv tools, one "name vX [required: …] [latest: Y]" line each (empty
+# when clean). An exact `==` pin shows up here on purpose (nothing may be
+# pinned). Tools installed from a local path or git (e.g. pytgcli from
+# ~/src/tgcli) are skipped: their PyPI "latest" is a different project.
 uv_outdated_tools() {
   command -v uv >/dev/null 2>&1 || return 0
-  uv tool list --outdated 2>/dev/null | ggrep -E '^[^- ].* \[latest: ' || true
+  uv tool list --outdated --show-version-specifiers 2>/dev/null |
+    ggrep -E '^[^- ].* \[latest: ' | ggrep -vE '\[required: (file:|git\+|/)' || true
 }
 
 # npm binaries whose global trees this script manages, one per line,
