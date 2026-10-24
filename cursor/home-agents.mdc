@@ -19,7 +19,7 @@ is a symlink to it.
 > omitted: backups, LLM gateway, Claude Code agent teams. Rule plus pointer: cases and narrative live
 > in the memory file a rule names, else `memory/reference_agent_rules_ops_housekeeping.md`. Agents
 > maintain both copies without asking; keep home-agents.md under 200 lines (2026-10-11; Anthropic's
-> CLAUDE.md target) and 13,500 bytes (2026-10-18), and this copy under 360 lines (≈ its old ~20 KB cap).
+> CLAUDE.md target) and 14,000 bytes (2026-10-18, raised 2026-10-23), and this copy under 360 lines (≈ its old ~20 KB cap).
 
 ## CLAUDE.md is always a symlink to AGENTS.md (2026-10-04)
 
@@ -204,9 +204,12 @@ URL, never `repo#N` (2026-10-17); script notices too, not macOS notifications.
 
 ## Periodic updates are a script, not a cron prompt (2026-10-05)
 
-**Asked for periodic updates ("keep me posted")? Never schedule a recurring model prompt** (CronCreate,
-/loop): use or extend `~/ops/site-private/bin/fleet-watch` or a similar script; a one-shot check is
-fine. (`memory/feedback_periodic_updates_by_script.md`)
+**Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt**
+(CronCreate, `/loop`): each firing is a full model turn that re-reads the whole conversation and usually
+finds nothing new. Use or extend `~/ops/site-private/bin/fleet-watch` (no tokens, notifies on change) or
+write a similar script. **Allowed:** a one-shot future check, and a recurring wake of an agent that no
+script or event can wake, when every firing has real work to do (clarified 2026-10-23).
+(`memory/feedback_periodic_updates_by_script.md`)
 
 ## Heavy builds and tests: run them through `bg` (2026-10-04)
 

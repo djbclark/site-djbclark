@@ -1,12 +1,12 @@
 # Notes for AI sessions working in the home directory
 
-`~` is not a git repo. `~/AGENTS.md`, `~/CLAUDE.md` and `site-private/home-agents.md` point here (`site-djbclark`).
+`~` is not a git repo. `~/AGENTS.md` and `~/CLAUDE.md` point here (`site-djbclark`).
 
-**Loaded into every session: under 200 lines and 13,500 bytes** (2026-10-18;
+**Loaded into every session: under 200 lines and 14,000 bytes** (2026-10-18, raised 2026-10-23;
 `memory/reference_instruction_file_size.md`). Rule plus pointer; dates, cases and narrative go to the
 `site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
 **Agents maintain this file unasked** (djbclark, 2026-10-05), `cursor/home-agents.mdc` in step. A condense
-proves nothing was lost: `rg -o` every date, `memory/*.md` pointer and `[[link]]` before and after, diff, show each
+proves nothing was lost: `rg -o` every date, `memory/*.md` pointer and `[[link]]` before and after, show each
 dropped one in its new home. Item numbers are unique and stable (files cite them).
 
 ## Tools and habits
@@ -41,10 +41,10 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 11. **A recurrable tool-calling mistake: fix the instructions that would have prevented it, same turn, unasked**, and say what changed
     (`memory/feedback_fix_instructions_after_tool_mistake.md`). **An agent-harness failure gets a root-cause fix in `~/src/djbclark-ade`, code not just docs**, not a
     re-route (`memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
-12. **When a task completes or something needs djbclark**, also run `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event, as in
-    the reply; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
-13. **Periodic updates asked for? Never schedule a recurring model prompt** (CronCreate, /loop): use or extend `~/ops/site-private/bin/fleet-watch` or a script; one-shot
-    checks are fine (`memory/feedback_periodic_updates_by_script.md`).
+12. **When a task completes or something needs djbclark**, also run `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
+13. **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt** (CronCreate, `/loop`): each firing is a full turn re-reading the
+    whole conversation and usually finds nothing new. Use or extend `~/ops/site-private/bin/fleet-watch`. **Allowed:** a one-shot check; a recurring wake nothing else
+    can do, if every firing has real work (`memory/feedback_periodic_updates_by_script.md`).
 14. **About to spend significant tokens on something a web search might answer? Search first**, then verify locally
     (`memory/feedback_web_search_before_local_spelunking.md`).
 15. **"Copy to clipboard"/"pbcopy" means `~/ops/site-private/bin/clip`**, never bare `pbcopy`; **every prompt you write for djbclark to hand to another agent goes through
@@ -86,8 +86,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>' --model <m>`** (**always `--model`**; check its `applied:` line; exit 0 is not success);
     (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing` headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice. copilot is the only
-    reserve (floor 60% left, one small GitHub slice); hermes never a target; cline only with djbclark's yes. The Claude API credits (`omp`, 2026-10-19): a normal tier, `api-only`
-    work first, else code/bulk, never unspent** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
+    reserve (floor 60% left, one small GitHub slice); hermes never a target; cline only with djbclark's yes. The Claude API credits (`omp`, 2026-10-19): a normal tier,
+    never unspent** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling, fix it there** ([[reference_djbclark_ade]], [[reference_agent_rules_multi_agent_toolkit]]).
 28. Session start in a git repo: read its Tier 1 pointer (`session-handoff`), check `head_sha`, state a resume plan first; only its owner writes it. **A teammate must get
     an `adversary` security review verdict before opening a pull request**, quoted (or "no findings") in the PR body.
