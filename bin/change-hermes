@@ -24,9 +24,21 @@ Not touched: model.* (main chat model), cron.*, per-channel overrides, fallback_
 Restart the Hermes gateway/CLI sessions afterwards; running ones keep the old config.
 
 Usage: change-hermes [--list] [--dry-run] [N] [--no-probe] [--config PATH]
+       change-hermes --auto [--dry-run]     pick the first working route in AUTO_ORDER
+       change-hermes --check                is the current fallback_providers[0] route usable?
   --list      print the options and exit
   N           choose option N without the prompt (numbers are those of the current list)
   --dry-run   show what would change, write nothing
+  --auto      probe AUTO_ORDER one route at a time (one tiny real request each, stop at the
+              first that answers) and apply it at effort medium, native context. A no-op when
+              that route is already current. Exit 0 ok, 3 nothing works.
+  --check     probe only the route in fallback_providers[0]. Exit 0 usable, 10 not usable
+              (quota/credits/model gone: run --auto), 2 config not readable.
+
+Remote use (any host without ~/.hermes/config.yaml, e.g. the Grok Bot box): the script runs
+itself on the Mac over ssh (host alias CHANGE_HERMES_SSH, default `hermes-mac`), whose
+authorized_keys entry forces bin/change-hermes-ssh-gate (allows --check, --list, --auto
+[--dry-run] only). Exit 75 = Mac unreachable (laptop asleep/off): callers treat it as a skip.
 """
 from __future__ import annotations
 
@@ -79,6 +91,24 @@ CATALOG: tuple[Model, ...] = (
     Model("DeepSeek", "pro", "v4", "cline", "cline-pass/deepseek-v4-pro", 1_000_000),
     Model("xAI", "grok", "4.7", "xai-oauth", "grok-4.7", 500_000, aiuse_provider="grok"),
 )
+
+
+# --auto preference (model-routing skill: Flash-primary chain with same-model provider
+# failover first; cheap pools before reserve pools; the xai-oauth subscription last so a
+# depleted grok pool is not also the side-model route the main model falls back to).
+AUTO_ORDER: tuple[str, ...] = (
+    "cline2:cline2-pass/deepseek-v4-flash",
+    "cline:cline-pass/deepseek-v4-flash",
+    "cline2:cline2-pass/deepseek-v4-pro",
+    "cline:cline-pass/deepseek-v4-pro",
+    "cline2:cline2-pass/kimi-k3",
+    "cline2:cline2-pass/glm-5.2",
+    "cline2:cline2-pass/minimax-m3",
+    "cline2:cline2-pass/qwen3.7-max",
+    "xai-oauth:grok-4.7",
+)
+EXIT_UNHEALTHY = 10
+EXIT_UNREACHABLE = 75  # EX_TEMPFAIL
 
 
 @dataclass(frozen=True)
@@ -197,6 +227,51 @@ def check_quota(cfg: dict, env: dict[str, str], probe: bool) -> dict[Model, tupl
             else:
                 result[m] = (True, f"aiuse {float(row['headroom_percent']):.0f}% left")
     return result
+
+
+def by_route(route: str) -> Model | None:
+    return next((m for m in CATALOG if f"{m.provider}:{m.model_id}" == route), None)
+
+
+def probe_one(cfg: dict, env: dict[str, str], m: Model) -> tuple[bool, str]:
+    if m.aiuse_provider is None:
+        return probe_api(cfg, env, m)
+    pools = aiuse_pools()
+    if pools is None:
+        return False, "aiuse unreadable"
+    row = pools.get(m.aiuse_provider)
+    if row is None:
+        return False, "no usable aiuse pool"
+    left = float(row.get("headroom_percent") or 0)
+    return (left >= MIN_HEADROOM), f"aiuse {left:.0f}% left"
+
+
+def auto_pick(cfg: dict, env: dict[str, str]) -> Option | None:
+    """Walk AUTO_ORDER sequentially; stop at the first route that answers."""
+    for route in AUTO_ORDER:
+        m = by_route(route)
+        if m is None:
+            continue
+        ok, why = probe_one(cfg, env, m)
+        print(f"  {'ok  ' if ok else 'FAIL'} {route}: {why}", file=sys.stderr)
+        if ok:
+            return Option(m, "medium", m.native_ctx, why)
+    return None
+
+
+def remote(argv: list[str]) -> int:
+    """Run on the Mac over ssh (forced-command gate there). 75 = unreachable."""
+    host = os.environ.get("CHANGE_HERMES_SSH", "hermes-mac")
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, "--", *argv],
+                           timeout=900)
+    except subprocess.TimeoutExpired:
+        print("change-hermes: remote run timed out", file=sys.stderr)
+        return EXIT_UNREACHABLE
+    if r.returncode == 255:
+        print(f"change-hermes: {host} unreachable (ssh 255): skipped", file=sys.stderr)
+        return EXIT_UNREACHABLE
+    return r.returncode
 
 
 def build_options(quota: dict[Model, tuple[bool, str]]) -> list[Option]:
@@ -328,12 +403,47 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="show changes, write nothing")
     ap.add_argument("--no-probe", action="store_true", help="skip live API calls (hides API-key routes)")
     ap.add_argument("--config", type=Path, default=CONFIG)
+    ap.add_argument("--auto", action="store_true", help="apply the first working route in AUTO_ORDER")
+    ap.add_argument("--check", action="store_true", help="probe the current fallback route only")
+    ap.add_argument("--remote", action="store_true", help="run on the Mac over ssh (default when no local config)")
     args = ap.parse_args()
+
+    if args.remote or (not args.config.exists() and "HERMES_HOME" not in os.environ and "--config" not in sys.argv):
+        fwd = [a for a in sys.argv[1:] if a != "--remote"]
+        return remote(fwd)
+
+    if args.check:
+        try:
+            cfg = yaml_rt().load(args.config.read_text())
+            fb = cfg["fallback_providers"][0]
+            route = f"{fb['provider']}:{fb['model']}"
+        except Exception as e:
+            print(f"config unreadable: {type(e).__name__}", file=sys.stderr)
+            return 2
+        m = by_route(route)
+        if m is None:
+            print(f"{route}: not in CATALOG; cannot probe", file=sys.stderr)
+            return EXIT_UNHEALTHY
+        ok, why = probe_one(cfg, load_env(), m)
+        print(f"{'ok' if ok else 'UNHEALTHY'} {route}: {why}")
+        return 0 if ok else EXIT_UNHEALTHY
 
     y = yaml_rt()
     cfg = y.load(args.config.read_text())
     env = load_env()
     prev = json.loads(STATE.read_text()) if STATE.exists() else None
+
+    if args.auto:
+        print("auto: probing in preference order ...", file=sys.stderr)
+        o = auto_pick(cfg, env)
+        if o is None:
+            print("auto: no route works right now", file=sys.stderr)
+            return 3
+        if prev and prev.get("route") == o.route and prev.get("effort") == o.effort and prev.get("ctx") == o.ctx \
+                and (cfg.get("fallback_providers") or [{}])[0].get("model") == o.model.model_id:
+            print(f"auto: {o.route} already current; nothing to do")
+            return 0
+        return write(args, y, cfg, o, prev)
 
     print("checking quota ...", file=sys.stderr)
     quota = check_quota(cfg, env, probe=not args.no_probe)
@@ -359,7 +469,10 @@ def main() -> int:
         print(f"choose 1-{len(opts)}", file=sys.stderr)
         return 2
     o = opts[choice - 1]
+    return write(args, y, cfg, o, prev)
 
+
+def write(args, y: YAML, cfg: CommentedMap, o: Option, prev: dict | None) -> int:
     log = apply(cfg, o, prev)
     print(f"\n{o.route}  effort={o.effort}  ctx={fmt_ctx(o.ctx)}  ->  " + ", ".join(log))
     if args.dry_run:
