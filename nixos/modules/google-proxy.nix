@@ -29,6 +29,12 @@ let
   port = 26369;
   # hyades.mit.edu; every Hyades microVM leaves through this one address.
   hyadesEgress = "18.4.60.84";
+  # 2026-10-24: a Hetzner Floating IPv4 (id 157592860, nbg1, 3.50 EUR a month, created through the API) because MIT's border
+  # drops traffic to and from this host's PRIMARY address 178.105.34.223 but not to a different one: pings from pastebin.xvm
+  # reach 78.47.225.34 (tcpdump on enp1s0, 4 of 4 answered, 99 ms) once replies leave on enp1s0. Hyades connects to
+  # floatingIp:port directly again (firecrawl-hyades docs/rendezvous-plan.md, option 1). Outgoing connections still leave from
+  # the primary address (the route's src), so what Google and the other engines see is unchanged.
+  floatingIp = "78.47.225.34";
   # 2026-10-24: MIT's border stopped forwarding anything to this host's public address (pastebin.xvm and Hyades
   # SYNs and pings never arrive on enp1s0 while check-host.net probes do; traceroute from pastebin dies after 18.0.161.1;
   # firecrawl-hyades/docs/hyades-watch.md). pastebin.xvm reaches this host over the tailnet, so it relays: Hyades ->
@@ -111,7 +117,7 @@ let
   start = pkgs.writeShellScript "tinyproxy-google-start" ''
     set -eu
     ip=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${publicInterface} scope global \
-      | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
+      | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }')
     [ -n "$ip" ] || { echo "tinyproxy-google: no IPv4 address on ${publicInterface}" >&2; exit 1; }
     # tailnet listener for the pastebin relay; tailscaled may still be coming up at boot, so wait a little for its address.
     # No address after 30 s: exit, so systemd retries every 10 s. The public address is unreachable from MIT, so a
@@ -123,7 +129,7 @@ let
       ${pkgs.coreutils}/bin/sleep 1
     done
     [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
-    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; echo "Listen ${floatingIp}"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -131,8 +137,8 @@ in
   systemd.services.tinyproxy-google = {
     description = "Allowlisted CONNECT proxy for Hyades SearXNG engine egress (vps-primary leg)";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "tailscaled.service" ];
-    wants = [ "network-online.target" "tailscaled.service" ];
+    after = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
+    wants = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
     # A crash loop stops: 5 failed starts in 15 minutes leave the unit `failed` instead of retrying every 10 s for ever.
     # hyades-watch sees `failed`, alerts (Hermes Watch topic) and restarts it at most twice an hour (after reset-failed).
     unitConfig = {
@@ -193,7 +199,7 @@ in
         TABLE=${toString returnPathTable}
         PRIO=${toString returnPathPriority}
         IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }')
         GW=$(${pkgs.iproute2}/bin/ip -4 route show default dev "$IF" \
           | ${pkgs.gawk}/bin/awk '{ print $3; exit }')
         [ -n "$IP" ] || { echo "hyades-public-return-path: no IPv4 on $IF" >&2; exit 1; }
@@ -202,16 +208,23 @@ in
         ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
         ${pkgs.iproute2}/bin/ip rule add from "$IP" table "$TABLE" priority "$PRIO"
         echo "hyades-public-return-path: from $IP via $GW dev $IF table $TABLE"
+        # The Floating IP: put it on the interface (Hetzner routes it to this server but does not configure it) and give it
+        # the same source rule, or replies to 18/8 follow the tailnet subnet route and vanish.
+        ${pkgs.iproute2}/bin/ip addr replace ${floatingIp}/32 dev "$IF"
+        ${pkgs.iproute2}/bin/ip rule del from ${floatingIp} table "$TABLE" 2>/dev/null || true
+        ${pkgs.iproute2}/bin/ip rule add from ${floatingIp} table "$TABLE" priority "$PRIO"
+        echo "hyades-public-return-path: from ${floatingIp} too"
       '';
       ExecStop = pkgs.writeShellScript "hyades-public-return-path-down" ''
         set -eu
         IF=${publicInterface}
         TABLE=${toString returnPathTable}
         IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }' || true)
         if [ -n "''${IP:-}" ]; then
           ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
         fi
+        ${pkgs.iproute2}/bin/ip rule del from ${floatingIp} table "$TABLE" 2>/dev/null || true
         ${pkgs.iproute2}/bin/ip route flush table "$TABLE" 2>/dev/null || true
       '';
     };
