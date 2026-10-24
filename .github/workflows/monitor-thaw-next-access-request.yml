@@ -160,7 +160,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "$telegram_url" \
             -d chat_id=838808636 \
-            -d message_thread_id=22158 \
+            -d message_thread_id=44130 \
             --data-urlencode "text=${text}" \
             --output "$response"
 
@@ -229,7 +229,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "$telegram_url" \
             -d chat_id=838808636 \
-            -d message_thread_id=22158 \
+            -d message_thread_id=44130 \
             --data-urlencode "text=${text}" \
             --output "$response"
 

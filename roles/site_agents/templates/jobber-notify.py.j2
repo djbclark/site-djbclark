@@ -78,7 +78,7 @@ def send_hermes_notification(info):
     )
     try:
         subprocess.run(
-            ["{{ site_agents_hermes_bin }}", "send", "-t", "telegram:838808636:22158", msg],
+            ["{{ site_agents_hermes_bin }}", "send", "-t", "telegram:838808636:44130", msg],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=30,

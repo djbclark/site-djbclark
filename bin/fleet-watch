@@ -181,7 +181,7 @@ mkdir -p "$STATE_DIR"
 # Where change notices go: the operator's Hermes Telegram Inbox topic (see
 # memory/feedback_ping_telegram_and_chat.md); nothing else.
 HERMES="${FLEET_WATCH_HERMES:-$HOME/.local/bin/hermes}"
-HERMES_TO="${FLEET_WATCH_TO:-telegram:838808636:22158}"
+HERMES_TO="${FLEET_WATCH_TO:-telegram:838808636:44130}"
 
 notify() {
   # Hermes only: the operator does not want macOS notifications (2026-10-05).

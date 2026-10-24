@@ -20,7 +20,7 @@
 # HERMES_PING_DRY=1 prints instead of sending.
 # Every lookup has a short timeout: a ping must never hang a session.
 set -u
-target="${HERMES_PING_TARGET:-telegram:838808636:22158}"
+target="${HERMES_PING_TARGET:-telegram:838808636:44130}"
 [ "$#" -gt 0 ] || { echo "usage: hermes-ping \"<repo>: <message>\"" >&2; exit 2; }
 # A lone flag is never a message: `hermes-ping --help` once reached Telegram as "--help".
 case "$1" in

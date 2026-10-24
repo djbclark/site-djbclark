@@ -215,7 +215,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: "838808636"
-          THREAD_ID: "22158"
+          THREAD_ID: "44130"
           ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/${{ (matrix.issue.type || 'issue') == 'discussion' && 'discussions' || 'issues' }}/${{ matrix.issue.number }}"
         run: |
           REPO="${{ matrix.issue.repo }}"

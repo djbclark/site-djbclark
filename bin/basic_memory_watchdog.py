@@ -35,7 +35,7 @@ LOG_FILE = "/Users/djbclark/Library/Logs/basic-memory-mcp/watchdog.log"
 LABEL = "com.djbclark.basic-memory-mcp"
 URL = "http://127.0.0.1:18796/mcp"
 HERMES_BIN = "/Users/djbclark/.local/bin/hermes"
-NOTIFY_TARGET = "telegram:838808636:22158"  # Inbox topic (per hermes-messaging skill)
+NOTIFY_TARGET = "telegram:838808636:44132"  # Watch topic
 
 MAX_RESTART_ATTEMPTS = 3  # consecutive failed-then-restarted cycles before giving up
 # Don't re-escalate more than once per 6h while still down.
