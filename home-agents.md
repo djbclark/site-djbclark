@@ -33,9 +33,9 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 7. **Web search/fetch walks the ladder** (`fallback-chains`, `web-get`): **search first with the shared `mcp__firecrawl__*`; never the paid cloud
     `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every needed page is eventually fetched**: fall back, fix the tool or pause for djbclark; never
     "unfetchable" (`memory/feedback_web_failover_pause.md`).
-8. **Every list in a reply to djbclark is numbered or lettered, never plain `-`/`*` bullets** (tables are fine); **never restart at 1** in one reply: `1.1`/`2.1` or
-    `1a`/`2b`, **each item labelled once**; **question-card options too (`1. Keep pinned`)** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
-    (`memory/feedback_links_clickable_markdown.md`).
+8. **Every list in a reply to djbclark is labelled, never `-`/`*` bullets** (tables fine). **Top-level headings get `A.`, `B.`; their items `A1`, `A2`
+    (sub-items `A1a`), each labelled once; no headings: `1.`, `2.`; question-card options too** (2026-10-24,
+    `memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card** (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway, restarting, or rerunning what has a result; quota tight or
     pause asked: stop scheduling, let running work finish. **Breakage found by accident: always ask djbclark whether to fix it, last in the queue.**
 10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type `! <command>` (`memory/feedback_run_commands_yourself.md`).
