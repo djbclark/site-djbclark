@@ -2,12 +2,14 @@
 
 `~` is not a git repo. `~/AGENTS.md` and `~/CLAUDE.md` point here (`site-djbclark`).
 
+**Only Claude Opus 5.5 or higher edits this file or `cursor/home-agents.mdc`** (djbclark, 2026-10-24): every edit,
+condense or reflow, item 11 fixes too. Any other model never touches them; it dispatches the edit: `acp-dispatch claude
+--model opus --kind judgment` (Claude quota tight: `acp-dispatch omp --model anthropic/claude-opus-5-5`).
 **Loaded into every session: under 200 lines and 14,000 bytes** (2026-10-18, raised 2026-10-23;
 `memory/reference_instruction_file_size.md`). Rule plus pointer; dates, cases and narrative go to the
-`site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
-**Agents maintain this file unasked** (djbclark, 2026-10-05), `cursor/home-agents.mdc` in step. A condense
-proves nothing was lost: `rg -o` every date, `memory/*.md` pointer and `[[link]]` before and after, show each
-dropped one in its new home. Item numbers are unique and stable (files cite them).
+`site-private/memory/` file an item names, else a `reference_agent_rules_*.md`. **Agents maintain both files
+unasked** (djbclark, 2026-10-05), in step. A condense proves nothing was lost: `rg -o` every date, `memory/*.md`
+pointer and `[[link]]` before and after, show each dropped one in its new home. Item numbers are unique and stable.
 
 ## Tools and habits
 
@@ -35,7 +37,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     `1a`/`2b`, **each item labelled once**; **question-card options too (`1. Keep pinned`), so a custom answer can cite one** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
     (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway, restarting, or rerunning what has a result; quota tight or
-    pause asked: stop scheduling, let running work finish.
+    pause asked: stop scheduling, let running work finish. **Breakage found by accident: always ask djbclark whether to fix it, at the end of the queue.**
 10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type `! <command>`
     (`memory/feedback_run_commands_yourself.md`).
 11. **A recurrable tool-calling mistake: fix the instructions that would have prevented it, same turn, unasked**, and say what changed
@@ -59,7 +61,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 ## Repos and paths
 
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
-    **Exception (2026-10-24): a fork whose upstream ships its own agent-file layout (e.g. paseo: `AGENTS.md -> CLAUDE.md`) keeps upstream's; don't enforce**
+    **Exception (2026-10-24): a fork keeps its upstream's own agent-file layout (paseo: `AGENTS.md -> CLAUDE.md`)**
     (`memory/feedback_claude_md_symlink_to_agents_md.md`).
 21. **Commit and push your own changes, every repo, per unit, unasked. `git commit -m MSG -- <paths>`, never bare `git commit`; a file another
     agent also edited: `git apply --cached` your hunks, then `git commit -m MSG`, NO pathspec (2026-10-23)**
@@ -114,7 +116,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 34. **Run builds and tests via `~/ops/site-private/bin/bg`** (**always the full path**) in the background; **first see whether CI can run it** (`load-watch ci decide`).
     **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy -b`; never throttle another session's processes. Gradle: one build at a time, machine-wide**
     (`memory/feedback_tests_through_bg_caps_and_slots.md`, `memory/feedback_gradle_one_at_a_time.md`).
-    **Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding; test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
+    **Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding it; run test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
 
 ## Compact Instructions
 
