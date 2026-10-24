@@ -11,11 +11,23 @@ while BG_MAX_WAIT still runs out in real time.
 
 import os
 import shlex
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
+
+# bin/bg is macOS-only: it reads load via `sysctl -n vm.loadavg`, times its wait budget with gdate,
+# parses with gawk and execs taskpolicy. Without them (e.g. Linux) the gate reads an empty load, its
+# clock stays at 0 and the BG_MAX_WAIT budget never runs out, so bg loops forever (2026-10-24).
+_BG_TOOLS = ("sysctl", "gawk", "gdate", "taskpolicy")
+_bg_skip = pytest.mark.skipif(
+    sys.platform != "darwin" or any(shutil.which(t) is None for t in _BG_TOOLS),
+    reason="bin/bg needs macOS (sysctl vm.loadavg, gawk, gdate, taskpolicy)",
+)
+pytestmark = _bg_skip
 
 BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
 

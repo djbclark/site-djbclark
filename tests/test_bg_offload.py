@@ -26,6 +26,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -36,7 +37,15 @@ BG = BIN / "bg"
 OFFLOAD = BIN / "bg-offload"
 COMMIT = "a" * 40
 
-pytestmark = pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq")
+# bin/bg is macOS-only: it reads load via `sysctl -n vm.loadavg`, times its wait budget with gdate,
+# parses with gawk and execs taskpolicy. Without them (e.g. Linux) the gate reads an empty load, its
+# clock stays at 0 and the BG_MAX_WAIT budget never runs out, so bg loops forever (2026-10-24).
+_BG_TOOLS = ("sysctl", "gawk", "gdate", "taskpolicy")
+_bg_skip = pytest.mark.skipif(
+    sys.platform != "darwin" or any(shutil.which(t) is None for t in _BG_TOOLS),
+    reason="bin/bg needs macOS (sysctl vm.loadavg, gawk, gdate, taskpolicy)",
+)
+pytestmark = [_bg_skip, pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq")]
 
 LW_STUB = """#!/bin/bash
 d={state}
