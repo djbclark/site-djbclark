@@ -95,10 +95,15 @@ Tailscale's rules: restart tailscaled right after it.
    `traceroute` from pastebin dies right after MIT's border router `18.0.161.1`, while `178.105.0.1` (same Hetzner /16) is
    reached via `18.0.161.18` and Lumen. The firewall (`nixos-fw` accepts `18.4.60.84`), the listener, `rp_filter` (loose) and
    the table-100 return rule were all checked and correct. It is a route or filter for this address at or beyond MIT's border.
-2. **What the module does now.** `tinyproxy-google` also listens on this host's tailnet address (waits up to 30 s for it at
-   boot), `Allow`s pastebin's tailnet address `100.104.212.89` (`relayPeer`), and `extraCommands` opens `26369` on
-   `tailscale0` for that one source (connection-capped like the public rule). Hyades reaches it as Hyades → pastebin
-   `:26371` (`tinyproxy-vpsrelay`, firecrawl-hyades `scripts/install-pastebin-egress-proxy`) → tailnet → here, so every
-   request still leaves from this address. The allowlist is enforced at both hops.
+2. **What the module does now.** `tinyproxy-google` also listens on this host's tailnet address (it waits up to 30 s for it at
+   boot and exits, so systemd retries, if there is none) and `Allow`s pastebin's tailnet address `100.104.212.89`
+   (`relayPeer`). Hyades reaches it as Hyades → pastebin `:26371` (`tinyproxy-vpsrelay`, firecrawl-hyades
+   `scripts/install-pastebin-egress-proxy`) → tailnet → here, so every request still leaves from this address. The allowlist
+   is enforced at both hops. **No iptables rule guards the tailnet path:** tailscaled's `ts-input` chain accepts everything on
+   `tailscale0` before `nixos-fw` (`iptables -S ts-input`: `-A ts-input -i tailscale0 -j ACCEPT`), so the gates are WireGuard
+   source authentication, tinyproxy's `Allow` (tailnet peers other than pastebin get 403) and the tailscale ACL. To tighten:
+   allow only `100.104.212.89` to reach this host on `tcp/26369` in the tailnet policy (admin console). The rate limit the
+   public rule applies to Hyades (40 new connections/s per source) therefore does not apply on this path; the same limit is
+   enforced on pastebin's nftables rule for `:26371` instead.
 3. **Restoring the direct path** needs MIT IS&T / SIPB to fix the route to `178.105.34.223`; nothing else on this host
    changes when it returns (the public listener and the `18.4.60.84` rule are untouched).

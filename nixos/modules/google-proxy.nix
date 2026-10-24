@@ -33,7 +33,10 @@ let
   # SYNs and pings never arrive on enp1s0 while check-host.net probes do; traceroute from pastebin dies after 18.0.161.1;
   # firecrawl-hyades/docs/hyades-watch.md). pastebin.xvm reaches this host over the tailnet, so it relays: Hyades ->
   # pastebin:26371 (tinyproxy-vpsrelay) -> tailnet -> this proxy -> the internet from this host's address. This is
-  # pastebin's tailnet address; the proxy also listens on this host's tailnet address and the firewall admits only it.
+  # pastebin's tailnet address. The proxy also listens on this host's tailnet address, but NO iptables rule guards that
+  # path: tailscaled's `ts-input` chain accepts everything arriving on tailscale0 before nixos-fw (checked 2026-10-24:
+  # `-A ts-input -i tailscale0 -j ACCEPT`, and a rule here showed 0 packets). The gates are WireGuard source
+  # authentication, the tailscale ACL (should allow only this peer to tcp/26369) and tinyproxy's `Allow` below.
   relayPeer = "100.104.212.89";
   tailnetInterface = "tailscale0";
   publicInterface = "enp1s0";
@@ -110,18 +113,17 @@ let
     ip=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${publicInterface} scope global \
       | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
     [ -n "$ip" ] || { echo "tinyproxy-google: no IPv4 address on ${publicInterface}" >&2; exit 1; }
-    # tailnet listener for the pastebin relay; tailscaled may still be coming up at boot, so wait a little for its address
+    # tailnet listener for the pastebin relay; tailscaled may still be coming up at boot, so wait a little for its address.
+    # No address after 30 s: exit, so systemd retries every 10 s. The public address is unreachable from MIT, so a
+    # public-only proxy would be a leg that looks up and carries nothing.
     ts=""
     for _ in $(${pkgs.coreutils}/bin/seq 1 30); do
       ts=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailnetInterface} | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
       [ -n "$ts" ] && break
       ${pkgs.coreutils}/bin/sleep 1
     done
-    {
-      cat ${baseConf}
-      echo "Listen $ip"
-      if [ -n "$ts" ]; then echo "Listen $ts"; else echo "tinyproxy-google: no address on ${tailnetInterface}; the pastebin relay cannot reach this leg" >&2; fi
-    } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
+    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -158,17 +160,13 @@ in
   # The firewall is the iptables backend (nftables is off), so extraInputRules does not
   # apply; extraCommands runs after the allowed-port rules and before the final refuse.
   networking.firewall.extraCommands = ''
-    iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} \
+    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
       -m connlimit --connlimit-above 80 --connlimit-mask 32 -j DROP
-    iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} \
+    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
       -m conntrack --ctstate NEW \
       -m hashlimit --hashlimit-name gproxy --hashlimit-mode srcip \
       --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
-    iptables -A nixos-fw -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
-    # the relay: pastebin's tailnet address only, on the tailnet interface only
-    iptables -A nixos-fw -i ${tailnetInterface} -p tcp -s ${relayPeer} --dport ${toString port} \
-      -m connlimit --connlimit-above 80 --connlimit-mask 32 -j DROP
-    iptables -A nixos-fw -i ${tailnetInterface} -p tcp -s ${relayPeer} --dport ${toString port} -j nixos-fw-accept
+    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
   '';
 
   # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
