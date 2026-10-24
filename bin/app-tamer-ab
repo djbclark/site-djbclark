@@ -16,16 +16,16 @@ mkdir -p "$dir"
 lw="${LOAD_WATCH:-$HOME/src/djbclark-ade/bin/load-watch}"
 
 cpu_s() { # cumulative CPU seconds of the named process, 0 if absent
-  ps -axo time=,comm= | awk -v n="$1" 'index($0, n) { split($1, t, /[:.]/); s += t[1]*60 + t[2] + t[3]/100 } END { printf "%.2f", s+0 }'
+  ps -axo time=,comm= | gawk -v n="$1" 'index($0, n) { split($1, t, /[:.]/); s += t[1]*60 + t[2] + t[3]/100 } END { printf "%.2f", s+0 }'
 }
 
 sample() {
   local phase adm running cpu swap
   phase=$(cat "$dir/phase.txt" 2>/dev/null || echo unlabelled)
   adm=$("$lw" admit --json 2>/dev/null) || adm='{}'
-  swap=$(sysctl -n vm.swapusage | awk '{ gsub("M", "", $6); print $6 }')
+  swap=$(sysctl -n vm.swapusage | gawk '{ gsub("M", "", $6); print $6 }')
   if pgrep -x "App Tamer" > /dev/null; then running=1; else running=0; fi
-  cpu=$(awk -v a="$(cpu_s 'App Tamer')" -v b="$(cpu_s 'com.stclairsoft.AppTamer.Helper')" 'BEGIN { printf "%.2f", a+b }')
+  cpu=$(gawk -v a="$(cpu_s 'App Tamer')" -v b="$(cpu_s 'com.stclairsoft.AppTamer.Helper')" 'BEGIN { printf "%.2f", a+b }')
   [ -s "$csv" ] || echo "utc,phase,load1,per_core,churn_pages_s,swap_used_mb,at_running,at_cpu_s" > "$csv"
   python3 -I -c '
 import json, sys
