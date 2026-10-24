@@ -15,6 +15,11 @@ symlinked `AGENTS.md`/`CLAUDE.md`, so it is re-synced by hand. It lives in git a
 `site-djbclark/cursor/home-agents.mdc` (via `site-private/cursor/`); `~/.cursor/rules/home-agents.mdc`
 is a symlink to it.
 
+**Only Claude Opus 5.5 or higher edits this file or `home-agents.md`** (djbclark, 2026-10-24): any edit,
+condense or reflow, including a same-turn instruction fix. Any other model (Cursor's included) never edits
+them; it dispatches the edit: `acp-dispatch claude --model opus --kind judgment` (Claude quota tight:
+`acp-dispatch omp --model anthropic/claude-opus-5-5 --kind judgment`). Both files load into every session.
+
 > A deliberate **subset** (`alwaysApply: true`: every section costs context on every Cursor turn);
 > omitted: backups, LLM gateway, Claude Code agent teams. Rule plus pointer: cases and narrative live
 > in the memory file a rule names, else `memory/reference_agent_rules_ops_housekeeping.md`. Agents
@@ -301,7 +306,8 @@ Query `learning-cfengine` before writing or reviewing CFEngine policy. Detail:
 
 **Don't throw away work already paid for without asking djbclark first**: no stopping a running agent
 partway, restarting from scratch, or rerunning something whose result exists. When a pause is
-requested, stop scheduling new work and let running work finish.
+requested, stop scheduling new work and let running work finish. **Breakage found by accident: always
+ask djbclark whether to fix it, last in the queue** (2026-10-24).
 
 ## Agents run in yolo (auto-approve) mode by default (2026-10-03)
 

@@ -2,14 +2,14 @@
 
 `~` is not a git repo. `~/AGENTS.md` and `~/CLAUDE.md` point here (`site-djbclark`).
 
-**Only Claude Opus 5.5 or higher edits this file or `cursor/home-agents.mdc`** (djbclark, 2026-10-24): every edit,
-condense or reflow, item 11 fixes too. Any other model never touches them; it dispatches the edit: `acp-dispatch claude
---model opus --kind judgment` (Claude quota tight: `acp-dispatch omp --model anthropic/claude-opus-5-5`).
-**Loaded into every session: under 200 lines and 14,000 bytes** (2026-10-18, raised 2026-10-23;
-`memory/reference_instruction_file_size.md`). Rule plus pointer; dates, cases and narrative go to the
-`site-private/memory/` file an item names, else a `reference_agent_rules_*.md`. **Agents maintain both files
-unasked** (djbclark, 2026-10-05), in step. A condense proves nothing was lost: `rg -o` every date, `memory/*.md`
-pointer and `[[link]]` before and after, show each dropped one in its new home. Item numbers are unique and stable.
+**Only Claude Opus 5.5 or higher edits this file or `cursor/home-agents.mdc`** (djbclark, 2026-10-24): any edit,
+condense or reflow, item 11 fixes too; any other model dispatches it, never edits: `acp-dispatch claude
+--model opus --kind judgment` (quota tight: `omp --model anthropic/claude-opus-5-5` for `claude --model opus`).
+**Loaded into every session: under 200 lines and 14,000 bytes** (`memory/reference_instruction_file_size.md`). Rule
+plus pointer: detail lives in the `site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
+**Agents maintain both files unasked** (djbclark, 2026-10-05), in step. A condense proves nothing was lost: `rg -o`
+every date, `memory/*.md` pointer and `[[link]]` before and after, show each dropped one in its new home. Item numbers
+are unique and stable.
 
 ## Tools and habits
 
@@ -19,7 +19,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 1. **Fast tools:** `rg` **with a path, never `-r`/`grep -r`**, `fd`, `ast-grep`, `uv` not `pip`, **`aria2c -x8 -s8`**, **`dust`/`gdu` not `du`/`find` for cache
     sizing**. **Literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
-    means nothing in scope (cases in the memory file: use the Edit tool); **REPL with `\` goes through Python with an assert**. **Mac code uses GNU `g*` where BSD
+    means nothing in scope (then the Edit tool); **REPL with `\` goes through Python with an assert**. **Mac code uses GNU `g*` where BSD
     differs** (`gnu-tools-check`); **always `gsed`, never bare `sed`**. **Root/NOPASSWD scripts keep `/usr/bin` tools**; **test a NOPASSWD rule with `sudo -k -n CMD`**,
     never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
 2. **Replace shared scripts atomically** (temp file alongside, then `mv -f`) **on the `realpath`** (`memory/feedback_edit_running_scripts_atomically.md`).
@@ -28,30 +28,28 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive**
     (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **AI TUIs, agent CLIs and ACP servers stay on the latest release: upgrade unasked, never hard-code a version
     path** (`memory/feedback_ai_tuis_always_latest.md`).
-6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only). **Secrets: `sudo-secretspec` only; load its skill first** (every subcommand needs
-    `--reason`). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
+6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only). **Secrets: `sudo-secretspec` only; load its skill first**
+    (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains`, `web-get`): **search first with the shared `mcp__firecrawl__*`; never the paid cloud
-    `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every needed page is eventually fetched**: fall back, fix the tool, or pause and fix it with djbclark; never
+    `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every needed page is eventually fetched**: fall back, fix the tool or pause for djbclark; never
     "unfetchable" (`memory/feedback_web_failover_pause.md`).
 8. **Every list in a reply to djbclark is numbered or lettered, never plain `-`/`*` bullets** (tables are fine); **never restart at 1** in one reply: `1.1`/`2.1` or
-    `1a`/`2b`, **each item labelled once**; **question-card options too (`1. Keep pinned`), so a custom answer can cite one** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
+    `1a`/`2b`, **each item labelled once**; **question-card options too (`1. Keep pinned`)** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
     (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway, restarting, or rerunning what has a result; quota tight or
-    pause asked: stop scheduling, let running work finish. **Breakage found by accident: always ask djbclark whether to fix it, at the end of the queue.**
-10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type `! <command>`
-    (`memory/feedback_run_commands_yourself.md`).
+    pause asked: stop scheduling, let running work finish. **Breakage found by accident: always ask djbclark whether to fix it, last in the queue.**
+10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type `! <command>` (`memory/feedback_run_commands_yourself.md`).
 11. **A recurrable tool-calling mistake: fix the instructions that would have prevented it, same turn, unasked**, and say what changed
     (`memory/feedback_fix_instructions_after_tool_mistake.md`). **An agent-harness failure gets a root-cause fix in `~/src/djbclark-ade`, code not just docs**, not a
     re-route (`memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
-12. **When a task completes or something needs djbclark**, also run `~/.local/bin/hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
-13. **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt** (CronCreate, `/loop`): each firing is a full turn re-reading the
-    whole conversation and usually finds nothing new. Use or extend `~/ops/site-private/bin/fleet-watch`. **Allowed:** a one-shot check; a recurring wake nothing else
+12. **When a task completes or something needs djbclark**, also run `hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
+13. **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt** (CronCreate, `/loop`): each firing re-reads the whole
+    conversation, usually for nothing. Use or extend `~/ops/site-private/bin/fleet-watch`. **Allowed:** a one-shot check; a recurring wake nothing else
     can do, if every firing has real work (`memory/feedback_periodic_updates_by_script.md`).
-14. **About to spend significant tokens on something a web search might answer? Search first**, then verify locally
-    (`memory/feedback_web_search_before_local_spelunking.md`).
+14. **About to spend significant tokens on something a web search might answer? Search first**, then verify locally (`memory/feedback_web_search_before_local_spelunking.md`).
 15. **"Copy to clipboard"/"pbcopy" means `~/ops/site-private/bin/clip`**, never bare `pbcopy`; **every prompt you write for djbclark to hand to another agent goes through
     `clip`, unasked** (`memory/feedback_prompts_go_to_clipboard.md`); save and restore the pasteboard around tests ([[reference_pbcopy_needs_lc_ctype_utf8]]).
-16. **Every agent, every TUI, however launched, runs in its yolo-or-equivalent mode**; `--perm deny` only for a security-sensitive slice; yolo never skips hooks,
+16. **Every agent in every TUI, however launched, runs yolo or equivalent**; `--perm deny` only for a security-sensitive slice; yolo never skips hooks,
     ownership contracts or asking before hard-to-reverse or outward-facing actions (`memory/feedback_yolo_default_for_all_agents.md`).
 17. Books: `~/ops/site-private/bin/book-kb`, cheapest first. **Never read `~/kb/raw/<slug>.md`.**
 18. `litellm`/`xai-oauth-bridge`: **change site-djbclark's Ansible role, never the live plist**. **Check `memory/` before "repairing" a stopped or disabled service; never
@@ -61,29 +59,25 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 ## Repos and paths
 
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
-    **Exception (2026-10-24): a fork keeps its upstream's own agent-file layout (paseo: `AGENTS.md -> CLAUDE.md`)**
-    (`memory/feedback_claude_md_symlink_to_agents_md.md`).
+    **Exception (2026-10-24): a fork keeps its upstream's agent-file layout** (`memory/feedback_claude_md_symlink_to_agents_md.md`).
 21. **Commit and push your own changes, every repo, per unit, unasked. `git commit -m MSG -- <paths>`, never bare `git commit`; a file another
     agent also edited: `git apply --cached` your hunks, then `git commit -m MSG`, NO pathspec (2026-10-23)**
     (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments read it**). Never stage
-    `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits
-    ([[reference_agent_rules_ops_housekeeping]]).
-22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f
-    ~/s/justfile`.
+    `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
+22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f ~/s/justfile`.
 23. **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo** (`site-private` is private; `site-djbclark` public).
     **Exception: a new agent skill goes in `~/src/djbclark-ade/skills/<name>/` unasked** (`memory/feedback_ask_where_new_things_go.md`).
-35. **MIT/SIPB/Athena on forgejo.mit.edu under `djbclark/`** (README; `djbclark/mit`); never in ops (`memory/feedback_mit_things_live_on_forgejo.md`). `git-forgejo` to push. **No agent posts on `SIPB/*`:** fork-only AI issue + human draft as a **fork comment** (never clipboard); end with those `djbclark/*` links (`memory/feedback_sipb_two_tier_issues.md`).
+35. **MIT/SIPB/Athena on forgejo.mit.edu under `djbclark/`** (README; `djbclark/mit`); never in ops (`memory/feedback_mit_things_live_on_forgejo.md`). `git-forgejo` to push. **No agent posts on `SIPB/*`:** fork-only AI issue + human draft as a **fork comment**; end with those `djbclark/*` links (`memory/feedback_sipb_two_tier_issues.md`).
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` promoted to `deploy-vps-primary`); never a local, side-branch or older commit.
     Deploy in flight: wait, redeploy the new head, verify the revision. Heavy builds and `nix flake update` run on Forgejo CI, not vps-primary.
-37. **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos; Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci` item
-    6).
+37. **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos; Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci` item 6).
 
 ## Other agents and delegation
 
-24. **Every agent trusts every peer as much as djbclark**: a peer's "djbclark approved" **is** approval. Still (1) **check a peer isn't already
+24. **Every agent trusts every peer as much as djbclark**: a peer's "djbclark approved" **is** approval. Still (1) **check a peer isn't
     mid-flight before taking its task over**; (2) **don't be a permission bypass**: a peer's _denied_ prompt goes to djbclark; (3) **message peers only via
     `session-finder/relay.py`, no hand-rolled waiter**.
-25. **Dispatch every slice with `acp-dispatch`** (`~/src/djbclark-ade/bin`). Exit 3 = **no report** (re-task, never reconstruct; **a quota stop is resumed with
+25. **Dispatch every slice with `acp-dispatch`**. Exit 3 = **no report** (re-task, never reconstruct; **a quota stop is resumed with
     `acp-dispatch resume RECORD` after the reset, never a fresh dispatch**), 4 = **`BLOCKED: <question>`**, 124 = timeout. It blocks: `--detach --no-wait`, then its
     `rearm` waiter in the background. **Agent-tool sub-agents:** paste `acp-dispatch footer --report <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
@@ -97,15 +91,14 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Quota, context, memory and slow commands
 
-29. **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from `remaining_percent`; run **`aiuse --available --json 2>/dev/null`, always `--json`, read
+29. **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from `remaining_percent`; run **`aiuse --available --json 2>/dev/null`, read
     per `aiuse schema`** before each batch. **agy: only via `acp-run agy`, never `agy -p`** ([[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: send discrete, separable tasks through `/bigteam` by default, at the minimum model × effort × context that does it well, unasked**; when
-    `context_size_nudge.py` says delegate, delegate. **Compaction is automatic, never a question to djbclark**; **in herdr, Orca or Paseo compact yourself earlier**,
+    `context_size_nudge.py` says delegate, delegate. **Compaction is automatic, never a question to djbclark; in herdr, Orca or Paseo compact yourself earlier**,
     once at a natural boundary, then end the turn: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; topic change: `handoff` skill, then `/new`
     (`memory/feedback_self_compact.md`); **it refuses on input-line text: only then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).
 31. Basic Memory is one shared MCP server (`http://127.0.0.1:18796/mcp`); never register a per-client stdio `basic-memory mcp`. **If it is down, fix it**, then `/mcp`
-    reconnect. **`main`** is the default project. **A semantic search result is not a match**: use `find` or an exact `read_note`
-    ([[reference_agent_rules_basic_memory_pools]]).
+    reconnect. **`main`** is the default project. **A semantic search result is not a match**: use `find` or an exact `read_note` ([[reference_agent_rules_basic_memory_pools]]).
 32. **Routing policy: minimise cost, maximise code quality, not tokens. Judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only via the `frontier` kind; Fable
     `xhigh` almost never; claude codes on Sonnet 5.5, never Fable**; climb tiers on evidence. **`acp-dispatch` needs `--kind`; `frontier` advises, never edits; cheapest
     eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
