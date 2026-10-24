@@ -304,6 +304,12 @@ have `LC_CTYPE=C`); human-bound prose gets `clip --unwrap`, no Markdown. **Every
 hand to another agent also goes through `clip`, unasked** (2026-10-06). Save and restore the
 pasteboard around tests.
 
+## Files djbclark handles by hand — reveal them in Finder (2026-10-24)
+
+When a step needs djbclark to drag, attach, upload, open or send a file by hand, **reveal it in Finder yourself,
+unasked, in the same turn: `open -R <absolute path>`**, and still name the path. Several files: reveal the first or
+the directory. (`memory/feedback_reveal_files_in_finder.md`)
+
 ## Long documents — query the book KB, never paste the book (2026-10-03)
 
 Books: `~/ops/site-private/bin/book-kb`, cheapest first (`book-kb query '<regex>' <slug>` is exact,
