@@ -75,6 +75,8 @@ let
     "^api\\.crossref\\.org$"
     "^wiki\\.nixos\\.org$"
     "^nixos\\.org$"
+    # devsearch (firecrawl-hyades, 2026-10-24): the GitHub search API for Firecrawl's developer search
+    "^api\\.github\\.com$"
   ];
 
   filterFile = pkgs.writeText "tinyproxy-google.filter" (lib.concatStringsSep "\n" allowedHosts + "\n");
