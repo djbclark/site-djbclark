@@ -94,6 +94,12 @@ hosts:
          must_be_up: false,  # the desktop app owns the daemon; down while Paseo.app is quit
          tailscale_serve_port: 7263,
          note: "2026-10-18: Paseo daemon + web UI (github.com/getpaseo/paseo), started by Paseo.app (brew cask paseo); config and tailnet serve by roles/paseo_desktop. Also opens one ephemeral loopback port. No password, no relay: tailnet-only, never funnel. Same port on vps-primary and get. See docs/paseo.md."}
+      - {port: 18806, bind: "127.0.0.1", owner: unmanaged, service: paseo-dev-daemon, status: default-claim,
+         must_be_up: false,  # on-demand dev daemon, started by agents working in ~/src/paseo
+         note: "2026-10-24: Paseo checkout dev daemon (`PASEO_LISTEN=127.0.0.1:18806 scripts/dev-daemon.sh` in ~/src/paseo, home .dev/paseo-home). The repo default is 6768, which this registry gives to orca-app, so agents set PASEO_LISTEN; never use the repo's `npm run dev`, whose cross-env hard-codes 6768. Distinct from the production daemon on 7263 and from Paseo's own 6767. Its node worker (process title `Paseo Daemon`) also opens ephemeral inspector and helper ports: see ephemeral_processes."}
+      - {port: 18807, bind: "*",         owner: unmanaged, service: paseo-dev-metro, status: default-claim,
+         must_be_up: false,  # on-demand Expo/Metro for the dev app, started by agents working in ~/src/paseo
+         note: "2026-10-24: Paseo checkout Expo web app (`EXPO_PORT=18807 PASEO_LISTEN=127.0.0.1:18806 scripts/dev-app.sh`). The repo default 8081 is the React Native/Expo default and unregistered. Metro listens on all interfaces; dev only."}
       - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
          note: "2026-10-03: `aiuse serve` (github.com/djbclark/aiuse, ~/src/aiuse) — on-demand loopback HTTP for agents, auto-started by the operator/agents, not a launchd service we manage (same class as opencli :19825). Its CLI default was 8787 until 2026-10-03, which silently collided with collie-bridge above: collie answers every path with HTML 200, so an agent hitting http://127.0.0.1:8787/v1/snapshot got plausible HTML from collie while aiuse serve wasn't running. aiuse commit 11d67f4 moved the default to 28787 AND made serve fail loudly when the port is held by a non-aiuse responder; clients identity-check via GET /v1/health -> {\"service\": \"aiuse\"}. Do not reassign 8787 or 28787 without checking both repos."}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
@@ -255,6 +261,8 @@ hosts:
         note: "Prisma query engine (prisma-python) -- one per LiteLLM process, random -p port per start; observed 50291/56091 (2026-09-29)"
       - pattern: "Orca.app/Contents/MacOS/Orca"
         note: "Orca.app secondary loopback listener on a per-launch high port (observed 49464); its fixed 6768 has its own row"
+      - pattern: "Paseo Daemon"
+        note: "Paseo dev daemon worker (node, process title) opens a Node inspector port (--inspect=0) and a helper port per start; observed 52338/52585 (2026-10-24). Its fixed port is the paseo-dev-daemon row"
       - pattern: "1Password.app"
         note: "1Password local helper port (observed 127.0.0.1:39127); app-owned, not ours to allocate"
       - pattern: "rapportd"
