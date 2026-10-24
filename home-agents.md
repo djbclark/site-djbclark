@@ -32,7 +32,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every needed page is eventually fetched**: fall back, fix the tool, or pause and fix it with djbclark; never
     "unfetchable" (`memory/feedback_web_failover_pause.md`).
 8. **Every list in a reply to djbclark is numbered or lettered, never plain `-`/`*` bullets** (tables are fine); **never restart at 1** in one reply: `1.1`/`2.1` or
-    `1a`/`2b`, **each item labelled once** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
+    `1a`/`2b`, **each item labelled once**; **question-card options too (`1. Keep pinned`), so a custom answer can cite one** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card**
     (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway, restarting, or rerunning what has a result; quota tight or
     pause asked: stop scheduling, let running work finish.
