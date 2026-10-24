@@ -85,15 +85,17 @@ listed in self-hosted too but route to commercial via the router when called.
 
 `firecrawl_developer_search` (and `firecrawl_search` with `categories: ["developer"]`) is answered by
 `firecrawl-router` from the **GitHub search API** (2026-10-24), because Hyades has no `/v2/search/developer` and the
-commercial index is off. Results are issues, merged pull requests, READMEs, docs and code files, merged round-robin
+commercial index is off. Results are issues, merged pull requests, READMEs, docs and code files of **public**
+repositories (the token can read private ones, so the router filters them out), merged round-robin
 in Firecrawl's shape with `source: "github"` and a per-kind `coverage`; there is no reranking and no non-GitHub
 documentation site. GitHub ANDs every word, so write a few distinctive terms (a name, an error string), not a
 sentence; a search that finds nothing is retried once with fewer terms. The token is `GITHUB_TOKEN`, read once per
 process through `sudo-secretspec get`; limits are GitHub's (30 searches/min, 10 for code search): a closed bucket
 shows as `coverage: "unavailable"` plus a `warning`, all closed as HTTP 429 with `Retry-After`. Only `query`, `k` and
 `types`/`repos`/`language`/`passages` over REST are honoured; the other developer filters are a 400.
-`FIRECRAWL_ROUTER_DEVELOPER=off` turns it off. With a commercial key configured the request goes to Hyades and then
-the commercial index, as before.
+`FIRECRAWL_ROUTER_DEVELOPER=off` turns it off; `FIRECRAWL_ROUTER_GITHUB_SECRET` names a different secretspec token
+(a fine-grained public-read one is the planned hardening). With a commercial key configured the request goes to
+Hyades and then the commercial index, as before.
 
 ## Search order
 
