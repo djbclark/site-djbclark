@@ -22,7 +22,8 @@ cpu_s() { # cumulative CPU seconds of the named process, 0 if absent
 sample() {
   local phase adm running cpu swap
   phase=$(cat "$dir/phase.txt" 2>/dev/null || echo unlabelled)
-  adm=$("$lw" admit --json 2>/dev/null) || adm='{}'
+  adm=$("$lw" admit --json 2>/dev/null)   # exit 75 means hot: the JSON is still the sample
+  [ -n "$adm" ] || adm='{}'
   swap=$(sysctl -n vm.swapusage | gawk '{ gsub("M", "", $6); print $6 }')
   if pgrep -x "App Tamer" > /dev/null; then running=1; else running=0; fi
   cpu=$(gawk -v a="$(cpu_s 'App Tamer')" -v b="$(cpu_s 'com.stclairsoft.AppTamer.Helper')" 'BEGIN { printf "%.2f", a+b }')
