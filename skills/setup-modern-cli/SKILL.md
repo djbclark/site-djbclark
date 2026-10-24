@@ -131,7 +131,14 @@ scheduled `brew-fast-upgrade` job owns updating.
 ## Footguns
 
 1. **`rg` with no path** searches more than intended. Always name the path
-   (home-agents rule, 2026-10-09).
+   (home-agents rule, 2026-10-09). **A named path can still over-search:**
+   `~/src` holds vendored/generated trees (`node_modules`, `litellm`,
+   `*.lock`, test fixtures, tokenizer JSON) that bury a config-literal sweep
+   in megabytes of noise. For "find every live reference to X", scope to live
+   dirs first (`~/.hermes/{bin,scripts,skills}`, `~/ops/<repo>`), or exclude
+   with `--glob '!**/node_modules/**' --glob '!**/*.lock' --glob '!**/fixtures/**'`.
+   Worktree checkouts under `~/src/*-worktrees` are separate branches, not live
+   config — report them, and never assume they are what runs.
 2. **`rg -r` is `--replace`, not a flag cluster.** `rg -rln PAT .` silently
    replaces every match in the *output* with `ln`, so ordinary files look
    corrupted (2026-10-11). Use `rg -l` and `rg -n` as separate flags.
