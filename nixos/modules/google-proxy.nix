@@ -39,10 +39,12 @@ let
   # authentication, the tailscale ACL (should allow only this peer to tcp/26369) and tinyproxy's `Allow` below.
   relayPeer = "100.104.212.89";
   tailnetInterface = "tailscale0";
-  # 2026-10-24, the better way round (firecrawl-hyades docs/tunnel.md): this host can still DIAL OUT to MIT, so it holds a
-  # reverse WebSocket tunnel open to a wstunnel server inside the SearXNG microVM on Hyades (through Hyades' own Caddy,
-  # wss://tunnelHost). That server listens on 127.0.0.1:tunnelPort THERE and forwards every connection back here to this
-  # proxy on 127.0.0.1:port. Hyades -> proxy no longer needs MIT to reach this host, nor pastebin.
+  # 2026-10-24 (firecrawl-hyades docs/tunnel.md): a reverse WebSocket tunnel is held open to a wstunnel server inside the
+  # SearXNG microVM on Hyades (wss://tunnelHost through Hyades' Caddy). That server listens on 127.0.0.1:tunnelPort THERE and
+  # forwards every connection back here to this proxy on 127.0.0.1:port. CAVEAT: this host cannot reach MIT's own networks over
+  # the public Internet either (the block is both ways), so the client only connects because this host's route to 18.0.0.0/8
+  # is the tailnet subnet route through pastebin: today the tunnel does not remove the pastebin dependency. Nothing on Hyades
+  # uses it yet.
   tunnelHost = "djbclark-firecrawl-tunnel.sipb.cloud";
   tunnelPort = 26372;
   publicInterface = "enp1s0";
