@@ -83,6 +83,7 @@ jobs:
             --repo fosterstack/cache \
             --signer-workflow fosterstack/cache/.github/workflows/stage-image.yml \
             --source-ref "refs/tags/${TAG}"
+          echo "Provenance verified: ${DIGEST} built by fosterstack/cache stage-image.yml at ${TAG}."
 
       - name: Simulated failure (test of the alarm path)
         if: inputs.simulate_failure
