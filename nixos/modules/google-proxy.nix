@@ -39,6 +39,12 @@ let
   # authentication, the tailscale ACL (should allow only this peer to tcp/26369) and tinyproxy's `Allow` below.
   relayPeer = "100.104.212.89";
   tailnetInterface = "tailscale0";
+  # 2026-10-24, the better way round (firecrawl-hyades docs/tunnel.md): this host can still DIAL OUT to MIT, so it holds a
+  # reverse WebSocket tunnel open to a wstunnel server inside the SearXNG microVM on Hyades (through Hyades' own Caddy,
+  # wss://tunnelHost). That server listens on 127.0.0.1:tunnelPort THERE and forwards every connection back here to this
+  # proxy on 127.0.0.1:port. Hyades -> proxy no longer needs MIT to reach this host, nor pastebin.
+  tunnelHost = "djbclark-firecrawl-tunnel.sipb.cloud";
+  tunnelPort = 26372;
   publicInterface = "enp1s0";
   # Separate routing table so "from $publicIp" never follows an 18/8 route (was GP tun0).
   returnPathTable = 100;
@@ -95,6 +101,7 @@ let
     Port ${toString port}
     Allow ${hyadesEgress}
     Allow ${relayPeer}
+    Allow 127.0.0.1
     Timeout 60
     MaxClients 40
     ConnectPort 443
@@ -123,7 +130,7 @@ let
       ${pkgs.coreutils}/bin/sleep 1
     done
     [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
-    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; echo "Listen 127.0.0.1"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -158,6 +165,49 @@ in
         "AF_INET"
         "AF_UNIX"
         "AF_NETLINK" # `ip addr` in the start script
+      ];
+      SystemCallFilter = [ "@system-service" ];
+    };
+  };
+
+  # The reverse tunnel client. The shared secret (the WebSocket path prefix the Hyades server requires) is in a root-only
+  # file that is not in git or the Nix store: /etc/wstunnel-hyades.env containing one line,
+  # WSTUNNEL_HTTP_UPGRADE_PATH_PREFIX=<secret> (docs/google-proxy-vps-primary.md section 6). It keeps reconnecting by itself
+  # (at most a minute apart); a start limit stops a real crash loop and hyades-watch notices either.
+  systemd.services.wstunnel-hyades = {
+    description = "Reverse WebSocket tunnel from Hyades (SearXNG microVM) back to tinyproxy-google";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" "tinyproxy-google.service" ];
+    wants = [ "network-online.target" "tinyproxy-google.service" ];
+    unitConfig = {
+      StartLimitIntervalSec = 900;
+      StartLimitBurst = 5;
+    };
+    serviceConfig = {
+      EnvironmentFile = "/etc/wstunnel-hyades.env";
+      ExecStart = lib.concatStringsSep " " [
+        "${pkgs.wstunnel}/bin/wstunnel client"
+        "--tls-verify-certificate"
+        "--reverse-tunnel-connection-retry-max-backoff 60s"
+        "-R tcp://127.0.0.1:${toString tunnelPort}:127.0.0.1:${toString port}"
+        "wss://${tunnelHost}:443"
+      ];
+      Restart = "on-failure";
+      RestartSec = "10s";
+      DynamicUser = true;
+      MemoryMax = "128M";
+      NoNewPrivileges = true;
+      CapabilityBoundingSet = "";
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectKernelTunables = true;
+      ProtectControlGroups = true;
+      RestrictAddressFamilies = [
+        "AF_INET"
+        "AF_INET6"
+        "AF_UNIX"
       ];
       SystemCallFilter = [ "@system-service" ];
     };
