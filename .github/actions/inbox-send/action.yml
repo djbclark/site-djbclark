@@ -40,11 +40,14 @@ inputs:
 runs:
   using: composite
   steps:
+    # The sparse list must keep this action's own directory: the runner reads action.yml
+    # again for the post step, which fails the job if the checkout removed it.
     - name: Check out the inbox register
       uses: actions/checkout@v4
       with:
         sparse-checkout: |
           registry/telegram-inbox.env
+          .github/actions/inbox-send/
         sparse-checkout-cone-mode: false
 
     - name: Resolve route and send
