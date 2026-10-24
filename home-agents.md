@@ -114,6 +114,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 34. **Run builds and tests via `~/ops/site-private/bin/bg`** (**always the full path**) in the background; **first see whether CI can run it** (`load-watch ci decide`).
     **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy -b`; never throttle another session's processes. Gradle: one build at a time, machine-wide**
     (`memory/feedback_tests_through_bg_caps_and_slots.md`, `memory/feedback_gradle_one_at_a_time.md`).
+    **Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding; test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
 
 ## Compact Instructions
 

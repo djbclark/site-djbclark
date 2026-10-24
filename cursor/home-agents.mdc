@@ -227,6 +227,8 @@ throttle or SIGSTOP another session's processes.
 queued, not hung: don't kill or retry it. Profiles: default `low`; `night` only with an expiry
 (`bin/gradle-limits set night --until 07:00`); don't override with `--max-workers` or `-Dorg.gradle.*`. Detail: site-djbclark `docs/gradle-limits.md`.
 
+**Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding it; drive test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
+
 ## Waiting on background work, and reading results
 
 Start slow work (over ~10-15 s) in the background; an Agent-tool sub-agent waits in bounded foreground
