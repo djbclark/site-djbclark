@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 VENV="${BOOK_KB_VENV:-$HOME/.local/share/book-kb/venv}"
 KB_ROOT="${KB_ROOT:-$HOME/kb}"
-PY_VERSION="${BOOK_KB_PYTHON:-3.12}"
+PY_VERSION="${BOOK_KB_PYTHON:-3.14}"
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
 
@@ -49,12 +49,20 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2. The docling toolchain, pinned to 3.12: torch has no 3.14 wheels, and several
-#    distributions now default to 3.13+.
-# --allow-existing, not --clear: re-running must not destroy a 1.2 GB venv.
-if [ -x "$VENV/bin/python" ]; then
+# 2. The docling toolchain, on the newest Python minor it resolves on: 3.14.
+#    docling-slim[standard] needs torch, and torch 2.14.1 ships wheels only up
+#    to cp314 (no cp315; checked 2026-10-24), so Homebrew's default 3.15 fails
+#    to resolve. Move this up when torch publishes cp315 wheels.
+# --allow-existing, not --clear: re-running must not destroy a 1.2 GB venv —
+# unless its Python minor differs from PY_VERSION, which needs a fresh venv.
+have=""
+[ -x "$VENV/bin/python" ] && have=$("$VENV/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)
+if [ -n "$have" ] && [ "$have" = "$PY_VERSION" ]; then
   say "reusing venv at $VENV"
   uv venv --python "$PY_VERSION" --allow-existing "$VENV" >/dev/null
+elif [ -n "$have" ]; then
+  say "recreating venv at $VENV (Python $have -> $PY_VERSION)"
+  uv venv --python "$PY_VERSION" --clear "$VENV" >/dev/null
 else
   say "creating venv at $VENV (Python $PY_VERSION)"
   uv venv --python "$PY_VERSION" "$VENV" >/dev/null

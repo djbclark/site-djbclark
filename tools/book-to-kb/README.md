@@ -33,7 +33,7 @@ Install the book-to-kb skill and its toolchain for me.
 2. Make sure `uv` is installed. If not: `curl -LsSf https://astral.sh/uv/install.sh | sh`
    on Linux/macOS, or `brew install uv`. uv manages its own Python, so my system
    Python version does not matter.
-3. Run `./install.sh`. It creates a Python 3.12 venv with docling (about 1.2 GB,
+3. Run `./install.sh`. It creates a Python 3.14 venv with docling (about 1.2 GB,
    a few minutes), installs the `book-kb` CLI to ~/.local/bin, symlinks the
    book-to-kb skill into every agent skills directory on this machine, and
    creates ~/kb.
@@ -144,7 +144,7 @@ tokens as `<span class="…">` — which is what Pygments emits natively.
 
 Configuration, all environment variables: `KB_ROOT` (default `~/kb`),
 `BOOK_KB_VENV` (`~/.local/share/book-kb/venv`), `BOOK_KB_BM_PROJECT` (`books`),
-`BOOK_KB_PYTHON` (`3.12`).
+`BOOK_KB_PYTHON` (`3.14`: the newest minor torch has wheels for).
 
 ## Not a replacement for book-to-skill
 

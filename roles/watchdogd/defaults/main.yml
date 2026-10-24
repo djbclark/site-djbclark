@@ -37,8 +37,11 @@ watchdogd_start_interval: 60
 # minor is pinned here: any python3 >= 3.11 first on the PATH will do, and
 # the preflight task below is the guard. That link is not this role's and
 # stays on 3.14 for now only because pip-installed packages live in 3.14's
-# site-packages (ddddocr needs onnxruntime, which has no cp315 wheel);
-# re-point it at /opt/homebrew/bin/python3 (or delete it) once they move. After
+# site-packages. Known blocker: ddddocr needs onnxruntime, and onnxruntime
+# (1.31.0, checked 2026-10-24) ships wheels only up to cp314, so 3.15 cannot
+# install it. Once onnxruntime publishes cp315 wheels, reinstall those
+# packages on /opt/homebrew/bin/python3 and re-point the link there (or
+# delete it). After
 # that reboot (and `just launchd-path-status` in sync), set this true: the
 # PATH key is dropped and the job inherits launchd's.
 watchdogd_inherit_path: false
