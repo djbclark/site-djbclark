@@ -86,17 +86,18 @@ listed in self-hosted too but route to commercial via the router when called.
 `firecrawl_developer_search` (and `firecrawl_search` with `categories: ["developer"]`) is answered by
 `firecrawl-router` from the **GitHub search API** (2026-10-24), because Hyades has no `/v2/search/developer` and the
 commercial index is off. Results are issues, merged pull requests, READMEs, docs and code files of **public**
-repositories (the token can read private ones, so the router filters them out, best effort: `docs/threat-model.md`
-item 10), merged round-robin
+repositories (the live token is a fine-grained public-repositories-read-only one, `FIRECRAWL_GITHUB_PUBLIC_TOKEN`,
+since 2026-10-24; the router still adds `is:public` and drops private hits as a second layer), merged round-robin
 in Firecrawl's shape with `source: "github"` and a per-kind `coverage`; there is no reranking and no non-GitHub
 documentation site. GitHub ANDs every word, so write a few distinctive terms (a name, an error string), not a
 sentence; a search that finds nothing is retried once with fewer terms (never when `repos` scopes it). The token is
-`GITHUB_TOKEN`, held in memory from one `sudo-secretspec get` (read again at most once a minute while none is held);
+`FIRECRAWL_GITHUB_PUBLIC_TOKEN` (the router's default name is `GITHUB_TOKEN`, a classic `repo`-scope PAT; the `shared_mcp` role sets `FIRECRAWL_ROUTER_GITHUB_SECRET`), held in memory from one `sudo-secretspec get` (read again at most once a minute while none is held);
 limits are GitHub's (30 searches/min, 10 for code search): a closed bucket
 shows as `coverage: "unavailable"` plus a `warning`, all closed as HTTP 429 with `Retry-After`. Only `query`, `k` and
 `types`/`repos` (one `owner/name`)/`language`/`passages` over REST are honoured; the other developer filters are a 400.
-`FIRECRAWL_ROUTER_DEVELOPER=off` turns it off; `FIRECRAWL_ROUTER_GITHUB_SECRET` names a different secretspec token
-(a fine-grained public-read one is the planned hardening). With a commercial key configured the request goes to
+`FIRECRAWL_ROUTER_DEVELOPER=off` turns it off; `FIRECRAWL_ROUTER_GITHUB_SECRET` names the secretspec token. The token expires
+(set when it was minted: check the date on github.com/settings/personal-access-tokens); after that the router answers with the
+unauthenticated fallback and a `warning`, and code search returns HTTP 401. With a commercial key configured the request goes to
 Hyades and then the commercial index, as before.
 
 ## Search order
