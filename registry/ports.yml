@@ -263,6 +263,8 @@ hosts:
         note: "Orca.app secondary loopback listener on a per-launch high port (observed 49464); its fixed 6768 has its own row"
       - pattern: "Paseo Daemon"
         note: "Paseo dev daemon worker (node, process title) opens a Node inspector port (--inspect=0) and a helper port per start; observed 52338/52585 (2026-10-24). Its fixed port is the paseo-dev-daemon row"
+      - pattern: "src/paseo/node_modules/electron"
+        note: "Paseo checkout dev desktop (`npm run dev:desktop` flow, Electron from ~/src/paseo): Chromium remote-debugging port is OS-assigned per start (--remote-debugging-port=0); its daemon and Metro use the claimed 18806/18807 rows"
       - pattern: "1Password.app"
         note: "1Password local helper port (observed 127.0.0.1:39127); app-owned, not ours to allocate"
       - pattern: "rapportd"
