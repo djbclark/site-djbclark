@@ -1,0 +1,321 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
+"""Host-side invariant checks for the Telegram inbox register
+(registry/telegram-inbox.toml) against the two live files that duplicate its
+facts today: ~/.hermes/config.yaml (channel_overrides / ignored_threads) and
+~/.hermes/cron/jobs.json (scheduled jobs' `deliver` targets). Read-only --
+never writes config.yaml, jobs.json or the register. See
+central-register-design-report.md sections E (config invariant) and D (cron)
+for the fuller design this is drawn from; this tool is S5's narrower,
+self-contained slice of both (it does not depend on [cron.routes] / [cron]
+unmanaged, which are a separate seeding step).
+
+Commands:
+  inbox-check config [--register PATH] [--config PATH]
+      Every mode="sink" destination's thread_id must be in
+      platforms.telegram.extra.ignored_threads. Every mode="bound"
+      destination must NOT be ignored and must have a channel_overrides
+      entry whose model/provider matches its bound_to (when the register
+      records one). No destination or [retired.*] thread_id may appear as a
+      channel_overrides key (a "live route") unless it is the one
+      mode="bound" destination it belongs to. On drift, prints the YAML
+      fragment the operator would paste to fix it.
+  inbox-check cron [--jobs PATH] [--register PATH]
+      Classifies every job's `deliver`: a telegram:<chat>:<thread> whose
+      thread is a known destination = OK; whose thread is retired = ERROR
+      (fails the check); `local`/`origin` = OK; bare `telegram` (no thread)
+      = WARN (does not fail: this is today's one known unmanaged
+      home-channel job). Prints a per-job table and a summary count.
+  inbox-check all [--register PATH] [--config PATH] [--jobs PATH]
+      Runs both.
+
+Exit codes: 0 clean, 1 drift/error found, 2 cannot read or parse input.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import tomllib
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+REPO = Path(__file__).resolve().parent.parent
+DEFAULT_REGISTER = REPO / "registry" / "telegram-inbox.toml"
+DEFAULT_HERMES_CONFIG = Path.home() / ".hermes" / "config.yaml"
+DEFAULT_JOBS = Path.home() / ".hermes" / "cron" / "jobs.json"
+
+
+class CheckError(Exception):
+    """Input is missing, unparseable, or not shaped as expected -- exit 2,
+    distinct from a drift finding (exit 1)."""
+
+
+def load_register(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise CheckError(f"cannot read {path}: {exc}") from exc
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise CheckError(f"cannot parse {path}: {exc}") from exc
+
+
+def load_yaml_mapping(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise CheckError(f"cannot read {path}: {exc}") from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise CheckError(f"cannot parse {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise CheckError(f"{path}: expected a YAML mapping at the top level")
+    return data
+
+
+def load_json_mapping(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise CheckError(f"cannot read {path}: {exc}") from exc
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CheckError(f"cannot parse {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise CheckError(f"{path}: expected a JSON object at the top level")
+    return data
+
+
+def _dig(data: dict[str, Any], *keys: str) -> Any:
+    cur: Any = data
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def check_config(register: dict[str, Any], config: dict[str, Any]) -> list[str]:
+    """Read-only invariant between the register and ~/.hermes/config.yaml.
+    Returns drift findings; empty means clean."""
+    findings: list[str] = []
+    destinations: dict[str, Any] = register.get("destinations") or {}
+    retired: dict[str, Any] = register.get("retired") or {}
+    retired_ids = {int(k) for k in retired}
+
+    channel_overrides = _dig(config, "platforms", "telegram", "channel_overrides") or {}
+    ignored_threads_raw = _dig(config, "platforms", "telegram", "extra", "ignored_threads") or []
+    ignored_threads = {int(t) for t in ignored_threads_raw}
+    override_ids = {int(k) for k in channel_overrides}
+
+    thread_to_name: dict[int, str] = {}
+    for name, dest in sorted(destinations.items()):
+        thread_id = int(dest["thread_id"])
+        thread_to_name[thread_id] = name
+        mode = dest.get("mode")
+
+        if mode == "sink":
+            if thread_id not in ignored_threads:
+                findings.append(
+                    f"destination {name!r} (thread {thread_id}, mode=sink) is missing from "
+                    f"platforms.telegram.extra.ignored_threads -- paste:\n"
+                    f"      ignored_threads:\n        - {thread_id}   # {name}"
+                )
+        elif mode == "bound":
+            if thread_id in ignored_threads:
+                findings.append(
+                    f"destination {name!r} (thread {thread_id}, mode=bound) is in "
+                    f"platforms.telegram.extra.ignored_threads, but it is a live binding -- "
+                    f"remove it from ignored_threads there"
+                )
+            override = channel_overrides.get(str(thread_id))
+            bound_to = dest.get("bound_to")
+            if override is None:
+                findings.append(
+                    f"destination {name!r} (thread {thread_id}, mode=bound) has no "
+                    f"platforms.telegram.channel_overrides entry -- paste:\n"
+                    f"      channel_overrides:\n        '{thread_id}':\n          provider: {bound_to or '<bound_to>'}"
+                )
+            elif bound_to and bound_to not in (override.get("model"), override.get("provider")):
+                findings.append(
+                    f"destination {name!r} (thread {thread_id}): channel_overrides entry has "
+                    f"model={override.get('model')!r} provider={override.get('provider')!r}, neither "
+                    f"matches the register's bound_to={bound_to!r} -- paste:\n"
+                    f"      channel_overrides:\n        '{thread_id}':\n          provider: {bound_to}"
+                )
+
+    for thread_id in sorted(override_ids):
+        if thread_id in retired_ids:
+            was = retired.get(str(thread_id), {}).get("was", "?")
+            findings.append(
+                f"platforms.telegram.channel_overrides has retired thread {thread_id} (was {was!r}) "
+                f"as a live route -- remove that channel_overrides entry"
+            )
+            continue
+        name = thread_to_name.get(thread_id)
+        if name is not None and destinations[name].get("mode") != "bound":
+            findings.append(
+                f"platforms.telegram.channel_overrides has thread {thread_id} (destination {name!r}, "
+                f"mode={destinations[name].get('mode')!r}) as a live route -- only the register's "
+                f"mode=bound destination may have a channel_overrides entry"
+            )
+
+    return findings
+
+
+def classify_cron_job(job: dict[str, Any], thread_to_name: dict[int, str], retired_ids: set[int]) -> tuple[str, str]:
+    """Return (deliver-as-printed, verdict) for one jobs.json entry."""
+    deliver = job.get("deliver")
+
+    if deliver is None:
+        return "<none>", "SKIP (no deliver configured)"
+    if deliver in ("local", "origin"):
+        return str(deliver), "OK (local)"
+    if deliver == "telegram":
+        return "telegram", "WARN unmanaged home-channel delivery"
+    if isinstance(deliver, str) and deliver.startswith("telegram:"):
+        parts = deliver.split(":")
+        if len(parts) != 3:
+            return deliver, "WARN malformed telegram deliver target"
+        try:
+            thread_id = int(parts[2])
+        except ValueError:
+            return deliver, "WARN malformed telegram deliver target"
+        if thread_id in retired_ids:
+            return deliver, f"ERROR delivers to retired thread {thread_id}"
+        name = thread_to_name.get(thread_id)
+        if name is not None:
+            return deliver, f"OK ({name})"
+        return deliver, f"WARN unknown thread {thread_id} (not in register)"
+    return "<none>" if deliver is None else str(deliver), "SKIP (not telegram/local/origin)"
+
+
+def check_cron(jobs_data: dict[str, Any], register: dict[str, Any]) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Return (rows, findings). rows are (job label, deliver, verdict) for
+    the printed table; findings are only the ERROR-level ones (retired-thread
+    delivery), which are what fail the check -- WARN/OK/SKIP never do."""
+    destinations: dict[str, Any] = register.get("destinations") or {}
+    retired: dict[str, Any] = register.get("retired") or {}
+    retired_ids = {int(k) for k in retired}
+    thread_to_name = {int(dest["thread_id"]): name for name, dest in destinations.items()}
+
+    rows: list[tuple[str, str, str]] = []
+    findings: list[str] = []
+    for job in jobs_data.get("jobs") or []:
+        job_id = job.get("id", "?")
+        name = job.get("name") or "<unnamed>"
+        label = f"{job_id} ({name})"
+        deliver, verdict = classify_cron_job(job, thread_to_name, retired_ids)
+        rows.append((label, deliver, verdict))
+        if verdict.startswith("ERROR"):
+            findings.append(f"job {label}: {verdict}")
+
+    return rows, findings
+
+
+def _print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
+    widths = [max(len(h), *(len(r[i]) for r in rows)) if rows else len(h) for i, h in enumerate(headers)]
+
+    def fmt(cols: tuple[str, ...]) -> str:
+        return "  ".join(c.ljust(w) for c, w in zip(cols, widths))
+
+    print(fmt(headers))
+    for row in rows:
+        print(fmt(row))
+
+
+def cmd_config(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="inbox-check config")
+    parser.add_argument("--register", type=Path, default=DEFAULT_REGISTER)
+    parser.add_argument("--config", type=Path, default=DEFAULT_HERMES_CONFIG)
+    args = parser.parse_args(argv)
+
+    try:
+        register = load_register(args.register)
+        config = load_yaml_mapping(args.config)
+    except CheckError as exc:
+        print(f"inbox-check: FAIL: {exc}", file=sys.stderr)
+        return 2
+
+    findings = check_config(register, config)
+    for f in findings:
+        print(f"inbox-check config: DRIFT: {f}")
+    if findings:
+        return 1
+    print("inbox-check config: OK")
+    return 0
+
+
+def cmd_cron(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="inbox-check cron")
+    parser.add_argument("--jobs", type=Path, default=DEFAULT_JOBS)
+    parser.add_argument("--register", type=Path, default=DEFAULT_REGISTER)
+    args = parser.parse_args(argv)
+
+    try:
+        jobs_data = load_json_mapping(args.jobs)
+        register = load_register(args.register)
+    except CheckError as exc:
+        print(f"inbox-check: FAIL: {exc}", file=sys.stderr)
+        return 2
+
+    rows, findings = check_cron(jobs_data, register)
+    _print_table(("JOB", "DELIVER", "VERDICT"), rows)
+
+    summary = Counter(verdict.split()[0] for _label, _deliver, verdict in rows)
+    print("inbox-check cron: " + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+
+    for f in findings:
+        print(f"inbox-check cron: DRIFT: {f}")
+    if findings:
+        return 1
+    return 0
+
+
+def cmd_all(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="inbox-check all")
+    parser.add_argument("--register", type=Path, default=DEFAULT_REGISTER)
+    parser.add_argument("--config", type=Path, default=DEFAULT_HERMES_CONFIG)
+    parser.add_argument("--jobs", type=Path, default=DEFAULT_JOBS)
+    args = parser.parse_args(argv)
+
+    rc_config = cmd_config(["--register", str(args.register), "--config", str(args.config)])
+    print()
+    rc_cron = cmd_cron(["--jobs", str(args.jobs), "--register", str(args.register)])
+
+    if 2 in (rc_config, rc_cron):
+        return 2
+    if 1 in (rc_config, rc_cron):
+        return 1
+    return 0
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv:
+        print("inbox-check: FAIL: need a command (config|cron|all)", file=sys.stderr)
+        return 2
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "config":
+        return cmd_config(rest)
+    if cmd == "cron":
+        return cmd_cron(rest)
+    if cmd == "all":
+        return cmd_all(rest)
+    print(f"inbox-check: FAIL: unknown command {cmd!r}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

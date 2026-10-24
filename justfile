@@ -98,6 +98,11 @@ inbox-check:
     bin/registry_lint.py
     bin/inbox-target export --check
 
+# Host-only: the register against the two live ~/.hermes files (S5's
+# bin/inbox-check), which CI has no access to. Run on this machine, not CI.
+inbox-check-host:
+    bin/inbox-check all
+
 # Serialize multi-agent release cut/deploy (see docs/OPS-RELEASES.md § locking).
 # State dir: ~/.local/state/site-djbclark/ (ops-release.lock + ops-release.claim.json)
 ops-release-claim-status:

@@ -53,6 +53,23 @@ TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL = False
 # future fifth; \b22158\b is the retired pre-split Inbox thread.
 TELEGRAM_INBOX_LITERAL_PATTERNS = [r"\b838808636\b", r"\b4413[0-9]\b", r"\b22158\b"]
 
+# --strict allowlist: files that intentionally keep a literal fallback
+# default for when registry/telegram-inbox.env isn't sourced (e.g. a
+# deployed copy run standalone, or a jinja template rendered before the env
+# path exists). Each is a known, reviewed case from central-register-
+# design-report.md section 0 item 3 / section F -- not yet migrated to read
+# the generated .env, but not an unreviewed literal either. A line matching
+# one of these paths is exempt only under --strict; the default (warn-only)
+# lint still reports it like any other hit so migration progress stays
+# visible. Remove an entry here once that file reads the .env instead.
+TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST = {
+    "bin/hermes-ping",
+    "bin/fleet-watch",
+    "bin/basic_memory_watchdog.py",
+    "roles/site_agents/files/hibernate-disk-check",
+    "roles/site_agents/templates/jobber-notify.py.j2",
+}
+
 # Site-owned Ansible roles that declare their own port default, each
 # cross-checked against the registry/ports.yml entry with the matching
 # `service` name (any host). Catches the same drift class that motivated
@@ -229,16 +246,24 @@ def lint_telegram_inbox_env(findings: list[str]) -> None:
         )
 
 
-def lint_telegram_inbox_literals(findings: list[str]) -> None:
-    """WARN-ONLY (central-register-design-report.md sections E/F7): flags a
-    Telegram chat/thread id literal living outside registry/, where it
-    should instead be read from registry/telegram-inbox.env. Never adds to
-    `findings` (so it never fails the lint) while
-    TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL is False; that constant is the one
-    flip step F7 needs once every sender has migrated.
+def lint_telegram_inbox_literals(findings: list[str], strict: bool = False) -> None:
+    """WARN-ONLY by default (central-register-design-report.md sections
+    E/F7): flags a Telegram chat/thread id literal living outside
+    registry/, where it should instead be read from
+    registry/telegram-inbox.env. Never adds to `findings` (so it never fails
+    the lint) while TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL is False; that
+    constant is the one flip step F7 needs once every sender has migrated.
     bin/registry_lint.py itself is excluded from the scan because
     TELEGRAM_INBOX_LITERAL_PATTERNS above necessarily contains these same
-    digit strings as regex text."""
+    digit strings as regex text.
+
+    `strict` (the lint's --strict flag, not yet wired into CI): a hit on a
+    path in TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST still prints as a WARN
+    (migration progress stays visible) but is not added to `findings`; any
+    other hit is a hard failure regardless of
+    TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL. This lets a caller fail on a new,
+    unreviewed literal while a short, named list of already-reviewed
+    fallback defaults keeps warning only."""
     if shutil.which("rg") is None:
         print("registry-lint: inbox literal-ID guard skipped (rg not found)")
         return
@@ -253,7 +278,13 @@ def lint_telegram_inbox_literals(findings: list[str]) -> None:
         return
     hits = [line for line in result.stdout.splitlines() if line]
     for line in hits:
-        if TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL:
+        path = line.split(":", 1)[0]
+        if strict:
+            if path in TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST:
+                print(f"registry-lint: WARN: telegram inbox literal outside registry/ (allowlisted): {line}")
+            else:
+                findings.append(f"telegram inbox literal outside registry/ (not allowlisted): {line}")
+        elif TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL:
             findings.append(f"telegram inbox literal outside registry/: {line}")
         else:
             print(f"registry-lint: WARN: telegram inbox literal outside registry/: {line}")
@@ -405,6 +436,14 @@ def main() -> int:
         help="diff registry/ports.yml against this machine's live TCP listeners (advisory, always exits 0)",
     )
     parser.add_argument("--host", default="mac", help="host key in registry/ports.yml to reconcile against (default: mac)")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "fail on any telegram-inbox literal outside registry/ that isn't in "
+            "TELEGRAM_INBOX_LITERAL_STRICT_ALLOWLIST (default stays warn-only; not yet wired into CI)"
+        ),
+    )
     args = parser.parse_args()
 
     if args.reconcile:
@@ -418,7 +457,7 @@ def main() -> int:
         lint_generated_paths()
         lint_telegram_inbox_schema(findings)
         lint_telegram_inbox_env(findings)
-        lint_telegram_inbox_literals(findings)
+        lint_telegram_inbox_literals(findings, strict=args.strict)
     except (OSError, yaml.YAMLError) as exc:
         fail(str(exc))
         return 2
