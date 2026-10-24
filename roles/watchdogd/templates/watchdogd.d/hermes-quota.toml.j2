@@ -1,0 +1,38 @@
+# Hermes side-model quota. Rendered by roles/watchdogd; edit the role.
+# 2026-10-24: Hermes ran out of model quota (cline2 DeepSeek Flash daily cap,
+# then the xAI grok credits). The probe is `change-hermes --check` (djbclark-ade:
+# one tiny real request to the route in fallback_providers[0]); exit 10 = that
+# route has no quota -> the action `change-hermes --auto` points every
+# side-model slot at the first route in AUTO_ORDER that answers.
+# Exit 75 = skip (04:58-05:10 local, the home network's nightly reboot).
+# Exit 73 = busy: another change-hermes (e.g. the Grok Bot box's wd-hermes,
+# which runs the same script here over ssh) holds ~/.hermes/state/change-hermes.lock.
+# The lock and change-hermes' own 30 min --auto cooldown keep this entry and the
+# box watchdog from switching twice.
+# Backoff: one --auto per 30 min at most, 4 per 6 h, then alert and stop until
+# the route is healthy for 6 h or someone looks.
+name = "hermes-quota"
+interval_s = 900
+
+[probe]
+kind = "command"
+command = ["/Users/djbclark/src/djbclark-ade/bin/change-hermes", "--check", "--skip-window", "0458-0510"]
+skip_exit_codes = [73, 75]
+timeout_s = 180
+
+[policy]
+slow_before_action = 2
+down_before_action = 1
+grace_s = 1800
+action = "command"
+command = ["/Users/djbclark/src/djbclark-ade/bin/change-hermes", "--auto", "--skip-window", "0458-0510"]
+timeout_s = 900
+min_action_interval_s = 1800
+max_restarts = 4
+healthy_reset_s = 21600
+renotify_s = 21600
+
+[notify]
+down = "{name} DOWN: Hermes side-model route has no quota ({detail}); running change-hermes --auto{tail}"
+recovered = "{name} RECOVERED: Hermes side-model route answers again ({detail})"
+exhausted = "{name}: change-hermes --auto ran {used} times without 6 h of health; stopped. Run change-hermes by hand ({detail})."

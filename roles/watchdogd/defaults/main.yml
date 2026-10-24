@@ -71,6 +71,7 @@ watchdogd_services:
   # NeoFinder runs; ~/.local/bin/neofinder-update runs one by hand. The
   # template stays in watchdogd.d/ so re-adding the name here restores it.
   - auxkc-heal
+  - hermes-quota
 
 # shutdown-thaw: a second, persistent LaunchAgent next to the watchdog
 # (2026-10-15). It thaws the SIGSTOPped Apple daemons when a logout, restart
