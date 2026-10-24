@@ -93,6 +93,7 @@ jobs:
           EXTENSION_SLUG: ${{ matrix.extension.slug }}
           LATEST_VERSION: ${{ steps.version.outputs.latest_version }}
         run: |
+          set -euo pipefail
           title="Herdr extension update: ${EXTENSION_SLUG} ${LATEST_VERSION}"
           count=$(gh issue list \
             --repo "$GITHUB_REPOSITORY" \
@@ -102,6 +103,9 @@ jobs:
             --json title \
             | jq --arg t "$title" '[.[] | select(.title == $t)] | length')
 
+          case "$count" in
+            ''|*[!0-9]*) echo "::error::dedupe count was not a number: '$count'"; exit 1 ;;
+          esac
           if [ "$count" -eq 0 ]; then
             echo "new_update=true" >> "$GITHUB_OUTPUT"
           else

@@ -265,4 +265,4 @@ jobs:
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
           # Unique key per run — caches are immutable; a new key creates a new entry
-          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
+          key: gh-tracker-v3-${{ matrix.issue.slug }}-${{ github.run_id }}
