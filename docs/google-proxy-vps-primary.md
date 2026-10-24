@@ -105,5 +105,13 @@ Tailscale's rules: restart tailscaled right after it.
    allow only `100.104.212.89` to reach this host on `tcp/26369` in the tailnet policy (admin console). The rate limit the
    public rule applies to Hyades (40 new connections/s per source) therefore does not apply on this path; the same limit is
    enforced on pastebin's nftables rule for `:26371` instead.
-3. **Restoring the direct path** needs MIT IS&T / SIPB to fix the route to `178.105.34.223`; nothing else on this host
-   changes when it returns (the public listener and the `18.4.60.84` rule are untouched).
+3. **Restoring the direct path** by MIT fixing the route to `178.105.34.223` would need nothing else on this host (the public
+   listener and the `18.4.60.84` rule are untouched).
+4. **The fix that worked, 2026-10-24 evening: a second public address.** MIT's border drops traffic to and from
+   `178.105.34.223` only; a Hetzner Floating IPv4, `78.47.225.34` (id 157592860, nbg1, 3.50 EUR a month, created through the
+   Hetzner Cloud API with `HETZNER_CLOUD_TOKEN`), is reachable from MIT. The module's `floatingIp`: `hyades-public-return-path`
+   puts it on `enp1s0` (Hetzner routes it here but does not configure it) and gives it the same source rule as the primary
+   address (without it, replies to 18/8 follow the tailnet subnet route and vanish), and `tinyproxy-google` listens on it.
+   Hyades connects to `http://78.47.225.34:26369` directly, so the pastebin relay and the tailnet hop are no longer needed
+   (the relay stays as a spare). Outgoing requests still leave from the primary address. Undo: `DELETE
+   /v1/floating_ips/157592860` and remove `floatingIp`. Details and the fallback plan: firecrawl-hyades `docs/rendezvous-plan.md`.
