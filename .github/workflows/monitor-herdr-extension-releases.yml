@@ -100,7 +100,7 @@ jobs:
             --search "${title} in:title" \
             --limit 100 \
             --json title \
-            --jq "[.[] | select(.title == \"$title\")] | length")
+            | jq --arg t "$title" '[.[] | select(.title == $t)] | length')
 
           if [ "$count" -eq 0 ]; then
             echo "new_update=true" >> "$GITHUB_OUTPUT"
@@ -123,10 +123,11 @@ jobs:
             '🧩 Herdr extension update: %s %s → %s\n%s / %s\n%s' \
             "$EXTENSION_REPO" "$INSTALLED_VERSION" "$LATEST_VERSION" \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$text"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Notify via Hermes-style Telegram delivery
@@ -183,10 +184,11 @@ jobs:
           run_url="${run_url}${GITHUB_RUN_ID}"
           printf -v text '✅ Herdr extension monitor test\n%s / %s\n%s' \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$text"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Send test notification to Hermes Telegram topic

@@ -72,11 +72,15 @@ jobs:
             echo "last_url=$(jq -r '.comments | last | .url // ""' <<<"$data")"
           } >> "$GITHUB_OUTPUT"
 
-          # Excerpt is multi-line; pass it through a heredoc delimiter.
+          # Excerpt is multi-line; pass it through a heredoc delimiter. The
+          # excerpt is attacker-controlled (a public issue comment body), so
+          # the delimiter must be unpredictable per write or a crafted
+          # comment can inject arbitrary output keys.
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "excerpt<<__EXCERPT__"
+            echo "excerpt<<$d"
             jq -r '.comments | last | .body // "" | .[0:500]' <<<"$data"
-            echo "__EXCERPT__"
+            echo "$d"
           } >> "$GITHUB_OUTPUT"
 
       - name: Read last-seen state from the tracking issue
@@ -158,10 +162,11 @@ jobs:
             "${LAST_URL:-$ISSUE_URL}" \
             "${EXCERPT:-(no comment body)}" \
             "$ISSUE_URL" "$run_url"
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$text"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Notify via Hermes Telegram topic
@@ -228,10 +233,11 @@ jobs:
           run_url="${run_url}${GITHUB_RUN_ID}"
           printf -v text '✅ thaw-next access monitor test\n%s / %s\n%s' \
             "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$text"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Send test notification to Hermes Telegram topic

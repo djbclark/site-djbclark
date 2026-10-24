@@ -77,8 +77,8 @@ runs:
         fi
 
         if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-          echo "::warning::TELEGRAM_BOT_TOKEN is not set; nothing sent for route '${INBOX_ROUTE}'."
-          exit 0
+          echo "::error::TELEGRAM_BOT_TOKEN is not set; nothing sent for route '${INBOX_ROUTE}'."
+          exit 1
         fi
 
         text="$INBOX_MESSAGE"
@@ -110,6 +110,6 @@ runs:
             echo "::error::Telegram API error: ${desc}"
             exit 1
           else
-            echo "Telegram API error: ${desc}"
+            echo "::warning::Telegram API error: ${desc}"
           fi
         fi

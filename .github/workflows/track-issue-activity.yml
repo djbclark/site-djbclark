@@ -199,52 +199,49 @@ jobs:
           # Save current state
           echo "{\"comment_count\":$new_count,\"state\":\"$new_state\",\"updated_at\":\"$new_updated\"}" > "$CACHE_FILE"
 
-      - name: Save state cache
-        # Save when something changed, OR on first run (no cache yet) to seed
-        # the baseline — otherwise a cold start would never notify again.
-        # Never save when the fetch failed (would poison the cache with bad state).
-        if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
-        uses: actions/cache/save@v6
-        with:
-          path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
-          # Unique key per run — caches are immutable; a new key creates a new entry
-          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}
-
       - name: Compose notification text
         id: compose
         if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
         env:
           ISSUE_URL: "https://github.com/${{ matrix.issue.repo }}/${{ (matrix.issue.type || 'issue') == 'discussion' && 'discussions' || 'issues' }}/${{ matrix.issue.number }}"
+          REPO: ${{ matrix.issue.repo }}
+          NUM: ${{ matrix.issue.number }}
+          TITLE: ${{ steps.check.outputs.title }}
+          NOTE: ${{ steps.check.outputs.note }}
+          STATE_NOTE: ${{ steps.check.outputs.state_change_note }}
+          STATE: ${{ steps.check.outputs.state }}
         run: |
-          REPO="${{ matrix.issue.repo }}"
-          NUM="${{ matrix.issue.number }}"
-          TITLE="${{ steps.check.outputs.title }}"
-          NOTE="${{ steps.check.outputs.note }}"
-          STATE_NOTE="${{ steps.check.outputs.state_change_note }}"
-          STATE="${{ steps.check.outputs.state }}"
+          esc() { python3 -c 'import html,sys;print(html.escape(sys.argv[1]))' "$1"; }
+          REPO_ESC=$(esc "$REPO")
+          NUM_ESC=$(esc "$NUM")
+          TITLE_ESC=$(esc "$TITLE")
+          STATE_ESC=$(esc "$STATE")
+          NOTE_ESC=$(esc "$NOTE")
+          STATE_NOTE_ESC=$(esc "$STATE_NOTE")
 
           MSG=$(cat <<EOF
-          🔔 <b>$REPO#$NUM</b>
+          🔔 <b>$REPO_ESC#$NUM_ESC</b>
 
-          <b>$TITLE</b>
+          <b>$TITLE_ESC</b>
 
-          Status: <b>$STATE</b>
+          Status: <b>$STATE_ESC</b>
           EOF
           )
 
           if [ -n "$NOTE" ] && [ "$NOTE" != "null" ]; then
-            MSG="$MSG"$'\n'"Comments: $NOTE"
+            MSG="$MSG"$'\n'"Comments: $NOTE_ESC"
           fi
           if [ -n "$STATE_NOTE" ] && [ "$STATE_NOTE" != "null" ]; then
-            MSG="$MSG"$'\n'"$STATE_NOTE"
+            MSG="$MSG"$'\n'"$STATE_NOTE_ESC"
           fi
 
           MSG="$MSG"$'\n\n'"<a href=\"$ISSUE_URL\">Open on GitHub</a>"
 
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$MSG"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Notify via Telegram
@@ -255,5 +252,17 @@ jobs:
           message: ${{ steps.compose.outputs.text }}
           parse_mode: HTML
           disable_web_page_preview: "true"
-          strict: "false"
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      - name: Save state cache
+        # Save when something changed, OR on first run (no cache yet) to seed
+        # the baseline — otherwise a cold start would never notify again.
+        # Never save when the fetch failed (would poison the cache with bad state).
+        # Runs after the Telegram send so a failed send does not mark the
+        # event as handled.
+        if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
+          # Unique key per run — caches are immutable; a new key creates a new entry
+          key: gh-tracker-v2-${{ matrix.issue.slug }}-${{ github.run_id }}

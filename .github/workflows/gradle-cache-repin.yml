@@ -251,10 +251,11 @@ jobs:
             exit 0
           fi
           echo "send=true" >>"$GITHUB_OUTPUT"
+          d="EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<__TEXT__"
+            echo "text<<$d"
             echo "$text"
-            echo "__TEXT__"
+            echo "$d"
           } >>"$GITHUB_OUTPUT"
 
       - name: Notify via Telegram
