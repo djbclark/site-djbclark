@@ -87,3 +87,18 @@ Tailscale's rules: restart tailscaled right after it.
    (`docs/nixos-in-git.md`); only the proxy unit restarts, the firewall rule is unchanged.
 3. If SearXNG gets connection timeouts, check `curl -4 https://ifconfig.me` from the
    microVM: the firewall rule is keyed to that address (`hyadesEgress`).
+
+## 5. Since 2026-10-24: reached through pastebin over the tailnet
+
+1. **What broke.** From 2026-10-23 13:39 UTC nothing sourced inside MIT arrives at `178.105.34.223`: Hyades' SYNs, pings and
+   TCP from pastebin.xvm never show up in `tcpdump -i enp1s0` on this host, while ICMP from three check-host.net nodes does.
+   `traceroute` from pastebin dies right after MIT's border router `18.0.161.1`, while `178.105.0.1` (same Hetzner /16) is
+   reached via `18.0.161.18` and Lumen. The firewall (`nixos-fw` accepts `18.4.60.84`), the listener, `rp_filter` (loose) and
+   the table-100 return rule were all checked and correct. It is a route or filter for this address at or beyond MIT's border.
+2. **What the module does now.** `tinyproxy-google` also listens on this host's tailnet address (waits up to 30 s for it at
+   boot), `Allow`s pastebin's tailnet address `100.104.212.89` (`relayPeer`), and `extraCommands` opens `26369` on
+   `tailscale0` for that one source (connection-capped like the public rule). Hyades reaches it as Hyades → pastebin
+   `:26371` (`tinyproxy-vpsrelay`, firecrawl-hyades `scripts/install-pastebin-egress-proxy`) → tailnet → here, so every
+   request still leaves from this address. The allowlist is enforced at both hops.
+3. **Restoring the direct path** needs MIT IS&T / SIPB to fix the route to `178.105.34.223`; nothing else on this host
+   changes when it returns (the public listener and the `18.4.60.84` rule are untouched).
