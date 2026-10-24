@@ -293,7 +293,7 @@ States are never conflated: `accepted` (durably journaled), `approved` (passed p
 - Archive/restore must be exposed and tested before automated removal is enabled.
 - Client unavailability never breaks ordinary chat; it may reduce recalled context and produce a visible degraded-state marker.
 - Bootstrap priority is deterministic: authority/security routing, critical cross-session user constraints, retrieval pointers, then high-frequency facts. Drop lowest-priority recall candidates first; never silently drop protected routing/security entries.
-- A launchd-supervised single writer drains accepted operations with bounded exponential retry. Pending >15 minutes or any fallback-journal use alerts the Inbox thread (Telegram `22158`); ordinary queued acknowledgements remain quiet.
+- A launchd-supervised single writer drains accepted operations with bounded exponential retry. Pending >15 minutes or any fallback-journal use alerts the Watch topic (Telegram `44132`; destinations live in `registry/telegram-inbox.toml`, the retired single Inbox `22158` was split 2026-10-23 into Pings/Watch/Digests/Triage); ordinary queued acknowledgements remain quiet.
 
 ## 7. Consolidation and dreaming
 
