@@ -82,6 +82,12 @@ batch and deep-research variants. The cloud-only tools (`firecrawl_agent*`,
 `firecrawl_monitor_*`, `firecrawl_research_*`, `firecrawl_interact*`) are
 listed in self-hosted too but route to commercial via the router when called.
 
+`firecrawl_developer_search` always fails with a 404: the Hyades backend has no `/v2/search/developer`
+(router log `GET /v2/search/developer -> primary 404 (route not on this backend); no fallback`, seen
+2026-10-24). Use `firecrawl_search`, `gh search code|issues` or Exa for code and issue questions until it is
+fixed; `docs/queue.md` ("Resurface: firecrawl developer search") revisits this note, so revert it once the
+route works.
+
 ## Search order
 
 `firecrawl_search` is the first rung of every client's web-search ladder and of
