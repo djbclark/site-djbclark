@@ -81,8 +81,8 @@ shared_mcp_servers:
       - "{{ shared_mcp_bin_dir }}/paper-search-mcp"
     env:
       PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: "{{ shared_mcp_unpaywall_email }}"
-  # firecrawl (2026-10-14): the official firecrawl-mcp (npm, pinned:
-  # `npm i -g firecrawl-mcp@3.23.7`, lands in ~/.local/bin) in its own
+  # firecrawl (2026-10-14): the official firecrawl-mcp (npm, `npm i -g
+  # firecrawl-mcp@latest`, lands in ~/.local/bin; nightly brew-fast-upgrade keeps it current) in its own
   # Streamable HTTP mode, pointed at OUR self-hosted Firecrawl on SIPB Hyades
   # (seven microVMs; public repo forgejo.mit.edu/djbclark/firecrawl-hyades,
   # local ~/src/firecrawl-hyades, since 2026-10-16) instead

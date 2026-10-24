@@ -5,7 +5,7 @@
 # Claude Code pipes a JSON payload to the statusLine command on each update
 # (https://code.claude.com/docs/en/statusline). The line is drawn by the existing mod
 # claude-powerline (https://github.com/Owloops/claude-powerline, npm @owloops/claude-powerline,
-# pinned install in ~/.local/bin; config ~/.claude/claude-powerline.json; `/powerline` from its
+# npm global in ~/.local/bin, kept current by brew-fast-upgrade; config ~/.claude/claude-powerline.json; `/powerline` from its
 # plugin reconfigures it). djbclark 2026-10-17: use an existing mod, not a home-grown line.
 #
 # Appended after it (claude-powerline has no custom segments, 2026-10-17):

@@ -220,7 +220,7 @@ def resolve_opencli_bin() -> str:
             return candidate
     raise BridgeError(
         ErrorType.DAEMON_UNAVAILABLE,
-        "opencli CLI not found on PATH or standard Homebrew locations; install the pinned release first "
+        "opencli CLI not found on PATH or standard Homebrew locations; install it first "
         "(docs/reference/gemini-opencli-bridge.md)",
     )
 

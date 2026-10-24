@@ -16,6 +16,7 @@ search service for agent memory. The project path and three safety
 settings live in `~/.basic-memory/config.json`, which this role does not
 render: `ensure_frontmatter_on_sync: false`, `disable_permalinks: true` and
 `auto_update: false`. With either of the first two at its default, indexing
-rewrites tracked memory files. After any Basic Memory upgrade or config
-change, check `git -C ~/ops/site-private status --short` shows no modified
-files.
+rewrites tracked memory files. `auto_update` stays off because the nightly
+`brew-fast-upgrade` upgrades the uv tool (`uv tool upgrade --all`); nothing
+pins it. After an upgrade or config change, check
+`git -C ~/ops/site-private status --short` shows no modified files.

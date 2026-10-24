@@ -15,7 +15,8 @@ Hermes -> bin/gemini_opencli_bridge.py -> opencli CLI -> localhost:19825 daemon
 
 - **OpenCLI**: [`jackwener/opencli`](https://github.com/jackwener/opencli),
   npm package `@jackwener/opencli`, **verified 1.8.6**, Apache-2.0,
-  Node >=20. Pin this version when installing; re-verify before bumping.
+  Node >=20. Install `@latest`; never pin (djbclark 2026-10-24). The nightly
+  `brew-fast-upgrade` npm pass keeps a global install current.
 - **Browser Bridge daemon**: local micro-daemon opencli starts on demand,
   `127.0.0.1:19825` (opencli's own default; claimed in
   [`registry/ports.yml`](../../registry/ports.yml)).
@@ -34,9 +35,9 @@ This wrapper never automates login, MFA, or extension installation — all of
 the following are manual, human steps:
 
 1. Verify prerequisites: `node --version` (>=20), `npm --version`.
-2. Install the pinned CLI, e.g. as a project/user tool:
-   `npm install -g @jackwener/opencli@1.8.6` (or run via
-   `npx --yes @jackwener/opencli@1.8.6 ...` if you'd rather not install
+2. Install the CLI, e.g. as a project/user tool:
+   `npm install -g @jackwener/opencli@latest` (or run via
+   `npx --yes @jackwener/opencli@latest ...` if you'd rather not install
    globally — set `GEMINI_BRIDGE_OPENCLI_BIN` accordingly, see below).
 3. Install the Chrome extension: download
    `opencli-extension-v1.0.22.zip` from
