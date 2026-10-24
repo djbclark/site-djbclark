@@ -35,7 +35,7 @@ Usage: change-hermes [--list] [--dry-run] [N] [--no-probe] [--config PATH]
   --check     probe only the route in fallback_providers[0]. Exit 0 usable, 10 not usable
               (quota/credits/model gone: run --auto), 2 config not readable.
 
-Remote use (any host without ~/.hermes/config.yaml, e.g. the Grok Bot box): the script runs
+Remote use (off macOS without --config/HERMES_HOME, or --remote; e.g. the Grok Bot box): the script runs
 itself on the Mac over ssh (host alias CHANGE_HERMES_SSH, default `hermes-mac`), whose
 authorized_keys entry forces bin/change-hermes-ssh-gate (allows --check, --list, --auto
 [--dry-run] only). Exit 75 = Mac unreachable (laptop asleep/off): callers treat it as a skip.
@@ -408,7 +408,9 @@ def main() -> int:
     ap.add_argument("--remote", action="store_true", help="run on the Mac over ssh (default when no local config)")
     args = ap.parse_args()
 
-    if args.remote or (not args.config.exists() and "HERMES_HOME" not in os.environ and "--config" not in sys.argv):
+    # Hermes lives on the Mac: off macOS, without an explicit --config/HERMES_HOME, run there.
+    local = sys.platform == "darwin" or "HERMES_HOME" in os.environ or "--config" in sys.argv
+    if args.remote or not local:
         fwd = [a for a in sys.argv[1:] if a != "--remote"]
         return remote(fwd)
 
