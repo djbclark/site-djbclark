@@ -60,7 +60,7 @@ jobs:
       CONFIG: nixos/vps-primary/configuration.nix
     steps:
       - name: Check out master
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: master
           fetch-depth: 0
@@ -105,7 +105,7 @@ jobs:
       # A manual run checks the gate even when nothing changed.
       - name: Install Nix
         if: steps.apply.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
-        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24  # v31.11.1
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes

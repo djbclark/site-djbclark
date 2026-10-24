@@ -43,7 +43,7 @@ runs:
     # The sparse list must keep this action's own directory: the runner reads action.yml
     # again for the post step, which fails the job if the checkout removed it.
     - name: Check out the inbox register
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         sparse-checkout: |
           registry/telegram-inbox.env

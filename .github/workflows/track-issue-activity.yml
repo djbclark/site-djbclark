@@ -85,11 +85,11 @@ jobs:
             number: "3909"
             slug: crush-3909
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Restore previous state
         id: cache-state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
           # Unique key per run + prefix restore: GitHub caches are immutable,
@@ -204,7 +204,7 @@ jobs:
         # the baseline — otherwise a cold start would never notify again.
         # Never save when the fetch failed (would poison the cache with bad state).
         if: steps.check.outputs.fetch_ok == 'true' && (steps.check.outputs.changed == 'true' || steps.check.outputs.had_cache == 'false' || (github.event_name == 'workflow_dispatch' && inputs.notify_even_if_unchanged == true))
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .cache/gh-tracker/${{ matrix.issue.slug }}.json
           # Unique key per run — caches are immutable; a new key creates a new entry
