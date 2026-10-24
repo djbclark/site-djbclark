@@ -538,8 +538,6 @@ __bashrc_tamper_alarm
 
 alias tgh='tg read "Hermes Mac" --limit 12 --chrono'
 
-alias brew-fast-upgrade='brew update && brew outdated --json | jq -r ".formulae + .casks | .[].name" | gxargs -P0 -L1 brew fetch && brew upgrade -y'
-
 # Disk usage: dua over the whole boot volume with nothing counted twice.
 # -x drops the genuinely separate volumes reached from / (/System/Volumes/VM,
 # Preboot, Update, /Volumes/Recovery, external /Volumes mounts, the autofs

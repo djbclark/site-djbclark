@@ -18,7 +18,13 @@ jobs:
     # before mac-dns-apply at 03:30 (typical run ~12 min). Jobber cron is
     # seconds-first: 0 10 3 = 03:10:00.
     time: 0 10 3 * * *
-    onError: Backoff
+    # Continue, never Backoff (2026-10-24): Backoff skips later scheduled runs
+    # after a failed one and eventually stops the job (status Failed). With a
+    # transient download error failing ~1 run in 5, 25 nights between
+    # 2026-08-17 and 2026-10-15 had no run, nearly all straight after a
+    # failure (08-28..09-08 in one stretch). Every night must try again;
+    # failures still notify.
+    onError: Continue
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
 
