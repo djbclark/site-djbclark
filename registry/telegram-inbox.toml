@@ -62,6 +62,7 @@ split_into = ["pings", "watch", "digests", "triage"]
 "gha.nixos-lock-update" = "pings"
 "gha.track-issue-activity" = "pings"
 "gha.gradle-cache-repin" = "pings"
+"funnel-health" = "watch"
 
 # Cron: job id -> destination. Empty placeholder -- S5 seeds this from the
 # live ~/.hermes/cron/jobs.json (host-only inbox-check), not part of S1.
