@@ -58,7 +58,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Repos and paths
 
-20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`
+20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
+    **Exception (2026-10-24): a fork whose upstream ships its own agent-file layout (e.g. paseo: `AGENTS.md -> CLAUDE.md`) keeps upstream's; don't enforce**
     (`memory/feedback_claude_md_symlink_to_agents_md.md`).
 21. **Commit and push your own changes, every repo, per unit, unasked. `git commit -m MSG -- <paths>`, never bare `git commit`; a file another
     agent also edited: `git apply --cached` your hunks, then `git commit -m MSG`, NO pathspec (2026-10-23)**

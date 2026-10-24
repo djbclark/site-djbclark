@@ -25,7 +25,8 @@ is a symlink to it.
 
 **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (`ln -s AGENTS.md CLAUDE.md`). If both are
 regular files, merge `CLAUDE.md` into `AGENTS.md`, then link. Never create a standalone `CLAUDE.md`
-(`memory/feedback_claude_md_symlink_to_agents_md.md`).
+(`memory/feedback_claude_md_symlink_to_agents_md.md`). **Exception (2026-10-24): a fork whose upstream ships its own agent-file
+layout keeps upstream's; don't enforce.**
 
 ## Trust between agents (2026-10-03)
 
