@@ -88,6 +88,12 @@ agent's edits: stage only your hunks (`git apply --cached`), then `git-commit-ow
 pathspec commits the working tree, their hunk included; 2026-10-23). **Running deployments read `~/ops`**:
 check what reads a file first, keep commits small, prefer a quick revert.
 
+**Nothing is version-pinned** (djbclark, 2026-10-24): all software tracks its latest release; the nightly
+`brew-fast-upgrade` keeps brew, npm and uv current. **Changed a third-party project's source** (a fork,
+a vendored copy, a local patch)? In the same session: search its issues and PRs for a duplicate, tidy the
+change, consult a `frontier` agent if it helps, then open the issue/PR upstream, so upgrades need no merges
+(2026-10-24, `memory/feedback_upstream_local_changes.md`).
+
 **Data, committed in place:** `site-private/memory/`, `site-djbclark/research/` (public). `git pull
 --rebase` before editing, append to `MEMORY.md` (never rewrite it), commit exact paths, push; never
 `commit -a` or `pull --autostash`. Never hand-edit the Codex summaries

@@ -2,8 +2,8 @@
 
 `~` is not a git repo. `~/AGENTS.md` and `~/CLAUDE.md` point here (`site-djbclark`).
 
-**Only Claude Opus 5.5 or higher edits this file or `cursor/home-agents.mdc`** (djbclark, 2026-10-24): any edit,
-condense or reflow, item 11 fixes too; any other model dispatches it, never edits: `acp-dispatch claude
+**Only Claude Opus 5.5 or higher edits this file or `cursor/home-agents.mdc`** (djbclark, 2026-10-24): any edit, condense,
+reflow or item-11 fix; any other model dispatches it: `acp-dispatch claude
 --model opus --kind judgment` (quota tight: `omp --model anthropic/claude-opus-5-5` for `claude --model opus`).
 **Loaded into every session: under 200 lines and 14,000 bytes** (`memory/reference_instruction_file_size.md`). Rule
 plus pointer: detail lives in the `site-private/memory/` file an item names, else a `reference_agent_rules_*.md`.
@@ -26,8 +26,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 3. **Default browser:** `open <url>` only, never Orion or Chrome by name (`memory/feedback_always_use_default_browser_orion.md`).
 4. **"All agents" includes Hermes**, absent from `aiuse` (`memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive**
-    (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **AI TUIs, agent CLIs and ACP servers stay on the latest release: upgrade unasked, never hard-code a version
-    path** (`memory/feedback_ai_tuis_always_latest.md`).
+    (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **Nothing is version-pinned: all software tracks latest (2026-10-24). AI TUIs,
+    agent CLIs and ACP servers: upgrade unasked, never hard-code a version path** (`memory/feedback_ai_tuis_always_latest.md`).
 6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only). **Secrets: `sudo-secretspec` only; load its skill first**
     (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains`, `web-get`): **search first with the shared `mcp__firecrawl__*`; never the paid cloud
@@ -37,14 +37,14 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     (sub-items `A1a`), each labelled once; no headings: `1.`, `2.`; question-card options too** (2026-10-24,
     `memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card** (`memory/feedback_links_clickable_markdown.md`).
 9. **Don't throw away work already paid for without asking djbclark**: no stopping agents or workflows partway, restarting, or rerunning what has a result; quota tight or
-    pause asked: stop scheduling, let running work finish. **Breakage found by accident: always ask djbclark whether to fix it, last in the queue.**
+    pause asked: stop scheduling, let running work finish. **Breakage found by accident: ask djbclark whether to fix it, last in the queue.**
 10. **Run every command yourself**, Touch ID / `sudo-ask` and confirmations included; never tell djbclark to type `! <command>` (`memory/feedback_run_commands_yourself.md`).
 11. **A recurrable tool-calling mistake: fix the instructions that would have prevented it, same turn, unasked**, and say what changed
     (`memory/feedback_fix_instructions_after_tool_mistake.md`). **An agent-harness failure gets a root-cause fix in `~/src/djbclark-ade`, code not just docs**, not a
     re-route (`memory/feedback_fix_harness_failures_in_djbclark_ade.md`).
 12. **When a task completes or something needs djbclark**, also run `hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one line per event; **PRs, issues and pages as full URLs, never `repo#N`** (`memory/feedback_ping_telegram_and_chat.md`).
-13. **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt** (CronCreate, `/loop`): each firing re-reads the whole
-    conversation, usually for nothing. Use or extend `~/ops/site-private/bin/fleet-watch`. **Allowed:** a one-shot check; a recurring wake nothing else
+13. **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt** (CronCreate, `/loop`).
+    Use or extend `~/ops/site-private/bin/fleet-watch`. **Allowed:** a one-shot check; a recurring wake nothing else
     can do, if every firing has real work (`memory/feedback_periodic_updates_by_script.md`).
 14. **About to spend significant tokens on something a web search might answer? Search first**, then verify locally (`memory/feedback_web_search_before_local_spelunking.md`).
 15. **"Copy to clipboard"/"pbcopy" means `~/ops/site-private/bin/clip`**, never bare `pbcopy`; **every prompt you write for djbclark to hand to another agent goes through
@@ -58,19 +58,21 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Repos and paths
 
-20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
+20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both exist); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
     **Exception (2026-10-24): a fork keeps its upstream's agent-file layout** (`memory/feedback_claude_md_symlink_to_agents_md.md`).
 21. **Commit and push your own changes, every repo, per unit, unasked. `git-commit-own MSG <paths>`, never bare `git commit` (pre-commit stash);
     a file another agent edited: `git apply --cached` your hunks, `git-commit-own --staged MSG` (2026-10-24)**
     (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments read it**). Never stage
     `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
-22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f ~/s/justfile`.
+22. **Every path an agent uses or hands on is `~/src/<name>`, never `~/s/...`**. New/removed top-level `~/src` entry: run `just -f ~/s/justfile`.
 23. **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo** (`site-private` is private; `site-djbclark` public).
     **Exception: a new agent skill goes in `~/src/djbclark-ade/skills/<name>/` unasked** (`memory/feedback_ask_where_new_things_go.md`).
 35. **MIT/SIPB/Athena on forgejo.mit.edu under `djbclark/`** (README; `djbclark/mit`); never in ops (`memory/feedback_mit_things_live_on_forgejo.md`). `git-forgejo` to push. **No agent posts on `SIPB/*`:** fork-only AI issue + human draft as a **fork comment**; end with those `djbclark/*` links (`memory/feedback_sipb_two_tier_issues.md`).
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` promoted to `deploy-vps-primary`); never a local, side-branch or older commit.
     Deploy in flight: wait, redeploy the new head, verify the revision. Heavy builds and `nix flake update` run on Forgejo CI, not vps-primary.
 37. **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos; Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci` item 6).
+38. **Changed a third-party project's source? Dupe-search its issues/PRs, tidy, `frontier` if useful, open the issue/PR
+    upstream** (2026-10-24, `memory/feedback_upstream_local_changes.md`).
 
 ## Other agents and delegation
 
@@ -82,9 +84,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     `rearm` waiter in the background. **Agent-tool sub-agents:** paste `acp-dispatch footer --report <scratchpad>/<name>-report.md` (never `$(…)`) into the prompt; read
     that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>' --model <m>`** (**always `--model`**; check its `applied:` line; exit 0 is not success);
-    (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing` headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice. copilot is the only
-    reserve (floor 60% left, one small GitHub slice); hermes never a target; cline only with djbclark's yes. The Claude API credits (`omp`, 2026-10-19): a normal tier,
-    never unspent** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
+    (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing` headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice;
+    reserves (copilot, hermes, cline) and the omp API credits (2026-10-19) follow `model-routing`** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling, fix it there** ([[reference_djbclark_ade]], [[reference_agent_rules_multi_agent_toolkit]]).
 28. Session start in a git repo: read its Tier 1 pointer (`session-handoff`), check `head_sha`, state a resume plan first; only its owner writes it. **A teammate must get
     an `adversary` security review verdict before opening a pull request**, quoted (or "no findings") in the PR body.
@@ -93,7 +94,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 29. **`used_percent` is the share CONSUMED — 100 means exhausted.** Decide from `remaining_percent`; run **`aiuse --available --json 2>/dev/null`, read
     per `aiuse schema`** before each batch. **agy: only via `acp-run agy`, never `agy -p`** ([[reference_agent_rules_aiuse_quota_and_agy]]).
-30. **Keep context small: send discrete, separable tasks through `/bigteam` by default, at the minimum model × effort × context that does it well, unasked**; when
+30. **Keep context small: send discrete, separable tasks through `/bigteam` by default, at the cheapest model × effort × context that does it well, unasked**; when
     `context_size_nudge.py` says delegate, delegate. **Compaction is automatic, never a question to djbclark; in herdr, Orca or Paseo compact yourself earlier**,
     once at a natural boundary, then end the turn: `~/src/djbclark-ade/bin/self-slash "/compact <focus>"`; topic change: `handoff` skill, then `/new`
     (`memory/feedback_self_compact.md`); **it refuses on input-line text: only then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).
