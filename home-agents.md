@@ -60,8 +60,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both are files); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
     **Exception (2026-10-24): a fork keeps its upstream's agent-file layout** (`memory/feedback_claude_md_symlink_to_agents_md.md`).
-21. **Commit and push your own changes, every repo, per unit, unasked. `git-commit-own MSG <paths>`, never bare `git commit` (its pre-commit stashes the whole tree);
-    a file another agent also edited: `git apply --cached` your hunks, then `git-commit-own --staged MSG` (2026-10-24)**
+21. **Commit and push your own changes, every repo, per unit, unasked. `git-commit-own MSG <paths>`, never bare `git commit` (pre-commit stashes all);
+    a file another agent edited: `git apply --cached` your hunks, `git-commit-own --staged MSG` (2026-10-24)**
     (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments read it**). Never stage
     `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
 22. **Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`**. After adding or removing a top-level `~/src` entry run `just -f ~/s/justfile`.
