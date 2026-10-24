@@ -254,5 +254,177 @@ class RegistryReconcileTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
 
 
+class TelegramInboxSchemaTest(unittest.TestCase):
+    """registry/telegram-inbox.toml schema checks (lint_telegram_inbox_schema):
+    every route/cron route names a real destination, thread ids are unique,
+    default exists, bound has bound_to (central-register-design-report.md
+    section A + E's CI-safe half)."""
+
+    VALID_TOML = textwrap.dedent(
+        """\
+        schema_version = 1
+        default = "pings"
+
+        [chats.dan]
+        platform = "telegram"
+        chat_id = 111
+
+        [destinations.pings]
+        chat = "dan"
+        thread_id = 10
+        mode = "sink"
+
+        [destinations.triage]
+        chat = "dan"
+        thread_id = 30
+        mode = "bound"
+        bound_to = "goose-scout"
+
+        [routes]
+        "hermes-ping" = "pings"
+
+        [cron]
+        routes = {"job1" = "pings"}
+        """
+    )
+
+    def _write_repo(self, tmp: Path, toml_text: str) -> None:
+        (tmp / "registry").mkdir(parents=True)
+        (tmp / "registry" / "telegram-inbox.toml").write_text(toml_text)
+
+    def _lint(self, tmp: Path) -> list[str]:
+        with patch("registry_lint.REPO", tmp):
+            findings: list[str] = []
+            registry_lint.lint_telegram_inbox_schema(findings)
+        return findings
+
+    def test_valid_schema_passes(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp, self.VALID_TOML)
+            self.assertEqual(self._lint(tmp), [])
+
+    def test_unparseable_toml_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            self._write_repo(tmp, "this is not [valid toml")
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("cannot read/parse", findings[0])
+
+    def test_unknown_route_destination_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            toml_text = self.VALID_TOML.replace('"hermes-ping" = "pings"', '"hermes-ping" = "nope"')
+            self._write_repo(tmp, toml_text)
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("'hermes-ping'", findings[0])
+            self.assertIn("'nope'", findings[0])
+
+    def test_unknown_cron_route_destination_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            toml_text = self.VALID_TOML.replace('routes = {"job1" = "pings"}', 'routes = {"job1" = "nope"}')
+            self._write_repo(tmp, toml_text)
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("[cron.routes]", findings[0])
+            self.assertIn("'job1'", findings[0])
+
+    def test_duplicate_thread_id_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            toml_text = self.VALID_TOML.replace("thread_id = 30", "thread_id = 10")
+            self._write_repo(tmp, toml_text)
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("thread_id 10", findings[0])
+
+    def test_default_missing_destination_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            toml_text = self.VALID_TOML.replace('default = "pings"', 'default = "nope"')
+            self._write_repo(tmp, toml_text)
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("default 'nope'", findings[0])
+
+    def test_bound_without_bound_to_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            toml_text = self.VALID_TOML.replace('bound_to = "goose-scout"\n', "")
+            self._write_repo(tmp, toml_text)
+            findings = self._lint(tmp)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("'triage'", findings[0])
+            self.assertIn("no bound_to", findings[0])
+
+
+class TelegramInboxEnvTest(unittest.TestCase):
+    """lint_telegram_inbox_env: the committed .env must match what
+    `bin/inbox-target export --check` says is current."""
+
+    @patch("registry_lint.subprocess.run")
+    def test_check_pass_adds_no_finding(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_env(findings)
+        self.assertEqual(findings, [])
+
+    @patch("registry_lint.subprocess.run")
+    def test_check_fail_adds_finding(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="stale")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_env(findings)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("stale", findings[0])
+
+    @patch("registry_lint.subprocess.run", side_effect=OSError("no such file"))
+    def test_missing_script_adds_finding_not_exception(self, mock_run):
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_env(findings)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("cannot run", findings[0])
+
+
+class TelegramInboxLiteralsTest(unittest.TestCase):
+    """lint_telegram_inbox_literals: warn-only today
+    (TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL=False); flipping that constant is
+    the only step F7 change, exercised here by patching it True."""
+
+    @patch("registry_lint.shutil.which", return_value=None)
+    def test_missing_rg_skips_cleanly(self, mock_which):
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_literals(findings)
+        self.assertEqual(findings, [])
+
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_hits_are_warn_only_by_default(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(stdout="bin/foo:1:838808636\n", stderr="")
+        findings: list[str] = []
+        with patch("registry_lint.TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL", False):
+            registry_lint.lint_telegram_inbox_literals(findings)
+        self.assertEqual(findings, [])
+
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_hits_fail_when_switch_flipped(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(stdout="bin/foo:1:838808636\n", stderr="")
+        findings: list[str] = []
+        with patch("registry_lint.TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL", True):
+            registry_lint.lint_telegram_inbox_literals(findings)
+        self.assertEqual(len(findings), 1)
+
+    @patch("registry_lint.subprocess.run")
+    @patch("registry_lint.shutil.which", return_value="/usr/bin/rg")
+    def test_no_hits_adds_no_finding(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(stdout="", stderr="")
+        findings: list[str] = []
+        registry_lint.lint_telegram_inbox_literals(findings)
+        self.assertEqual(findings, [])
+
+
 if __name__ == '__main__':
     unittest.main()

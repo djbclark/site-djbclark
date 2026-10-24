@@ -1,0 +1,77 @@
+# registry/telegram-inbox.toml — the ONE place a Telegram destination is written.
+# Consumers read the generated registry/telegram-inbox.env (bin/inbox-target export),
+# never this file directly (launchd's /usr/bin/python3 is 3.9 and has no tomllib).
+# After editing: just inbox-sync  (regenerates the .env, then lints).
+#
+# mode: "sink"  = outbound-only; MUST be in config.yaml extra.ignored_threads
+#       "bound" = a live agent session; MUST be a config.yaml channel_overrides key
+schema_version = 1
+default = "pings"                    # destination for unknown routes (non-strict resolve)
+
+[chats.dan]
+platform = "telegram"
+chat_id = 838808636
+
+[destinations.pings]
+chat = "dan"
+thread_id = 44130
+mode = "sink"
+title = "Pings"
+purpose = "agent task-done / needs-djbclark pings (hermes-ping)"
+
+[destinations.watch]
+chat = "dan"
+thread_id = 44132
+mode = "sink"
+title = "Watch"
+purpose = "watchdogs, monitors, health alerts"
+
+[destinations.digests]
+chat = "dan"
+thread_id = 44134
+mode = "sink"
+title = "Digests"
+purpose = "scheduled summaries"
+
+[destinations.triage]
+chat = "dan"
+thread_id = 44136
+mode = "bound"
+title = "Triage"
+bound_to = "goose-scout"             # must equal config.yaml channel_overrides['44136'] binding
+purpose = "paste-in triage; the only bound topic"
+
+# Retired IDs: any sender, cron job or config entry naming one is a lint/check failure.
+[retired.22158]
+was = "Inbox"
+retired = "2026-10-23"
+split_into = ["pings", "watch", "digests", "triage"]
+
+# Routes: sender key -> destination. Senders ask for THEIR key, never a destination,
+# so splitting a topic later is a route edit here, not a sender edit.
+[routes]
+"hermes-ping" = "pings"
+"fleet-watch" = "pings"
+"basic-memory-watchdog" = "watch"
+"hibernate-disk-check" = "watch"
+"jobber-notify" = "pings"
+"stayturgid.control" = "watch"
+"stayturgid.apk-updates" = "pings"
+"gha.herdr-extension-releases" = "pings"
+"gha.thaw-next-access-request" = "pings"
+"gha.nixos-lock-update" = "pings"
+"gha.track-issue-activity" = "pings"
+
+# Cron: job id -> destination. Empty placeholder -- S5 seeds this from the
+# live ~/.hermes/cron/jobs.json (host-only inbox-check), not part of S1.
+[cron.routes]
+
+[cron]
+# Jobs whose deliver is intentionally not a register destination (local/origin
+# delivery, or the bare `telegram` home-channel job). Seeded by S5.
+unmanaged = {}
+
+[config_yaml]
+# Threads config.yaml may ignore that aren't register sinks. Should stay empty;
+# checked against ~/.hermes/config.yaml by the host-only inbox-check (S5), not S1.
+extra_ignored_threads = []

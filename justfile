@@ -84,6 +84,20 @@ lint:
     bin/registry_lint.py
     PYTHONPATH=. uv run --with pytest --with pyyaml python -m unittest discover -s tests -v
 
+# Regenerate registry/telegram-inbox.env from registry/telegram-inbox.toml,
+# then lint (central-register-design-report.md section A/F). Run after
+# editing the TOML, before committing.
+inbox-sync:
+    bin/inbox-target export
+    bin/registry_lint.py
+
+# CI-safe inbox checks only: the lint (schema + literal-ID guard) plus the
+# .env staleness check on its own, so a CI run can fail on exactly why.
+# The host-only ~/.hermes checks (bin/inbox-check, S5) are not part of this.
+inbox-check:
+    bin/registry_lint.py
+    bin/inbox-target export --check
+
 # Serialize multi-agent release cut/deploy (see docs/OPS-RELEASES.md § locking).
 # State dir: ~/.local/state/site-djbclark/ (ops-release.lock + ops-release.claim.json)
 ops-release-claim-status:

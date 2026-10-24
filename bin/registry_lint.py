@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections import defaultdict
 from pathlib import Path
 
@@ -38,6 +39,19 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 REQUIRED_PORT_KEYS = {"port", "owner", "service", "status"}
 VALID_STATUS = {"active", "planned", "default-claim"}
+
+# Flip to True to make the inbox literal-ID guard (lint_telegram_inbox_literals,
+# below) a hard lint failure instead of a warning. Planned for step F7 of
+# central-register-design-report.md's migration, once every sender in that
+# report's section F reads registry/telegram-inbox.env instead of a literal.
+# This constant is the only change F7 needs.
+TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL = False
+
+# Chat/thread ids that should only ever be literal inside registry/ (the TOML
+# and the generated .env). \b838808636\b is the chat id; \b4413[0-9]\b covers
+# the four live thread ids (44130/44132/44134/44136) plus headroom for a
+# future fifth; \b22158\b is the retired pre-split Inbox thread.
+TELEGRAM_INBOX_LITERAL_PATTERNS = [r"\b838808636\b", r"\b4413[0-9]\b", r"\b22158\b"]
 
 # Site-owned Ansible roles that declare their own port default, each
 # cross-checked against the registry/ports.yml entry with the matching
@@ -147,6 +161,102 @@ def lint_paths(findings: list[str]) -> None:
             prev = owner_by_prefix.setdefault(p, stack)
             if prev != stack:
                 findings.append(f"prefix {p!r} claimed by both {prev} and {stack}")
+
+
+def lint_telegram_inbox_schema(findings: list[str]) -> None:
+    """registry/telegram-inbox.toml (central-register-design-report.md
+    section A): every route and cron route names a real destination, thread
+    ids are unique, `default` names a real destination, and every mode=bound
+    destination has a bound_to."""
+    path = REPO / "registry" / "telegram-inbox.toml"
+    try:
+        data = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        findings.append(f"registry/telegram-inbox.toml: cannot read/parse: {exc}")
+        return
+
+    destinations = data.get("destinations") or {}
+    routes = data.get("routes") or {}
+    cron_routes = ((data.get("cron") or {}).get("routes")) or {}
+
+    default = data.get("default")
+    if default not in destinations:
+        findings.append(f"registry/telegram-inbox.toml: default {default!r} is not a [destinations] key")
+
+    for route_name, dest_name in routes.items():
+        if dest_name not in destinations:
+            findings.append(
+                f"registry/telegram-inbox.toml: [routes] {route_name!r} names unknown destination {dest_name!r}"
+            )
+    for job_id, dest_name in cron_routes.items():
+        if dest_name not in destinations:
+            findings.append(
+                f"registry/telegram-inbox.toml: [cron.routes] {job_id!r} names unknown destination {dest_name!r}"
+            )
+
+    seen_threads: dict[int, str] = {}
+    for name, dest in destinations.items():
+        thread_id = dest.get("thread_id")
+        if thread_id in seen_threads:
+            findings.append(
+                f"registry/telegram-inbox.toml: thread_id {thread_id} claimed by both "
+                f"{seen_threads[thread_id]!r} and {name!r}"
+            )
+        else:
+            seen_threads[thread_id] = name
+        if dest.get("mode") == "bound" and not dest.get("bound_to"):
+            findings.append(f"registry/telegram-inbox.toml: destination {name!r} is mode=bound but has no bound_to")
+
+
+def lint_telegram_inbox_env(findings: list[str]) -> None:
+    """registry/telegram-inbox.env must be exactly what
+    `bin/inbox-target export` would (re)write from the current TOML -- a
+    stale .env is a drift class the TOML schema check above can't catch."""
+    script = REPO / "bin" / "inbox-target"
+    try:
+        result = subprocess.run(
+            [str(script), "export", "--check"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        findings.append(f"bin/inbox-target export --check: cannot run: {exc}")
+        return
+    if result.returncode != 0:
+        findings.append(
+            "registry/telegram-inbox.env is stale (bin/inbox-target export --check failed): "
+            + (result.stderr.strip() or result.stdout.strip())
+        )
+
+
+def lint_telegram_inbox_literals(findings: list[str]) -> None:
+    """WARN-ONLY (central-register-design-report.md sections E/F7): flags a
+    Telegram chat/thread id literal living outside registry/, where it
+    should instead be read from registry/telegram-inbox.env. Never adds to
+    `findings` (so it never fails the lint) while
+    TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL is False; that constant is the one
+    flip step F7 needs once every sender has migrated.
+    bin/registry_lint.py itself is excluded from the scan because
+    TELEGRAM_INBOX_LITERAL_PATTERNS above necessarily contains these same
+    digit strings as regex text."""
+    if shutil.which("rg") is None:
+        print("registry-lint: inbox literal-ID guard skipped (rg not found)")
+        return
+    cmd = ["rg", "-n", "--no-heading"]
+    for pattern in TELEGRAM_INBOX_LITERAL_PATTERNS:
+        cmd += ["-e", pattern]
+    cmd += ["bin", "roles", ".github", "--glob", "!bin/registry_lint.py"]
+    try:
+        result = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
+    except OSError as exc:
+        print(f"registry-lint: inbox literal-ID guard skipped (rg failed to run: {exc})")
+        return
+    hits = [line for line in result.stdout.splitlines() if line]
+    for line in hits:
+        if TELEGRAM_INBOX_LITERAL_GUARD_HARD_FAIL:
+            findings.append(f"telegram inbox literal outside registry/: {line}")
+        else:
+            print(f"registry-lint: WARN: telegram inbox literal outside registry/: {line}")
 
 
 def lint_generated_paths() -> None:
@@ -306,6 +416,9 @@ def main() -> int:
         lint_role_default_ports(findings)
         lint_paths(findings)
         lint_generated_paths()
+        lint_telegram_inbox_schema(findings)
+        lint_telegram_inbox_env(findings)
+        lint_telegram_inbox_literals(findings)
     except (OSError, yaml.YAMLError) as exc:
         fail(str(exc))
         return 2

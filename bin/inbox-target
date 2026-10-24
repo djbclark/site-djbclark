@@ -1,0 +1,280 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""Resolve a Telegram inbox route or destination name against the one
+canonical register (registry/telegram-inbox.toml), and generate the
+committed, parser-agnostic registry/telegram-inbox.env that senders source
+at runtime instead of parsing TOML.
+
+See registry/telegram-inbox.toml's header comment and
+central-register-design-report.md sections A/B for the schema and the .env
+contract this script implements.
+
+Commands:
+  inbox-target <name>                  telegram:<chat>:<thread> for a route
+                                        or destination name. Unknown name ->
+                                        INBOX_DEFAULT + stderr warning, exit 0
+                                        (a ping must not be lost). --strict
+                                        makes an unknown name exit 1 instead.
+  inbox-target --field thread|chat <name>
+                                        the bare chat or thread id for <name>.
+  inbox-target export [--check]        (re)write registry/telegram-inbox.env.
+                                        --check exits 1 if the file is stale
+                                        (used by the lint), writes nothing.
+  inbox-target export --shell          print `export KEY=value` lines to
+                                        stdout for `eval "$(...)"` interactive
+                                        use. Writes nothing.
+  inbox-target list                    a table of destinations: name,
+                                        thread, mode, purpose, routes.
+
+Exit codes: 0 ok (including an unknown name resolved to the default, unless
+--strict), 1 unknown name with --strict / stale --check / list findings, 2
+cannot read or parse the register.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+REPO = Path(__file__).resolve().parent.parent
+TOML_PATH = REPO / "registry" / "telegram-inbox.toml"
+ENV_PATH = REPO / "registry" / "telegram-inbox.env"
+
+
+class RegisterError(Exception):
+    """The register file is missing, unparseable, or violates its own schema."""
+
+
+def load_register() -> dict[str, Any]:
+    try:
+        data = tomllib.loads(TOML_PATH.read_text())
+    except OSError as exc:
+        raise RegisterError(f"cannot read {TOML_PATH}: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise RegisterError(f"cannot parse {TOML_PATH}: {exc}") from exc
+    for key in ("default", "chats", "destinations", "routes"):
+        if key not in data:
+            raise RegisterError(f"{TOML_PATH}: missing top-level key {key!r}")
+    return data
+
+
+def _chat_id(data: dict[str, Any], chat_key: str, dest_name: str) -> int:
+    chats = data["chats"]
+    if chat_key not in chats:
+        raise RegisterError(f"destination {dest_name!r}: chat {chat_key!r} not in [chats]")
+    return chats[chat_key]["chat_id"]
+
+
+def resolve_destination(data: dict[str, Any], dest_name: str) -> tuple[int, int]:
+    """Return (chat_id, thread_id) for a destination name. Raises RegisterError
+    if the destination (or the chat it points at) doesn't exist."""
+    destinations = data["destinations"]
+    if dest_name not in destinations:
+        raise RegisterError(f"no destination {dest_name!r} in [destinations]")
+    dest = destinations[dest_name]
+    return _chat_id(data, dest["chat"], dest_name), dest["thread_id"]
+
+
+def resolve_name(data: dict[str, Any], name: str) -> tuple[int, int, str] | None:
+    """Resolve a route-or-destination name to (chat_id, thread_id, destination
+    name). [routes] is checked first, then [destinations], matching section B.
+    Returns None if name is neither a known route nor a known destination."""
+    routes = data["routes"]
+    destinations = data["destinations"]
+    if name in routes:
+        dest_name = routes[name]
+        if dest_name not in destinations:
+            raise RegisterError(f"route {name!r} names unknown destination {dest_name!r}")
+    elif name in destinations:
+        dest_name = name
+    else:
+        return None
+    chat_id, thread_id = resolve_destination(data, dest_name)
+    return chat_id, thread_id, dest_name
+
+
+def resolve_default(data: dict[str, Any]) -> tuple[int, int, str]:
+    default_name = data["default"]
+    if default_name not in data["destinations"]:
+        raise RegisterError(f"default {default_name!r} is not a destination in [destinations]")
+    chat_id, thread_id = resolve_destination(data, default_name)
+    return chat_id, thread_id, default_name
+
+
+def target_string(chat_id: int, thread_id: int) -> str:
+    return f"telegram:{chat_id}:{thread_id}"
+
+
+def env_key(name: str) -> str:
+    """INBOX_(DEST|ROUTE)_<KEY> suffix: upper-case, [.-] -> _."""
+    return re.sub(r"[.\-]", "_", name).upper()
+
+
+def cmd_resolve(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="inbox-target",
+        description="Resolve a Telegram inbox route or destination name to telegram:<chat>:<thread>.",
+    )
+    parser.add_argument("name", help="a [routes] key or a [destinations] key")
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="exit 1 on an unknown name instead of warning and falling back to the default",
+    )
+    parser.add_argument(
+        "--field", choices=["thread", "chat"],
+        help="print only the bare chat or thread id instead of the full telegram:<chat>:<thread> target",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        data = load_register()
+        resolved = resolve_name(data, args.name)
+        if resolved is None:
+            if args.strict:
+                print(f"inbox-target: FAIL: unknown name {args.name!r} (no route or destination)", file=sys.stderr)
+                return 1
+            print(
+                f"inbox-target: WARN: unknown name {args.name!r} (no route or destination); "
+                f"falling back to default",
+                file=sys.stderr,
+            )
+            chat_id, thread_id, _dest_name = resolve_default(data)
+        else:
+            chat_id, thread_id, _dest_name = resolved
+    except RegisterError as exc:
+        print(f"inbox-target: FAIL: {exc}", file=sys.stderr)
+        return 2
+
+    if args.field == "thread":
+        print(thread_id)
+    elif args.field == "chat":
+        print(chat_id)
+    else:
+        print(target_string(chat_id, thread_id))
+    return 0
+
+
+def render_env_lines(data: dict[str, Any]) -> list[str]:
+    """Render the .env contract (section A): a fixed header, then one
+    INBOX_DEST_<NAME>/_THREAD pair per destination (sorted by name), then one
+    INBOX_ROUTE_<KEY>/_CHAT/_THREAD triple per route (sorted by key)."""
+    destinations = data["destinations"]
+    chat_ids = {_chat_id(data, dest["chat"], name) for name, dest in destinations.items()}
+    if len(chat_ids) != 1:
+        raise RegisterError(
+            f"the .env contract needs exactly one chat across all destinations, found {sorted(chat_ids)}"
+        )
+    (chat_id,) = chat_ids
+
+    default_chat_id, default_thread_id, _default_dest = resolve_default(data)
+    if default_chat_id != chat_id:
+        raise RegisterError("default destination's chat does not match the single register chat")
+
+    lines = [
+        "# GENERATED by bin/inbox-target export from registry/telegram-inbox.toml -- do not edit",
+        f"INBOX_SCHEMA={data['schema_version']}",
+        f"INBOX_CHAT_ID={chat_id}",
+        f"INBOX_DEFAULT={target_string(default_chat_id, default_thread_id)}",
+    ]
+    for name in sorted(destinations):
+        thread_id = destinations[name]["thread_id"]
+        key = env_key(name)
+        lines.append(f"INBOX_DEST_{key}={target_string(chat_id, thread_id)}")
+        lines.append(f"INBOX_DEST_{key}_THREAD={thread_id}")
+    routes = data["routes"]
+    for route_name in sorted(routes):
+        _rchat_id, thread_id, _dest_name = resolve_name(data, route_name)  # type: ignore[misc]
+        key = env_key(route_name)
+        lines.append(f"INBOX_ROUTE_{key}={target_string(chat_id, thread_id)}")
+        lines.append(f"INBOX_ROUTE_{key}_CHAT={chat_id}")
+        lines.append(f"INBOX_ROUTE_{key}_THREAD={thread_id}")
+    return lines
+
+
+def cmd_export(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="inbox-target export")
+    parser.add_argument("--check", action="store_true", help="exit 1 if registry/telegram-inbox.env is stale; writes nothing")
+    parser.add_argument("--shell", action="store_true", help="print `export KEY=value` lines to stdout; writes nothing")
+    args = parser.parse_args(argv)
+
+    try:
+        data = load_register()
+        lines = render_env_lines(data)
+    except RegisterError as exc:
+        print(f"inbox-target: FAIL: {exc}", file=sys.stderr)
+        return 2
+    rendered = "\n".join(lines) + "\n"
+
+    if args.shell:
+        for line in lines:
+            if line.startswith("#"):
+                continue
+            print(f"export {line}")
+        return 0
+
+    if args.check:
+        current = ENV_PATH.read_text() if ENV_PATH.exists() else None
+        if current != rendered:
+            print(f"inbox-target: FAIL: {ENV_PATH} is stale (run: bin/inbox-target export)", file=sys.stderr)
+            return 1
+        print("inbox-target: OK: registry/telegram-inbox.env matches registry/telegram-inbox.toml")
+        return 0
+
+    ENV_PATH.write_text(rendered)
+    print(f"inbox-target: wrote {ENV_PATH}")
+    return 0
+
+
+def cmd_list(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="inbox-target list")
+    parser.parse_args(argv)
+
+    try:
+        data = load_register()
+    except RegisterError as exc:
+        print(f"inbox-target: FAIL: {exc}", file=sys.stderr)
+        return 2
+
+    routes_by_dest: dict[str, list[str]] = {}
+    for route_name, dest_name in sorted(data["routes"].items()):
+        routes_by_dest.setdefault(dest_name, []).append(route_name)
+
+    rows = []
+    for name, dest in sorted(data["destinations"].items()):
+        rows.append(
+            (
+                name,
+                str(dest["thread_id"]),
+                dest["mode"],
+                dest.get("purpose", ""),
+                ", ".join(routes_by_dest.get(name, [])),
+            )
+        )
+
+    headers = ("NAME", "THREAD", "MODE", "PURPOSE", "ROUTES")
+    widths = [max(len(h), *(len(r[i]) for r in rows)) if rows else len(h) for i, h in enumerate(headers)]
+    def fmt_row(cols: tuple[str, ...]) -> str:
+        return "  ".join(c.ljust(w) for c, w in zip(cols, widths))
+    print(fmt_row(headers))
+    for row in rows:
+        print(fmt_row(row))
+    return 0
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "export":
+        return cmd_export(argv[1:])
+    if argv and argv[0] == "list":
+        return cmd_list(argv[1:])
+    return cmd_resolve(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
