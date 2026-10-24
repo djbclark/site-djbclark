@@ -222,6 +222,7 @@ class GateTests(unittest.TestCase):
         "gha.thaw-next-access-request": (838808636, 44130),
         "gha.nixos-lock-update": (838808636, 44130),
         "gha.track-issue-activity": (838808636, 44130),
+        "gha.gradle-cache-repin": (838808636, 44130),
     }
 
     def test_every_route_matches_todays_literal(self) -> None:

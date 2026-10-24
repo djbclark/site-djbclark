@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Re-pin vps-primary's Gradle remote cache image (FosterStack cache) to the latest release.
+
+Commands:
+  gradle-cache-repin resolve
+      Latest GitHub release of fosterstack/cache -> its image's index digest on ghcr.io.
+      Prints tag=, version=, digest= lines (GITHUB_OUTPUT format).
+  gradle-cache-repin current
+      The pin in nixos/vps-primary/configuration.nix: prints version=, digest=.
+  gradle-cache-repin apply VERSION DIGEST
+      Rewrite the pin (configuration.nix, registry/ports.yml, docs/gradle-remote-cache.md).
+      Prints changed=true|false and old_version=, old_digest=.
+
+Stdlib only (runs on a bare GitHub runner and on the Mac). GH_TOKEN, when set, authenticates
+the GitHub API call. Used by .github/workflows/gradle-cache-repin.yml; see
+docs/gradle-remote-cache.md, "Upgrade the image".
+"""
+
+import json
+import os
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+UPSTREAM = "fosterstack/cache"
+IMAGE = f"ghcr.io/{UPSTREAM}"
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "nixos/vps-primary/configuration.nix"
+PORTS = ROOT / "registry/ports.yml"
+DOC = ROOT / "docs/gradle-remote-cache.md"
+
+INDEX_TYPES = (
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+)
+PIN_RE = re.compile(
+    r"# ghcr\.io/fosterstack/cache:(?P<version>\S+)\n"
+    r"\s*image = \"ghcr\.io/fosterstack/cache@(?P<digest>sha256:[0-9a-f]{64})\";"
+)
+DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+
+
+def die(msg):
+    print(f"gradle-cache-repin: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def http(url, headers=None, method="GET"):
+    req = urllib.request.Request(url, headers=headers or {}, method=method)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.headers, resp.read()
+
+
+def resolve():
+    headers = {"Accept": "application/vnd.github+json"}
+    if os.environ.get("GH_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['GH_TOKEN']}"
+    _, body = http(f"https://api.github.com/repos/{UPSTREAM}/releases/latest", headers)
+    tag = json.loads(body)["tag_name"]
+    if not (tag.startswith("v") and VERSION_RE.fullmatch(tag[1:])):
+        die(f"latest release tag {tag!r} is not vMAJOR.MINOR.PATCH; image tag unknown")
+    version = tag[1:]
+
+    _, body = http(f"https://ghcr.io/token?scope=repository:{UPSTREAM}:pull")
+    token = json.loads(body)["token"]
+    hdrs, _ = http(
+        f"https://ghcr.io/v2/{UPSTREAM}/manifests/{version}",
+        {"Authorization": f"Bearer {token}", "Accept": ", ".join(INDEX_TYPES)},
+        method="HEAD",
+    )
+    ctype = hdrs.get("Content-Type", "")
+    if ctype not in INDEX_TYPES:
+        die(f"{IMAGE}:{version} is {ctype!r}, not a multi-platform index")
+    digest = hdrs.get("Docker-Content-Digest", "")
+    if not DIGEST_RE.fullmatch(digest):
+        die(f"{IMAGE}:{version}: bad Docker-Content-Digest {digest!r}")
+    print(f"tag={tag}\nversion={version}\ndigest={digest}")
+
+
+def current():
+    m = PIN_RE.search(CONFIG.read_text())
+    if not m:
+        die(f"no '# {IMAGE}:<ver>' + 'image = \"{IMAGE}@sha256:...\"' pair in {CONFIG}")
+    return m["version"], m["digest"]
+
+
+def replace_once(path, old, new):
+    text = path.read_text()
+    if text.count(old) != 1:
+        die(f"{path.relative_to(ROOT)}: expected exactly one {old!r}, found {text.count(old)}")
+    path.write_text(text.replace(old, new))
+
+
+def apply(version, digest):
+    if not VERSION_RE.fullmatch(version) or not DIGEST_RE.fullmatch(digest):
+        die(f"bad VERSION {version!r} or DIGEST {digest!r}")
+    old_version, old_digest = current()
+    changed = (old_version, old_digest) != (version, digest)
+    if changed:
+        replace_once(CONFIG, f"# {IMAGE}:{old_version}\n", f"# {IMAGE}:{version}\n")
+        replace_once(CONFIG, f"{IMAGE}@{old_digest}", f"{IMAGE}@{digest}")
+        replace_once(CONFIG, f"index digest, v{old_version};", f"index digest, v{version};")
+        replace_once(PORTS, f"FosterStack cache v{old_version} ", f"FosterStack cache v{version} ")
+        replace_once(DOC, f"`{IMAGE}:{old_version}`", f"`{IMAGE}:{version}`")
+    print(f"changed={str(changed).lower()}\nold_version={old_version}\nold_digest={old_digest}")
+
+
+def main(argv):
+    match argv:
+        case ["resolve"]:
+            resolve()
+        case ["current"]:
+            version, digest = current()
+            print(f"version={version}\ndigest={digest}")
+        case ["apply", version, digest]:
+            apply(version, digest)
+        case _:
+            die("usage: gradle-cache-repin resolve | current | apply VERSION DIGEST")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

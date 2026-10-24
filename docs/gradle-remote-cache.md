@@ -109,16 +109,26 @@ session, 2026-10-15), so hits are not split across two caches.
    over stdin, then write `/var/lib/gradle-cache.env` on the VPS (mode 0600, root) with the
    two lines `FSCACHE_USERNAME=mac` and `FSCACHE_PASSWORD=<it>`, piping the password over
    ssh stdin so it never appears in a command line, and restart the unit.
-5. Upgrade the image: pick the release, then on the Mac
-   `crane digest ghcr.io/fosterstack/cache:<ver>` and
+5. Upgrade the image: **automatic, daily** (since 2026-10-24; djbclark's ruling: never held at a
+   version, being current beats stability). `.github/workflows/gradle-cache-repin.yml` (03:41
+   UTC; also `gh workflow run gradle-cache-repin.yml`) resolves the latest
+   [release](https://github.com/fosterstack/cache/releases) to its index digest
+   (`bin/gradle-cache-repin resolve`, the ghcr.io registry API), verifies it with
    `gh attestation verify oci://ghcr.io/fosterstack/cache@<digest> --repo fosterstack/cache
    --signer-workflow fosterstack/cache/.github/workflows/stage-image.yml --source-ref
-   refs/tags/v<ver>` (must print a verified result naming that tag); read the release's
-   changes for anything touching auth, storage or network (baseline:
-   [reviews/fosterstack-cache-v0.2.2.md](reviews/fosterstack-cache-v0.2.2.md)). Put the digest in
-   `configuration.nix`, commit, then promote and apply it as in
-   [nixos-in-git.md](nixos-in-git.md) (`git push origin master:deploy-vps-primary`, then
-   `systemctl start nixos-upgrade` on the VPS).
+   refs/tags/v<ver>`, rewrites the pin (`configuration.nix`, `registry/ports.yml`, item 1
+   above), checks that vps-primary still evaluates with exactly that image, commits to
+   `master`, and fast-forwards `deploy-vps-primary` when nothing else under `nixos/` is
+   waiting (the [nixos-in-git.md](nixos-in-git.md) rule); the host's 04:00 run pulls it.
+   A promoted bump sends a Telegram message (route `gha.gradle-cache-repin`, Pings topic)
+   with the release notes link: read them for anything touching auth, storage or network
+   (baseline: [reviews/fosterstack-cache-v0.2.2.md](reviews/fosterstack-cache-v0.2.2.md)).
+   A failed run, or a pin that could not be promoted, opens one issue labelled
+   `gradle-cache-repin` and sends a message; it closes itself once the deploy branch
+   carries the latest digest. By hand, the same steps: `bin/gradle-cache-repin resolve`,
+   the `gh attestation verify` above, `bin/gradle-cache-repin apply <ver> <digest>`,
+   commit, then promote and apply as in [nixos-in-git.md](nixos-in-git.md)
+   (`git push origin master:deploy-vps-primary`, then `systemctl start nixos-upgrade` on the VPS).
 
 ## Pitfalls met
 

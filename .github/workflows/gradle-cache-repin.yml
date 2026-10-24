@@ -1,0 +1,265 @@
+# Daily re-pin of vps-primary's Gradle remote cache image (FosterStack cache) to the latest
+# upstream release.
+#
+# djbclark's ruling (2026-10-24): installed software is not held at a version; being current
+# beats stability. The image stays pinned by index digest (the host pulls exactly what was
+# checked), but this job moves the pin: resolve the latest GitHub release of fosterstack/cache
+# to its ghcr.io index digest (bin/gradle-cache-repin), verify its build provenance
+# (gh attestation verify, as in docs/gradle-remote-cache.md), rewrite the pin, check that
+# vps-primary still evaluates with the new image, commit to master, and fast-forward
+# deploy-vps-primary when nothing else under nixos/ is waiting there (the rule of
+# nixos-lock-update.yml: a pending config change is never promoted for you). The host's own
+# nightly run (04:00 UTC) then pulls the new image.
+#
+# It must never fail quietly. A failed run, or a new pin on master that could not be promoted,
+# opens one GitHub issue labelled gradle-cache-repin and sends a Telegram message through route
+# gha.gradle-cache-repin (Pings topic); later failures comment on that issue; a run that finds
+# the latest digest on the deploy branch closes it and says so. A promoted bump also sends a
+# message, so the release notes get read. GitHub also emails the failed run itself.
+#
+# Setup: TELEGRAM_BOT_TOKEN as a repository secret (shared with the other workflows here).
+# Test the alarm path with: gh workflow run gradle-cache-repin.yml -f simulate_failure=true
+
+---
+name: Gradle cache re-pin
+
+"on":
+  schedule:
+    # Daily 03:41 UTC: before the host's 04:00-04:45 run, so a promoted bump lands that night.
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: >-
+          Fail on purpose after resolving, to exercise the issue and Telegram alarm
+        type: boolean
+        default: false
+      deploy_branch:
+        description: >-
+          Promote to this branch instead of deploy-vps-primary (a test seam; leave the default)
+        type: string
+        default: deploy-vps-primary
+
+concurrency:
+  group: gradle-cache-repin
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  repin:
+    name: Resolve, verify, pin, promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_BRANCH: ${{ inputs.deploy_branch || 'deploy-vps-primary' }}
+      CONFIG: nixos/vps-primary/configuration.nix
+    steps:
+      - name: Check out master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve the latest release to its index digest
+        id: resolve
+        run: |
+          set -euo pipefail
+          out=$(bin/gradle-cache-repin resolve)
+          echo "$out"
+          echo "$out" >>"$GITHUB_OUTPUT"
+
+      - name: Verify build provenance
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://ghcr.io/fosterstack/cache@${DIGEST}" \
+            --repo fosterstack/cache \
+            --signer-workflow fosterstack/cache/.github/workflows/stage-image.yml \
+            --source-ref "refs/tags/${TAG}"
+
+      - name: Simulated failure (test of the alarm path)
+        if: inputs.simulate_failure
+        run: |
+          echo "::error::simulate_failure was set; failing on purpose."
+          exit 1
+
+      - name: Rewrite the pin
+        id: apply
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
+          out=$(bin/gradle-cache-repin apply "$VERSION" "$DIGEST")
+          echo "$out"
+          echo "$out" >>"$GITHUB_OUTPUT"
+
+      # A manual run checks the gate even when nothing changed.
+      - name: Install Nix
+        if: steps.apply.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24  # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      # The image is pulled by podman at unit start, not built, so evaluation is the gate:
+      # the whole system must still evaluate and carry exactly the new image reference.
+      - name: Evaluate vps-primary (the gate)
+        if: steps.apply.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cfg='./nixos#nixosConfigurations.vps-primary.config'
+          image=$(nix eval --raw "${cfg}.virtualisation.oci-containers.containers.gradle-cache.image")
+          if [ "$image" != "ghcr.io/fosterstack/cache@${DIGEST}" ]; then
+            echo "::error::evaluated image is ${image}, expected ghcr.io/fosterstack/cache@${DIGEST}"
+            exit 1
+          fi
+          nix eval --raw "${cfg}.system.build.toplevel.drvPath"
+          echo
+
+      - name: Commit the pin to master
+        id: commit
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          OLD: ${{ steps.apply.outputs.old_version }}
+          NEW: ${{ steps.resolve.outputs.version }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$CONFIG" registry/ports.yml docs/gradle-remote-cache.md
+          git commit -m "vps-primary: gradle cache image ${OLD} -> ${NEW} (${DIGEST:0:19}, provenance verified)"
+          for _ in 1 2 3; do
+            git pull --rebase --quiet origin master
+            if git push origin HEAD:master; then
+              echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::could not push the pin commit to master after 3 attempts."
+          exit 1
+
+      - name: Promote to deploy-vps-primary
+        id: promote
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+          PIN_COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master "$DEPLOY_BRANCH"
+          deploy="origin/$DEPLOY_BRANCH"
+          pending=""
+          deployed_cfg=$(git show "$deploy:$CONFIG")
+          if grep -qF "ghcr.io/fosterstack/cache@${DIGEST}" <<<"$deployed_cfg"; then
+            state=deployed
+          elif ! git merge-base --is-ancestor "$deploy" origin/master; then
+            state=diverged
+          elif [ -n "$PIN_COMMIT" ] &&
+            git diff --quiet "$deploy" "${PIN_COMMIT}^" -- nixos &&
+            git diff --quiet "$PIN_COMMIT" origin/master -- nixos; then
+            # Nothing else under nixos/ is waiting: the pin commit is the only difference.
+            git push origin "origin/master:refs/heads/$DEPLOY_BRANCH"
+            state=promoted
+          else
+            pending=$(git diff --name-only "$deploy" origin/master -- nixos | paste -sd, -)
+            state=blocked
+          fi
+          echo "state=$state" >>"$GITHUB_OUTPUT"
+          echo "pending=$pending" >>"$GITHUB_OUTPUT"
+          echo "promotion: $state ${pending:+(pending: $pending)}"
+
+      - name: Report (issue)
+        id: report
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          PROMOTE_STATE: ${{ steps.promote.outputs.state }}
+          PENDING: ${{ steps.promote.outputs.pending }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          OLD: ${{ steps.apply.outputs.old_version }}
+          NEW: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          label=gradle-cache-repin
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          notes="https://github.com/fosterstack/cache/releases/tag/${TAG}"
+          deploy="git push origin master:${DEPLOY_BRANCH}"
+
+          if [ "$JOB_STATUS" != success ]; then
+            kind=failed
+            headline="Gradle cache re-pin FAILED"
+            detail="The daily FosterStack cache re-pin did not finish (release lookup, provenance,"
+            detail="${detail} nix eval or push); vps-primary keeps its current image."
+            detail="${detail} Open the run log: ${run_url}"
+          elif [ "$PROMOTE_STATE" = blocked ]; then
+            kind=blocked
+            headline="Gradle cache ${TAG} is on master but NOT promoted"
+            detail="${DEPLOY_BRANCH} lags master: other changes under nixos/ are pending (${PENDING})."
+            detail="${detail} Review them, then run: ${deploy}. Run: ${run_url}"
+          elif [ "$PROMOTE_STATE" = diverged ]; then
+            kind=diverged
+            headline="Gradle cache ${TAG} is on master but NOT promoted"
+            detail="${DEPLOY_BRANCH} is not an ancestor of master (someone committed to it"
+            detail="${detail} directly). Merge it into master, then run: ${deploy}. Run: ${run_url}"
+          else
+            kind=ok
+          fi
+
+          open=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+          text=""
+
+          if [ "$kind" != ok ]; then
+            footer="Automated by .github/workflows/gradle-cache-repin.yml;"
+            footer="${footer} this issue closes itself when a later run finds the latest digest deployed."
+            body="**${headline}**"$'\n\n'"${detail}"$'\n\n'"${footer}"
+            if [ -n "$open" ]; then
+              # Already alarmed once; a daily repeat goes to the issue only.
+              gh issue comment "$open" --body "$body"
+            else
+              gh issue create --title "$headline" --label "$label" --body "$body"
+              text="⚠️ ${headline}"$'\n'"${detail}"
+            fi
+          else
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "Resolved: ${DEPLOY_BRANCH} carries the latest digest (${TAG}); run: ${run_url}."
+              gh issue close "$open"
+              text="✅ Gradle cache re-pin: back to normal, issue #${open} closed."$'\n'"${run_url}"
+            fi
+            if [ "$PROMOTE_STATE" = promoted ]; then
+              [ -z "$text" ] || text="${text}"$'\n\n'
+              text="${text}⬆️ Gradle cache on vps-primary: ${OLD} -> ${NEW}, promoted to ${DEPLOY_BRANCH};"
+              text="${text} the host pulls it at its next nightly run. Release notes: ${notes}"
+            fi
+          fi
+
+          if [ -z "$text" ]; then
+            echo "Nothing to send."
+            echo "send=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "send=true" >>"$GITHUB_OUTPUT"
+          {
+            echo "text<<__TEXT__"
+            echo "$text"
+            echo "__TEXT__"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Notify via Telegram
+        if: always() && steps.report.outputs.send == 'true'
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.gradle-cache-repin
+          message: ${{ steps.report.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
