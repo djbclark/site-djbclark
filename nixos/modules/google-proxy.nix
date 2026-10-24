@@ -132,7 +132,11 @@ let
       ${pkgs.coreutils}/bin/sleep 1
     done
     [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
-    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    # The proxy credential (`BasicAuth USER SECRET`) lives in /etc/tinyproxy-google.auth, root 0600, never in git or the store;
+    # systemd hands it to this DynamicUser service. Without it the unit does not start: never an open proxy.
+    cred="$CREDENTIALS_DIRECTORY/proxyauth"
+    [ -s "$cred" ] || { echo "tinyproxy-google: no proxy credential (/etc/tinyproxy-google.auth)" >&2; exit 1; }
+    { cat ${baseConf}; cat "$cred"; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -154,6 +158,8 @@ in
       RestartSec = "10s";
       DynamicUser = true;
       RuntimeDirectory = "tinyproxy-google";
+      RuntimeDirectoryMode = "0700";
+      LoadCredential = "proxyauth:/etc/tinyproxy-google.auth";
       MemoryMax = "128M";
       NoNewPrivileges = true;
       CapabilityBoundingSet = "";
