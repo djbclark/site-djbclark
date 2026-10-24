@@ -29,13 +29,14 @@ let
   port = 26369;
   # hyades.mit.edu; every Hyades microVM leaves through this one address.
   hyadesEgress = "18.4.60.84";
-  # 2026-10-24: a Hetzner Floating IPv4 (id 157592860, nbg1, 3.50 EUR a month, created through the API) because MIT's border
-  # drops traffic to and from this host's PRIMARY address 178.105.34.223 but not to a different one: pings from pastebin.xvm
-  # reach 78.47.225.34 (tcpdump on enp1s0, 4 of 4 answered, 99 ms) once replies leave on enp1s0. Hyades connects to
-  # floatingIp:port directly again (firecrawl-hyades docs/rendezvous-plan.md, option 1). Outgoing connections still leave from
-  # the primary address (the route's src), so what Google and the other engines see is unchanged.
-  floatingIp = "78.47.225.34";
-  # Ports on the Floating IP that Hyades may use as well as the proxy port (redirected to it, see the firewall below).
+  # 2026-10-24: MIT's border drops traffic to and from this host's FORMER primary address 178.105.34.223 (and not to a
+  # different one: a Floating IP and then a fresh Primary IPv4 both answered pings from pastebin.xvm). The server's primary
+  # IPv4 was swapped to 2.28.231.104 (Hetzner Primary IP id 157596067, 0.60 EUR a month; the swap needs the server powered
+  # off and every Floating IP detached) and the old primary and the Floating IP were released. Hyades connects to
+  # proxyIp directly (firecrawl-hyades docs/rendezvous-plan.md). If MIT blocks this address too: rotation recipe in that file.
+  # The address comes from DHCP; this constant only names it for the redirect below.
+  proxyIp = "2.28.231.104";
+  # Ports on proxyIp that Hyades may use as well as the proxy port (redirected to it, see the firewall below).
   wellKnownPorts = [ 443 80 ];
   # 2026-10-24: MIT's border stopped forwarding anything to this host's public address (pastebin.xvm and Hyades
   # SYNs and pings never arrive on enp1s0 while check-host.net probes do; traceroute from pastebin dies after 18.0.161.1;
@@ -119,7 +120,7 @@ let
   start = pkgs.writeShellScript "tinyproxy-google-start" ''
     set -eu
     ip=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${publicInterface} scope global \
-      | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }')
+      | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
     [ -n "$ip" ] || { echo "tinyproxy-google: no IPv4 address on ${publicInterface}" >&2; exit 1; }
     # tailnet listener for the pastebin relay; tailscaled may still be coming up at boot, so wait a little for its address.
     # No address after 30 s: exit, so systemd retries every 10 s. The public address is unreachable from MIT, so a
@@ -131,7 +132,7 @@ let
       ${pkgs.coreutils}/bin/sleep 1
     done
     [ -n "$ts" ] || { echo "tinyproxy-google: no IPv4 address on ${tailnetInterface}" >&2; exit 1; }
-    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; echo "Listen ${floatingIp}"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
+    { cat ${baseConf}; echo "Listen $ip"; echo "Listen $ts"; } > "$RUNTIME_DIRECTORY/tinyproxy.conf"
     exec ${pkgs.tinyproxy}/bin/tinyproxy -d -c "$RUNTIME_DIRECTORY/tinyproxy.conf"
   '';
 in
@@ -182,21 +183,21 @@ in
       --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
     iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
 
-    # Well-known ports on the Floating IP (2026-10-24): Hyades may also connect to 78.47.225.34:443 or :80, which land on the
-    # proxy port, so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still
-    # meets the final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
+    # Well-known ports on proxyIp (2026-10-24): Hyades may also connect to proxyIp:443 or :80, which land on the proxy port,
+    # so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still meets the
+    # final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
     # nat rules are not flushed by a firewall reload: delete first, so a reload never stacks duplicates.
     for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
-      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
-        -j DNAT --to-destination ${floatingIp}:${toString port} 2>/dev/null || true
-      iptables -t nat -A PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
-        -j DNAT --to-destination ${floatingIp}:${toString port}
+      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+        -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
+      iptables -t nat -A PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+        -j DNAT --to-destination ${proxyIp}:${toString port}
     done
   '';
   networking.firewall.extraStopCommands = ''
     for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
-      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${floatingIp} --dport $p \
-        -j DNAT --to-destination ${floatingIp}:${toString port} 2>/dev/null || true
+      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+        -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
     done
   '';
 
@@ -218,7 +219,7 @@ in
         TABLE=${toString returnPathTable}
         PRIO=${toString returnPathPriority}
         IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }')
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
         GW=$(${pkgs.iproute2}/bin/ip -4 route show default dev "$IF" \
           | ${pkgs.gawk}/bin/awk '{ print $3; exit }')
         [ -n "$IP" ] || { echo "hyades-public-return-path: no IPv4 on $IF" >&2; exit 1; }
@@ -227,23 +228,16 @@ in
         ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
         ${pkgs.iproute2}/bin/ip rule add from "$IP" table "$TABLE" priority "$PRIO"
         echo "hyades-public-return-path: from $IP via $GW dev $IF table $TABLE"
-        # The Floating IP: put it on the interface (Hetzner routes it to this server but does not configure it) and give it
-        # the same source rule, or replies to 18/8 follow the tailnet subnet route and vanish.
-        ${pkgs.iproute2}/bin/ip addr replace ${floatingIp}/32 dev "$IF"
-        ${pkgs.iproute2}/bin/ip rule del from ${floatingIp} table "$TABLE" 2>/dev/null || true
-        ${pkgs.iproute2}/bin/ip rule add from ${floatingIp} table "$TABLE" priority "$PRIO"
-        echo "hyades-public-return-path: from ${floatingIp} too"
       '';
       ExecStop = pkgs.writeShellScript "hyades-public-return-path-down" ''
         set -eu
         IF=${publicInterface}
         TABLE=${toString returnPathTable}
         IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); if ($4 != "${floatingIp}") { print $4; exit } }' || true)
+          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
         if [ -n "''${IP:-}" ]; then
           ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
         fi
-        ${pkgs.iproute2}/bin/ip rule del from ${floatingIp} table "$TABLE" 2>/dev/null || true
         ${pkgs.iproute2}/bin/ip route flush table "$TABLE" 2>/dev/null || true
       '';
     };
