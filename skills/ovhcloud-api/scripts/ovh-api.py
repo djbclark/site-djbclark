@@ -43,6 +43,37 @@ def fail(msg: str) -> int:
     return 2
 
 
+def _probe_region(base: str, ak: str, ck: str, as_: str) -> str:
+    """Ask one region whether it accepts this credential, via /me (read-only).
+
+    Returns '200 ACCEPTED' or 'NNN <message>'. Never raises: a failure here is itself the answer.
+    """
+    try:
+        with urllib.request.urlopen(f"{base}/auth/time", timeout=20) as r:
+            delta = int(r.read().decode()) - int(time.time())
+    except Exception as e:  # noqa: BLE001
+        return f"unreachable ({type(e).__name__})"
+    now = str(int(time.time()) + delta)
+    url = base + "/me"
+    sig = "$1$" + hashlib.sha1("+".join([as_, ck, "GET", url, "", now]).encode()).hexdigest()
+    req = urllib.request.Request(url)
+    req.add_header("X-Ovh-Application", ak)
+    req.add_header("X-Ovh-Consumer", ck)
+    req.add_header("X-Ovh-Timestamp", now)
+    req.add_header("X-Ovh-Signature", sig)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+            return "200 ACCEPTED"
+    except urllib.error.HTTPError as e:
+        try:
+            return f"{e.code} {json.loads(e.read().decode()).get('message', '')[:60]}"
+        except Exception:  # noqa: BLE001
+            return f"{e.code} {e.reason}"
+    except Exception as e:  # noqa: BLE001
+        return f"failed ({type(e).__name__})"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="One signed OVHcloud API call.")
     p.add_argument("method", help="HTTP method, e.g. GET")
@@ -114,8 +145,19 @@ def main() -> int:
         if e.code == 403 and "NOT_GRANTED_CALL" in detail:
             print("hint: the credential's rights do not cover this call "
                   "(a missing Rights row; `*` does not include the parent path)", file=sys.stderr)
-        elif e.code == 401:
-            print("hint: AK/AS/CK may belong to different key sets, or the region is wrong",
+        elif e.code == 401 or "application key is invalid" in detail.lower():
+            # A wrong OVH_ENDPOINT produces exactly this, and it reads like a rights failure.
+            # Test the credential against all three regions so the answer is evidence, not a guess.
+            print("hint: this usually means OVH_ENDPOINT names the wrong region for this credential.\n"
+                  "      Testing all three regions with /me (read-only):", file=sys.stderr)
+            for name, base_url in ENDPOINTS.items():
+                if name == endpoint_name:
+                    continue
+                status = _probe_region(base_url, ak, ck, as_)
+                mark = "  <-- try this one" if status.startswith("200") else ""
+                print(f"        {name:8} {status}{mark}", file=sys.stderr)
+            print(f"      Your OVH_ENDPOINT is {endpoint_name!r}. Fix it with:\n"
+                  f"        printf '<region>' | sudo-secretspec set OVH_ENDPOINT --reason '...'",
                   file=sys.stderr)
         return 1
 
