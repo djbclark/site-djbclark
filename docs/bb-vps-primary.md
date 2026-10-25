@@ -201,7 +201,7 @@ own installer there) and the userspace-Tailscale variant for a libkrun microVM, 
 
 Never `nixos-rebuild` by hand on the host. Force-push a known-good commit to the deploy branch and start the
 upgrade unit: `git push -f origin <good-sha>:deploy-vps-primary`, then `ssh vps-ts systemctl start nixos-upgrade`
-(`docs/nixos-in-git.md`). `/var/lib/bb` is not touched by a switch. Commits before 2026-10-17 ran Cloudroom, whose
+(`docs/nixos-in-git.md`). A switch never changes the contents of `/var/lib/bb` (it may remount the volume when its options change, and `createHome` re-applies the root directory's owner and mode). Commits before 2026-10-17 ran Cloudroom, whose
 data is being removed. Commits from 2026-10-17 to 2026-10-25 run `services.bb`: rolling back to one of them starts
 `bb.service` again (and takes the 443/38443 tailnet serves back), and a BB version rollback needs the pre-upgrade
 database backup.
