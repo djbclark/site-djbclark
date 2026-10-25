@@ -27,6 +27,14 @@ numbers.
 1. **Size with `dust` or `gdu`, never `du`/`find`** — on these trees `du`/`find`
    time out (>120 s repeatedly, 2026-10-11). Follow symlinks when a tree is one
    (`~/.codex/sessions` is): `dust` follows by default; use `du -skL` by hand.
+   **Low-load rule (djbclark, 2026-10-25):** a `dust` of all of `~` indexed 5.2M
+   files / 314 GiB logical (cow pastures count in full), ran 30+ min and added to a
+   load of 24. Never scan `~` or `~/src`. Size one named directory at a time,
+   sequentially, each as `~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 15 <dir>
+   > /tmp/diskfree-<name>.out 2>&1` (run in the background, output to a file; `bg`
+   is the load gate and utility QoS). Run `load-watch admit` first and skip the step
+   while it says hot. Never `BG_LOAD_WAIT=0`, never `taskpolicy -b`. Cheap numbers
+   first (`df`, `tmutil`, `cow stats`, a tool's own size command). Taking longer is fine.
 2. **Freed space can be pinned by a snapshot.** APFS only reclaims blocks when
    no snapshot references them. Before declaring a delete "didn't work", check
    `tmutil listlocalsnapshots /System/Volumes/Data` (step 5).
@@ -47,11 +55,13 @@ numbers.
 
 ```bash
 df -h /System/Volumes/Data
-dust -d 2 -n 25 ~            # top consumers, home
-dust -d 2 -n 15 ~/.cache ~/Library/Caches
-cow stats                    # pastures: logical vs on-disk
+cow stats                    # pastures: logical vs on-disk (cheap)
 tmutil listlocalsnapshots /System/Volumes/Data
 jobber list | rg 'apfs-compress|chrome-cache-trim'
+~/src/djbclark-ade/bin/load-watch admit --json     # proceed only while status is ok
+# then ONE directory at a time (rule 1), e.g. ~/.cache, ~/Library/Caches,
+# ~/Library/Application\ Support, ~/.cargo, ~/Downloads, ~/Library:
+~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 15 ~/.cache > /tmp/diskfree-cache.out 2>&1
 ```
 
 Present a table — path, size, reclaimable-by, risk — and get a go. If space is
