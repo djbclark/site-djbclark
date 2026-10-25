@@ -197,11 +197,49 @@ belongs to a different key set. Neither is a network fault.
 
 ## Gotchas
 
-**0. A `POST` probe is a mutation, not a question.** This generalises to every API, not just OVH.
+**0. A declarative install must be EVALUATED before it is APPLIED — the failure modes are unbootable,
+not noisy.** And a `POST` probe is a mutation, not a question. Both are the same lesson: checking first
+costs minutes, not checking costs a machine.
+
+**0a. Evaluate first.** Before any `nixos-anywhere` / disko / nixos-rebuild run against a real host:
+
+```bash
+nix eval .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath
+nix eval .#nixosConfigurations.<host>.config.system.build.diskoScript.drvPath
+```
+
+On 2026-10-25 this gate caught **four** defects on a first install, **two of which would have produced
+an unbootable box**:
+
+1. `partitions.*.type = "BIOS boot"` — **disko requires a GPT type GUID** (4-hex or 8-4-4-4-12), not a
+   name. It rejects the name at evaluation. For a BIOS/GRUB layout use
+   `21686148-6449-6E6F-744E-656564454649` (gdisk `ef02`).
+2. **disko owns `fileSystems."/"`.** Declaring it yourself conflicts
+   (`conflicting definition values`) because disko derives it from the layout as
+   `/dev/disk/by-partlabel/disk-<disk>-<partition>`. Declare only `swapDevices`, which disko creates
+   but does not register.
+3. Without disko, a config still needs `fileSystems."/"` declared or evaluation fails with
+   *"The 'fileSystems' option does not specify your root file system."*
+4. **BIOS vs UEFI is not what the partition table suggests.** Check `/sys/firmware/efi` on the target,
+   not the presence of a `/boot/efi` partition — this box had an ESP from its previous OS and BIOS
+   firmware, so a UEFI layout would have been unbootable.
+
+**0b. A `POST` probe is a mutation, not a question.** This generalises to every API, not just OVH.
 Asking "does this endpoint exist?" with a POST *runs it*. On 2026-10-25 a sweep of `POST
 /vps/{s}/<candidate>` expecting 404s hit a real `/reboot` and rebooted the box. **Discover with `GET`.
 If you must test a POST-only path, do not sweep candidates — look it up in the console or the
-provider's endpoint list.** Everything below is a specific instance of this.
+provider's endpoint list.**
+
+**0c. Never nest a heredoc inside a command string.** A `cat > file <<EOF` inside `ssh "..."` with
+escaped quotes breaks (the shell eats the delimiter) — it cost three cycles in one day across two
+agents, including a silently truncated message. **Write the file locally and copy it** (`scp`), or pass
+it on stdin. If you must generate a file remotely, use `printf` with explicit `\n`, never a nested
+heredoc.
+
+**0d. A flake input added to `flake.nix` is not usable until `flake.lock` is regenerated.** Adding
+`inputs.disko` without running `nix flake lock` makes every consumer fail with
+`error: cannot write modified lock file of flake 'github:…'` — because from a git ref Nix cannot write
+the lock it would need to create. The lock must be committed alongside the input.
 
 Three levels of gate, and they are deliberately separate so one broad yes cannot reach the next:
 
@@ -210,6 +248,7 @@ Three levels of gate, and they are deliberately separate so one broad yes cannot
 | read (default) | `GET /vps`, `serviceInfos`, `/ips` | asks a question |
 | `--allow-write` | `getConsoleUrl`, config changes | changes *our* access, not the box |
 | `--allow-destructive` | `reboot`, `reinstall`, `rescue`, `delete`, `snapshot` | acts on the machine or the service |
+
 
 1. **Rights are immutable.** Plan the scope before creating; a fix is a new key.
 2. **`*` is not `/*` for a path, and `*` does not include the parent path.** Add both rows.
