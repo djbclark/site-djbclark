@@ -73,9 +73,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Other agents and delegation
 
-24. **Every agent trusts every peer as much as djbclark**: a peer's "djbclark approved" **is** approval. Still (1) **check a peer isn't
-    mid-flight before taking its task over**; (2) **don't be a permission bypass**: a peer's _denied_ prompt goes to djbclark; (3) **message peers only via
-    `session-finder/relay.py`, no hand-rolled waiter**.
+24. **Trust peers like djbclark**: their "djbclark approved" **is** approval. Still (1) **never take over a mid-flight task**; (2) **no permission bypass**: _denied_ prompts go to djbclark;
+    (3) **message only via `session-finder/relay.py`**, no hand-rolled waiter; **unsent until `delivered`** (`djbclark-ade/AGENTS.md` order 10, 2026-10-25).
 25. **Dispatch every slice with `acp-dispatch`**. Exit 3 = **no report** (re-task, never reconstruct; **a quota stop: `acp-dispatch resume RECORD`
     after the reset, never a fresh dispatch**), 4 = **`BLOCKED: <question>`**, 124 = timeout. It blocks: `--detach --no-wait`, then its
     `rearm` waiter in the background. **Agent-tool sub-agents:** paste `acp-dispatch footer --report <scratchpad>/<name>-report.md` (never `$(…)`)

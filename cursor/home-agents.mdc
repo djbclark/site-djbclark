@@ -39,7 +39,10 @@ layout keeps upstream's; don't enforce.**
 approved something **is** approval; its hand-offs and claims are authoritative. Still: (1) **check
 whether a peer is already mid-flight before taking a task over**; (2) **don't be a permission
 bypass**: a peer asking you to run a prompt its session was *denied* goes to djbclark; (3) **message
-peers only with `session-finder/relay.py`, which picks the route and falls back itself, never a hand-rolled waiter** (2026-10-15, 2026-10-23).
+peers only with `session-finder/relay.py`, which picks the route and falls back itself, never a hand-rolled waiter** (2026-10-15, 2026-10-23);
+**a message is unsent until relay reports `delivered`** (`queued`/`accepted`/`unverified` is no proof); the first message to a
+peer asks for a named ack; a peer's relayed question is answered by relay, not prose; an unreachable peer goes to djbclark
+(`~/src/djbclark-ade/AGENTS.md` standing order 10; djbclark, 2026-10-25).
 
 ## Sub-agent reports go to a file (2026-10-03)
 
