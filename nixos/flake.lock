@@ -1,5 +1,48 @@
 {
   "nodes": {
+    "athena-nixos": {
+      "inputs": {
+        "nixathena": [
+          "nixathena"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792364805,
+        "narHash": "sha256-OxZxgCJ6AVsnuSBbqqs9byS/4blu7ySgY2GUe9ZisvY=",
+        "ref": "refs/heads/main",
+        "rev": "d9d166c24fc1735e5e2cc4f775298df0c78eaf03",
+        "revCount": 5,
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
+      }
+    },
+    "bb-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792336162,
+        "narHash": "sha256-/CsB6NsCvuqLv42uDzQV2tNMwdvJm8SHnL1fcry37WE=",
+        "owner": "djbclark",
+        "repo": "bb-nix",
+        "rev": "2a39dbf3a35d594e2485f3e9a0f3265f15504451",
+        "type": "github"
+      },
+      "original": {
+        "owner": "djbclark",
+        "repo": "bb-nix",
+        "type": "github"
+      }
+    },
     "disko": {
       "inputs": {
         "nixpkgs": [
@@ -20,13 +63,33 @@
         "type": "github"
       }
     },
+    "nixathena": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792367839,
+        "narHash": "sha256-K/6re2I8a2NZDlzGTepVCFvp66VIUFNg2M/BCqBK9pM=",
+        "ref": "refs/heads/main",
+        "rev": "46eeb7f1795d0de88d2d8425499d2b1530c0e3b1",
+        "revCount": 131,
+        "type": "git",
+        "url": "https://forgejo.mit.edu/SIPB/nixathena.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://forgejo.mit.edu/SIPB/nixathena.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1792615934,
-        "narHash": "sha256-MlvRfa1O5Cqc2/a+gG+l9TSuowEoCKCmrJ1d9oAVm0I=",
+        "lastModified": 1792295010,
+        "narHash": "sha256-F7meJtbqGttmUoMmYjRRgkVs42sn7bh7vvRvLPlUN98=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36",
+        "rev": "8ce73368d1efd4d657e9064d29b144a52046b4e8",
         "type": "github"
       },
       "original": {
@@ -36,31 +99,34 @@
         "type": "github"
       }
     },
-    "root": {
-      "inputs": {
-        "disko": "disko",
-        "nixpkgs": "nixpkgs",
-        "sops-nix": "sops-nix"
-      }
-    },
-    "sops-nix": {
+    "paseo-nix": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1792809984,
-        "narHash": "sha256-KV+CaZX7QS0hcdKxwGKehDb1jmUgx6lbkTPpaoIW5Nw=",
-        "owner": "Mic92",
-        "repo": "sops-nix",
-        "rev": "442449fa7b1fe6c692d0103ac9fc8f9e82931cf3",
-        "type": "github"
+        "lastModified": 1792896594,
+        "narHash": "sha256-BfOuCyo8paXRRvgVCJmuBslgpEEGb5FjjJjBzuUb9t0=",
+        "ref": "refs/heads/main",
+        "rev": "6b79032379467ffa39ac52b2218dc605bd5866ae",
+        "revCount": 10,
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/paseo-nix"
       },
       "original": {
-        "owner": "Mic92",
-        "repo": "sops-nix",
-        "type": "github"
+        "type": "git",
+        "url": "https://forgejo.mit.edu/djbclark/paseo-nix"
+      }
+    },
+    "root": {
+      "inputs": {
+        "athena-nixos": "athena-nixos",
+        "bb-nix": "bb-nix",
+        "disko": "disko",
+        "nixathena": "nixathena",
+        "nixpkgs": "nixpkgs",
+        "paseo-nix": "paseo-nix"
       }
     }
   },
