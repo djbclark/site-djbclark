@@ -197,6 +197,20 @@ belongs to a different key set. Neither is a network fault.
 
 ## Gotchas
 
+**0. A `POST` probe is a mutation, not a question.** This generalises to every API, not just OVH.
+Asking "does this endpoint exist?" with a POST *runs it*. On 2026-10-25 a sweep of `POST
+/vps/{s}/<candidate>` expecting 404s hit a real `/reboot` and rebooted the box. **Discover with `GET`.
+If you must test a POST-only path, do not sweep candidates — look it up in the console or the
+provider's endpoint list.** Everything below is a specific instance of this.
+
+Three levels of gate, and they are deliberately separate so one broad yes cannot reach the next:
+
+| level | examples | why |
+|---|---|---|
+| read (default) | `GET /vps`, `serviceInfos`, `/ips` | asks a question |
+| `--allow-write` | `getConsoleUrl`, config changes | changes *our* access, not the box |
+| `--allow-destructive` | `reboot`, `reinstall`, `rescue`, `delete`, `snapshot` | acts on the machine or the service |
+
 1. **Rights are immutable.** Plan the scope before creating; a fix is a new key.
 2. **`*` is not `/*` for a path, and `*` does not include the parent path.** Add both rows.
 3. **Region-locked.** Keys made on one region's page fail on another with "Authentication failed".
