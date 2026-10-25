@@ -105,7 +105,8 @@
 # ping text and relay file ($STATE_DIR/upstream-pr.*) are exactly the single-profile ones. The scheduled
 # tick runs every profile in FLEET_WATCH_UPSTREAM_PROFILES (default "cfengine paseo"), each with its own
 # throttle stamp, run lock, state file and relay target:
-#   cfengine  cfengine/core, cfengine/libntech, NorthernTechHQ/libntech; PullRequest and Issue threads;
+#   cfengine  cfengine/core, cfengine/libntech, NorthernTechHQ/libntech; PullRequest, Issue and Discussion
+#             threads (Discussion added 2026-10-25);
 #             state $STATE_DIR/upstream-pr.*; ping prefix "cfengine-core"; fallback "worker" (above).
 #   paseo     getpaseo/paseo, william0wang/zcode-acp (FLEET_WATCH_PASEO_REPOS); PullRequest, Issue and
 #             Discussion threads; state $STATE_DIR/upstream-paseo.*; ping prefix "paseo"; fallback "ping":
@@ -688,7 +689,7 @@ upr_profile() {
       UPSTREAM_DIR="${FLEET_WATCH_UPSTREAM_DIR:-$HOME/src/cfengine-core}"
       UPSTREAM_PROMPT="${FLEET_WATCH_UPSTREAM_PROMPT:-$HOME/ops/site-private/prompts/upstream-pr-review.md}"
       UPSTREAM_CHAIN="${FLEET_WATCH_UPSTREAM_CHAIN:-$HOME/.local/state/handoffs/chains/standalone-3fd9}"
-      UPR_BASE=upstream-pr UPR_PING=cfengine-core UPR_TYPES="PullRequest Issue" UPR_FALLBACK=worker
+      UPR_BASE=upstream-pr UPR_PING=cfengine-core UPR_TYPES="PullRequest Issue Discussion" UPR_FALLBACK=worker
       UPR_DRAFT_DIR=$UPSTREAM_CHAIN UPR_DRAFT_STEM=upstream-reply
       UPR_LABEL="CFEngine upstream watcher" UPR_WATCHER="upstream-PR watcher" UPR_FOLLOWUP="upstream-PR follow-up"
       UPR_WHO="a worker"

@@ -423,14 +423,18 @@ class PaseoWatch(Harness):
         self.assertEqual(len(self.relays()), 1)
         self.assertEqual(self.pstate()["pending"], [])
 
-    def test_the_cfengine_profile_does_not_track_discussions_or_paseo_repos(self) -> None:
-        self.dthread(T0, repo="cfengine/core")
-        self.assertEqual(self.run_fw().returncode, 0)
-        self.dthread("2026-10-16T09:00:00Z", repo="cfengine/core")
-        self.discussion([dcomment("DC_2", "larsewi", "2026-10-16T09:00:00Z", "hello")])
+    def test_the_cfengine_profile_tracks_its_own_discussions_but_not_paseo_repos(self) -> None:
+        self.set("notifications", [note("9100", T0, "cfengine/core", "Discussion", 6295),
+                                   note("9101", T0, "getpaseo/paseo", "Discussion", 7828)])
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertEqual(self.pings(), [])
-        self.assertEqual(json.loads((self.state / "upstream-pr.json").read_text())["threads"], {})
+        (seeded,) = json.loads((self.state / "upstream-pr.json").read_text())["threads"].values()
+        self.assertEqual(seeded["n"], 6295)
+        self.set("notifications", [note("9100", "2026-10-16T09:00:00Z", "cfengine/core", "Discussion", 6295)])
+        self.discussion([dcomment("DC_2", "larsewi", "2026-10-16T09:00:00Z", "hello")])
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.pings(), ["cfengine-core: cfengine/core#6295 comment by larsewi: hello"])
+        self.assertEqual(len(self.dispatches()), 1)
 
     def test_an_unknown_profile_is_refused(self) -> None:
         result = self.run_fw("--profile", "nope", "--dry-run")
