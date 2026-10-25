@@ -1,0 +1,32 @@
+{
+  "server_types": [
+    {
+      "id": 116, "name": "cx23", "description": "CX23", "cores": 2, "memory": 4.0, "disk": 40,
+      "cpu_type": "shared", "architecture": "x86", "deprecated": false,
+      "locations": [
+        {"id": 1, "name": "fsn1", "available": true, "recommended": true, "deprecation": null},
+        {"id": 2, "name": "nbg1", "available": true, "recommended": false, "deprecation": null},
+        {"id": 3, "name": "hel1", "available": false, "recommended": false, "deprecation": null}
+      ]
+    },
+    {
+      "id": 118, "name": "cx33", "description": "CX33", "cores": 4, "memory": 8.0, "disk": 80,
+      "cpu_type": "shared", "architecture": "x86", "deprecated": false,
+      "locations": [
+        {"id": 1, "name": "fsn1", "available": false, "recommended": false, "deprecation": null},
+        {"id": 2, "name": "nbg1", "available": false, "recommended": false, "deprecation": null},
+        {"id": 3, "name": "hel1", "available": false, "recommended": false, "deprecation": null}
+      ]
+    },
+    {
+      "id": 120, "name": "cx43", "description": "CX43", "cores": 8, "memory": 16.0, "disk": 160,
+      "cpu_type": "shared", "architecture": "x86", "deprecated": false,
+      "locations": [
+        {"id": 1, "name": "fsn1", "available": false, "recommended": false, "deprecation": null},
+        {"id": 2, "name": "nbg1", "available": false, "recommended": false, "deprecation": null},
+        {"id": 3, "name": "hel1", "available": false, "recommended": false, "deprecation": null}
+      ]
+    }
+  ],
+  "meta": {"pagination": {"page": 1, "per_page": 50, "previous_page": null, "next_page": null, "last_page": 1, "total_entries": 3}}
+}

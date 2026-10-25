@@ -9,6 +9,7 @@
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch upstream [--dry-run] [--once]  only the upstream-PR watcher (see Upstream PR watcher)
+#   fleet-watch hetzner [--dry-run] [--fixture FILE]  only the Hetzner restock watcher (see Hetzner restock watcher)
 #   fleet-watch upstream --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
 #   fleet-watch install   write the launchd agent (every 5 min) and load it
 #   fleet-watch uninstall  unload and remove the launchd agent
@@ -99,6 +100,30 @@
 # newest non-operator activity as a candidate; --once is accepted (a manual pass is single anyway).
 # After 6 consecutive failed notification fetches (a locked login keychain does that overnight)
 # one ping says so.
+
+# Hetzner restock watcher (2026-10-24): vps-primary sits on a CX-class type that cannot be rescaled
+# until a bigger one is in stock (cx33/cx43 were available=false in fsn1, nbg1 and hel1 that day;
+# the old /v1/datacenters endpoint is gone, 410). Every FLEET_WATCH_HETZNER_INTERVAL seconds (default
+# 3600; the launchd job ticks every 5 min) ONE read-only `GET /v1/server_types?per_page=50` reads each
+# type's per-location `available` flag. The watched grid is FLEET_WATCH_HETZNER_TYPES (default
+# "cx33 cx43") x FLEET_WATCH_HETZNER_LOCATIONS (default "nbg1 fsn1"). Last known values live in
+# $STATE_DIR/hetzner-restock.json ({"avail": {"cx33@nbg1": false, ...}}, temp file then os.replace).
+# A ping goes out only when a pair CHANGES: "cx33 now available in nbg1 (rescale vps-primary: needs
+# power-off; ask djbclark)", and once "cx33 back to unavailable in nbg1". The first run only seeds the
+# state, and speaks only for pairs that are already available. A failed ping leaves that pair's state
+# alone, so the next run retries; a failed fetch (or a response with none of the watched pairs, i.e.
+# the API shape changed) logs to fleet-watch.log, pings nothing and keeps the state.
+# The token HETZNER_CLOUD_TOKEN (full-access scope) comes ONLY from
+#   sudo-secretspec run --reason "hetzner restock watch" -- python3 -I -c <code> fetch
+# (no sudo and no Touch ID needed under launchd). That child reads the one value, wipes the rest of
+# its environment (every declared secret rides in it) before doing anything else, never prints,
+# logs or stores it, and prints only {"cx33@nbg1": false, ...}. It is the only code that ever holds
+# the token; the decision, the state file and the pings run in a second process without it. The
+# watcher cannot change anything: the single request is built by hetzner_request() (method GET,
+# redirects refused so the header cannot follow one), and tests/test_fleet_watch_hetzner.py asserts
+# that against a local server. --dry-run reads (live, or --fixture FILE, which needs no token and no
+# network and implies --dry-run) and prints "would ping: ..." per change; it writes and pings nothing.
+# FLEET_WATCH_HETZNER=off disables the scheduled check; `fleet-watch hetzner` always runs now.
 export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
 
@@ -143,6 +168,16 @@ VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # Consecutive failed probes before "down" is announced. 3 x 5 min covers the
 # unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
 VPS_DOWN_AFTER="${FLEET_WATCH_VPS_DOWN_AFTER:-3}"
+# Hetzner restock watcher (2026-10-24); see "Hetzner restock watcher" in the header.
+HETZNER="${FLEET_WATCH_HETZNER:-on}"
+HETZNER_TYPES="${FLEET_WATCH_HETZNER_TYPES-cx33 cx43}"
+HETZNER_LOCATIONS="${FLEET_WATCH_HETZNER_LOCATIONS-nbg1 fsn1}"
+HETZNER_INTERVAL="${FLEET_WATCH_HETZNER_INTERVAL:-3600}"
+HETZNER_TIMEOUT="${FLEET_WATCH_HETZNER_TIMEOUT:-60}"
+HETZNER_SECRETSPEC="${FLEET_WATCH_SECRETSPEC:-sudo-secretspec}"
+HETZNER_STATE="$STATE_DIR/hetzner-restock.json"
+HETZNER_FIXTURE=""
+HETZNER_DRY=0
 # get backup staleness (2026-10-16, asked by the sipb-fa session, approved by djbclark): defeat
 # pulls nightly rsync snapshots of get (restic until 2026-10-20; get parked since then, so "stale"); ~/src/get's `scripts/backup-check stale` prints one line
 # and exits 1 when the last success is older than 30 h or defeat is unreachable (ssh defeat).
@@ -1055,6 +1090,198 @@ upstream_watch() {
   return 0
 }
 
+hetzner_watch() {
+  # $1 = check (the scheduled run: throttled) or manual (always runs now).
+  local mode=${1:-check} stamp="$STATE_DIR/hetzner-restock.last" now snap rc args=()
+  [[ "$HETZNER" == on || "$mode" == manual ]] || return 0
+  now=$(gdate +%s)
+  # 30 s of slack: the launchd job ticks at 300 s and is never exactly on time.
+  if [[ "$mode" == check && -f "$stamp" ]] && ((now - $(gstat -c %Y "$stamp") < HETZNER_INTERVAL - 30)); then
+    return 0
+  fi
+  ((HETZNER_DRY)) || : >"$stamp"
+  if [[ -n "$HETZNER_FIXTURE" ]]; then
+    snap=$("$PY3" -I -c "$HETZNER_PY" fetch --fixture "$HETZNER_FIXTURE" 2>>"$LOG")
+  else
+    # The only place the token exists: HETZNER_CLOUD_TOKEN, injected by the boundary into this one child.
+    snap=$(FLEET_WATCH_HETZNER_WATCH="$HETZNER_TYPES|$HETZNER_LOCATIONS" \
+      runb "$HETZNER_TIMEOUT" "$HETZNER_SECRETSPEC" run --reason "hetzner restock watch" -- \
+      "$PY3" -I -c "$HETZNER_PY" fetch </dev/null 2>>"$LOG")
+  fi
+  rc=$?
+  if ((rc != 0)) || [[ -z "$snap" ]]; then
+    printf '%s hetzner fetch failed (rc=%s)\n' "$(gdate '+%F %T')" "$rc" >>"$LOG"
+    ((HETZNER_DRY)) && echo "hetzner: fetch failed (rc=$rc); see $LOG" >&2
+    return 1
+  fi
+  ((HETZNER_DRY)) && args+=(--dry-run)
+  printf '%s' "$snap" | FLEET_WATCH_HETZNER_WATCH="$HETZNER_TYPES|$HETZNER_LOCATIONS" \
+    "$PY3" -I -c "$HETZNER_PY" decide --state "$HETZNER_STATE" --notify "$SELF" ${args[@]+"${args[@]}"} 2>>"$LOG"
+  rc=$?
+  ((rc == 0)) || printf '%s hetzner decide ended rc=%s\n' "$(gdate '+%F %T')" "$rc" >>"$LOG"
+  return "$rc"
+}
+
+# The watcher's Python, run as `python3 -I -c "$HETZNER_PY" fetch|decide ...` (-I: no PYTHON* variables,
+# no user site). `fetch` runs under sudo-secretspec and holds the token; `decide` never does.
+IFS= read -r -d '' HETZNER_PY <<'PYEOF' || true
+import datetime
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+API_URL = "https://api.hetzner.cloud/v1/server_types?per_page=50"
+MAX_PAGES = 5
+# What a child needs to run and resolve names; everything else (all the declared secrets) goes.
+KEEP_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR")
+
+
+def watched():
+    types, _, locs = os.environ.get("FLEET_WATCH_HETZNER_WATCH", "cx33 cx43|nbg1 fsn1").partition("|")
+    return types.split(), locs.split()
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def hetzner_request(url, token):
+    """The one request this watcher can make: a GET. Nothing else is built anywhere."""
+    return urllib.request.Request(
+        url, method="GET", headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+
+
+def get_pages(url, token):
+    opener = urllib.request.build_opener(NoRedirect)
+    pages, nxt = [], 1
+    while nxt and len(pages) < MAX_PAGES:
+        page_url = url if nxt == 1 else "%s&page=%d" % (url, nxt)
+        with opener.open(hetzner_request(page_url, token), timeout=20) as resp:
+            body = json.load(resp)
+        pages.append(body)
+        nxt = ((body.get("meta") or {}).get("pagination") or {}).get("next_page")
+    return pages
+
+
+def snapshot(pages, types, locs):
+    out = {}
+    for page in pages:
+        for st in page.get("server_types") or []:
+            if st.get("name") not in types:
+                continue
+            for loc in st.get("locations") or []:
+                if loc.get("name") in locs and isinstance(loc.get("available"), bool):
+                    out["%s@%s" % (st["name"], loc["name"])] = loc["available"]
+    return out
+
+
+def fetch(args):
+    types, locs = watched()
+    if args[:1] == ["--fixture"]:
+        with open(args[1]) as f:
+            pages = [json.load(f)]
+    else:
+        token = os.environ.get("HETZNER_CLOUD_TOKEN", "")
+        url = os.environ.get("FLEET_WATCH_HETZNER_URL") or API_URL
+        keep = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
+        os.environ.clear()
+        os.environ.update(keep)
+        if not token:
+            sys.stderr.write("hetzner: HETZNER_CLOUD_TOKEN not provided\n")
+            return 1
+        try:
+            pages = get_pages(url, token)
+        except urllib.error.HTTPError as e:
+            sys.stderr.write("hetzner: HTTP %s\n" % e.code)
+            return 1
+        except Exception as e:
+            sys.stderr.write("hetzner: %s\n" % type(e).__name__)
+            return 1
+        finally:
+            token = None
+    snap = snapshot(pages, types, locs)
+    if not snap:
+        sys.stderr.write("hetzner: none of the watched type/location pairs are in the response\n")
+        return 1
+    sys.stdout.write(json.dumps(snap, sort_keys=True))
+    return 0
+
+
+def events(snap, prev):
+    """Pings for pairs that changed. A pair never seen before speaks only when already available."""
+    out = []
+    for key in sorted(snap):
+        now, was = snap[key], prev.get(key)
+        if was is None and not now or was == now:
+            continue
+        typ, loc = key.split("@")
+        if now:
+            line = "%s now available in %s (rescale vps-primary: needs power-off; ask djbclark)" % (typ, loc)
+        else:
+            line = "%s back to unavailable in %s" % (typ, loc)
+        out.append((key, line))
+    return out
+
+
+def save(path, state):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".hetzner-restock.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, sort_keys=True)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def decide(args):
+    path = notify = None
+    dry = False
+    it = iter(args)
+    for a in it:
+        if a == "--state":
+            path = next(it)
+        elif a == "--notify":
+            notify = next(it)
+        elif a == "--dry-run":
+            dry = True
+    snap = json.load(sys.stdin)
+    try:
+        with open(path) as f:
+            state = json.load(f)
+        prev = state.get("avail") if isinstance(state, dict) else None
+    except (OSError, ValueError):
+        prev = None
+    prev = dict(prev) if isinstance(prev, dict) else {}
+    due = events(snap, prev)
+    avail, rc = dict(prev), 0
+    for key, now in snap.items():
+        if key not in dict(due):
+            avail[key] = now  # unchanged, or first sight of an unavailable pair: seed silently
+    for key, line in due:
+        if dry:
+            print("would ping: " + line)
+        elif subprocess.run([notify, "hetzner-notify", line], stdin=subprocess.DEVNULL).returncode == 0:
+            avail[key] = snap[key]
+        else:
+            rc = 3  # this pair's state stays, so the next run retries
+    print("hetzner: " + " ".join("%s=%s" % (k, "yes" if v else "no") for k, v in sorted(snap.items())))
+    if not dry:
+        now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        save(path, {"avail": avail, "checked": now_utc})
+    return rc
+
+
+if __name__ == "__main__":
+    mode, rest = sys.argv[1], sys.argv[2:]
+    sys.exit({"fetch": fetch, "decide": decide}[mode](rest))
+PYEOF
+
 check() {
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
@@ -1075,6 +1302,7 @@ check() {
   vps_watch
   getbackup_watch check
   upstream_watch check || true
+  hetzner_watch check || true
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
   local r
@@ -1153,6 +1381,27 @@ case "${1:-check}" in
   getbackup)
     getbackup_watch manual
     echo "getbackup=$GETBACKUP_STATE"
+    ;;
+  hetzner)
+    shift
+    while (($#)); do
+      case $1 in
+        --dry-run) HETZNER_DRY=1 ;;
+        --fixture)
+          [[ -n "${2:-}" ]] || { echo "usage: fleet-watch hetzner [--dry-run] [--fixture FILE]" >&2; exit 2; }
+          HETZNER_FIXTURE=$2
+          HETZNER_DRY=1
+          shift
+          ;;
+        *) echo "usage: fleet-watch hetzner [--dry-run] [--fixture FILE]" >&2; exit 2 ;;
+      esac
+      shift
+    done
+    hetzner_watch manual
+    ;;
+  hetzner-notify)
+    # Internal: the decision process (no token in its environment) sends each ping through here.
+    notify "site-djbclark" "${2:?usage: fleet-watch hetzner-notify TEXT}"
     ;;
   upstream)
     shift
@@ -1257,7 +1506,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    gsed -n '2,12p' "$0"
+    gsed -n '2,13p' "$0"
     exit 1
     ;;
 esac
