@@ -364,12 +364,15 @@ if [ "$wait_s" != 0 ]; then
     load1=$(sysctl -n vm.loadavg | gawk '{print $2}')
     over=$(gawk -v l="$load1" -v c="$cores" -v m="$max_per_core" 'BEGIN { print (l / c > m) ? 1 : 0 }')
     why="load below $max_per_core per core (now $load1)"
-    if [ "$over" = 0 ] && [ -x "$lw" ]; then
-      # The load is fine: also ask the watcher's memory gate (compressor churn, 2026-10-23), which
-      # load alone cannot show. Exit 75 is "too hot"; anything else (missing, error) fails open.
+    if [ -x "$lw" ]; then
+      # Ask the watcher's gate (compressor churn, 2026-10-23), which load alone cannot show. Since 2026-10-25 it
+      # also raises the per-core limit to its calm boost (2.0) while the compressor is calm, so a load between
+      # $max_per_core and the boost is its call, not the awk check's. Exit 0 admit, 75 too hot; anything else
+      # (error, missing) keeps the plain $max_per_core check above.
       lw_rc=0
       "$lw" admit --wait 0 --max-per-core "$max_per_core" >/dev/null 2>&1 || lw_rc=$?
-      if [ "$lw_rc" = 75 ]; then over=1; why="memory churn below the load-watch limit (load $load1 is fine)"; fi
+      if [ "$lw_rc" = 75 ]; then over=1; why="load or memory churn above the load-watch limit (load $load1)"
+      elif [ "$lw_rc" = 0 ]; then over=0; fi
     fi
     if [ "$over" = 0 ]; then
       # Straight through at low load; after a wait, read it twice with a random pause between.

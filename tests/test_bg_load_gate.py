@@ -36,7 +36,7 @@ exit 0
 """
 
 
-def run_bg(tmp_path, admit_codes, max_wait):
+def run_bg(tmp_path, admit_codes, max_wait, max_per_core="1000"):
     """Run `bg touch MARKER` with a stub `load-watch admit` that exits with ADMIT_CODES in turn.
 
     Returns (CompletedProcess, marker Path, admit calls, sleep arguments, seconds taken).
@@ -60,7 +60,7 @@ def run_bg(tmp_path, admit_codes, max_wait):
         "BASH_ENV": str(shim),
         # work is not in a git repo, so bg skips `load-watch ci check`; the stub answers it anyway.
         "GIT_CEILING_DIRECTORIES": str(tmp_path),
-        "BG_MAX_LOAD_PER_CORE": "1000",
+        "BG_MAX_LOAD_PER_CORE": max_per_core,
         "BG_MAX_WAIT": str(max_wait),
         "BG_PING_CMD": "/usr/bin/true",
         "BG_WATCH_POLL": "1",
@@ -114,3 +114,17 @@ def test_bg_runs_the_command_once_admit_clears(tmp_path):
     assert len(calls) == 3
     assert slept[0] == "15"
     assert 5 <= int(slept[1]) <= 30
+
+
+def test_bg_lets_the_watcher_admit_above_its_own_load_limit(tmp_path):
+    """2026-10-25: load-watch admit raises the limit while the compressor is calm, so exit 0 beats bg's awk check."""
+    r, marker, calls, slept, took = run_bg(tmp_path, [0], max_wait=60, max_per_core="0.0001")
+    assert r.returncode == 0, r.stderr
+    assert marker.exists()
+    assert calls == ["admit --wait 0 --max-per-core 0.0001"]
+
+
+def test_bg_keeps_its_own_limit_when_admit_errors(tmp_path):
+    r, marker, calls, slept, took = run_bg(tmp_path, [1], max_wait=5, max_per_core="0.0001")
+    assert r.returncode == 75, r.stderr
+    assert not marker.exists()
