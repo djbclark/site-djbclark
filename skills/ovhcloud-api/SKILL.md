@@ -259,7 +259,16 @@ Kept because this work repeats: these cost real time and each one looks like som
 7. **A 404 on `GET /vps/{s}/<sub>` does not prove the sub-resource is absent** — it may be POST-only
    (e.g. `/reboot` 404s on GET and exists on POST). The `option` list (`GET /vps/{s}/option`) and the
    console are the honest sources. And per (2), never resolve this ambiguity with a POST probe.
-8. **Not everything in the brief is exposed on the API.** Traffic quota and bandwidth are not on the
-   `/vps` endpoints. Say "unverified", do not infer them from the order email.
+9. **A forced password change needs a PTY, and `expect`'s `-re "assword:"` matches the wrong prompt.**
+   OVH's first login forces a password change; a non-interactive SSH fails with *"Password change
+   required but no TTY available"*, so use `ssh -tt` under `expect`. **Order the expect patterns
+   most-specific-first**, because a bare `assword:` also matches **"Current password:"** — my first
+   attempt fed the *new* password as the *current* one and got `passwd: Authentication token
+   manipulation error`. Correct order: `Retype new password` → `New password` → `Current password` →
+   `'s password:`.
+10. **A password change on a remote box is a two-step operation.** The change closes the session, so
+   installing a key must be a *second* login with the new password. Do the change first, verify the
+   new password works, then install the key — and keep both values in 600 files, never argv.
+
 
 
