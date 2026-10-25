@@ -12,6 +12,18 @@
     url = "github:nix-community/disko";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # sops-nix: secrets encrypted in git, decrypted on the host at activation by its age key.
+  # The house standard for this (docs/nixos-in-git.md §4: "Secrets never go in nixos/ as plain
+  # text: the Nix store is world-readable and this repo is public ... adopt one before putting
+  # any secret in the configuration"). Adopted 2026-10-25 for the dann host.
+  #
+  # WHY THIS IS SAFE IN A PUBLIC REPO: only the CIPHERTEXT is committed. The host's private age
+  # key lives at /var/lib/sops-nix/key.txt (mode 0600, generated ON the host, never transmitted)
+  # and is deliberately NOT in this repo or in git anywhere.
+  inputs.sops-nix = {
+    url = "github:Mic92/sops-nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   # bb-nix: only its codex-npm-bin package (the Codex CLI on the bb user's and Paseo's PATH) is used.
   # Its services.bb module is no longer imported: the BB service was removed 2026-10-25. History:
@@ -49,6 +61,7 @@
       bb-nix,
       disko,
       paseo-nix,
+      sops-nix,
       ...
     }:
     {
@@ -74,6 +87,7 @@
         system = "x86_64-linux";
         modules = [
           disko.nixosModules.disko
+          sops-nix.nixosModules.sops
           ./dann/configuration.nix
           ./dann/disko.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

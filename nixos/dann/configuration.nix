@@ -151,12 +151,45 @@
     };
   };
 
+  # ── Secrets: sops-nix with age ────────────────────────────────────────────────────────
+  # The house standard (docs/nixos-in-git.md §4). Only CIPHERTEXT is committed; this repo is
+  # public, which is safe because an age public key encrypts but cannot decrypt.
+  #
+  # The host's private age key was generated ON the host on 2026-10-25 and has never been
+  # transmitted: /var/lib/sops-nix/key.txt, mode 0600, root-owned. It is not in git anywhere.
+  # Public key (in .sops.yaml): age1kpu8804m763x7aet9pwhm92k4h44qmk34xmxg3yynhdsct5f4pfqrv548p
+  #
+  # LEAST PRIVILEGE IS THE POINT (main instance's ruling, 2026-10-25): this host holds only the
+  # credentials its own work needs, NOT the operator's full set. A file store holding three
+  # scoped credentials is a smaller exposure than a perfect boundary holding all of them, so the
+  # rule is that a secret is added here only when a service on THIS host actually consumes it.
+  sops = {
+    age.keyFile = "/var/lib/sops-nix/key.txt";
+    defaultSopsFile = ./secrets/dann.yaml;
+    defaultSopsFormat = "yaml";
+    # Validate the secret declarations against the encrypted file at evaluation time, so a
+    # renamed or removed key is caught before the switch rather than at activation.
+    validateSopsFiles = true;
+
+    # Each secret is declared with its consumer's identity and mode. The pipeline probe below is
+    # deliberate: it proves encrypt -> deploy -> decrypt works end to end before a real credential
+    # depends on it. Remove it once a real secret has been through the same path.
+    secrets."sops_probe" = {
+      owner = "dann";
+      group = "users";
+      mode = "0400";
+    };
+  };
+
   environment.systemPackages = with pkgs; [
     vim
     git
     python3
     curl
     htop
+    # age is here so the operator (or a future session) can inspect or re-key without a nix shell.
+    age
+    sops
   ];
 
   services.journald.extraConfig = "SystemMaxUse=200M";

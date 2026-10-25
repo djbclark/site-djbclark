@@ -1,0 +1,26 @@
+# sops configuration: WHICH age keys may decrypt WHICH files.
+#
+# Committed to a PUBLIC repo on purpose. This file contains only PUBLIC age keys — an age public
+# key can encrypt but not decrypt, so publishing it is safe and is in fact required for the
+# encryption to be reproducible.
+#
+# The private keys:
+#   * dann (the entity's host) — /var/lib/sops-nix/key.txt on the host, mode 0600, generated ON
+#     the host 2026-10-25 and never transmitted. NOT in git anywhere.
+#
+# Adding a recipient: append its public key below and re-encrypt (`sops updatekeys <file>`).
+# Removing one is the same edit plus `updatekeys` — but note that a removed recipient can still
+# read OLD commits, so a real revocation means rotating the secret, not just the key list.
+keys:
+  # dann.dclark.us — the entity's host. Public key only.
+  - &dann age1kpu8804m763x7aet9pwhm92k4h44qmk34xmxg3yynhdsct5f4pfqrv548p
+  # The operator's own age key, for break-glass decryption without the host.
+  # NOT YET CREATED — deliberately left as a placeholder rather than invented. When djbclark
+  # generates one (`age-keygen`), add it here so a lost host key is recoverable.
+
+creation_rules:
+  # Every secret file under this tree. `path_regex` is matched against the file path.
+  - path_regex: nixos/dann/secrets/.*\.(yaml|json|env|ini)$
+    key_groups:
+      - age:
+          - *dann
