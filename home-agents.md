@@ -58,7 +58,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 20. **In every repo, `CLAUDE.md` is a symlink to `AGENTS.md`** (merge first if both exist); likewise vendor instruction files under `~`, bar Cursor `.mdc`.
     **Exception (2026-10-24): a fork keeps its upstream's agent-file layout** (`memory/feedback_claude_md_symlink_to_agents_md.md`).
-21. **Commit and push your own changes, every repo, per unit, unasked. `git-commit-own MSG <paths>`, never bare `git commit` (pre-commit stash); a file another agent edited: `git apply --cached` your hunks,
+21. **Commit and push your own changes, every repo, per unit, unasked. `git-commit-own MSG <paths>`, never bare `git commit`; a file another agent edited: `git apply --cached` your hunks,
     `git-commit-own --staged MSG` (2026-10-24)** (`memory/feedback_commit_push_opportune.md`). `~/ops`: plain `master`, small commits (**deployments read it**).
     Never stage `site-private/codex/config.toml`, hand-edit `memory/codex/`, or stash/add/reset/`commit -a`/`pull --autostash` others' edits ([[reference_agent_rules_ops_housekeeping]]).
 22. **Paths an agent uses or hands on are `~/src/<name>`, never `~/s/...`**. New/removed top-level `~/src` entry: run `just -f ~/s/justfile`.
@@ -82,7 +82,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     into the prompt; read that file, never the final message ([[reference_agent_rules_ops_housekeeping]]).
 26. **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>' --model <m>` (always `--model`**; check its `applied:` line; exit 0 is not success);
     (2) Orca `worker-start`, (3) a Herdr pane, (4) `model-routing` headless. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice;
-    reserves (copilot, hermes, cline) and omp API credits (2026-10-19) follow `model-routing`** (item 32; [[reference_agent_rules_code_discovery_and_cli_table]])
+    reserves (copilot, hermes, cline) and omp API credits (2026-10-19) follow item 32** ([[reference_agent_rules_code_discovery_and_cli_table]])
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling, fix it there** ([[reference_djbclark_ade]], [[reference_agent_rules_multi_agent_toolkit]]).
 28. Session start in a git repo: read its Tier 1 pointer (`session-handoff`), check `head_sha`, state a resume plan first; only its owner writes it. **A teammate must get
     an `adversary` security review verdict before opening a PR**, quoted (or "no findings") in the PR body.
@@ -97,13 +97,13 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
     (`memory/feedback_self_compact.md`); **it refuses on input-line text: only then ask, never over a draft** (`memory/feedback_context_prompts_early.md`).
 31. Basic Memory is one shared MCP server (`127.0.0.1:18796/mcp`); never register a per-client stdio `basic-memory mcp`. **If down, fix it**, then `/mcp`
     reconnect. Default project: **`main`**. **A semantic search result is not a match**: use `find` or an exact `read_note` ([[reference_agent_rules_basic_memory_pools]]).
-32. **Routing policy: minimise cost, maximise code quality, not tokens. Judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only via the `frontier` kind; Fable
-    `xhigh` almost never; claude codes on Sonnet 5.5, never Fable**; climb tiers on evidence. **`acp-dispatch` needs `--kind`; `frontier` advises, never edits; cheapest
-    eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
+32. **Routing policy: minimise cost, maximise code quality, not tokens. Judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only via `frontier`; codex
+    otherwise: ample quota and top router rank (2026-10-25); Fable `xhigh` almost never; claude codes on Sonnet 5.5, never Fable**; climb tiers on evidence.
+    **`acp-dispatch` needs `--kind`; `frontier` advises, never edits; cheapest eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
 33. **Anything over ~10-15 s uses `run_in_background: true`**; wait on the notification, never poll (**Agent-tool sub-agents** wait in bounded foreground calls;
     `memory/feedback_start_slow_commands_in_background.md`). **Wait on a file or a PID; never `pgrep -f`/`pkill -f` a pattern**; kill your saved `$!`. **Never read a
     result or exit status through a pipe, or feed `--body-file` from one**: `cmd > out.log 2>&1; echo "rc=$?" > out.rc`. **Never credit a hook you haven't seen run** (`memory/feedback_exit_status_through_pipe.md`).
-34. **Run builds and tests via `~/ops/site-private/bin/bg` (always full path)** in the background; **first see whether CI can run it** (`load-watch ci decide`).
+34. **Run builds and tests via `~/ops/site-private/bin/bg` (always full path)**; **first see whether CI can run it** (`load-watch ci decide`).
     **Never set `BG_LOAD_WAIT=0` on a build; never `taskpolicy -b`; never throttle another session's processes. Gradle: one build at a time, machine-wide**
     (`memory/feedback_tests_through_bg_caps_and_slots.md`, `memory/feedback_gradle_one_at_a_time.md`).
     **Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding it; run test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).

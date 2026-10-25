@@ -171,7 +171,9 @@ never left unspent** (`djbclark-ade/skills/model-routing/SKILL.md`).
 
 **Routing policy (2026-10-15): minimise cost, maximise code quality.** Frontier models are scarce:
 judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only for work that really needs them
-(codex one slice in flight, Fable `xhigh` almost never); everyday work on other pools at the minimum
+(codex one slice in flight, Fable `xhigh` almost never); codex on other models may also take non-frontier
+work when its quota is plentiful and the router ranks it the best available (2026-10-25,
+`memory/feedback_routing_policy_cost_quality.md`); everyday work on other pools at the minimum
 spec. **claude codes on Sonnet 5.5, never Fable**; quota never buys a pool more than 10 rank steps
 below the best into code/judgment. Claude tiers: Haiku lookups, Sonnet executes, Opus plans, reviews
 and advises, Fable frontier; climb on evidence. **`acp-dispatch` needs `--kind`, refuses an ineligible
