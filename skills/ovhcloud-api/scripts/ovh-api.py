@@ -37,6 +37,39 @@ ENDPOINTS = {
 
 BILLABLE = ("/order", "/cart", "/billing", "/payment", "/refund", "/credit")
 
+# Actions that destroy, interrupt or rebuild the host. These are NOT covered by --allow-write:
+# a discovery probe must never be able to reboot a box. They need their own flag, so passing
+# one broad "yes" cannot reach them.
+#
+# This list exists because of a real incident (2026-10-25): probing which VPS endpoints exist with
+# `POST /vps/{s}/reboot --allow-write` expected a 404 (the usual "no such path" answer) and instead
+# got a 202 and a queued reboot — the box rebooted. Nothing was lost (it was unconfigured), but the
+# lesson is that a POST probe is a *mutation*, not a question, and a single broad write flag is not
+# a sufficient gate for it.
+DESTRUCTIVE = (
+    "reboot", "reinstall", "rescue", "restore", "terminate", "delete", "vnc", "console",
+    "snapshot", "rescuemode", "reset", "stop", "halt", "shutdown",
+)
+# Note: "console" is here, so an access-granting call like /getConsoleUrl is treated as sensitive
+# too — it hands out a way in, which is worth a deliberate yes even though it destroys nothing.
+
+
+def is_destructive(path: str) -> str | None:
+    """Return the matched destructive path segment, or None.
+
+    Matches on path SEGMENTS, case-insensitively, not substrings: `/vps/x/getConsoleUrl` is one
+    segment ("getconsoleurl") and matches nothing, while `/vps/x/reboot` matches "reboot". Substring
+    matching would be both too loose (`/snapshot` inside an unrelated word) and too fragile.
+    """
+    for seg in path.strip("/").split("/"):
+        low = seg.lower()
+        if low in DESTRUCTIVE:
+            return seg
+        # `/snapshot/create` and similar verb-after-noun forms.
+        if low.split(":")[0] in DESTRUCTIVE:
+            return seg
+    return None
+
 
 def fail(msg: str) -> int:
     print(f"ovh-api: {msg}", file=sys.stderr)
@@ -83,6 +116,9 @@ def main() -> int:
                    help="permit a non-GET method (the read-only default is deliberate)")
     p.add_argument("--allow-billable", action="store_true",
                    help="permit a billable path; needs a fresh explicit yes per action")
+    p.add_argument("--allow-destructive", action="store_true",
+                   help="permit a reboot/reinstall/rescue/delete path; NOT implied by --allow-write, "
+                        "and needs a fresh explicit yes per action")
     a = p.parse_args()
 
     method = a.method.upper()
@@ -93,6 +129,13 @@ def main() -> int:
     if any(a.path.startswith(b) for b in BILLABLE) and not a.allow_billable:
         return fail(f"{a.path} refused: billable path. This token can order and bill, so it needs "
                     "a fresh explicit yes per action (pass --allow-billable only after that yes)")
+    # Destructive is checked AFTER the write gate and needs its own flag, so `--allow-write` alone
+    # can never reboot a box. See the DESTRUCTIVE comment for the incident that produced this.
+    if (hit := is_destructive(a.path)) and not a.allow_destructive:
+        return fail(f"{a.path} refused: looks destructive (matched {hit!r}). --allow-write does NOT "
+                    "cover this. A probe that only wants to know whether a path exists must not be "
+                    "able to run it. Pass --allow-destructive only after a fresh explicit yes for "
+                    "this specific action.")
 
     try:
         ak = os.environ["OVH_APPLICATION_KEY"]

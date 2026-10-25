@@ -210,3 +210,42 @@ belongs to a different key set. Neither is a network fault.
    `DELETE /me/api/application/{id}` revokes it — but revoking needs rights on `/me/api/*`, so a
    token created without it cannot revoke itself. `*` covers it.
 
+## Glitches actually hit, and what to do instead (all 2026-10-25, one session)
+
+Kept because this work repeats: these cost real time and each one looks like something else.
+
+1. **A wrong `OVH_ENDPOINT` produces `403 This application key is invalid`, which reads like a rights
+   failure.** It is not — rights failures are `NOT_GRANTED_CALL`. The credential was a **US**
+   credential (`ovh-us`, account accepted 200) on a service named `…vps.ovh.ca`, and the endpoint
+   value was `ovh-ca`. **Test the region before believing any 403:** `scripts/ovh-region-check.py`
+   probes all three with `/me` (read-only) and names the one that works. `scripts/ovh-api.py` now
+   does this automatically on an auth failure.
+   **Also note:** the *service name* tells you nothing about the API region — `.ovh.ca` on a US
+   account is normal. The resource's IAM URN does tell you: `urn:v1:us:resource:…`.
+2. **A `POST` probe is a mutation, not a question.** Probing whether `/vps/{s}/reboot` exists with
+   `POST … --allow-write` expected a 404 ("no such path") and instead got `202` plus a queued
+   reboot — **the box rebooted.** A discovery sweep must never be able to act. `ovh-api.py` now
+   refuses reboot/reinstall/rescue/delete/snapshot/console paths unless `--allow-destructive` is
+   passed *separately* from `--allow-write`, so one broad yes cannot reach them. **Use `GET` to
+   discover; never sweep `POST` across candidate paths.**
+3. **The first SSH user on an OVH VPS is not `root`.** It is the OS's default user (`debian` for
+   Debian, `ubuntu`, `rocky`, …) with a temporary password delivered by a **secure link in the
+   delivery email**, and the first login forces a password change. `root` login is disabled. So a
+   fresh OVH VPS is unreachable by key until someone with console/email access adds one.
+4. **The KVM console has an API endpoint:** `POST /vps/{serviceName}/getConsoleUrl` returns the
+   console URL (the docs list it; the console UI path is VPS → General information → `...` → KVM).
+   That is the way in when there is no key and no password — so **do not reinstall just to get
+   access.**
+5. **`GET /vps/{s}/snapshot` returning 404 does NOT mean "no backup".** It is the *manual* snapshot
+   slot, empty by default. The automatic one is a different resource: `GET /vps/{s}/automatedBackup`
+   → `{state, rotation, schedule}`. Check the right endpoint before reporting a backup gap.
+6. **`serviceInfos.expiration` is the billing period, not a countdown to loss.** A monthly plan shows
+   a date ~30 days out with `renew.automatic: true`. Do not raise it as a risk; check
+   `renewalType`/`renew.period` first.
+7. **A 404 on `GET /vps/{s}/<sub>` does not prove the sub-resource is absent** — it may be POST-only
+   (e.g. `/reboot` 404s on GET and exists on POST). The `option` list (`GET /vps/{s}/option`) and the
+   console are the honest sources. And per (2), never resolve this ambiguity with a POST probe.
+8. **Not everything in the brief is exposed on the API.** Traffic quota and bandwidth are not on the
+   `/vps` endpoints. Say "unverified", do not infer them from the order email.
+
+
