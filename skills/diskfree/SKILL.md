@@ -80,7 +80,7 @@ thorough but slow.
 | cargo shared targets | `pgrep -x cargo >/dev/null \|\| pgrep -x rustc >/dev/null \|\| pgrep -f maturin >/dev/null \|\| rm -rf ~/.cargo/target-shared` | no `cargo`/`rustc`/`maturin` running **at the moment of the delete**: the guard is in the same command, never only at question time (2026-10-20: a delete approved minutes earlier broke a live maturin build) — this was 56 GB once |
 | pre-commit | `rm -rf ~/.cache/pre-commit` | none |
 | pip | `pip cache purge` | none |
-| gradle | `rm -rf ~/.cache/gradle` | **idle only**: `pgrep -fl 'GradleWrapperMain\|gradle-wrapper.jar'` empty AND `~/.local/state/gradle-slot/STATUS` shows no holder (one build at a time machine-wide); mostly jars, so compression gains little — deleting is the move, but it forces full re-downloads |
+| gradle | `rm -rf ~/.cache/gradle` | **idle only**: `pgrep -fl 'GradleWrapperMain\|gradle-wrapper.jar'` empty AND `~/.local/state/gradle-slot/STATUS` shows no holder (one build at a time machine-wide); mostly jars, so compression gains little — deleting is the move, but it forces full re-downloads; **it also deletes the linked `init.d` scripts (machine slot, shared remote cache): run `~/ops/site-djbclark/bin/gradle-limits link` right after (2026-10-25)** |
 | uv | prefer compression (step 4); `uv cache clean` clears ~14 GB → re-downloads | no uv agent running; `uv run` holds a shared flock on `~/.cache/uv/.lock` for its whole life, so "idle" means no uv process except the long-lived servers (`uv_keep` list in `~/.local/bin/apfs-compress`) |
 | Android SDK | `sdkmanager --uninstall` unused system-images/emulators | none |
 | Homebrew | `brew cleanup -s` | none |
