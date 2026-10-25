@@ -270,5 +270,8 @@
   nix.optimise.automatic = true;
   boot.loader.grub.configurationLimit = 10;
 
+  # Cap the persistent journal (754 MB on 2026-10-24 on a 30 GB root, djbclark disk hygiene).
+  services.journald.extraConfig = "SystemMaxUse=200M";
+
   system.stateVersion = "26.05";
 }
