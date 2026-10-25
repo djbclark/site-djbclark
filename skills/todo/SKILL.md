@@ -19,7 +19,7 @@ handoff doc, or cron).
 Stored as notes in the **shared** Basic Memory pool (`main`, backed by
 `~/ops/site-private/memory`, git-tracked), not any one agent's private memory.
 Any agent on this machine can read and add to it via the `basic-memory` MCP
-tools (`mcp__basic_memory__*`) or the `bm` CLI.
+tools (`mcp__basic-memory__*`) or the `bm` CLI.
 
 ## Convention
 
@@ -72,7 +72,7 @@ the server itself is fine: the client gave up during a restart and does not retr
 ## When asked "what could I work on" / "what's on the todo"
 
 1. Search the shared pool for open items:
-   - MCP: `mcp__basic_memory__search_notes` (or `search`) with query/tag
+   - MCP: `mcp__basic-memory__search_notes` (or `search`) with query/tag
      `todo-item`, project `main`.
    - CLI: `bm tool search-notes "todo-item"` (or grep
      `~/ops/site-private/memory/todo/` directly if MCP is down).
@@ -82,7 +82,7 @@ the server itself is fine: the client gave up during a restart and does not retr
 ## When you find or create one
 
 Write a new note under `todo/` in project `main` with the convention above
-(`mcp__basic_memory__write_note`, directory `todo`). Set `status: open`. Flip
+(`mcp__basic-memory__write_note`, directory `todo`). Set `status: open`. Flip
 to `status: closed` (edit in place, don't delete) once done/merged/stale, so
 the surface stays accurate without losing history.
 
