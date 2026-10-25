@@ -35,6 +35,7 @@ numbers.
    is the load gate and utility QoS). Run `load-watch admit` first and skip the step
    while it says hot. Run it from `cd /tmp` (2026-10-25: `bg` refused with exit 3 from inside a CI repo such as djbclark-ade). Never `BG_LOAD_WAIT=0`, never `taskpolicy -b`. Cheap numbers
    first (`df`, `tmutil`, `cow stats`, a tool's own size command). Taking longer is fine.
+   **`~/Library` needs `-X "Mobile Documents" -X CloudStorage -X "Group Containers"`** (2026-10-25: an unexcluded `dust` sat 1 h 32 min at 0% CPU in iCloud Drive; Google Drive's CloudStorage holds the Arq backup data, never touch it).
 2. **Freed space can be pinned by a snapshot.** APFS only reclaims blocks when
    no snapshot references them. Before declaring a delete "didn't work", check
    `tmutil listlocalsnapshots /System/Volumes/Data` (step 5).
