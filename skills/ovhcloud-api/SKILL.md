@@ -100,24 +100,34 @@ mis-copied UI rendering, not a key.
 
 ## Storing the credential
 
-Declare first, then store. `set` reads the value from stdin when stdin is not a terminal, so the
-value never enters argv, history or a transcript:
+Declare first, then store. **Have the operator run the general collector** — it is the safe path for
+any value a human types, and it is not OVH-specific:
 
 ```bash
-sudo-secretspec add OVH_APPLICATION_KEY    --description "..." --optional --reason "R"
-sudo-secretspec add OVH_APPLICATION_SECRET --description "..." --optional --reason "R"
-sudo-secretspec add OVH_CONSUMER_KEY       --description "..." --optional --reason "R"
-sudo-secretspec add OVH_ENDPOINT           --description "..." --optional --reason "R"
+# 1. declare the names (no values yet; --optional keeps `check` green until they are set)
+for n in OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY OVH_ENDPOINT; do
+  sudo-secretspec add "$n" --description "OVHcloud API credential" --optional --reason "R"
+done
 
-# store from the clipboard, one value at a time, validating shape in the SAME process
-export LC_CTYPE=en_US.UTF-8
-pbpaste | scripts/ovh-store.py OVH_APPLICATION_KEY     # prints only len + shape verdict
-printf 'cleared' | ~/ops/site-private/bin/clip         # then overwrite the clipboard
+# 2. the operator runs this; prompts hidden, all-or-nothing, shape-checked
+S=~/src/sudo-secretspec/skills/sudo-secretspec/scripts/secrets-collect.py
+python3 $S \
+  --secret 'OVH_APPLICATION_KEY=Application Key (AK):16' \
+  --secret 'OVH_APPLICATION_SECRET=Application Secret (AS):32' \
+  --secret 'OVH_CONSUMER_KEY=Consumer Key (CK):32' \
+  --secret 'OVH_ENDPOINT=API endpoint (ovh-us|ovh-eu|ovh-ca)' --literal
 ```
 
-`scripts/ovh-store.py` refuses a value that is not the documented shape, in one process, so the
-clipboard race in the `sudo-secretspec` skill (the operator's *next* copy getting stored) cannot
-happen. Then prove reach without printing anything — see Verification.
+`secrets-collect.py` is in the `sudo-secretspec` skill (every agent TUI links that skill, so it is
+always reachable). It reads each value with the input **hidden**, refuses anything that cannot be a
+key (the alphanumeric check is what catches a masked UI rendering), stores nothing until all values
+are collected and confirmed, and prints **names and lengths only**. Add `--notify-to <role>` and it
+also messages that peer when done, again without values.
+
+`scripts/ovh-store.py` remains as the single-value clipboard variant for a one-off re-copy: it
+validates and forwards in one process, so the clipboard race in the `sudo-secretspec` skill (the
+operator's *next* copy getting stored) cannot happen. Then prove reach without printing anything —
+see Verification.
 
 **Never write `~/.ovh.conf` into a repo, and never echo a key.** If a tool needs a config file,
 generate it at runtime into a mode-600 temp path under `sudo-secretspec run`, or pass the values as
