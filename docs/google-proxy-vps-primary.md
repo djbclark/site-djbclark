@@ -116,7 +116,12 @@ Tailscale's rules: restart tailscaled right after it.
    `http://2.28.231.104:443` directly, so the pastebin relay and the tailnet hop are no longer needed (the relay stays as a
    spare). Requests still reach the engines from this address. **Rotation recipe, test method and the gotchas:**
    firecrawl-hyades `docs/rendezvous-plan.md` section 0.
-5. **Credential (2026-10-24 night).** The proxy requires HTTP basic auth (user `hyades`). The unit reads `BasicAuth hyades SECRET`
-   from `/etc/tinyproxy-google.auth` (root 0600, outside git and the store) through systemd `LoadCredential` and refuses to start
-   without it, so it is never an open proxy; the runtime directory is 0700. The secret is sudo-secretspec `FIRECRAWL_PROXY_AUTH`.
-   A new host needs the file before the first start; rotation and the test are in firecrawl-hyades `docs/searxng-egress.md`.
+5. **Credential (2026-10-24 night).** The proxy requires HTTP basic auth (user `hyades`). The unit reads the secrets from
+   `/etc/tinyproxy-google.auth` (root 0600, outside git and the store, one secret of letters and digits per line, the first
+   current and an optional second the previous one for a no-downtime rotation) through systemd `LoadCredential`, writes one
+   `BasicAuth hyades SECRET` per line and refuses to start without the file or with a malformed line, so it is never an open
+   proxy; the runtime directory is 0700. The secret is sudo-secretspec `FIRECRAWL_PROXY_AUTH`. A new host needs the file before
+   the first start; rotation and the test are in firecrawl-hyades `docs/searxng-egress.md`. The tailnet listener (for the pastebin
+   relay) is optional at start: without a tailscale address the proxy still comes up on the public one. The :443/:80 redirects
+   live in their own nat chain `hyades-dnat`, rebuilt on every firewall start, so a changed `proxyIp` or `wellKnownPorts` leaves no
+   stale rule.
