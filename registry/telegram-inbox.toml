@@ -41,6 +41,13 @@ title = "Triage"
 bound_to = "goose-scout"             # must equal config.yaml channel_overrides['44136'] binding
 purpose = "paste-in triage; the only bound topic"
 
+[destinations.dann]
+chat = "dan"
+thread_id = 44782
+mode = "sink"
+title = "Dann"
+purpose = "quiet sink for Dann (no agent dispatch; posted to directly)"
+
 # Retired IDs: any sender, cron job or config entry naming one is a lint/check failure.
 [retired.22158]
 was = "Inbox"
