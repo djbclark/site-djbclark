@@ -48,6 +48,7 @@ exit "$rc"
 
 RELAY_STUB = """#!/bin/bash
 echo "$*" >> "$HOME/relay.log"
+echo "${RELAY_SENDER_NAME-unset}" >> "$HOME/relay.sender"
 exit "$(cat "$HOME/relay_rc" 2>/dev/null || echo 0)"
 """
 
@@ -113,6 +114,7 @@ class Harness(unittest.TestCase):
                     FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"), ACP_DISPATCH_STATE=str(self.bigteam),
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_UPSTREAM_CHAIN=str(self.home / "chain"),
                     FLEET_WATCH_RELAY=str(self.bin / "relay.py"), FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT))
+        full.pop("RELAY_SENDER_NAME", None)
         full.update(env)
         return subprocess.run(["bash", str(FLEET_WATCH), "upstream", *args], env=full,
                               capture_output=True, text=True, timeout=120)
@@ -397,6 +399,13 @@ class PaseoWatch(Harness):
                      "No PR branch: this is a Discussion"):
             self.assertIn(text, brief)
         self.assertEqual((self.pstate()["pending"], self.dispatches()), ([], []))
+
+    def test_relays_declare_a_sender_label_because_relay_py_refuses_without_one(self) -> None:
+        self.assertEqual(self.fw("--relay-to", "sess-1", "paseowatch session").returncode, 0)
+        self.seed()
+        self.maintainer_replies()
+        self.assertEqual(self.fw().returncode, 0)
+        self.assertEqual((self.home / "relay.sender").read_text().split(), ["fleet-watch"])
 
     def test_a_refused_relay_keeps_the_event_pending_pings_once_and_never_dispatches(self) -> None:
         self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)

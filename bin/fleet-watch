@@ -182,6 +182,8 @@ UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
 UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
 # Per-profile fields (repos, ignore list, dir, prompt, chain, state/lock/relay files) are set by upr_profile.
 UPSTREAM_RELAY="${FLEET_WATCH_RELAY:-$HOME/src/djbclark-ade/skills/session-finder/relay.py}"
+# relay.py refuses to send without a sender id (exit 4, 2026-10-25): a launchd job has none, so declare the label.
+export RELAY_SENDER_NAME="${RELAY_SENDER_NAME:-fleet-watch}"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
 UPSTREAM_AIUSE="${FLEET_WATCH_AIUSE:-$HOME/.local/bin/aiuse}"
 UPSTREAM_DISPATCH="${FLEET_WATCH_DISPATCH:-$HOME/src/djbclark-ade/bin/acp-dispatch}"
