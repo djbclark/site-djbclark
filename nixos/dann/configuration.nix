@@ -72,9 +72,34 @@
   };
 
   # ── Users ────────────────────────────────────────────────────────────────────────────
-  # `dann` is the entity's own account: normal user, wheel, key-only. It is NOT root — the
-  # agreed rule (plan §6 Q4) is that "own" means authority over the work, not over the kernel,
-  # and sudo keeps that boundary visible instead of hiding it behind uid 0.
+  # `dann` is the entity's own account. It is root-equivalent, and that is deliberate
+  # (djbclark, 2026-10-25: "give the entity root — simpler for automation, larger blast
+  # radius accepted").
+  #
+  # BE ACCURATE ABOUT WHAT THIS IS. An earlier version of this comment claimed sudo "keeps
+  # that boundary visible instead of hiding it behind uid 0". That was WRONG and is corrected
+  # here, because a false claim of a boundary is worse than no boundary: someone will trust it.
+  # The verified truth on this host (2026-10-25):
+  #
+  #     /etc/sudoers: %wheel ALL=(ALL:ALL) NOPASSWD:SETENV: ALL
+  #     $ sudo -n id -u   ->  0
+  #
+  # So sudo is FRICTION, NOT A BOUNDARY. It costs one command prefix; it does not restrict
+  # anything. The only real difference from uid 0 is that files dann creates without sudo are
+  # owned by dann, and that a careless command has to be prefixed with `sudo` to be destructive.
+  #
+  # Why not make uid literally 0: it buys no security (the power is already there) and breaks
+  # real things — /home/dann ownership, systemd --user units, NixOS's own user expectations.
+  # "Root" here means root-equivalent, which is what this is.
+  #
+  # What actually mitigates the blast radius (and this is the honest list):
+  #   1. The box is DISPOSABLE. Its whole configuration is in git
+  #      (site-djbclark nixos/dann/, on deploy-dann), and a full reinstall measured ~2 minutes
+  #      on 2026-10-25. There is nothing on it that cannot be rebuilt.
+  #   2. It holds no data of its own yet — the entity's memory still lives on the Mac, which is
+  #      exactly why phase 1 (memory) must add its own guards rather than relying on this one.
+  #   3. Everything outward-facing, billable or irreversible still needs a fresh yes from the
+  #      operator. That rule is about ACTIONS, and it survives root.
   users.users.dann = {
     isNormalUser = true;
     description = "Dann (the entity)";
@@ -88,7 +113,8 @@
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtqrJzIIPFly8MDXpLEZEJ2WArfc5lSiCHxGTJnL8DY djbclark@djbclarks-MacBook-Air.local"
     ];
   };
-  # No local password exists to type, so wheel must not demand one.
+  # No local password exists to type, so wheel must not demand one. This is what makes the
+  # account root-equivalent — see the note above, which is the accurate version.
   security.sudo.wheelNeedsPassword = false;
 
   # Root keeps a key too: nixos-anywhere deploys as root, and the operator's existing
