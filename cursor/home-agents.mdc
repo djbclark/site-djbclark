@@ -81,15 +81,19 @@ One shared MCP server, `http://127.0.0.1:18796/mcp`; never register a per-client
 **A semantic search result is not a match**: answer "does X exist?" with `find` or an exact
 `read_note`. Detail: `site-private/memory/basic-memory/README.md`.
 
-## Where work happens — plain git in `~/ops`
+## Where work happens — claimed task workspaces; `~/ops` plain `master` for now (2026-10-25)
 
-Edit `~/ops/{stayturgid,site-djbclark,site-private}` in place on `master`; **commit and push your own
-changes as each unit lands, unasked** (2026-10-12); default `git-commit-own MSG <paths>`, never a bare
-`git commit` (it takes what another agent staged too, 2026-10-18; its pre-commit stashes every unstaged
-change in the tree for the hook run and clobbers parallel agents, 2026-10-24). A file also holding another
-agent's edits: stage only your hunks (`git apply --cached`), then `git-commit-own --staged MSG` (a
-pathspec commits the working tree, their hunk included; 2026-10-23). **Running deployments read `~/ops`**:
-check what reads a file first, keep commits small, prefer a quick revert.
+**All development (edits, commits, tests, one-line docs) happens in an exclusively claimed task workspace (a linked worktree
+or a cow pasture), one writer at a time, never in a shared checkout, which is only fast-forwarded**; before dispatching into a
+workspace, `git status` and `git log -3`, stop on an unresolved merge. Exceptions: read-only inspection, a promoter's
+`--ff-only`, installs on the real target (`~/src/djbclark-ade/AGENTS.md` order 9; djbclark, 2026-10-25;
+`memory/feedback_all_work_in_claimed_workspaces.md`). **Transitional, until the ops-promotion pilot passes:** edit
+`~/ops/{stayturgid,site-djbclark,site-private}` in place on `master`. Everywhere, **commit and push your own changes as each
+unit lands, unasked** (2026-10-12); default `git-commit-own MSG <paths>`, never a bare `git commit` (it takes what another agent
+staged too, 2026-10-18; its pre-commit stashes every unstaged change in the tree for the hook run and clobbers parallel agents,
+2026-10-24). In `~/ops`, a file also holding another agent's edits: stage only your hunks (`git apply --cached`), then
+`git-commit-own --staged MSG` (a pathspec commits the working tree, their hunk included; 2026-10-23). **Running deployments read
+`~/ops`**: check what reads a file first, keep commits small, prefer a quick revert.
 
 **Nothing is version-pinned** (djbclark, 2026-10-24): all software tracks its latest release; the nightly
 `brew-fast-upgrade` keeps brew, npm and uv current. **Changed a third-party project's source** (a fork,
@@ -110,7 +114,7 @@ change, consult a `frontier` agent if it helps, then open the issue/PR upstream,
 
 ## `~/s` is a view — reference `~/src`, never `~/s` (2026-10-06)
 
-**Every path an agent writes, runs, records or hands on is `~/src/<name>`, never `~/s/...`** (a
+**Every path an agent writes, runs, records or hands on is `~/src/<name>` or your claimed workspace, never `~/s/...`** (a
 generated, locked symlink farm); never write to or start a session in `~/s`. After adding or removing
 a top-level `~/src` entry run `just -f ~/s/justfile` (`site-djbclark/tools/s-farm/AGENTS.md`).
 
@@ -294,17 +298,14 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive.**
-   (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay
-   on the latest release: upgrade unasked, never hard-code a version path.**
-   (`memory/feedback_ai_tuis_always_latest.md`)
-6. **Never pass `--help` to a live-service CLI subcommand**; `collie` is read-only for agents.
-   **Secrets: `sudo-secretspec` only; load its skill before scripting it** (every subcommand needs
-   `--reason`). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
-7. **Web search and fetch walk the failover ladder** (`fallback-chains` skill, `web-get`): **search
-   first with the shared `firecrawl` MCP's `firecrawl_search`** (`mcp__firecrawl__*`); **never the paid
-   cloud `mcp__claude_ai_Firecrawl__*`** unless djbclark asks. **Every page the task needs is
-   eventually fetched**: fall back, fix the tool, or pause and fix it with djbclark; never accept
-   "unfetchable", continue without the source, or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
+   (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay on the latest release:
+   upgrade unasked, never hard-code a version path.** (`memory/feedback_ai_tuis_always_latest.md`)
+6. **Never pass `--help` to a live-service CLI subcommand**; `collie` is read-only for agents. **Secrets: `sudo-secretspec`
+   only; load its skill before scripting it** (every subcommand needs `--reason`). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
+7. **Web search and fetch walk the failover ladder** (`fallback-chains` skill, `web-get`): **search first with the shared
+   `firecrawl` MCP's `firecrawl_search`** (`mcp__firecrawl__*`); **never the paid cloud `mcp__claude_ai_Firecrawl__*`** unless
+   djbclark asks. **Every page the task needs is eventually fetched**: fall back, fix the tool, or pause and fix it with
+   djbclark; never accept "unfetchable", continue without the source, or fill it in from memory. (`memory/feedback_web_failover_pause.md`)
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 
