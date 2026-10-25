@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -22,16 +23,20 @@ FLEET_WATCH = Path(os.environ.get("FLEET_WATCH_SCRIPT", REPO / "bin" / "fleet-wa
 FIXTURE = REPO / "tests" / "fixtures" / "hetzner_server_types.json"
 TOKEN = "fake-token-0123456789abcdef"
 
-# The boundary's `run --reason R -- cmd...`: the child gets every declared secret, not just one.
+# The boundary's `get NAME --reason R`: prints that one value on stdout. Asking for anything else
+# would hand out the decoy, so a test sees it if the watcher ever requests another secret.
 SECRETSPEC_STUB = f"""#!/bin/bash
 echo "$*" >> "$HOME/secretspec.calls"
-[ "$1" = run ] || exit 2
-shift 3   # run --reason R
-[ "$1" = -- ] && shift
-HETZNER_CLOUD_TOKEN={TOKEN} OTHER_DECLARED_SECRET=decoy-secret exec "$@"
+[ -e "$HOME/get_rc" ] && exit "$(cat "$HOME/get_rc")"
+[ "$1" = get ] && [ "$3" = --reason ] || exit 2
+case "$2" in
+  HETZNER_CLOUD_TOKEN) echo {TOKEN} ;;
+  *) echo decoy-secret ;;
+esac
 """
 
 PING_STUB = """#!/bin/bash
+env >> "$HOME/ping.env"
 rc=$(cat "$HOME/ping_rc" 2>/dev/null || echo 0)
 [ "$rc" = 0 ] && echo "$*" >> "$HOME/pings"
 exit "$rc"
@@ -44,6 +49,7 @@ class Api:
     def __init__(self) -> None:
         self.body: dict = json.loads(FIXTURE.read_text())
         self.status = 200
+        self.always_next = False  # every response claims one more page follows
         self.requests: list[tuple[str, str, str | None]] = []
         api = self
 
@@ -54,7 +60,11 @@ class Api:
                     self.send_response(405)
                     self.end_headers()
                     return
-                data = json.dumps(api.body).encode()
+                body = api.body
+                if api.always_next:
+                    page = int((re.search(r"[?&]page=(\d+)", self.path) or [0, 1])[1])
+                    body = {**body, "meta": {"pagination": {"page": page, "next_page": page + 1}}}
+                data = json.dumps(body).encode()
                 self.send_response(api.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
@@ -99,14 +109,31 @@ class HetznerWatch(unittest.TestCase):
         self.addCleanup(self.api.close)
         self.addCleanup(self._tmp.cleanup)
 
-    def run_watch(self, *args: str, url: str | None = None) -> subprocess.CompletedProcess:
+    def run_watch(self, *args: str, url: str | None = None,
+                  extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         env = {
             "HOME": str(self.home), "PATH": f"{self.bin}:{os.environ['PATH']}",
             "FLEET_WATCH_SECRETSPEC": str(self.bin / "sudo-secretspec"),
             "FLEET_WATCH_HETZNER_URL": url or self.api.url, "FLEET_WATCH_TO": "telegram:1:2",
+            **(extra_env or {}),
         }
         return subprocess.run([str(FLEET_WATCH), "hetzner", *args], env=env, capture_output=True,
                               text=True, timeout=120)
+
+    def assert_no_secret_anywhere(self, r: subprocess.CompletedProcess) -> None:
+        """The token and the decoy appear in no stdout, stderr, log, state or recorded child environment."""
+        texts = {"stdout": r.stdout, "stderr": r.stderr}
+        texts.update({str(f): f.read_text(errors="replace") for f in self.home.rglob("*") if f.is_file()})
+        for where, text in texts.items():
+            self.assertNotIn(TOKEN, text, where)
+            self.assertNotIn("decoy-secret", text, where)
+        ping_env = self.home / "ping.env"
+        if ping_env.exists():
+            self.assertNotIn("HETZNER_CLOUD_TOKEN", ping_env.read_text())
+
+    def gets(self) -> list[str]:
+        f = self.home / "secretspec.calls"
+        return f.read_text().splitlines() if f.exists() else []
 
     def pings(self) -> list[str]:
         f = self.home / "pings"
@@ -155,7 +182,9 @@ class HetznerWatch(unittest.TestCase):
         self.run_watch()
         self.api.set("cx33", "fsn1", True)
         (self.home / "ping_rc").write_text("1")
-        self.assertNotEqual(self.run_watch().returncode, 0)
+        r = self.run_watch()
+        self.assertNotEqual(r.returncode, 0)
+        self.assert_no_secret_anywhere(r)
         self.assertIs(self.state()["avail"]["cx33@fsn1"], False)  # not recorded as announced
         (self.home / "ping_rc").write_text("0")
         self.assertEqual(self.run_watch().returncode, 0)
@@ -170,32 +199,87 @@ class HetznerWatch(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.pings(), [])
         self.assertEqual(self.state(), before)
+        self.assert_no_secret_anywhere(r)
 
     def test_response_without_watched_pairs_is_an_error_not_a_change(self) -> None:
         self.run_watch()
         before = self.state()
         self.api.body = {"server_types": [], "meta": {}}
-        self.assertNotEqual(self.run_watch().returncode, 0)
+        r = self.run_watch()
+        self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.pings(), [])
         self.assertEqual(self.state(), before)
+        self.assert_no_secret_anywhere(r)
 
-    def test_only_get_requests_with_bearer_token_and_token_never_stored(self) -> None:
+    def test_only_get_requests_with_bearer_token_and_token_never_leaves_the_fetch_process(self) -> None:
         self.api.set("cx33", "nbg1", True)
-        self.run_watch()
+        r = self.run_watch()
         self.run_watch("--dry-run")
         self.assertTrue(self.api.requests)
         for method, path, auth in self.api.requests:
             self.assertEqual(method, "GET")
             self.assertTrue(path.startswith("/v1/server_types?per_page=50"), path)
             self.assertEqual(auth, f"Bearer {TOKEN}")
-        calls = (self.home / "secretspec.calls").read_text()
-        self.assertIn('run --reason hetzner restock watch --', calls)
-        self.assertNotIn(TOKEN, calls)
-        for f in self.home.rglob("*"):
-            if f.is_file() and f.name != "secretspec.calls":
-                text = f.read_text(errors="replace")
-                self.assertNotIn(TOKEN, text, f)
-                self.assertNotIn("decoy-secret", text, f)
+        # Exactly one secret is ever requested, by name; the notify child ran and saw no token.
+        self.assertTrue(self.gets())
+        for call in self.gets():
+            self.assertEqual(call, "get HETZNER_CLOUD_TOKEN --reason hetzner restock watch")
+        self.assertTrue((self.home / "ping.env").exists())
+        self.assert_no_secret_anywhere(r)
+
+    def test_url_that_is_not_the_real_api_or_loopback_gets_no_request_and_no_token(self) -> None:
+        port = self.api.httpd.server_port
+        for bad in (f"http://127.1:{port}/v1/server_types?per_page=50",  # loopback in disguise
+                    f"http://example.invalid:{port}/v1/server_types?per_page=50",
+                    f"https://127.0.0.1:{port}/v1/server_types?per_page=50",
+                    f"http://api.hetzner.cloud/v1/server_types?per_page=50",
+                    f"https://api.hetzner.cloud.evil.invalid/v1/server_types?per_page=50",
+                    f"https://api.hetzner.cloud@127.1:{port}/v1/server_types?per_page=50",
+                    f"http://127.0.0.1@127.1:{port}/v1/server_types?per_page=50",
+                    f"ftp://127.0.0.1:{port}/v1/server_types?per_page=50"):
+            with self.subTest(url=bad):
+                r = self.run_watch(url=bad)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertEqual(self.api.requests, [])
+                self.assertEqual(self.gets(), [])  # the token was not even asked for
+                self.assertIn("refusing URL", (self.state_dir / "fleet-watch.log").read_text())
+                self.assert_no_secret_anywhere(r)
+
+    def test_token_that_cannot_be_read_means_no_request(self) -> None:
+        (self.home / "get_rc").write_text("1")
+        r = self.run_watch()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.api.requests, [])
+        self.assert_no_secret_anywhere(r)
+
+    def test_watched_grid_is_taken_from_the_configuration(self) -> None:
+        r = self.run_watch(extra_env={"FLEET_WATCH_HETZNER_TYPES": "cx33", "FLEET_WATCH_HETZNER_LOCATIONS": "hel1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(list(self.state()["avail"]), ["cx33@hel1"])
+
+    def test_pagination_is_capped(self) -> None:
+        self.api.always_next = True
+        r = self.run_watch()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.api.requests), 5)
+        self.assertTrue(all(m == "GET" for m, _, _ in self.api.requests))
+
+    def test_overlapping_run_leaves_the_pass_to_the_one_holding_the_lock(self) -> None:
+        self.state_dir.mkdir(parents=True)
+        lock = self.state_dir / "hetzner-restock.run"
+        lock.mkdir()
+        holder = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(holder.kill)
+        (lock / "pid").write_text(str(holder.pid))
+        self.api.set("cx33", "nbg1", True)
+        self.assertEqual(self.run_watch().returncode, 0)
+        self.assertEqual(self.api.requests, [])
+        self.assertEqual(self.pings(), [])
+        holder.kill()
+        holder.wait()
+        self.assertEqual(self.run_watch().returncode, 0)  # stale lock is taken over
+        self.assertEqual(len(self.pings()), 1)
+        self.assertFalse(lock.exists())
 
     def test_redirect_is_refused_so_the_token_cannot_follow_it(self) -> None:
         sink = Api()
@@ -217,6 +301,7 @@ class HetznerWatch(unittest.TestCase):
         r = self.run_watch(url=f"http://127.0.0.1:{httpd.server_port}/v1/server_types?per_page=50")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(sink.requests, [])
+        self.assert_no_secret_anywhere(r)
 
     def test_follows_pagination_with_get(self) -> None:
         pages = {}
@@ -262,7 +347,7 @@ class HetznerWatch(unittest.TestCase):
                       "ask djbclark)", r.stdout)
         self.assertEqual(self.pings(), [])
         self.assertFalse((self.state_dir / "hetzner-restock.json").exists())
-        self.assertFalse((self.home / "secretspec.calls").exists())
+        self.assertEqual(self.gets(), [])
 
     def test_recorded_fixture_matches_the_verified_shape(self) -> None:
         r = self.run_watch("--fixture", str(FIXTURE))

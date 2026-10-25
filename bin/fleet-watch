@@ -114,15 +114,21 @@
 # alone, so the next run retries; a failed fetch (or a response with none of the watched pairs, i.e.
 # the API shape changed) logs to fleet-watch.log, pings nothing and keeps the state.
 # The token HETZNER_CLOUD_TOKEN (full-access scope) comes ONLY from
-#   sudo-secretspec run --reason "hetzner restock watch" -- python3 -I -c <code> fetch
-# (no sudo and no Touch ID needed under launchd). That child reads the one value, wipes the rest of
-# its environment (every declared secret rides in it) before doing anything else, never prints,
-# logs or stores it, and prints only {"cx33@nbg1": false, ...}. It is the only code that ever holds
-# the token; the decision, the state file and the pings run in a second process without it. The
-# watcher cannot change anything: the single request is built by hetzner_request() (method GET,
-# redirects refused so the header cannot follow one), and tests/test_fleet_watch_hetzner.py asserts
-# that against a local server. --dry-run reads (live, or --fixture FILE, which needs no token and no
-# network and implies --dry-run) and prints "would ping: ..." per change; it writes and pings nothing.
+#   sudo-secretspec get HETZNER_CLOUD_TOKEN --reason "hetzner restock watch"
+# (no sudo and no Touch ID needed under launchd), run by the `fetch` process itself with an argv list,
+# stdin /dev/null, stdout captured and stderr discarded. Only that one value is ever released: no other
+# declared secret is requested and none sits in any environment. `fetch` (python3 -I) never prints,
+# logs or stores the token, and prints only {"cx33@nbg1": false, ...}. It is the only code that ever
+# holds it; the decision, the state file and the pings run in a second process without it. The watched
+# grid and the URL reach `fetch` as argv. The watcher cannot change anything: the single request is
+# built by hetzner_request() (method GET, redirects refused so the header cannot follow one). The URL
+# override FLEET_WATCH_HETZNER_URL (tests) is accepted only as https to api.hetzner.cloud or http to
+# 127.0.0.1, ::1 or localhost; anything else is refused before the token is requested, so the token
+# cannot be sent off the machine. tests/test_fleet_watch_hetzner.py asserts all of this against a local
+# server. One pass (fetch+decide) runs at a time ($STATE_DIR/hetzner-restock.run, as for the upstream
+# watcher), so a manual and a scheduled run cannot interleave. --dry-run reads (live, or --fixture FILE,
+# which needs no token and no network and implies --dry-run) and prints "would ping: ..." per change;
+# it writes and pings nothing and takes no lock.
 # FLEET_WATCH_HETZNER=off disables the scheduled check; `fleet-watch hetzner` always runs now.
 export PATH="/opt/homebrew/bin:$PATH"
 set -uo pipefail
@@ -175,6 +181,7 @@ HETZNER_LOCATIONS="${FLEET_WATCH_HETZNER_LOCATIONS-nbg1 fsn1}"
 HETZNER_INTERVAL="${FLEET_WATCH_HETZNER_INTERVAL:-3600}"
 HETZNER_TIMEOUT="${FLEET_WATCH_HETZNER_TIMEOUT:-60}"
 HETZNER_SECRETSPEC="${FLEET_WATCH_SECRETSPEC:-sudo-secretspec}"
+HETZNER_URL="${FLEET_WATCH_HETZNER_URL:-}"
 HETZNER_STATE="$STATE_DIR/hetzner-restock.json"
 HETZNER_FIXTURE=""
 HETZNER_DRY=0
@@ -1092,21 +1099,42 @@ upstream_watch() {
 
 hetzner_watch() {
   # $1 = check (the scheduled run: throttled) or manual (always runs now).
-  local mode=${1:-check} stamp="$STATE_DIR/hetzner-restock.last" now snap rc args=()
+  local mode=${1:-check} stamp="$STATE_DIR/hetzner-restock.last" run="$STATE_DIR/hetzner-restock.run" now pid rc
   [[ "$HETZNER" == on || "$mode" == manual ]] || return 0
   now=$(gdate +%s)
   # 30 s of slack: the launchd job ticks at 300 s and is never exactly on time.
   if [[ "$mode" == check && -f "$stamp" ]] && ((now - $(gstat -c %Y "$stamp") < HETZNER_INTERVAL - 30)); then
     return 0
   fi
-  ((HETZNER_DRY)) || : >"$stamp"
+  if ((HETZNER_DRY)); then
+    hetzner_pass
+    return
+  fi
+  : >"$stamp"
+  # One pass at a time: a manual run can overlap the scheduled one (both would read the same
+  # state and the last save would win). The run that finds the lock held leaves it to that run.
+  if ! mkdir "$run" 2>/dev/null; then
+    pid=$(cat "$run/pid" 2>/dev/null)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+    rm -rf "$run"
+    mkdir "$run" 2>/dev/null || return 0
+  fi
+  echo $$ >"$run/pid"
+  hetzner_pass
+  rc=$?
+  rm -rf "$run"
+  return "$rc"
+}
+
+hetzner_pass() {
+  local snap rc args=()
   if [[ -n "$HETZNER_FIXTURE" ]]; then
-    snap=$("$PY3" -I -c "$HETZNER_PY" fetch --fixture "$HETZNER_FIXTURE" 2>>"$LOG")
+    snap=$("$PY3" -I -c "$HETZNER_PY" fetch --fixture "$HETZNER_FIXTURE" --types "$HETZNER_TYPES" \
+      --locations "$HETZNER_LOCATIONS" 2>>"$LOG")
   else
-    # The only place the token exists: HETZNER_CLOUD_TOKEN, injected by the boundary into this one child.
-    snap=$(FLEET_WATCH_HETZNER_WATCH="$HETZNER_TYPES|$HETZNER_LOCATIONS" \
-      runb "$HETZNER_TIMEOUT" "$HETZNER_SECRETSPEC" run --reason "hetzner restock watch" -- \
-      "$PY3" -I -c "$HETZNER_PY" fetch </dev/null 2>>"$LOG")
+    # The only place the token exists: `fetch` asks the boundary for that one value itself.
+    snap=$(runb "$HETZNER_TIMEOUT" "$PY3" -I -c "$HETZNER_PY" fetch --secretspec "$HETZNER_SECRETSPEC" \
+      --url "$HETZNER_URL" --types "$HETZNER_TYPES" --locations "$HETZNER_LOCATIONS" </dev/null 2>>"$LOG")
   fi
   rc=$?
   if ((rc != 0)) || [[ -z "$snap" ]]; then
@@ -1115,7 +1143,7 @@ hetzner_watch() {
     return 1
   fi
   ((HETZNER_DRY)) && args+=(--dry-run)
-  printf '%s' "$snap" | FLEET_WATCH_HETZNER_WATCH="$HETZNER_TYPES|$HETZNER_LOCATIONS" \
+  printf '%s' "$snap" |
     "$PY3" -I -c "$HETZNER_PY" decide --state "$HETZNER_STATE" --notify "$SELF" ${args[@]+"${args[@]}"} 2>>"$LOG"
   rc=$?
   ((rc == 0)) || printf '%s hetzner decide ended rc=%s\n' "$(gdate '+%F %T')" "$rc" >>"$LOG"
@@ -1123,7 +1151,7 @@ hetzner_watch() {
 }
 
 # The watcher's Python, run as `python3 -I -c "$HETZNER_PY" fetch|decide ...` (-I: no PYTHON* variables,
-# no user site). `fetch` runs under sudo-secretspec and holds the token; `decide` never does.
+# no user site). `fetch` asks sudo-secretspec for the token and holds it; `decide` never does.
 IFS= read -r -d '' HETZNER_PY <<'PYEOF' || true
 import datetime
 import json
@@ -1132,17 +1160,45 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API_URL = "https://api.hetzner.cloud/v1/server_types?per_page=50"
 MAX_PAGES = 5
-# What a child needs to run and resolve names; everything else (all the declared secrets) goes.
-KEEP_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR")
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
 
-def watched():
-    types, _, locs = os.environ.get("FLEET_WATCH_HETZNER_WATCH", "cx33 cx43|nbg1 fsn1").partition("|")
-    return types.split(), locs.split()
+def url_allowed(url):
+    """The token may go only to the real API, or to this machine (tests)."""
+    if any(c <= " " or c == "\\" or c == "\x7f" for c in url):
+        return False
+    try:
+        u = urllib.parse.urlsplit(url)
+        host, port = u.hostname, u.port
+    except ValueError:
+        return False
+    if u.username is not None or u.password is not None:
+        return False
+    if u.scheme == "https":
+        return host == "api.hetzner.cloud" and port in (None, 443)
+    return u.scheme == "http" and host in LOOPBACK
+
+
+def read_token(secretspec):
+    """Exactly one secret, by name; stderr of the boundary is never kept."""
+    p = subprocess.run([secretspec, "get", "HETZNER_CLOUD_TOKEN", "--reason", "hetzner restock watch"],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
+    return p.stdout.decode().strip() if p.returncode == 0 else ""
+
+
+def parse_args(args):
+    opt = {"--fixture": "", "--secretspec": "", "--url": "", "--types": "", "--locations": ""}
+    it = iter(args)
+    for a in it:
+        if a not in opt:
+            raise SystemExit("hetzner: bad argument")
+        opt[a] = next(it, "")
+    return opt
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -1181,20 +1237,22 @@ def snapshot(pages, types, locs):
 
 
 def fetch(args):
-    types, locs = watched()
-    if args[:1] == ["--fixture"]:
-        with open(args[1]) as f:
+    opt = parse_args(args)
+    types, locs = opt["--types"].split(), opt["--locations"].split()
+    if opt["--fixture"]:
+        with open(opt["--fixture"]) as f:
             pages = [json.load(f)]
     else:
-        token = os.environ.get("HETZNER_CLOUD_TOKEN", "")
-        url = os.environ.get("FLEET_WATCH_HETZNER_URL") or API_URL
-        keep = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
-        os.environ.clear()
-        os.environ.update(keep)
-        if not token:
-            sys.stderr.write("hetzner: HETZNER_CLOUD_TOKEN not provided\n")
+        url = opt["--url"] or API_URL
+        if not url_allowed(url):
+            sys.stderr.write("hetzner: refusing URL (token goes only to https://api.hetzner.cloud or loopback)\n")
             return 1
+        token = ""
         try:
+            token = read_token(opt["--secretspec"])
+            if not token:
+                sys.stderr.write("hetzner: HETZNER_CLOUD_TOKEN not provided\n")
+                return 1
             pages = get_pages(url, token)
         except urllib.error.HTTPError as e:
             sys.stderr.write("hetzner: HTTP %s\n" % e.code)
