@@ -64,10 +64,14 @@ Fields:
 | DELETE | `/*` |
 
 The `+` button adds rows for PUT/POST/DELETE; the `-` button removes one. Confirmed by the
-`createToken` URL format OVH itself generates:
-`createToken/index.cgi?GET=%2F*&POST=%2F*&PUT=%2F*&DELETE=%2F*` — i.e. each path is `/` followed by
-`*`, so a **pre-filled** link can be used to avoid typing: append
-`?GET=/*&POST=/*&PUT=/*&DELETE=/*` to the createToken URL.
+`createToken` URL format OVH itself generates and indexes:
+`https://api.us.ovhcloud.com/createToken/index.cgi?DELETE=&GET=%2F*&POST=%2F*&PUT=%2F*` — i.e. each
+path is `/` followed by `*` (URL-encoded `%2F*`). So a **pre-filled** link avoids typing the rows:
+
+```text
+https://api.us.ovhcloud.com/createToken/?GET=/*&POST=/*&PUT=/*&DELETE=/*
+```
+
 
 **`/domain` and `/domain/*` are different rules.** `*` covers everything *below* a path but not the
 path itself, so a scoped token usually needs both rows. Getting this wrong fails as
