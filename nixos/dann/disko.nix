@@ -17,9 +17,13 @@
         partitions = {
           # No EFI system partition: the firmware is BIOS, and a stray ESP here would be dead
           # weight that a future reader would mistake for an oversight.
+          #
+          # `type` must be a GPT type GUID (4- or 8-4-4-4-12 hex), not a name — disko validates
+          # the pattern and rejects "BIOS boot". This GUID is the BIOS boot partition type
+          # (gdisk code ef02), which is what GRUB uses to embed its core image on a GPT disk.
           boot = {
             size = "1M";
-            type = "BIOS boot";
+            type = "21686148-6449-6E6F-744E-656564454649";
           };
           swap = {
             size = "8G";

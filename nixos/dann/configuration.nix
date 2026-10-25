@@ -16,17 +16,14 @@
   ];
 
   # ── Filesystems ──────────────────────────────────────────────────────────────────────
-  # disko creates the layout at install time (nixos/dann/disko.nix) and passes the resulting
-  # mounts in, so these are the *installed* filesystems, written out rather than inferred.
-  # The root filesystem is labelled nixos-root by disko; naming it by label rather than
-  # /dev/sda2 keeps it correct if device ordering ever changes.
-  fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos-root";
-    fsType = "ext4";
-  };
-  # disko creates an 8 GiB swap partition (nixos/dann/disko.nix). Declared here so the
-  # installed system uses it and so evaluation does not warn about an unmanaged partition.
-  swapDevices = [ { device = "/dev/disk/by-partlabel/swap"; } ];
+  # DISKO OWNS THESE. It derives `fileSystems."/"` from the layout in nixos/dann/disko.nix
+  # (`/dev/disk/by-partlabel/disk-main-root`) and defines it itself, so declaring it here
+  # conflicts: "The option `fileSystems."/".device' has conflicting definition values".
+  # Verified 2026-10-25 — this comment replaces a manual definition that failed evaluation.
+  #
+  # The one thing that DOES need declaring is swap: disko creates the partition but does not
+  # add it to `swapDevices`.
+  swapDevices = [ { device = "/dev/disk/by-partlabel/disk-main-swap"; } ];
 
   # ── Boot: BIOS, not UEFI ──────────────────────────────────────────────────────────────
   # Verified on the box 2026-10-25: /sys/firmware/efi is absent, so the firmware is BIOS even

@@ -6,6 +6,13 @@
   # .github/workflows/nixos-lock-update.yml bumps it, builds the host, and promotes it
   # (docs/nixos-in-git.md).
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  # disko: declarative disk partitioning, used by nixos-anywhere to install a host from scratch
+  # and to keep the layout reviewable in git. Added 2026-10-25 for the `dann` host.
+  inputs.disko = {
+    url = "github:nix-community/disko";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   # bb-nix: only its codex-npm-bin package (the Codex CLI on the bb user's and Paseo's PATH) is used.
   # Its services.bb module is no longer imported: the BB service was removed 2026-10-25. History:
   # BB replaced Cloudroom on 2026-10-17 (plan: site-private
@@ -40,6 +47,7 @@
       nixpkgs,
       athena-nixos,
       bb-nix,
+      disko,
       paseo-nix,
       ...
     }:
@@ -53,6 +61,21 @@
           paseo-nix.nixosModules.default
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
+          { system.configurationRevision = self.rev or self.dirtyRev or null; }
+        ];
+      };
+
+      # The entity's own host (dann.dclark.us), installed with nixos-anywhere 2026-10-25.
+      # disko.nixosModules.disko is imported HERE rather than in configuration.nix, because the
+      # disk layout is an installation-time concern; keeping it in this flake is what lets
+      # `nixos-anywhere --flake .#dann` find the layout and the system in one place.
+      # The layout itself is ./dann/disko.nix, pulled in by disko's own `disko.devices` option.
+      nixosConfigurations.dann = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          disko.nixosModules.disko
+          ./dann/configuration.nix
+          ./dann/disko.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }
         ];
       };
