@@ -171,9 +171,14 @@
     # renamed or removed key is caught before the switch rather than at activation.
     validateSopsFiles = true;
 
-    # Each secret is declared with its consumer's identity and mode. The pipeline probe below is
-    # deliberate: it proves encrypt -> deploy -> decrypt works end to end before a real credential
-    # depends on it. Remove it once a real secret has been through the same path.
+    # Each secret is declared with its consumer's identity and mode.
+    #
+    # `sops_probe` is a CANARY, and it is deliberately permanent rather than a one-off test. It
+    # proves encrypt -> commit -> deploy -> decrypt end to end, so a break in the sops path shows up
+    # here (`/run/secrets/sops_probe` missing or empty) rather than silently waiting for the first
+    # real credential to fail. An earlier comment said to remove it once a real secret had been
+    # through the same path; on reflection that would delete the only canary and make a future
+    # failure invisible, so it stays.
     secrets."sops_probe" = {
       owner = "dann";
       group = "users";
