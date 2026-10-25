@@ -33,7 +33,7 @@ numbers.
    sequentially, each as `~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 15 <dir>
    > /tmp/diskfree-<name>.out 2>&1` (run in the background, output to a file; `bg`
    is the load gate and utility QoS). Run `load-watch admit` first and skip the step
-   while it says hot. Never `BG_LOAD_WAIT=0`, never `taskpolicy -b`. Cheap numbers
+   while it says hot. Run it from `cd /tmp` (2026-10-25: `bg` refused with exit 3 from inside a CI repo such as djbclark-ade). Never `BG_LOAD_WAIT=0`, never `taskpolicy -b`. Cheap numbers
    first (`df`, `tmutil`, `cow stats`, a tool's own size command). Taking longer is fine.
 2. **Freed space can be pinned by a snapshot.** APFS only reclaims blocks when
    no snapshot references them. Before declaring a delete "didn't work", check
