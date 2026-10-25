@@ -157,8 +157,12 @@
   # provided, and Paseo and its agents still need, is declared here by hand, unchanged: the `bb`
   # user and group with home /var/lib/bb, its login-shell environment, and its one D-Bus session bus.
   # The bb-nix input stays because its codex-npm-bin package is still used.
-  users.groups.bb = { };
+  # uid/gid pinned to the live values (994/991): NixOS auto-allocation hands out a free id
+  # at first creation, so a rebuilt host or a changed user set could give bb a different one and
+  # leave /var/lib/bb (a separate volume that outlives the host) owned by a stranger.
+  users.groups.bb.gid = 991;
   users.users.bb = {
+    uid = 994;
     isSystemUser = true;
     group = "bb";
     home = "/var/lib/bb";
@@ -253,12 +257,16 @@
   # `resize2fs /dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb` on the mounted host.
   # `nofail` keeps a missing or slow volume from dropping the boot into emergency mode, which
   # would cut off SSH and Tailscale; x-systemd.device-timeout bounds the wait. The price is that
-  # the mount can fail unnoticed, so paseo requires it below.
+  # the mount can fail unnoticed, so paseo requires it below. `nosuid,nodev`: the volume holds
+  # only agent-controlled downloads and checkouts, so setuid bits and device nodes there are never
+  # legitimate. Not `noexec`: nix-ld binaries (Claude Code, Cursor's node) run from ~/.local.
   fileSystems."/var/lib/bb" = {
     device = "/dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb";
     fsType = "ext4";
     options = [
       "nofail"
+      "nosuid"
+      "nodev"
       "x-systemd.device-timeout=30s"
     ];
   };
