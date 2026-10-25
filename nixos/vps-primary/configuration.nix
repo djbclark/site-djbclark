@@ -152,46 +152,67 @@
     };
   };
 
-  # BB (github.com/get-bb/bb), the agent app that replaced Cloudroom (C2, 2026-10-17). Tailnet
-  # 443 is the web UI; 38443 is the address other machines' host daemons use (externalUrl).
-  # BB has no login: the tailnet is the only boundary, and it must never be funnelled. Packages
-  # are built by Forgejo CI (forgejo.mit.edu/djbclark/bb-build) and only downloaded here.
-  # The caps hold the server and every agent: the host has 4 GB and also runs the Gradle cache
-  # (1 GB cap) and Athena, so past them the kernel reclaims inside BB, not host-wide.
-  services.bb = {
-    enable = true;
-    package = bb-nix.packages.x86_64-linux.bb-app-bin;
-    appUrl = "https://vps-primary.greyhound-sidemirror.ts.net";
-    externalUrl = "https://vps-primary.greyhound-sidemirror.ts.net:38443";
-    # Anthropic's native installer, run once as the bb user (nix-ld is enabled by nativeInstaller).
-    claudeCode = {
-      nativeInstaller = true;
-      executable = "/var/lib/bb/.local/bin/claude";
-    };
-    # npmGlobalPrefix keeps its default (/var/lib/bb/.local): BB's own `npm install -g` (Pi and
-    # other agents installed from the UI) fails on the read-only Node store path without it.
-    extraPackages = [
+  # The BB service (services.bb, bb.service, its tailnet 443/38443 serve units, the `bb` CLI) was
+  # removed 2026-10-25; the bb-nix module is no longer imported (flake.nix). What that module also
+  # provided, and Paseo and its agents still need, is declared here by hand, unchanged: the `bb`
+  # user and group with home /var/lib/bb, its login-shell environment, and its one D-Bus session bus.
+  # The bb-nix input stays because its codex-npm-bin package is still used.
+  users.groups.bb = { };
+  users.users.bb = {
+    isSystemUser = true;
+    group = "bb";
+    home = "/var/lib/bb";
+    createHome = true;
+    homeMode = "0700";
+    # A real login shell: agents read their PATH from it.
+    shell = pkgs.bashInteractive;
+    # The agents' tools (Paseo's PATH includes /etc/profiles/per-user/bb/bin). Node too: what
+    # `npm install -g` puts in the prefix below is a script with an `#!/usr/bin/env node` line.
+    packages = [
       bb-nix.packages.x86_64-linux.codex-npm-bin
       pkgs.git
       pkgs.gh
       pkgs.ripgrep
+      pkgs.nodejs_24
     ];
-    memoryHigh = "2560M";
-    memoryMax = "3G";
-    tailscaleServe = {
-      enable = true;
-      ports = [
-        443
-        38443
-      ];
+  };
+  # Anthropic's native Claude Code installer, run once as bb, puts its binary in ~/.local/bin.
+  environment.localBinInPath = true;
+  # Login shells of bb only (the guard on the user name keeps it from touching anyone else): npm
+  # global installs go to ~/.local (npm's default prefix is the read-only Node store path), the
+  # system CA bundle for Python's stdlib (uv-managed interpreters look in hashed links NixOS does not
+  # create), and bb's one D-Bus session bus.
+  environment.extraInit = ''
+    if [ "$(${pkgs.coreutils}/bin/id -un 2>/dev/null)" = bb ]; then
+      export NPM_CONFIG_PREFIX=/var/lib/bb/.local
+      export PATH=/var/lib/bb/.local/bin:"$PATH"
+      export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/bb-session-bus/bus
+    fi
+  '';
+  # One D-Bus session bus for bb. A system user has no login session, so without an address an agent
+  # that looks up a keyring (Copilot CLI, Hermes, gh) autolaunches a dbus-daemon that never exits
+  # (22 had piled up in a day). Paseo's agents use it through DBUS_SESSION_BUS_ADDRESS below.
+  systemd.services.bb-session-bus = {
+    description = "D-Bus session bus for the bb user";
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      ExecStart = "${pkgs.dbus}/bin/dbus-daemon --session --nofork --nopidfile --address=unix:path=/run/bb-session-bus/bus";
+      User = "bb";
+      Group = "bb";
+      RuntimeDirectory = "bb-session-bus";
+      RuntimeDirectoryMode = "0700";
+      Restart = "on-failure";
+      RestartSec = 5;
     };
   };
 
-  # Paseo (github.com/getpaseo/paseo), a second agent workspace beside BB (djbclark, 2026-10-18).
-  # It runs as BB's `bb` user, so its agents use the logins already in /var/lib/bb (docs/
-  # bb-vps-primary.md, "Logins"); state in /var/lib/bb/.paseo. Tailnet 7263 serves the web UI, the
-  # apps and the CLI. No password and no relay: like BB, the tailnet is the only boundary, and it
-  # must never be funnelled. Built by Forgejo CI (forgejo.mit.edu/djbclark/paseo-nix). docs/paseo.md.
+  # Paseo (github.com/getpaseo/paseo), the agent workspace and the only interface to the agents
+  # (djbclark, 2026-10-25: BB retired). It runs as the `bb` user above, so its agents use the logins
+  # already in /var/lib/bb (docs/bb-vps-primary.md, "Logins"); state in /var/lib/bb/.paseo. Tailnet
+  # 7263 serves the web UI, the apps and the CLI. No password and no relay: the tailnet is the only
+  # boundary, and it must never be funnelled. Built by Forgejo CI (forgejo.mit.edu/djbclark/paseo-nix).
+  # docs/paseo.md.
   services.paseo = {
     enable = true;
     package = paseo-nix.packages.x86_64-linux.paseo-bin;
@@ -205,29 +226,53 @@
     ];
     slice = "agents.slice";
     tailscaleServe.enable = true;
-    # Paseo's agents run as bb too: use bb's one session bus (bb-nix `sessionBus`), or Copilot/Hermes
+    # Paseo's agents run as bb too: use bb's one session bus (bb-session-bus above), or Copilot/Hermes
     # keyring lookups autolaunch dbus-daemons that never exit (djbclark-ade-9e, 2026-10-18).
     environment.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/bb-session-bus/bus";
   };
 
-  # One memory cap for BB, Paseo and every agent either starts (the per-unit BB caps above still
-  # apply inside it): the 4 GB host also runs the Gradle cache and Athena.
+  # One memory cap for Paseo and every agent it starts: the 4 GB host also runs the Gradle cache
+  # and Athena.
   systemd.slices.agents = {
-    description = "Agent workspaces (BB, Paseo) and their agents";
+    description = "Agent workspace (Paseo) and its agents";
     sliceConfig = {
       MemoryHigh = "2816M";
       MemoryMax = "3G";
     };
   };
-  systemd.services.bb.serviceConfig.Slice = "agents.slice";
   systemd.services.paseo = {
+    # (bb-session-bus is declared with the bb user above.)
     wants = [ "bb-session-bus.service" ];
     after = [ "bb-session-bus.service" ];
   };
 
+  # bb's home, /var/lib/bb (tool installs, caches, agent checkouts: ~10 GB), lives on a Hetzner
+  # Volume, not the 85%-full root disk (2026-10-25): Volume 107263872 "vps-primary-bb-home", ext4,
+  # nbg1. Mounted by filesystem UUID, which belongs to the filesystem, not to a /dev/sdX name.
+  # It grows in place: enlarge it in the Hetzner console or API, then
+  # `resize2fs /dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb` on the mounted host.
+  # `nofail` keeps a missing or slow volume from dropping the boot into emergency mode, which
+  # would cut off SSH and Tailscale; x-systemd.device-timeout bounds the wait. The price is that
+  # the mount can fail unnoticed, so paseo requires it below.
+  fileSystems."/var/lib/bb" = {
+    device = "/dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb";
+    fsType = "ext4";
+    options = [
+      "nofail"
+      "x-systemd.device-timeout=30s"
+    ];
+  };
+  # With the volume absent, paseo must fail to start, never recreate an empty home (and fresh
+  # logins and installs) on the root disk underneath the mount point. systemd derives this from
+  # WorkingDirectory already; stated so it does not depend on that.
+  # bb-session-bus and the tailscale-serve unit never touch the home, so they need nothing.
+  # Still created before the mount: the empty mount-point directory (the NixOS user database
+  # activation, createHome) and, if the mount failed, paseo's empty /var/lib/bb/.paseo (its
+  # tmpfiles rule, which runs after local-fs.target whether or not a nofail mount succeeded).
+  systemd.services.paseo.unitConfig.RequiresMountsFor = [ "/var/lib/bb" ];
+
   # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
-  # Cursor's bundled node (both installed into /var/lib/bb/.local). claudeCode.nativeInstaller
-  # also turns it on; it is stated here so it does not depend on that option.
+  # Cursor's bundled node (both installed into /var/lib/bb/.local).
   programs.nix-ld.enable = true;
 
   # The host builds this configuration from git, never from /etc/nixos:

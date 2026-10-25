@@ -1,5 +1,11 @@
 # BB on vps-primary
 
+> **BB service removed 2026-10-25** (djbclark: Paseo is the primary interface; [paseo.md](paseo.md)). `bb.service` and
+> its tailnet serves (443, 38443) are gone, and the flake no longer imports the bb-nix module. Kept: the `bb` unix
+> user, its home `/var/lib/bb` (Hetzner Volume), every agent login and install below, `paseo.service`, the bb-build repo
+> and CI. The sections below describe BB as it ran until then; anything about the BB UI, `bbcli`, the host daemon,
+> machine enrolment and version bumps is history. The "Logins" and agent-install facts still hold (Paseo's agents use them).
+
 [BB](https://github.com/get-bb/bb) (npm package `bb-app`, upstream `get-bb/bb`) is an agent workspace: a web UI
 and server that start coding agents (Claude Code, Codex, Cursor, Pi and a long list of ACP agents) as an
 unprivileged account on a Linux machine, keep their threads and worktrees there, and can drive further machines
@@ -14,7 +20,7 @@ port; the module binds the server to loopback and serves it with `tailscale serv
 1. **Module and packages:** [github.com/djbclark/bb-nix](https://github.com/djbclark/bb-nix) (public, MIT; local
    `~/src/bb-nix`), a flake input of `nixos/`. Its README is the documentation: options, what the module does to a
    host, logging the agents in, adding another machine, the settings that are not in Nix.
-2. **This host's settings:** `services.bb` in `nixos/vps-primary/configuration.nix`.
+2. **This host's settings:** the `bb` user and session bus in `nixos/vps-primary/configuration.nix` (the `services.bb` block was removed 2026-10-25).
 3. **Builds:** the public Forgejo repo [forgejo.mit.edu/djbclark/bb-build](https://forgejo.mit.edu/djbclark/bb-build)
    (local `~/src/bb-build`); index of my MIT projects: [djbclark/mit](https://forgejo.mit.edu/djbclark/mit).
 
@@ -36,29 +42,28 @@ bb-build's `nix-build` workflow builds flake attributes on the runner: bb-nix's 
 
 | Piece | Where |
 | --- | --- |
-| Browser URL | `https://vps-primary.greyhound-sidemirror.ts.net/` (tailnet 443 -> `127.0.0.1:38886`). `appUrl` has no port: BB's Host and Origin check compares against it. |
-| Machine URL | `https://vps-primary.greyhound-sidemirror.ts.net:38443` (the same backend; `externalUrl` = `BB_EXTERNAL_URL`, what Settings, Machines, Manual shows for host daemons). |
-| Ports | `38886` bb-server and `38887` bb-host-daemon, both loopback (registry/ports.yml). Tailnet 443 and 38443 are `tailscale serve` only. |
-| Account and data | User `bb`, data dir `/var/lib/bb` (BB's `bb.db`, worktrees under `plugins/environment-git-worktree`, the agents' installs and logins). Scratch repo `c1test` is a leftover smoke project. |
-| Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for BB and every agent (4 GB host, also running the Gradle cache and Athena). Idle about 850 MiB, peak about 1.1-1.6 GiB. |
-| Telemetry | `BB_TELEMETRY=false` in the unit and `telemetryEnabled false` in the database. |
+| Browser URL | removed 2026-10-25 (was tailnet 443 -> `127.0.0.1:38886`). Use Paseo: `https://vps-primary.greyhound-sidemirror.ts.net:7263` ([paseo.md](paseo.md)). |
+| Machine URL | removed 2026-10-25 (was tailnet 38443, the endpoint of other machines' BB host daemons; those daemons now fail to connect). |
+| Ports | `38886` and `38887` (registry/ports.yml) are no longer listened on; the registry entries are not updated by this change. |
+| Account and data | User `bb`, home `/var/lib/bb` (BB's old `bb.db` and worktrees, the agents' installs and logins), on its own Hetzner Volume `vps-primary-bb-home` (15 GB ext4, UUID `cef32561-f50a-4332-ae46-b5ee5a1570eb`, `nofail`; `paseo` has `RequiresMountsFor`, so without the volume it fails to start instead of making an empty home). Grow it in the Hetzner console or API, then `resize2fs` on the host. Scratch repo `c1test` is a leftover smoke project. |
+| Memory | `agents.slice` (`MemoryHigh` 2816M, `MemoryMax` 3G) holds Paseo and every agent it starts (4 GB host, also running the Gradle cache and Athena). |
+| Telemetry | moot with the service gone; the database still says `telemetryEnabled false`. |
 
-The module block (abridged; the file has the comments):
+Current settings (the `services.bb` block was removed 2026-10-25; the `bb` user, group, login-shell environment and
+session bus are now declared by hand in `nixos/vps-primary/configuration.nix`, unchanged from what the module made):
 
 ```nix
-services.bb = {
-  enable = true;
-  package = bb-nix.packages.x86_64-linux.bb-app-bin;
-  appUrl = "https://vps-primary.greyhound-sidemirror.ts.net";
-  externalUrl = "https://vps-primary.greyhound-sidemirror.ts.net:38443";
-  claudeCode = { nativeInstaller = true; executable = "/var/lib/bb/.local/bin/claude"; };
-  extraPackages = [ bb-nix.packages.x86_64-linux.codex-npm-bin pkgs.git pkgs.gh pkgs.ripgrep ];
-  memoryHigh = "2560M";
-  memoryMax = "3G";
-  tailscaleServe = { enable = true; ports = [ 443 38443 ]; };
-};
+users.users.bb = { isSystemUser = true; group = "bb"; home = "/var/lib/bb"; createHome = true; homeMode = "0700";
+                   shell = pkgs.bashInteractive;
+                   packages = [ bb-nix.packages.x86_64-linux.codex-npm-bin pkgs.git pkgs.gh pkgs.ripgrep pkgs.nodejs_24 ]; };
+environment.localBinInPath = true;   # native Claude Code installer: ~/.local/bin on login PATHs
+environment.extraInit = ''...'';       # bb's login shells: NPM_CONFIG_PREFIX=/var/lib/bb/.local, SSL_CERT_FILE, DBUS_SESSION_BUS_ADDRESS
+systemd.services.bb-session-bus = { ... };   # one D-Bus session bus for bb (item 6 under "Agents")
 programs.nix-ld.enable = true;   # downloaded generic-glibc binaries: Claude Code, Cursor's node, agy, omp, grok
 ```
+
+The flake no longer imports bb-nix's module; the input stays for `codex-npm-bin`. Removed with the service:
+`bb.service`, `bb-tailscale-serve-443` and `-38443`, the `bb`/`bb-app` CLI in the system profile.
 
 `npmGlobalPrefix` keeps its default `/var/lib/bb/.local`. BB's own `npm install -g` (agents installed from its UI,
 for example Pi) would otherwise write into the read-only Node store path and fail; with the prefix, global npm
@@ -196,9 +201,10 @@ own installer there) and the userspace-Tailscale variant for a libkrun microVM, 
 
 Never `nixos-rebuild` by hand on the host. Force-push a known-good commit to the deploy branch and start the
 upgrade unit: `git push -f origin <good-sha>:deploy-vps-primary`, then `ssh vps-ts systemctl start nixos-upgrade`
-(`docs/nixos-in-git.md`). `/var/lib/bb` is not touched by a switch, but a BB version rollback needs the pre-upgrade
-database backup. Commits before 2026-10-17 ran Cloudroom, whose data is being removed: roll back only to a
-commit that has `services.bb`.
+(`docs/nixos-in-git.md`). `/var/lib/bb` is not touched by a switch. Commits before 2026-10-17 ran Cloudroom, whose
+data is being removed. Commits from 2026-10-17 to 2026-10-25 run `services.bb`: rolling back to one of them starts
+`bb.service` again (and takes the 443/38443 tailnet serves back), and a BB version rollback needs the pre-upgrade
+database backup.
 
 ## History: Cloudroom
 
