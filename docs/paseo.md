@@ -7,7 +7,7 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 
 1. One daemon per host, all on port **7263** (upstream default 6767), bound to loopback and published on the
    tailnet with `tailscale serve --https=7263`. Never `tailscale funnel`, never a public port.
-2. **No daemon password and no relay** (app.paseo.sh): the tailnet is the boundary, as for BB
+2. **No daemon password and no relay** (app.paseo.sh): the tailnet is the boundary, as it was for BB (removed 2026-10-25 on vps-primary)
    ([bb-vps-primary.md](bb-vps-primary.md)). Paseo runs commands for anyone who reaches it.
 3. Linux builds happen in Forgejo CI, never on a host: [forgejo.mit.edu/djbclark/paseo-nix](https://forgejo.mit.edu/djbclark/paseo-nix)
    packs the npm release into a hash-pinned tarball and carries the NixOS module (`services.paseo`).
@@ -19,7 +19,7 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 | Host | Daemon | Runs as | URL (tailnet only) | Config |
 | --- | --- | --- | --- | --- |
 | mac | Paseo.app (`brew install --cask paseo`) starts and owns it; LaunchAgent `com.djbclark.paseo-desktop` opens the app hidden at login and `keepRunningAfterQuit` keeps the daemon up after quitting (djbclark, 2026-10-18) | djbclark | https://mac.greyhound-sidemirror.ts.net:7263 | `roles/paseo_desktop` (`just paseo-desktop-apply`): `~/.paseo/config.json` keys, the serve and the LaunchAgent |
-| vps-primary | `services.paseo` (systemd `paseo.service`) | `bb`, sharing BB's agent logins in `/var/lib/bb`; state `/var/lib/bb/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; BB and Paseo share `agents.slice` (MemoryMax 3G) |
+| vps-primary | `services.paseo` (systemd `paseo.service`) | `bb`, using the agent logins in `/var/lib/bb` (home of the former BB service user); state `/var/lib/bb/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; Paseo and its agents run in `agents.slice` (MemoryMax 3G) |
 | get | `services.paseo` in the image (`hostName = "get"`: clients would show the container ID) | djbclark; state `~/.paseo` on `/persist` | https://get.greyhound-sidemirror.ts.net:7263 | `~/src/get` `nixos/paseo.nix`; the TSI port shim is preloaded; get's Tailscale shields are down for this (get `docs/runbook.md` 8.4) |
 
 Clients: the Mac app adds the other two as hosts (Settings, Add host, Direct connection, `<name>.greyhound-sidemirror.ts.net`,
