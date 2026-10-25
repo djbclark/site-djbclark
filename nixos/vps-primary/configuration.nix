@@ -225,6 +225,32 @@
     after = [ "bb-session-bus.service" ];
   };
 
+  # bb's home, /var/lib/bb (tool installs, caches, agent checkouts: ~10 GB), lives on a Hetzner
+  # Volume, not the 85%-full root disk (2026-10-25): Volume 107263872 "vps-primary-bb-home", ext4,
+  # nbg1. Mounted by filesystem UUID, which belongs to the filesystem, not to a /dev/sdX name.
+  # It grows in place: enlarge it in the Hetzner console or API, then
+  # `resize2fs /dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb` on the mounted host.
+  # `nofail` keeps a missing or slow volume from dropping the boot into emergency mode, which
+  # would cut off SSH and Tailscale; x-systemd.device-timeout bounds the wait. The price is that
+  # the mount can fail unnoticed, so bb and paseo require it below.
+  fileSystems."/var/lib/bb" = {
+    device = "/dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb";
+    fsType = "ext4";
+    options = [
+      "nofail"
+      "x-systemd.device-timeout=30s"
+    ];
+  };
+  # With the volume absent, bb and paseo must fail to start, never recreate an empty home (and a
+  # fresh bb.db, logins and installs) on the root disk underneath the mount point. systemd derives
+  # this from WorkingDirectory/StateDirectory already; stated so it does not depend on that.
+  # bb-session-bus and the tailscale-serve units never touch the home, so they need nothing.
+  # Still created before the mount: the empty mount-point directory (the NixOS user database
+  # activation, createHome) and, if the mount failed, paseo's empty /var/lib/bb/.paseo (its
+  # tmpfiles rule, which runs after local-fs.target whether or not a nofail mount succeeded).
+  systemd.services.bb.unitConfig.RequiresMountsFor = [ "/var/lib/bb" ];
+  systemd.services.paseo.unitConfig.RequiresMountsFor = [ "/var/lib/bb" ];
+
   # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
   # Cursor's bundled node (both installed into /var/lib/bb/.local). claudeCode.nativeInstaller
   # also turns it on; it is stated here so it does not depend on that option.

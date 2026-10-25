@@ -39,7 +39,7 @@ bb-build's `nix-build` workflow builds flake attributes on the runner: bb-nix's 
 | Browser URL | `https://vps-primary.greyhound-sidemirror.ts.net/` (tailnet 443 -> `127.0.0.1:38886`). `appUrl` has no port: BB's Host and Origin check compares against it. |
 | Machine URL | `https://vps-primary.greyhound-sidemirror.ts.net:38443` (the same backend; `externalUrl` = `BB_EXTERNAL_URL`, what Settings, Machines, Manual shows for host daemons). |
 | Ports | `38886` bb-server and `38887` bb-host-daemon, both loopback (registry/ports.yml). Tailnet 443 and 38443 are `tailscale serve` only. |
-| Account and data | User `bb`, data dir `/var/lib/bb` (BB's `bb.db`, worktrees under `plugins/environment-git-worktree`, the agents' installs and logins). Scratch repo `c1test` is a leftover smoke project. |
+| Account and data | User `bb`, data dir `/var/lib/bb` (BB's `bb.db`, worktrees under `plugins/environment-git-worktree`, the agents' installs and logins), on its own Hetzner Volume `vps-primary-bb-home` (15 GB ext4, UUID `cef32561-f50a-4332-ae46-b5ee5a1570eb`, `nofail`; `bb` and `paseo` have `RequiresMountsFor`, so without the volume they fail to start instead of making an empty home). Grow it in the Hetzner console or API, then `resize2fs` on the host. Scratch repo `c1test` is a leftover smoke project. |
 | Memory | `memoryHigh = "2560M"`, `memoryMax = "3G"` for BB and every agent (4 GB host, also running the Gradle cache and Athena). Idle about 850 MiB, peak about 1.1-1.6 GiB. |
 | Telemetry | `BB_TELEMETRY=false` in the unit and `telemetryEnabled false` in the database. |
 
