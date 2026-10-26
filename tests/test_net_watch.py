@@ -1736,29 +1736,42 @@ def test_the_tunnel_must_also_be_far_below_the_direct_rate_not_just_its_own_base
 ARP_AN = "? (192.0.2.1) at aa:b:cc:dd:ee:f on en0 ifscope [ethernet]\n? (192.0.2.77) at 11:22:33:44:55:66 on en0 ifscope [ethernet]\n"
 
 
-def snap_net(nw, path, cfg=None, via_wrapper=True, runner=None):
-    """discover_net where `arp` finds nothing, reading the snapshot at `path`; as the wrapper's child unless via_wrapper is False."""
+def snap_net(nw, path, cfg=None, via_wrapper=True, runner=None, marker=None):
+    """discover_net where `arp` finds nothing, reading the snapshot at `path`. As the wrapper's child (marker = this process's PID)
+    unless via_wrapper is False (no marker at all) or `marker` names something else."""
     from unittest import mock
 
     nw.STATE_DIR = path.parent
     runner = runner or (lambda argv, t, env=None: nw.Res(0, NETSTAT) if argv[0] == "netstat" else nw.Res(1))
-    env = {nw.ARP_SNAPSHOT_ENV: "1"} if via_wrapper else {}
+    env = {nw.ARP_SNAPSHOT_ENV: str(os.getpid()) if marker is None else marker} if via_wrapper else {}
     with mock.patch.dict(os.environ, env):
         if not via_wrapper:
             os.environ.pop(nw.ARP_SNAPSHOT_ENV, None)
         return nw.discover_net(cfg or C(nw, home_gateway_macs=["aa:0b:cc:dd:ee:0f"]), runner)
 
 
-def put_snapshot(nw, tmp_path, text=ARP_AN, mode=0o600, age=10):
+def header_for(pid):
+    return f"# net-watch-tick pid {pid}\n"
+
+
+def put_snapshot(nw, tmp_path, text=ARP_AN, mode=0o600, age=10, header=None):
+    """A snapshot as the wrapper writes it, its first line naming this process (the reader's PID); header="" omits it."""
     import time
 
     p = tmp_path / "snapdir" / nw.ARP_SNAPSHOT_NAME
     p.parent.mkdir(exist_ok=True)
-    p.write_text(text)
+    p.write_text((header_for(os.getpid()) if header is None else header) + text)
     p.chmod(mode)
     t = time.time() - age
     os.utime(p, (t, t))
     return p
+
+
+def as_the_reader(path):
+    """Rewrite the header of a file a wrapper wrote so that it names this process, as if this process were that wrapper's child."""
+    first, rest = path.read_text().split("\n", 1)
+    assert first.startswith("# net-watch-tick pid ")
+    path.write_text(header_for(os.getpid()) + rest)
 
 
 def test_the_arp_snapshot_supplies_the_gateway_mac_when_arp_is_empty(nw, tmp_path):
@@ -1773,6 +1786,29 @@ def test_the_snapshot_is_used_only_by_a_process_the_wrapper_started(nw, tmp_path
     assert snap_net(nw, p, via_wrapper=True)["home"] is True
 
 
+@pytest.mark.parametrize("marker", ["1", "0", "", "abc", "999999999"])
+def test_a_marker_that_names_neither_this_process_nor_its_parent_gives_no_mac(nw, tmp_path, marker):
+    # an inherited "1", or any other PID: the file names the same value, so only the marker check can refuse it
+    assert snap_net(nw, put_snapshot(nw, tmp_path, header=header_for(marker)), marker=marker)["gateway_mac"] == ""
+
+
+def test_the_marker_may_name_the_parent_because_uv_run_starts_python_as_the_wrappers_child(nw, tmp_path):
+    ppid = str(os.getppid())
+    d = snap_net(nw, put_snapshot(nw, tmp_path, header=header_for(ppid)), marker=ppid)
+    assert d["gateway_mac"] == "aa:0b:cc:dd:ee:0f" and d["arp_source"] == "snapshot"
+
+
+@pytest.mark.parametrize("head", [lambda: header_for(os.getpid() + 1), lambda: header_for(f"{os.getpid()}0"), lambda: header_for(os.getpid()).rstrip("\n") + " \n", lambda: ""])
+def test_a_file_that_does_not_name_the_marked_pid_gives_no_mac(nw, tmp_path, head):
+    # right marker, file written by another run (or by no wrapper): another PID, a longer number, a padded line, no header at all
+    assert snap_net(nw, put_snapshot(nw, tmp_path, header=head()))["gateway_mac"] == ""
+
+
+def test_the_header_must_be_the_first_line(nw, tmp_path):
+    late = "? (192.0.2.1) at aa:0b:cc:dd:ee:0f on en0 ifscope [ethernet]\n" + header_for(os.getpid())
+    assert snap_net(nw, put_snapshot(nw, tmp_path, header="", text=late))["gateway_mac"] == ""
+
+
 def test_live_arp_wins_over_the_snapshot_and_is_marked_arp(nw, tmp_path):
     put_snapshot(nw, tmp_path)
     live = "? (192.0.2.1) at aa:0b:cc:dd:ee:0f on en0 ifscope [ethernet]"
@@ -1780,10 +1816,10 @@ def test_live_arp_wins_over_the_snapshot_and_is_marked_arp(nw, tmp_path):
     assert d["arp_source"] == "arp" and d["home"] is True
 
 
-def test_a_snapshot_older_than_180_s_is_ignored(nw, tmp_path):
-    assert nw.ARP_SNAPSHOT_MAX_AGE_S == 180
-    assert snap_net(nw, put_snapshot(nw, tmp_path, age=170))["home"] is True
-    d = snap_net(nw, put_snapshot(nw, tmp_path, age=190))
+def test_a_snapshot_older_than_30_s_is_ignored(nw, tmp_path):
+    assert nw.ARP_SNAPSHOT_MAX_AGE_S == 30
+    assert snap_net(nw, put_snapshot(nw, tmp_path, age=25))["home"] is True
+    d = snap_net(nw, put_snapshot(nw, tmp_path, age=35))
     assert d["gateway_mac"] == "" and d["arp_source"] == "arp" and d["home"] is False and d["home_unsure"] is True
 
 
@@ -1905,19 +1941,50 @@ def test_the_wrapper_snapshots_arp_privately_then_execs_net_watch_with_its_argum
     r, state, calls = run_tick(tmp_path, "tick")
     assert r.returncode == 0
     snap = state / "arp.snapshot"
-    assert snap.read_text().strip() == "? (192.0.2.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]"
+    pid = (tmp_path / "stub.pid").read_text().strip()
+    # first line binds the file to the wrapper's PID (the exec'd process keeps it), then the arp output untouched
+    assert snap.read_text().splitlines() == [f"# net-watch-tick pid {pid}", "? (192.0.2.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]"]
     assert (snap.stat().st_mode & 0o777) == 0o600 and (state.stat().st_mode & 0o777) == 0o700
     assert [p.name for p in state.iterdir()] == ["arp.snapshot"]  # the temp file was moved, not left behind
     assert calls == ["netstat -rn -f inet", "ping -c 1 -t 2 192.0.2.1", "arp -an", "net-watch tick"]  # tunnel default skipped; ping before arp; exec last
 
 
-def test_the_wrapper_marks_the_net_watch_it_starts(tmp_path):
+def test_the_wrapper_exports_its_own_pid_once_the_snapshot_is_in_place(tmp_path):
     run_tick(tmp_path, "tick")
-    assert (tmp_path / "stub.env").read_text().strip() == "1"
-    again = tmp_path / "again"
-    again.mkdir()
-    run_tick(again, "tick", netstat_out=FOREIGN_NETSTAT)
-    assert (again / "stub.env").read_text().strip() == "1"  # also when the snapshot was skipped: there is no file to trust
+    assert (tmp_path / "stub.env").read_text().strip() == (tmp_path / "stub.pid").read_text().strip()
+
+
+def _marker_after(tmp_path, setup=None, **kw):
+    """What a net-watch started by the wrapper sees in the marker, when the caller's environment already had NET_WATCH_VIA_TICK_WRAPPER=1."""
+    tick, env, log = tick_rig(tmp_path, **kw)
+    env["NET_WATCH_VIA_TICK_WRAPPER"] = "1"
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    if setup:
+        setup(state)
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    return (tmp_path / "stub.env").read_text().strip()
+
+
+def test_a_skipped_or_failed_snapshot_exports_nothing_and_drops_an_inherited_marker(tmp_path):
+    def case(name, **kw):
+        d = tmp_path / name
+        d.mkdir()
+        return _marker_after(d, **kw)
+
+    assert case("foreign", netstat_out=FOREIGN_NETSTAT) == "unset"
+    assert case("arp-fails", arp_rc=1) == "unset"
+    assert case("dir-in-the-way", setup=lambda s: (s / "arp.snapshot").mkdir(parents=True)) == "unset"
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file, so the state dir cannot be created")
+    d = tmp_path / "no-state"
+    d.mkdir()
+    tick, env, log = tick_rig(d)
+    env["NET_WATCH_STATE_DIR"] = str(blocker / "nw")
+    env["NET_WATCH_VIA_TICK_WRAPPER"] = "1"
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    assert (d / "stub.env").read_text().strip() == "unset"
+    working = case("working")  # the success case replaces the caller's "1" with the wrapper's PID
+    assert working == (tmp_path / "working" / "stub.pid").read_text().strip() != "1"
 
 
 def test_the_wrapper_resolves_net_watch_through_a_symlink_to_itself(tmp_path):
@@ -1988,10 +2055,7 @@ def test_the_wrapper_exec_replaces_itself_and_passes_the_exit_status(tmp_path):
 
 
 def test_the_wrapper_skips_exactly_the_interfaces_net_watch_calls_tunnels(nw, tmp_path):
-    import re
-
-    m = re.search(r"^tunnel_prefixes=\(([^)]*)\)", TICK.read_text(), re.M)
-    assert m and tuple(m[1].split()) == nw.TUNNEL_PREFIXES  # one list, in two languages
+    # every prefix net-watch calls a tunnel is skipped; en0, the fallback route in each netstat, is not (so no extra prefix either)
     for i, prefix in enumerate(nw.TUNNEL_PREFIXES):
         d = tmp_path / f"p{i}"
         d.mkdir()
@@ -2005,7 +2069,7 @@ def test_the_wrapper_needs_a_dotted_quad_gateway(tmp_path):
 
 
 def test_a_home_snapshot_never_makes_a_foreign_tick_look_like_home(nw, tmp_path):
-    """The adversary's PoC: tick at home writes the snapshot; the next tick, on a network with only a tunnel default, must not read it."""
+    """PoC A: tick at home writes the snapshot; the next tick, on a network with only a tunnel default, must not read it."""
     tick, env, log = tick_rig(tmp_path)
     state = Path(env["NET_WATCH_STATE_DIR"])
     assert run_wrapper(tick, env, "tick").returncode == 0 and (state / "arp.snapshot").exists()
@@ -2014,9 +2078,83 @@ def test_a_home_snapshot_never_makes_a_foreign_tick_look_like_home(nw, tmp_path)
         return {"netstat": nw.Res(0, FOREIGN_NETSTAT), "scutil": nw.Res(0, NWI), "ipconfig": nw.Res(0, "192.0.2.1\n")}.get(argv[0], nw.Res(1))
 
     cfg = C(nw, home_gateway_macs=["aa:bb:cc:dd:ee:ff"])
-    assert snap_net(nw, state / "arp.snapshot", cfg, runner=runner)["home"] is True  # the hazard is real: a fresh home snapshot would pass
+    as_the_reader(state / "arp.snapshot")
+    assert snap_net(nw, state / "arp.snapshot", cfg, runner=runner)["home"] is True  # the hazard is real: a fresh home file this process may read passes
     set_netstat(tmp_path, FOREIGN_NETSTAT)
     assert run_wrapper(tick, env, "tick").returncode == 0
     assert not (state / "arp.snapshot").exists()
     d = snap_net(nw, state / "arp.snapshot", cfg, runner=runner)
     assert d["home"] is False and d["gateway_mac"] == "" and d["gateway"] == "192.0.2.1"
+
+
+def foreign_runner(nw):
+    """A foreign network as net-watch sees it: only a tunnel default in netstat, the gateway (the home IP) from scutil + ipconfig."""
+    return lambda argv, t, env=None: {"netstat": nw.Res(0, FOREIGN_NETSTAT), "scutil": nw.Res(0, NWI), "ipconfig": nw.Res(0, "192.0.2.1\n")}.get(argv[0], nw.Res(1))
+
+
+def test_poc_d_a_manual_net_watch_never_reads_a_home_snapshot_whatever_it_inherited(nw, tmp_path):
+    tick, env, log = tick_rig(tmp_path)
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    wrapper_pid = (tmp_path / "stub.pid").read_text().strip()
+    cfg = C(nw, home_gateway_macs=["aa:bb:cc:dd:ee:ff"])  # fresh home file, foreign network with the same gateway IP
+    assert snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw), via_wrapper=False)["home"] is False  # marker unset
+    for marker in ("1", wrapper_pid):  # an inherited "1", or the (dead) wrapper's own PID
+        d = snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw), marker=marker)
+        assert d["home"] is False and d["gateway_mac"] == "", marker
+
+
+def test_poc_e_a_home_runs_file_landing_after_a_foreign_runs_rm_is_never_trusted(nw, tmp_path):
+    tick, env, log = tick_rig(tmp_path, netstat_out=FOREIGN_NETSTAT)
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    state.mkdir(parents=True)
+    # run A's `mv` lands while run B (foreign) is reading the routing table, i.e. after B's rm: B's netstat stub writes A's file
+    (tmp_path / "netstat").write_text(
+        f"#!/bin/bash\n(umask 077; printf '# net-watch-tick pid 424242\\n? (192.0.2.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]\\n' > {state}/arp.snapshot)\n"
+        f"cat <<'EOT'\n{FOREIGN_NETSTAT}EOT\n"
+    )
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    assert (state / "arp.snapshot").exists()  # the interleave happened
+    assert (tmp_path / "stub.env").read_text().strip() == "unset"  # B found no physical default: it exports nothing
+    cfg = C(nw, home_gateway_macs=["aa:bb:cc:dd:ee:ff"])
+    assert snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw), via_wrapper=False)["home"] is False
+    # even if B's net-watch carried a marker naming itself, A's file names A
+    d = snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw))
+    assert d["home"] is False and d["gateway_mac"] == ""
+
+
+@pytest.mark.parametrize("second_netstat", [FOREIGN_NETSTAT, HOME_NETSTAT])
+def test_poc_f_a_snapshot_the_wrapper_cannot_delete_is_never_trusted(nw, tmp_path, second_netstat):
+    tick, env, log = tick_rig(tmp_path)
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    first_pid = (tmp_path / "stub.pid").read_text().strip()
+    set_netstat(tmp_path, second_netstat)
+    env["NET_WATCH_VIA_TICK_WRAPPER"] = "1"
+    state.chmod(0o500)  # rm (and mv, and mktemp) fail
+    try:
+        assert run_wrapper(tick, env, "tick").returncode == 0
+    finally:
+        state.chmod(0o700)
+    assert (state / "arp.snapshot").exists()  # the old file is still there
+    assert (tmp_path / "stub.env").read_text().strip() == "unset"
+    cfg = C(nw, home_gateway_macs=["aa:bb:cc:dd:ee:ff"])
+    assert snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw), via_wrapper=False)["home"] is False
+    for marker in ("1", first_pid):
+        assert snap_net(nw, state / "arp.snapshot", cfg, runner=foreign_runner(nw), marker=marker)["home"] is False, marker
+
+
+def test_a_temp_file_deleted_under_the_wrapper_is_recreated_owner_only(tmp_path):
+    # another run's `rm arp.snapshot.??????` removes this run's temp file just after mktemp (a stub `chmod` plays that run; launchd umask 022)
+    tick, env, log = tick_rig(tmp_path)
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    (fake / "chmod").write_text(f"#!/bin/bash\nrm -f {state}/arp.snapshot.??????\n")
+    (fake / "chmod").chmod(0o755)
+    env["PATH"] = f"{fake}:{env['PATH']}"
+    assert run_wrapper(tick, env, "tick").returncode == 0
+    snap = state / "arp.snapshot"
+    assert snap.exists() and (snap.stat().st_mode & 0o777) == 0o600  # recreated by the shell's own redirection under umask 077, not 0644
+    pid = (tmp_path / "stub.pid").read_text().strip()
+    assert snap.read_text().splitlines()[0] == f"# net-watch-tick pid {pid}"
