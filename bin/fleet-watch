@@ -23,9 +23,10 @@
 # (`helm.py brief`). A notice goes out only when a session starts waiting or asks a new
 # question, never when one is answered. Added 2026-10-06.
 # Each scheduled check also runs relay.py --sweep (FLEET_WATCH_RELAY overrides
-# its path). OVERDUE ack lines page once per expectation; when --pending --json parses,
-# only IDs it lists as open and overdue are paged (text built from its row) and a ledger
-# key is pruned as soon as its row is no longer open, so a reused ID pages again.
+# its path). The sweep only resolves acks; each open, overdue expectation row in
+# --pending --json pages once (text built from its row; no parsed pending list, no page).
+# A ledger key is pruned when its row is no longer open (or gone twice running), so a reused
+# ID pages again; a ping killed by its timeout is recorded "uncertain" and never retried.
 # State: $STATE_DIR/ack-overdue.json. The step has one 90 s deadline and a non-blocking
 # lock. Missing or failed relay calls are logged and never stop the other checks.
 #
@@ -1205,8 +1206,10 @@ CMD_TIMEOUT = float(os.environ.get("FLEET_WATCH_ACK_CMD_TIMEOUT", "60"))
 DEADLINE = float(os.environ.get("FLEET_WATCH_ACK_DEADLINE", "90"))
 deadline = time.monotonic() + DEADLINE
 LINE = re.compile(r"^OVERDUE ack (\S{1,200}?): .+$")
-ID_SHAPE = re.compile(r"[A-Za-z0-9._:@-]{1,80}")
 MAX_SKIP_LOGS = 5
+# A ping starts only with this much of the step left: a ping cut short by the deadline would be
+# "maybe sent" and never retried (see ping()). Overridable for tests.
+PING_FLOOR = float(os.environ.get("FLEET_WATCH_ACK_PING_FLOOR", "20"))
 
 class DeadlineExceeded(RuntimeError):
     pass
@@ -1217,8 +1220,12 @@ def clean(text, limit):
     return "".join(c for c in text if c.isprintable())[:limit]
 
 def log(message):
-    with (root / "fleet-watch.log").open("a") as stream:
-        stream.write(f"{time.strftime('%F %T')} ack-sweep: {message}\n")
+    # Never raises: the state directory may be unwritable, and the step must still end.
+    try:
+        with (root / "fleet-watch.log").open("a") as stream:
+            stream.write(f"{time.strftime('%F %T')} ack-sweep: {message}\n")
+    except OSError as error:
+        print(f"ack-sweep: {message} (log unwritable: {clean(error, 120)})", file=sys.stderr)
 
 def left():
     return deadline - time.monotonic()
@@ -1232,16 +1239,17 @@ def run(args, label):
     return result.stdout
 
 def ping(message):
-    """None on success, else a short reason that never repeats the message."""
+    """(reason, maybe_sent): (None, False) sent; (reason, False) not sent, retry; (reason, True) a timeout
+    may have delivered the page, so it is never retried. The reason never repeats the message."""
     try:
         result = subprocess.run([str(Path.home() / ".local/bin/hermes-ping"), message], capture_output=True,
                                 timeout=min(CMD_TIMEOUT, max(left(), 0.1)),
                                 env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
     except subprocess.TimeoutExpired:
-        return "timed out"
+        return "timed out", True
     except OSError as error:
-        return f"OS error {error.errno}"
-    return f"exit {result.returncode}" if result.returncode else None
+        return f"OS error {error.errno}", False
+    return (f"exit {result.returncode}" if result.returncode else None), False
 
 def save(seen):
     fd, name = tempfile.mkstemp(prefix=".ack-overdue-", dir=root)
@@ -1260,9 +1268,12 @@ def load():
             raise ValueError("not an object")
     except FileNotFoundError:
         return {}
-    except ValueError as error:    # includes JSONDecodeError and UnicodeDecodeError
-        os.replace(state, root / "ack-overdue.json.bad")
-        log(f"corrupt ledger moved to ack-overdue.json.bad ({clean(error, 120)}); starting empty")
+    except (ValueError, OSError) as error:    # corrupt JSON (incl. UnicodeDecodeError), or not a readable file
+        try:
+            os.replace(state, root / "ack-overdue.json.bad")
+            log(f"unusable ledger moved to ack-overdue.json.bad ({clean(error, 120)}); starting empty")
+        except OSError as move_error:
+            log(f"unusable ledger ({clean(error, 120)}) could not be moved aside ({clean(move_error, 120)}); starting empty")
         return {}
     return seen
 
@@ -1288,50 +1299,78 @@ def main():
         output = run([relay, "--sweep"], "--sweep")
         if not output.strip():
             log("relay --sweep printed nothing")
-        # A failed/malformed pending list must never erase deduplication evidence.
-        expects = None
+        # The sweep only resolves acks. What gets paged is read from the --pending rows, so a
+        # reworded or forged sweep line can neither page nor silence anything.
         try:
             rows = json.loads(run([relay, "--pending", "--json"], "--pending"))
             if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
                 raise ValueError("invalid pending list")
-            expects = {row["id"]: row for row in rows if row.get("kind") == "expect" and isinstance(row.get("id"), str)}
-            # Once per expectation: a ledger key lives only while its expectation is still open.
-            seen = {key: value for key, value in seen.items() if expects.get(key, {}).get("state") == "open"}
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-            log(f"pending unavailable; retained ledger: {clean(error, 240)}")
-        todo, skipped = {}, 0
+            # No parsed pending list: page nothing and keep the ledger as it is.
+            log(f"pending unavailable; paging deferred: {clean(error, 240)}")
+            return
+        expects = {row["id"]: row for row in rows if row.get("kind") == "expect" and isinstance(row.get("id"), str)}
+        # Once per expectation: a key is dropped when its row is present and no longer open (acked,
+        # reserved for reuse), or when its row was absent on two consecutive successful runs, so
+        # one missing row (a transient listing gap) cannot make a still-open expectation page again.
+        kept = {}
+        for key, value in seen.items():
+            entry = dict(value) if isinstance(value, dict) else {}
+            current = expects.get(key)
+            if current is not None:
+                if current.get("state") != "open":
+                    continue
+                entry.pop("missing", None)
+            else:
+                missing = entry.get("missing", 0)
+                missing = missing + 1 if isinstance(missing, int) and not isinstance(missing, bool) else 1
+                if missing >= 2:
+                    continue
+                entry["missing"] = missing
+            kept[key] = entry
+        seen = kept
+        due = {ident: current for ident, current in expects.items()
+               if current.get("state") == "open" and current.get("overdue") is True}
+        listed, skipped = set(), 0
         for line in output.splitlines():
             match = LINE.match(line)
             if not match:
                 continue
-            ident = match[1]
-            if expects is not None:
-                row = expects.get(ident)
-                valid = row is not None and row.get("state") == "open" and row.get("overdue") is True
-            else:
-                valid = ID_SHAPE.fullmatch(ident) is not None
-            if not valid:
+            listed.add(match[1])
+            if match[1] not in due:
                 skipped += 1
                 if skipped <= MAX_SKIP_LOGS:
-                    log(f"ignored OVERDUE line for {clean(ident, 80)!r}: not an open overdue expectation in --pending"
-                        if expects is not None else f"ignored OVERDUE line for {clean(ident, 80)!r}: unusable ID")
-                continue
-            if ident not in seen and ident not in todo:
-                todo[ident] = describe(expects[ident]) if expects is not None else clean("fleet-watch: " + line, 500)
+                    log(f"ignored OVERDUE line for {clean(match[1], 80)!r}: not an open overdue expectation in --pending")
         if skipped > MAX_SKIP_LOGS:
             log(f"ignored {skipped} OVERDUE lines in all")
+        unlisted = sum(ident not in listed for ident in due)
+        if unlisted:
+            log(f"{unlisted} open overdue expectation(s) in --pending had no OVERDUE line")
+        todo = {ident: describe(current) for ident, current in due.items() if ident not in seen}
+        # Persist the prune, and prove the ledger is writable, BEFORE any page: a ping whose record
+        # cannot be stored would repeat on every run.
+        try:
+            save(seen)
+        except OSError as error:
+            log(f"ledger not writable ({clean(error, 240)}); paging skipped this run")
+            return
         for number, (ident, message) in enumerate(todo.items()):
-            if left() <= 0:
-                log(f"step deadline of {DEADLINE:g} seconds reached; {len(todo) - number} overdue notice(s) retry next run")
+            if left() < PING_FLOOR:
+                log(f"less than {PING_FLOOR:g} seconds left; {len(todo) - number} overdue notice(s) retry next run")
                 break
-            reason = ping(message)
-            if reason:
+            reason, maybe_sent = ping(message)
+            if reason and not maybe_sent:
                 log(f"hermes-ping failed for {clean(ident, 80)}: {reason}")
                 continue
-            seen[ident] = {"notified": time.time()}
-            # Save after every successful notice so a later failure cannot replay it.
-            save(seen)
-        save(seen)
+            seen[ident] = {"notified": time.time(), **({"uncertain": True} if maybe_sent else {})}
+            if maybe_sent:
+                log(f"hermes-ping for {clean(ident, 80)}: {reason}, not retried (the page may have been lost)")
+            # Save after every notice so a later failure cannot replay it.
+            try:
+                save(seen)
+            except OSError as error:
+                log(f"ledger not writable after paging {clean(ident, 80)} ({clean(error, 240)}); paging stopped")
+                break
 
 try:
     main()
