@@ -156,6 +156,8 @@ hosts:
          note: "2026-09-27: com.djbclark.hermes-dashboard launchd (roles/site_agents). hermes dashboard --host Tailscale IP --port 9119 --no-open --skip-build. Auth is local (~/.hermes dashboard.basic_auth + Nous OAuth), never git. Tailnet-only bind, same class as firerpa-mcp :8000. Android companion URL http://100.113.53.87:9119"}
       - {port: 19825, bind: "127.0.0.1", owner: site, service: opencli-browser-bridge, status: default-claim,
          note: "site-djbclark#105: @jackwener/opencli's own micro-daemon (its hardcoded default port), auto-started on demand by the `opencli` CLI -- not a launchd service we manage. Backs bin/gemini_opencli_bridge.py (Hermes gemini_status/gemini_read/gemini_ask). See docs/reference/gemini-opencli-bridge.md."}
+      - {port: 25467, bind: "127.0.0.1", owner: site, service: cline-native-acceptance-hub, status: planned, must_be_up: false,
+         note: "2026-10-26: dedicated loopback TCP port for the Cline native-TUI acceptance Hub, claimed before any bind. Not the production Cline Hub: its identity and port are discovered separately and are not claimed here. No listener exists until the acceptance run starts it; nothing listened on 25467 when claimed (lsof, 2026-10-26)."}
 
       # ── SuperBrain (independent local application) ────────────────────────
       - {port: 5001,  bind: "*",         owner: unmanaged, service: superbrain-api, status: active,
