@@ -1,0 +1,23 @@
+# net-watch config template (docs/net-watch.md). PLACEHOLDER VALUES ONLY: this file is public.
+# Copy to ~/.config/net-watch/config.toml (or point NET_WATCH_CONFIG at it) and fill in the two REQUIRED values
+# below: [deco] host (the Deco's LAN address) and [home] gateway_mac (the arp MAC of the home Deco master;
+# `net-watch status` shows the current one while you are at home). The real file stays out of both repos.
+threshold_mbps = 30
+sustain_min = 10          # >= 1
+healthy_interval_s = 300
+slow_interval_s = 60
+recover_samples = 2       # >= 1 (invalid values fall back to the default, with a log line)
+episode_max_h = 12        # close an episode as abandoned after this long
+interface = ""          # "" = discover (physical default-route interface, never utun*)
+gateway = ""            # "" = discover
+urls = ["https://speed.cloudflare.com/__down?bytes=5000000", "https://ash-speed.hetzner.com/100MB.bin"]
+[reboot]
+enabled = true          # must be a TOML boolean; anything else disables reboots (logged)
+min_cooldown_h = 2      # >= 0 (bad values fall back to the default with a log line)
+after_min = 10          # >= 0: reboot once the episode is this old (the start notice fires at sustain_min)
+max_per_day = 3         # >= 1: automatic reboots in any rolling 24 h (manual ones counted), whatever the trigger
+trigger = "direct"      # WHICH slow path arms an episode and so the one reboot: "direct" (Wi-Fi/WAN on en0, today's rule) | "tunnel" (default route, e.g. the Tailscale exit node) | "either"
+[deco]
+host = "192.0.2.1"   # REQUIRED for any Deco call; never defaults to the discovered gateway
+[home]
+gateway_mac = ["aa:bb:cc:dd:ee:ff"]   # REQUIRED: arp MAC of the home Deco master; `net-watch status` shows the current one
