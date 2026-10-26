@@ -20,16 +20,32 @@ install to `~/.local/bin`; plists render to
 
 The existing five-minute `fleet-watch check` also runs `relay.py --sweep`,
 using `FLEET_WATCH_RELAY` or `~/src/djbclark-ade/skills/session-finder/relay.py`.
-Each `OVERDUE ack ID: ...` line produces one `hermes-ping` naming the sender,
+Each overdue acknowledgement produces one `hermes-ping` naming the sender,
 target, ID and age. No model or agent message is used for this check.
+When `relay.py --pending --json` parses, only IDs it lists as `kind: expect`,
+`state: open` and overdue are paged, and the ping text is built from that row
+(not from the sweep line, which carries peer-chosen names); any other
+`OVERDUE ack` line is logged and skipped. If the pending list fails or does
+not parse, the ledger is kept as it is and a sweep line is paged only when its
+ID is made of `A-Za-z0-9._:@-` (80 characters at most).
 `~/.local/state/fleet-watch/ack-overdue.json` records successful notices by ID;
-updates use an atomic replacement under a lock. Failed pings are retried.
-`relay.py --pending --json` removes ledger entries only when their expectation
-is gone, including keeping entries for retained acknowledged records. Missing,
-failed or empty sweeps are logged; other fleet checks continue. A failed pending
-list preserves the ledger. The launchd sender label stays `fleet-watch`.
-The inspected relay usage does not yet list `--no-ack`, so existing relay sends
-retain their current flags and exit-code handling.
+updates use an atomic replacement under a lock. A corrupt ledger is moved to
+`ack-overdue.json.bad`, logged, and replaced by an empty one. Failed pings are
+retried on the next run.
+The paging is once per expectation, not once per ID string: a ledger entry is
+dropped as soon as its row in `--pending --json` is no longer `open` (acked,
+expired or gone), so a reused ID pages again. Residual: an ack and a reuse of
+the same ID inside one five-minute window is not seen, because the pending row
+has no `created` field; the follow-up is a `created` field in relay's
+`expect_view` rows, so the ledger can key on `(id, created)`.
+Peer-controlled text is stripped of non-printable characters and clipped
+(ping about 500 characters); the log records the ID and exit code, never the
+text. The step has one 90 s deadline (pings still owed retry on the next run)
+and a non-blocking lock: an overlapping run logs `ack sweep already running`
+and returns. Missing, failed or empty sweeps are logged; other fleet checks
+continue. The launchd sender label stays `fleet-watch`.
+The scheduled `relay.py --sweep` also re-arms queued records whose deliverer
+is gone and expires old ones; those messages are already owed.
 
 ## APFS compression job (`apfs-compress`)
 

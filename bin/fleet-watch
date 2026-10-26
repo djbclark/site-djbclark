@@ -23,9 +23,11 @@
 # (`helm.py brief`). A notice goes out only when a session starts waiting or asks a new
 # question, never when one is answered. Added 2026-10-06.
 # Each scheduled check also runs relay.py --sweep (FLEET_WATCH_RELAY overrides
-# its path). OVERDUE ack lines page once per expectation ID; --pending --json
-# prunes IDs only when the expectation is gone. State: $STATE_DIR/ack-overdue.json.
-# Missing or failed relay calls are logged and never stop the other checks.
+# its path). OVERDUE ack lines page once per expectation; when --pending --json parses,
+# only IDs it lists as open and overdue are paged (text built from its row) and a ledger
+# key is pruned as soon as its row is no longer open, so a reused ID pages again.
+# State: $STATE_DIR/ack-overdue.json. The step has one 90 s deadline and a non-blocking
+# lock. Missing or failed relay calls are logged and never stop the other checks.
 #
 # Phones: FLEET_WATCH_HOSTS (default "s24 p7a t2e hd8"; ssh aliases). hd8 was left
 # out until 2026-10-05, when the operator asked for it back in.
@@ -1185,6 +1187,7 @@ ack_watch() {
   "$PY3" - "$UPSTREAM_RELAY" "$STATE_DIR" "$HERMES" "$HERMES_TO" <<'PY' || true
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -1196,16 +1199,49 @@ import time
 relay, directory, hermes, target = sys.argv[1:]
 root = Path(directory)
 state = root / "ack-overdue.json"
+# One deadline for the whole step, so a hung Hermes cannot stall the other checks.
+# The environment overrides are for tests.
+CMD_TIMEOUT = float(os.environ.get("FLEET_WATCH_ACK_CMD_TIMEOUT", "60"))
+DEADLINE = float(os.environ.get("FLEET_WATCH_ACK_DEADLINE", "90"))
+deadline = time.monotonic() + DEADLINE
+LINE = re.compile(r"^OVERDUE ack (\S{1,200}?): .+$")
+ID_SHAPE = re.compile(r"[A-Za-z0-9._:@-]{1,80}")
+MAX_SKIP_LOGS = 5
+
+class DeadlineExceeded(RuntimeError):
+    pass
+
+def clean(text, limit):
+    """Peer-controlled text: collapse whitespace, drop non-printable characters, clip."""
+    text = " ".join(str(text)[:limit * 4].split())
+    return "".join(c for c in text if c.isprintable())[:limit]
 
 def log(message):
     with (root / "fleet-watch.log").open("a") as stream:
         stream.write(f"{time.strftime('%F %T')} ack-sweep: {message}\n")
 
-def run(args, **kwargs):
-    result = subprocess.run(args, capture_output=True, text=True, timeout=60, **kwargs)
+def left():
+    return deadline - time.monotonic()
+
+def run(args, label):
+    if left() <= 0:
+        raise DeadlineExceeded(f"{label}: step deadline of {DEADLINE:g} seconds reached")
+    result = subprocess.run(args, capture_output=True, text=True, timeout=min(CMD_TIMEOUT, left()))
     if result.returncode:
-        raise RuntimeError(f"{args[-1]} exited {result.returncode}: {result.stderr.strip()[:240]}")
+        raise RuntimeError(f"{label} exited {result.returncode}: {clean(result.stderr, 240)}")
     return result.stdout
+
+def ping(message):
+    """None on success, else a short reason that never repeats the message."""
+    try:
+        result = subprocess.run([str(Path.home() / ".local/bin/hermes-ping"), message], capture_output=True,
+                                timeout=min(CMD_TIMEOUT, max(left(), 0.1)),
+                                env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
+    except subprocess.TimeoutExpired:
+        return "timed out"
+    except OSError as error:
+        return f"OS error {error.errno}"
+    return f"exit {result.returncode}" if result.returncode else None
 
 def save(seen):
     fd, name = tempfile.mkstemp(prefix=".ack-overdue-", dir=root)
@@ -1217,46 +1253,90 @@ def save(seen):
         if os.path.exists(name):
             os.unlink(name)
 
-try:
-    # Serialize the sweep and ping ledger, including overlapping manual checks.
-    with (root / "ack-overdue.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            seen = json.loads(state.read_text())
-        except FileNotFoundError:
-            seen = {}
+def load():
+    try:
+        seen = json.loads(state.read_text())
         if not isinstance(seen, dict):
-            raise ValueError("invalid ack-overdue ledger")
-        output = run([relay, "--sweep"])
+            raise ValueError("not an object")
+    except FileNotFoundError:
+        return {}
+    except ValueError as error:    # includes JSONDecodeError and UnicodeDecodeError
+        os.replace(state, root / "ack-overdue.json.bad")
+        log(f"corrupt ledger moved to ack-overdue.json.bad ({clean(error, 120)}); starting empty")
+        return {}
+    return seen
+
+def describe(row):
+    """The ping text, built from the validated pending row, not from the sweep line."""
+    tgt = row.get("target")
+    tgt = (tgt.get("name") or tgt.get("id")) if isinstance(tgt, dict) else tgt
+    tgt = tgt or "?"
+    age = row.get("age_s")
+    minutes = int(age) // 60 if isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age) else "?"
+    return clean(f"fleet-watch: OVERDUE ack {clean(row['id'], 80)}: {clean(tgt, 80)} has not answered "
+                 f"[{clean(row.get('sender') or '?', 80)}] in {minutes}m; tell the operator, never assume it was read", 500)
+
+def main():
+    # Serialize the sweep and ping ledger; a second overlapping run gives way at once.
+    with (root / "ack-overdue.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("ack sweep already running")
+            return
+        seen = load()
+        output = run([relay, "--sweep"], "--sweep")
         if not output.strip():
             log("relay --sweep printed nothing")
         # A failed/malformed pending list must never erase deduplication evidence.
+        expects = None
         try:
-            rows = json.loads(run([relay, "--pending", "--json"]))
+            rows = json.loads(run([relay, "--pending", "--json"], "--pending"))
             if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
                 raise ValueError("invalid pending list")
-            active = {row.get("id") for row in rows if row.get("kind") == "expect"}
-            seen = {key: value for key, value in seen.items() if key in active}
+            expects = {row["id"]: row for row in rows if row.get("kind") == "expect" and isinstance(row.get("id"), str)}
+            # Once per expectation: a ledger key lives only while its expectation is still open.
+            seen = {key: value for key, value in seen.items() if expects.get(key, {}).get("state") == "open"}
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-            log(f"pending unavailable; retained ledger: {error}")
+            log(f"pending unavailable; retained ledger: {clean(error, 240)}")
+        todo, skipped = {}, 0
         for line in output.splitlines():
-            match = re.match(r"^OVERDUE ack ([A-Za-z0-9._-]{1,40}): (.+)$", line)
-            if not match or match[1] in seen:
+            match = LINE.match(line)
+            if not match:
                 continue
             ident = match[1]
-            message = "fleet-watch: " + " ".join(line.split())
-            try:
-                run([str(Path.home() / ".local/bin/hermes-ping"), message],
-                    env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
-            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-                log(f"hermes-ping failed for {ident}: {error}")
+            if expects is not None:
+                row = expects.get(ident)
+                valid = row is not None and row.get("state") == "open" and row.get("overdue") is True
+            else:
+                valid = ID_SHAPE.fullmatch(ident) is not None
+            if not valid:
+                skipped += 1
+                if skipped <= MAX_SKIP_LOGS:
+                    log(f"ignored OVERDUE line for {clean(ident, 80)!r}: not an open overdue expectation in --pending"
+                        if expects is not None else f"ignored OVERDUE line for {clean(ident, 80)!r}: unusable ID")
+                continue
+            if ident not in seen and ident not in todo:
+                todo[ident] = describe(expects[ident]) if expects is not None else clean("fleet-watch: " + line, 500)
+        if skipped > MAX_SKIP_LOGS:
+            log(f"ignored {skipped} OVERDUE lines in all")
+        for number, (ident, message) in enumerate(todo.items()):
+            if left() <= 0:
+                log(f"step deadline of {DEADLINE:g} seconds reached; {len(todo) - number} overdue notice(s) retry next run")
+                break
+            reason = ping(message)
+            if reason:
+                log(f"hermes-ping failed for {clean(ident, 80)}: {reason}")
                 continue
             seen[ident] = {"notified": time.time()}
             # Save after every successful notice so a later failure cannot replay it.
             save(seen)
         save(seen)
+
+try:
+    main()
 except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-    log(f"unavailable: {error}")
+    log(f"unavailable: {clean(error, 240)}")
 PY
 }
 
