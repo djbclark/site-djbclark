@@ -154,6 +154,11 @@ def run(action: str, host: str, env: dict, client_cls, deco_error: tuple[type[Ba
 CURL = "/usr/bin/curl"
 
 
+def _curl_quote(value: str) -> str:
+    """A curl config-file string: double-quoted, with the characters curl treats specially escaped."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r") + '"'
+
+
 def make_curl_post(transport_error, loads, cookie_re, curl: str = CURL, runner=subprocess.run):
     """A replacement for `HttpTransport._post` that goes through /usr/bin/curl.
 
@@ -162,17 +167,27 @@ def make_curl_post(transport_error, loads, cookie_re, curl: str = CURL, runner=s
     the `sysauth` cookie remembered, HTTP >= 400 -> TransportError(status_code=N), failure to connect -> TransportError, and, after the
     request was sent, a timeout or dropped connection surfaces RAW (TimeoutError / ConnectionResetError), which is what a rebooting
     router does and what `sent_then_dropped` counts as "sent". The body goes on stdin (never argv: login bodies carry the encrypted
-    password); argv is a list, TLS is not verified (the library does not either; home identity is pinned by the parent)."""
+    password); the URL (session token) and the Cookie header go through `-K /dev/fd/N` (never argv); argv is a list, TLS is not verified (the library does not either; home identity is pinned by the parent)."""
 
     def _post(self, url: str, data: bytes):
         argv = [curl, "-sk", "-m", f"{self.timeout:g}", "--connect-timeout", "5", "-D", "-", "--data-binary", "@-", "-w", "\n%{time_connect}",
                 "-H", "Content-Type: application/json", "-H", "Expect:", "-H", "Accept-Encoding: identity", "-H", "Connection: close"]
+        # The URL carries the session token (`;stok=...`) and the cookie is the session: both go to curl through an inherited pipe, never argv.
+        conf = [f"url = {_curl_quote(url)}"]
         if self._cookie:
-            argv += ["-H", f"Cookie: {self._cookie}"]
+            conf.append(f"header = {_curl_quote('Cookie: ' + self._cookie)}")
+        rfd, wfd = os.pipe()
         try:
-            p = runner(argv + ["--", url], input=data, capture_output=True, timeout=self.timeout + 5)
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            raise transport_error("Failed to POST: curl did not finish") from exc
+            try:
+                os.write(wfd, ("\n".join(conf) + "\n").encode())
+            finally:
+                os.close(wfd)
+            try:
+                p = runner(argv + ["-K", f"/dev/fd/{rfd}"], input=data, capture_output=True, timeout=self.timeout + 5, pass_fds=(rfd,))
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                raise transport_error("Failed to POST: curl did not finish") from exc
+        finally:
+            os.close(rfd)
         body, _, connect = p.stdout.rpartition(b"\n")
         try:
             connected = float(connect) > 0
