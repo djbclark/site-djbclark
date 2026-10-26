@@ -93,6 +93,16 @@ Location permission. Off the home network net-watch is idle (no probes, so no te
 call); an open episode is closed with one "left the home network" ping. Back home it resumes by itself. Copy the MAC
 from `net-watch status` (net: `gateway_mac`) while at home; if the Deco master is replaced, update it.
 
+### ARP and Local Network privacy (`bin/net-watch-tick`)
+
+macOS Local Network privacy hides the ARP table from processes that are not Apple-signed. Under launchd, `arp -n <gateway>` and `ping` work from a bash job and from Apple's `/usr/bin/python3`, but fail from Homebrew/uv Python, even with a bash parent. net-watch needs Python 3.11 or newer, so Apple's Python is not an option, and without the gateway MAC it reports "NOT MEASURING: gateway MAC unknown (arp has no entry)" forever.
+
+So launchd starts `bin/net-watch-tick`, a bash script, not `net-watch`. Each minute it pings the gateway once (the first IPv4 default route on a non-tunnel interface), writes `arp -an` to `~/.local/state/net-watch/arp.snapshot` (temp file in the same directory, mode 0600, `mv -f`), and `exec`s `net-watch` with its arguments. A snapshot failure is skipped and never fails the tick. Tests may override the tools with `NW_ARP`, `NW_PING` and `NW_NETSTAT`; `NET_WATCH_STATE_DIR` moves the directory.
+
+`net-watch` asks its own `arp` first (so `arp_source` is `arp` in `status --json` `net`). Only when that finds no MAC does it read the snapshot (`arp_source` is `snapshot`). Fail closed: the file must be a regular file, not a symlink, owned by this uid, mode 0600 or tighter, modified in the last **180 s** (`ARP_SNAPSHOT_MAX_AGE_S`, three ticks), and have a line for exactly the gateway IP with a MAC. Otherwise there is no MAC, as before. The snapshot never relaxes the home check: the MAC must still be one of `[home] gateway_mac`.
+
+`net-watch status` shows what the job last saw (`state.json`), so it works from any shell. Commands that discover the network themselves (`probe`, `diagnose`, `reboot`) use the snapshot too, and from an agent shell that has no fresh snapshot (the job is not ticking, or the last tick was over 180 s ago) they can still say "NOT MEASURING". `status` run before the first tick with the new plist also says so.
+
 ## State and files
 
 `~/.local/state/net-watch/`: `state.json` (atomic writes; samples 24 h, episode, last reboot), `net-watch.log`,
@@ -162,7 +172,7 @@ exception text. Logging in to the Deco API signs the Deco app / web UI admin out
 ~/ops/site-djbclark/bin/net-watch status       # ~/ops/site-private/bin/net-watch is the same file through a symlink
 ```
 
-The plist points at `~/ops/site-djbclark/bin/net-watch`, so the branch must be merged there first. `net-watch uninstall` removes it.
+The plist runs `~/ops/site-djbclark/bin/net-watch-tick tick` (see "ARP and Local Network privacy"), so the branch must be merged there first. `net-watch uninstall` removes it.
 No `ProcessType` key is set (Standard): `Adaptive` would behave as `Background` for this XPC-less job (see Known limits 3).
 
 ## Known limits

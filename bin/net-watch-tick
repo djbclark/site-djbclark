@@ -1,0 +1,49 @@
+#!/bin/bash
+# net-watch-tick: the launchd entry point for net-watch.
+#
+# macOS Local Network privacy hides the ARP table from processes that are not Apple-signed, and net-watch (uv/Python >= 3.11)
+# is not. This bash job is allowed to read it: so it writes `arp -an` to $STATE_DIR/arp.snapshot, atomically and 0600, and
+# then exec's the sibling `net-watch`, which reads that file when its own `arp` finds nothing (see docs/net-watch.md).
+# It never fails the tick: any snapshot problem just skips the snapshot.
+#
+# Tool paths are Apple's, absolute; NW_ARP, NW_PING, NW_NETSTAT override them (tests only).
+set -u
+
+self=${BASH_SOURCE[0]}
+self=$(/usr/bin/readlink -f "$self" 2>/dev/null) || self=${BASH_SOURCE[0]}
+here=$(dirname "$self")
+
+arp=${NW_ARP:-/usr/sbin/arp}
+ping=${NW_PING:-/sbin/ping}
+netstat=${NW_NETSTAT:-/usr/sbin/netstat}
+state_dir=${NET_WATCH_STATE_DIR:-$HOME/.local/state/net-watch}
+
+# First IPv4 default route on a physical interface, like net-watch's parse_netstat_default.
+default_gateway() {
+  local -a f
+  while read -r -a f; do
+    [ "${#f[@]}" -ge 4 ] && [ "${f[0]}" = default ] || continue
+    case "${f[${#f[@]} - 1]}" in utun* | ipsec* | ppp*) continue ;; esac
+    case "${f[1]}" in '' | *[!0-9.]*) continue ;; esac
+    printf '%s\n' "${f[1]}"
+    return 0
+  done < <("$netstat" -rn -f inet 2>/dev/null)
+  return 1
+}
+
+snapshot() {
+  local gw tmp
+  gw=$(default_gateway) || return 0
+  [ -n "$gw" ] || return 0
+  [ -d "$state_dir" ] || (umask 077 && mkdir -p "$state_dir") || return 0
+  "$ping" -c 1 -t 2 "$gw" >/dev/null 2>&1 || true
+  tmp=$(mktemp "$state_dir/arp.snapshot.XXXXXX") || return 0
+  if chmod 600 "$tmp" && "$arp" -an >"$tmp" 2>/dev/null && mv -f "$tmp" "$state_dir/arp.snapshot"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
+snapshot || true
+exec "$here/net-watch" "$@"

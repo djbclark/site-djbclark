@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import statistics
 import subprocess
 import sys
@@ -55,6 +56,9 @@ STATE_VERSION = 1
 SAMPLE_KEEP_S = 24 * 3600
 DUE_SLACK_S = 10  # launchd's StartInterval is not exact
 TUNNEL_PREFIXES = ("utun", "ipsec", "ppp", "lo", "gif", "stf", "awdl", "llw", "bridge", "ap")
+ARP_SNAPSHOT_NAME = "arp.snapshot"  # written by bin/net-watch-tick (bash, Apple tools) before each tick
+ARP_SNAPSHOT_MAX_AGE_S = 180  # older than this is ignored: three 60 s ticks
+ARP_SNAPSHOT_READ_CAP = 1_000_000
 SNAP_FILE_CAP = 64 * 1024
 SNAP_DIR_CAP = 2 * 1024 * 1024
 SNAP_TOTAL_CAP = 256 * 1024 * 1024  # all episode directories together; oldest go first
@@ -258,6 +262,41 @@ def parse_netstat_tunnel(text: str) -> str:
     return ""
 
 
+ARP_RE = re.compile(r"\bat ((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})\b")
+
+
+def read_arp_snapshot(gw: str, path: Path | None = None, now: float | None = None) -> str:
+    """The gateway's MAC from the `arp -an` snapshot that bin/net-watch-tick writes before this process starts, else ''.
+
+    macOS Local Network privacy hides the ARP table from processes that are not Apple-signed (this one, run by uv), but not
+    from the bash wrapper's `arp`. Fail closed: the file must be a regular file (opened O_NOFOLLOW, so never a symlink) owned
+    by this uid, mode 0600 or tighter, modified within ARP_SNAPSHOT_MAX_AGE_S, with a line for exactly this gateway IP.
+    Anything else is no MAC."""
+    path = path or STATE_DIR / ARP_SNAPSHOT_NAME
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return ""
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o177:
+            return ""
+        t = time.time() if now is None else now
+        if not 0 <= t - st.st_mtime <= ARP_SNAPSHOT_MAX_AGE_S:
+            return ""
+        text = os.read(fd, ARP_SNAPSHOT_READ_CAP).decode(errors="replace")
+    except OSError:
+        return ""
+    finally:
+        os.close(fd)
+    for line in text.splitlines():
+        if f"({gw})" in line:
+            m = ARP_RE.search(line)
+            if m:
+                return normalize_mac(m[1])
+    return ""
+
+
 def discover_net(cfg: Config, runner: Callable[..., Res] = run) -> dict:
     """{'interface', 'gateway', 'source'}; config overrides; every part may be '' on failure."""
     iface, gw, src = cfg.interface, cfg.gateway, "config" if (cfg.interface and cfg.gateway) else ""
@@ -277,16 +316,19 @@ def discover_net(cfg: Config, runner: Callable[..., Res] = run) -> dict:
         cand = r.out.strip()
         if r.rc == 0 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", cand):
             gw, src = cand, (src or "ipconfig") + "+ipconfig"
-    mac = ""
+    mac, arp_source = "", "arp"
     if gw:
         for attempt in (0, 1):
             r = runner(["arp", "-n", gw], 5)
-            m = re.search(r"\bat ((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})\b", r.out) if r.rc == 0 else None
+            m = ARP_RE.search(r.out) if r.rc == 0 else None
             mac = normalize_mac(m[1]) if m else ""
             if mac or attempt:
                 break
             runner(["ping", "-c", "1", "-t", "2", gw], 5)  # an idle gateway has no arp entry: one ping creates it
-    net = {"interface": iface, "gateway": gw, "gateway_mac": mac, "source": src, "tunnel_iface": tunnel}
+        if not mac:  # hidden from this process by Local Network privacy: use the wrapper's snapshot
+            mac = read_arp_snapshot(gw)
+            arp_source = "snapshot" if mac else "arp"
+    net = {"interface": iface, "gateway": gw, "gateway_mac": mac, "arp_source": arp_source, "source": src, "tunnel_iface": tunnel}
     net["home"], net["home_why"] = check_home(cfg, net)
     net["home_unsure"] = (not net["home"]) and home_unsure(cfg, net)
     return net

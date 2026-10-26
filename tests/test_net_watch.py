@@ -1602,7 +1602,7 @@ def test_install_copies_the_repo_plist_whose_program_is_this_sites_net_watch_tic
     dest = tmp_path / "home" / "Library/LaunchAgents" / f"{nw.LABEL}.plist"
     assert dest.read_bytes() == repo_plist.read_bytes()
     prog = plistlib.loads(dest.read_bytes())["ProgramArguments"]
-    assert prog[0].endswith("site-djbclark/bin/net-watch") and "tick" in prog[1:]
+    assert prog[0].endswith("site-djbclark/bin/net-watch-tick") and "tick" in prog[1:]
     assert [c[:2] for c in calls] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]] and calls[1][3] == str(dest)
 
 
@@ -1729,3 +1729,190 @@ def test_the_tunnel_must_also_be_far_below_the_direct_rate_not_just_its_own_base
         r.sample(60)  # an unusual link: the tunnel baseline (200) is above the direct one (60)
     degrade(r, 5, tunnel=40.0, direct=60.0)  # T <= 0.25*T0 = 50, but T/D = 0.67: the tunnel is not the problem
     assert r.pings == [] and r.st["tunnel"]["ep"] is None
+
+
+# ---------------------------------------------------------------- ARP snapshot (Local Network privacy hides arp from this process)
+
+ARP_AN = "? (192.0.2.1) at aa:b:cc:dd:ee:f on en0 ifscope [ethernet]\n? (192.0.2.77) at 11:22:33:44:55:66 on en0 ifscope [ethernet]\n"
+
+
+def snap_net(nw, path, cfg=None):
+    """discover_net where `arp` finds nothing, reading the snapshot at `path`."""
+    nw.STATE_DIR = path.parent
+    runner = lambda argv, t, env=None: nw.Res(0, NETSTAT) if argv[0] == "netstat" else nw.Res(1)  # noqa: E731
+    return nw.discover_net(cfg or C(nw, home_gateway_macs=["aa:0b:cc:dd:ee:0f"]), runner)
+
+
+def put_snapshot(nw, tmp_path, text=ARP_AN, mode=0o600, age=10):
+    import time
+
+    p = tmp_path / "snapdir" / nw.ARP_SNAPSHOT_NAME
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(text)
+    p.chmod(mode)
+    t = time.time() - age
+    os.utime(p, (t, t))
+    return p
+
+
+def test_the_arp_snapshot_supplies_the_gateway_mac_when_arp_is_empty(nw, tmp_path):
+    d = snap_net(nw, put_snapshot(nw, tmp_path))
+    assert d["gateway_mac"] == "aa:0b:cc:dd:ee:0f" and d["arp_source"] == "snapshot" and d["home"] is True
+
+
+def test_live_arp_wins_over_the_snapshot_and_is_marked_arp(nw, tmp_path):
+    put_snapshot(nw, tmp_path)
+    live = "? (192.0.2.1) at aa:0b:cc:dd:ee:0f on en0 ifscope [ethernet]"
+    d = nw.discover_net(C(nw, home_gateway_macs=["aa:0b:cc:dd:ee:0f"]), lambda argv, t, env=None: nw.Res(0, NETSTAT if argv[0] == "netstat" else live))
+    assert d["arp_source"] == "arp" and d["home"] is True
+
+
+def test_a_snapshot_older_than_180_s_is_ignored(nw, tmp_path):
+    assert nw.ARP_SNAPSHOT_MAX_AGE_S == 180
+    assert snap_net(nw, put_snapshot(nw, tmp_path, age=170))["home"] is True
+    d = snap_net(nw, put_snapshot(nw, tmp_path, age=190))
+    assert d["gateway_mac"] == "" and d["arp_source"] == "arp" and d["home"] is False and d["home_unsure"] is True
+
+
+def test_a_snapshot_dated_in_the_future_is_ignored(nw, tmp_path):
+    assert snap_net(nw, put_snapshot(nw, tmp_path, age=-3600))["gateway_mac"] == ""
+
+
+def test_a_symlinked_snapshot_is_ignored(nw, tmp_path):
+    real = put_snapshot(nw, tmp_path)
+    link = tmp_path / "linkdir" / nw.ARP_SNAPSHOT_NAME
+    link.parent.mkdir()
+    link.symlink_to(real)
+    assert snap_net(nw, link)["gateway_mac"] == ""
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o602, 0o700, 0o666])
+def test_a_snapshot_with_group_or_other_bits_is_ignored(nw, tmp_path, mode):
+    assert snap_net(nw, put_snapshot(nw, tmp_path, mode=mode))["gateway_mac"] == ""
+
+
+def test_a_tighter_than_0600_snapshot_is_accepted(nw, tmp_path):
+    assert snap_net(nw, put_snapshot(nw, tmp_path, mode=0o400))["gateway_mac"] == "aa:0b:cc:dd:ee:0f"
+
+
+def test_a_snapshot_owned_by_someone_else_is_ignored(nw, tmp_path, monkeypatch):
+    p = put_snapshot(nw, tmp_path)
+    uid = os.getuid()
+    monkeypatch.setattr(nw.os, "getuid", lambda: uid + 1)
+    assert snap_net(nw, p)["gateway_mac"] == ""
+
+
+def test_a_snapshot_that_is_a_directory_or_missing_is_no_mac(nw, tmp_path):
+    p = tmp_path / "snapdir" / nw.ARP_SNAPSHOT_NAME
+    assert snap_net(nw, p)["gateway_mac"] == ""  # missing (and not even a directory)
+    p.mkdir(parents=True)
+    assert snap_net(nw, p)["gateway_mac"] == ""
+
+
+def test_the_snapshot_needs_a_line_for_this_gateway_with_a_mac(nw, tmp_path):
+    d = snap_net(nw, put_snapshot(nw, tmp_path, "? (192.0.2.77) at 11:22:33:44:55:66 on en0\n? (192.0.2.10) at aa:bb:cc:dd:ee:ff on en0\n"))
+    assert d["gateway_mac"] == ""  # other hosts only; 192.0.2.10 is not 192.0.2.1
+    d = snap_net(nw, put_snapshot(nw, tmp_path, "? (192.0.2.1) at (incomplete) on en0 ifscope [ethernet]\n"))
+    assert d["gateway_mac"] == ""
+
+
+def test_a_snapshot_mac_that_is_not_the_home_gateway_is_not_home(nw, tmp_path):
+    d = snap_net(nw, put_snapshot(nw, tmp_path), C(nw, home_gateway_macs=["aa:bb:cc:dd:ee:ff"]))
+    assert d["gateway_mac"] == "aa:0b:cc:dd:ee:0f" and d["arp_source"] == "snapshot"
+    assert d["home"] is False and "not the home gateway" in d["home_why"] and d["home_unsure"] is False
+
+
+# ---- bin/net-watch-tick
+
+TICK = BIN.parent / "net-watch-tick"
+
+
+def tick_rig(tmp_path, arp_out="? (192.0.2.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]", arp_rc=0, netstat_out=None):
+    """A copy of the wrapper next to a stub `net-watch`, with stub arp/ping/netstat; nothing real is run."""
+    import shutil
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    shutil.copy(TICK, bindir / "net-watch-tick")
+    log = tmp_path / "calls.log"
+    (bindir / "net-watch").write_text(f'#!/bin/bash\necho "net-watch $*" >> {log}\n')
+    (tmp_path / "arp").write_text(f'#!/bin/bash\necho "arp $*" >> {log}\necho "{arp_out}"\nexit {arp_rc}\n')
+    (tmp_path / "ping").write_text(f'#!/bin/bash\necho "ping $*" >> {log}\nexit 1\n')
+    ns = netstat_out if netstat_out is not None else "Destination Gateway Flags Netif Expire\ndefault 192.0.2.99 UGScg utun4\ndefault link#25 UCSIg utun5\ndefault 192.0.2.1 UGScg en0\n"
+    (tmp_path / "netstat").write_text(f'#!/bin/bash\necho "netstat $*" >> {log}\ncat <<\'EOT\'\n{ns}EOT\n')
+    for f in (bindir / "net-watch", bindir / "net-watch-tick", tmp_path / "arp", tmp_path / "ping", tmp_path / "netstat"):
+        f.chmod(0o755)
+    env = {**os.environ, "NW_ARP": str(tmp_path / "arp"), "NW_PING": str(tmp_path / "ping"), "NW_NETSTAT": str(tmp_path / "netstat"),
+           "NET_WATCH_STATE_DIR": str(tmp_path / "state" / "nw"), "HOME": str(tmp_path / "home")}
+    return bindir / "net-watch-tick", env, log
+
+
+def run_tick(tmp_path, *args, **kw):
+    import subprocess
+
+    tick, env, log = tick_rig(tmp_path, **kw)
+    r = subprocess.run([str(tick), *args], env=env, capture_output=True, text=True, timeout=30)
+    return r, Path(env["NET_WATCH_STATE_DIR"]), (log.read_text().splitlines() if log.exists() else [])
+
+
+def test_the_wrapper_snapshots_arp_privately_then_execs_net_watch_with_its_arguments(tmp_path):
+    r, state, calls = run_tick(tmp_path, "tick")
+    assert r.returncode == 0
+    snap = state / "arp.snapshot"
+    assert snap.read_text().strip() == "? (192.0.2.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]"
+    assert (snap.stat().st_mode & 0o777) == 0o600 and (state.stat().st_mode & 0o777) == 0o700
+    assert [p.name for p in state.iterdir()] == ["arp.snapshot"]  # the temp file was moved, not left behind
+    assert calls == ["netstat -rn -f inet", "ping -c 1 -t 2 192.0.2.1", "arp -an", "net-watch tick"]  # tunnel default skipped; ping before arp; exec last
+
+
+def test_the_wrapper_resolves_net_watch_through_a_symlink_to_itself(tmp_path):
+    tick, env, log = tick_rig(tmp_path)
+    link = tmp_path / "elsewhere" / "net-watch-tick"
+    link.parent.mkdir()
+    link.symlink_to(tick)
+    import subprocess
+
+    assert subprocess.run([str(link), "tick"], env=env, capture_output=True, timeout=30).returncode == 0
+    assert log.read_text().splitlines()[-1] == "net-watch tick"
+
+
+def test_a_failing_arp_leaves_no_snapshot_and_still_runs_the_tick(tmp_path):
+    r, state, calls = run_tick(tmp_path, "tick", arp_rc=1)
+    assert r.returncode == 0 and calls[-1] == "net-watch tick"
+    assert not (state / "arp.snapshot").exists() and list(state.iterdir()) == []
+
+
+def test_a_failing_arp_keeps_the_previous_snapshot(tmp_path):
+    tick, env, log = tick_rig(tmp_path, arp_rc=1)
+    state = Path(env["NET_WATCH_STATE_DIR"])
+    state.mkdir(parents=True)
+    (state / "arp.snapshot").write_text("old\n")
+    import subprocess
+
+    assert subprocess.run([str(tick), "tick"], env=env, capture_output=True, timeout=30).returncode == 0
+    assert (state / "arp.snapshot").read_text() == "old\n"
+
+
+def test_no_physical_default_route_skips_the_snapshot_and_still_ticks(tmp_path):
+    r, state, calls = run_tick(tmp_path, "tick", netstat_out="default 192.0.2.99 UGScg utun4\ndefault 192.0.2.98 UGScg ipsec0\n")
+    assert r.returncode == 0 and calls == ["netstat -rn -f inet", "net-watch tick"]
+    assert not state.exists()
+
+
+def test_an_unwritable_state_dir_never_fails_the_tick(tmp_path):
+    tick, env, log = tick_rig(tmp_path)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file, so the state dir cannot be created")
+    env["NET_WATCH_STATE_DIR"] = str(blocker / "nw")
+    import subprocess
+
+    assert subprocess.run([str(tick), "tick"], env=env, capture_output=True, timeout=30).returncode == 0
+    assert log.read_text().splitlines()[-1] == "net-watch tick"
+
+
+def test_the_wrapper_exec_replaces_itself_and_passes_the_exit_status(tmp_path):
+    tick, env, log = tick_rig(tmp_path)
+    (tick.parent / "net-watch").write_text("#!/bin/bash\nexit 7\n")
+    import subprocess
+
+    assert subprocess.run([str(tick), "tick"], env=env, capture_output=True, timeout=30).returncode == 7
