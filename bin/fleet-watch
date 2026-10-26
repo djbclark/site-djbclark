@@ -22,6 +22,10 @@
 # helm: agent sessions blocked on the operator, from the helm skill's no-model collector
 # (`helm.py brief`). A notice goes out only when a session starts waiting or asks a new
 # question, never when one is answered. Added 2026-10-06.
+# Each scheduled check also runs relay.py --sweep (FLEET_WATCH_RELAY overrides
+# its path). OVERDUE ack lines page once per expectation ID; --pending --json
+# prunes IDs only when the expectation is gone. State: $STATE_DIR/ack-overdue.json.
+# Missing or failed relay calls are logged and never stop the other checks.
 #
 # Phones: FLEET_WATCH_HOSTS (default "s24 p7a t2e hd8"; ssh aliases). hd8 was left
 # out until 2026-10-05, when the operator asked for it back in.
@@ -1176,7 +1180,88 @@ upstream_watch() {
   return 0
 }
 
+ack_watch() {
+  # No agent send: only the sweep, a read-only pending list, and hermes-ping.
+  "$PY3" - "$UPSTREAM_RELAY" "$STATE_DIR" "$HERMES" "$HERMES_TO" <<'PY' || true
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+relay, directory, hermes, target = sys.argv[1:]
+root = Path(directory)
+state = root / "ack-overdue.json"
+
+def log(message):
+    with (root / "fleet-watch.log").open("a") as stream:
+        stream.write(f"{time.strftime('%F %T')} ack-sweep: {message}\n")
+
+def run(args, **kwargs):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=60, **kwargs)
+    if result.returncode:
+        raise RuntimeError(f"{args[-1]} exited {result.returncode}: {result.stderr.strip()[:240]}")
+    return result.stdout
+
+def save(seen):
+    fd, name = tempfile.mkstemp(prefix=".ack-overdue-", dir=root)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(seen, stream)
+        os.replace(name, state)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+try:
+    # Serialize the sweep and ping ledger, including overlapping manual checks.
+    with (root / "ack-overdue.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            seen = json.loads(state.read_text())
+        except FileNotFoundError:
+            seen = {}
+        if not isinstance(seen, dict):
+            raise ValueError("invalid ack-overdue ledger")
+        output = run([relay, "--sweep"])
+        if not output.strip():
+            log("relay --sweep printed nothing")
+        # A failed/malformed pending list must never erase deduplication evidence.
+        try:
+            rows = json.loads(run([relay, "--pending", "--json"]))
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError("invalid pending list")
+            active = {row.get("id") for row in rows if row.get("kind") == "expect"}
+            seen = {key: value for key, value in seen.items() if key in active}
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+            log(f"pending unavailable; retained ledger: {error}")
+        for line in output.splitlines():
+            match = re.match(r"^OVERDUE ack ([A-Za-z0-9._-]{1,40}): (.+)$", line)
+            if not match or match[1] in seen:
+                continue
+            ident = match[1]
+            message = "fleet-watch: " + " ".join(line.split())
+            try:
+                run([str(Path.home() / ".local/bin/hermes-ping"), message],
+                    env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                log(f"hermes-ping failed for {ident}: {error}")
+                continue
+            seen[ident] = {"notified": time.time()}
+            # Save after every successful notice so a later failure cannot replay it.
+            save(seen)
+        save(seen)
+except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+    log(f"unavailable: {error}")
+PY
+}
+
 check() {
+  ack_watch
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
   agents=$(count 'bin/python[0-9.]* [^ ]*/site-private/bin/acp-run ')

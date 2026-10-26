@@ -16,6 +16,21 @@ install to `~/.local/bin`; plists render to
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 | s1-ingest | `com.{{ site_ns }}.s1-ingest` | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed |
 
+## Fleet-watch acknowledgement escalation
+
+The existing five-minute `fleet-watch check` also runs `relay.py --sweep`,
+using `FLEET_WATCH_RELAY` or `~/src/djbclark-ade/skills/session-finder/relay.py`.
+Each `OVERDUE ack ID: ...` line produces one `hermes-ping` naming the sender,
+target, ID and age. No model or agent message is used for this check.
+`~/.local/state/fleet-watch/ack-overdue.json` records successful notices by ID;
+updates use an atomic replacement under a lock. Failed pings are retried.
+`relay.py --pending --json` removes ledger entries only when their expectation
+is gone, including keeping entries for retained acknowledged records. Missing,
+failed or empty sweeps are logged; other fleet checks continue. A failed pending
+list preserves the ledger. The launchd sender label stays `fleet-watch`.
+The inspected relay usage does not yet list `--no-ack`, so existing relay sends
+retain their current flags and exit-code handling.
+
 ## APFS compression job (`apfs-compress`)
 
 Weekly Jobber job (Sunday 04:30) that re-applies APFS (decmpfs) compression with
