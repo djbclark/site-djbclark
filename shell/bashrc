@@ -698,6 +698,29 @@ omp() {
   esac
 }
 
+# kiro-cli (2026-10-25): -a/--trust-all-tools is its YOLO, and it belongs to the
+# `chat` and `acp` subcommands, NOT the root command (kiro-cli 2.34.0 --help-all),
+# so it is inserted after the subcommand. A bare launch or root flags (--agent,
+# --tui, --v3, -r ...) are chat's own flags, so they run as `chat`. Every other
+# subcommand (login, doctor, settings, mcp, ...) and help/version pass through
+# untouched. Skipped when --trust-tools (a stricter, explicit set) is given.
+# Kiro's own `kiro-cli init` shell blocks sit at the top and bottom of this file:
+# keep this function between them.
+kiro-cli() {
+  local sub=chat
+  case "${1:-}" in
+    chat|acp) sub=$1; shift ;;
+    -h|--help|--help-all|-V|--version) command kiro-cli "$@"; return ;;
+    ""|-*) ;;
+    *) command kiro-cli "$@"; return ;;
+  esac
+  if __agent_has_opt "--trust-all-tools -a --trust-tools" "$@"; then
+    command kiro-cli "$sub" "$@"
+  else
+    command kiro-cli "$sub" --trust-all-tools "$@"
+  fi
+}
+
 # -- fzf (fuzzy finder) --------------------------------------------------
 
 if command -v fzf >/dev/null 2>&1; then
