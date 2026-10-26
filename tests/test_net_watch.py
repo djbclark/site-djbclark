@@ -894,7 +894,7 @@ NWI = """Network information
 
 IPv4 network interface information
      utun4 : flags      : 0x5 (IPv4,DNS)
-             address    : 100.64.0.2
+             address    : 100.0.0.2
        en0 : flags      : 0x5 (IPv4,DNS)
              address    : 192.0.2.57
 
@@ -1518,7 +1518,7 @@ class FakeTransport:
 def stub_curl(tmp_path, monkeypatch, reply: bytes, rc: int):
     d = tmp_path / "stub"
     d.mkdir(exist_ok=True)
-    (d / "curl").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_DIR/argv"\ncat > "$STUB_DIR/stdin"\ncat "$STUB_DIR/reply"\nexit $(cat "$STUB_DIR/rc")\n')
+    (d / "curl").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_DIR/argv"\nwhile [ $# -gt 0 ]; do [ "$1" = -K ] && cat "$2" > "$STUB_DIR/config"; shift; done\ncat > "$STUB_DIR/stdin"\ncat "$STUB_DIR/reply"\nexit $(cat "$STUB_DIR/rc")\n')
     (d / "curl").chmod(0o755)
     (d / "reply").write_bytes(reply)
     (d / "rc").write_text(str(rc))
@@ -1538,11 +1538,31 @@ def test_curl_transport_parses_the_last_header_block_keeps_the_cookie_and_sends_
     assert post(t, "https://192.0.2.1/login", b'{"operation": "read", "pw": "SECRET-BODY"}') == {"result": {"x": 1}}
     assert t._cookie == "sysauth=abc123"
     argv = (d / "argv").read_text().splitlines()
-    assert argv[0] == "-sk" and "SECRET-BODY" not in " ".join(argv) and "@-" in argv and argv[-2:] == ["--", "https://192.0.2.1/login"]
+    assert argv[0] == "-sk" and "SECRET-BODY" not in " ".join(argv) and "@-" in argv and argv[-2] == "-K" and argv[-1].startswith("/dev/fd/")
+    assert (d / "config").read_text() == 'url = "https://192.0.2.1/login"\n'
     assert "Expect:" in argv and "Accept-Encoding: identity" in argv and "Connection: close" in argv and "Content-Type: application/json" in argv
     assert (d / "stdin").read_bytes() == b'{"operation": "read", "pw": "SECRET-BODY"}'
-    post(t, "https://192.0.2.1/x", b"{}")
-    assert "Cookie: sysauth=abc123" in (d / "argv").read_text().splitlines()
+    post(t, "https://192.0.2.1/x;stok=tok0123/y", b"{}")
+    assert (d / "config").read_text() == 'url = "https://192.0.2.1/x;stok=tok0123/y"\nheader = "Cookie: sysauth=abc123"\n'
+    argv_text = (d / "argv").read_text()
+    assert "sysauth=" not in argv_text and "stok=" not in argv_text and "tok0123" not in argv_text and "abc123" not in argv_text
+
+
+def test_curl_transport_session_secrets_never_reach_argv_or_an_error_message(deco, tmp_path, monkeypatch):
+    d = stub_curl(tmp_path, monkeypatch, b"\n0.000", 7)  # never connected -> TransportError
+    t = FakeTransport()
+    t._cookie = "sysauth=deadbeef99"
+    with pytest.raises(FakeTransportError) as e:
+        curl_post(deco, d)(t, "https://192.0.2.1/cgi-bin/luci/;stok=feedface77/admin/device?form=device_list", b"{}")
+    argv_text = (d / "argv").read_text()
+    for secret in ("sysauth=", "stok=", "deadbeef99", "feedface77"):
+        assert secret not in argv_text and secret not in str(e.value)
+    assert "feedface77" in (d / "config").read_text() and "deadbeef99" in (d / "config").read_text()  # they did reach curl, via the fd
+    d = stub_curl(tmp_path, monkeypatch, b"HTTP/1.1 403 Forbidden\r\n\r\n{}\n0.01", 0)  # HTTP error path
+    with pytest.raises(FakeTransportError) as e:
+        curl_post(deco, d)(t, "https://192.0.2.1/;stok=feedface77/x", b"{}")
+    assert "feedface77" not in str(e.value) and "deadbeef99" not in str(e.value)
+    assert deco._curl_quote('a"b\\c\nd') == '"a\\"b\\\\c\\nd"'
 
 
 def test_curl_transport_failures_map_to_what_sent_then_dropped_expects(deco, tmp_path, monkeypatch):
@@ -1565,6 +1585,25 @@ def test_curl_transport_failures_map_to_what_sent_then_dropped_expects(deco, tmp
     with pytest.raises(ConnectionResetError) as e:
         curl_post(deco, d)(FakeTransport(), "https://h/", b"{}")
     assert deco.sent_then_dropped(e.value, (FakeTransportError,)) is True
+
+
+# ---------------------------------------------------------------- install copies the repo's plist
+
+
+def test_install_copies_the_repo_plist_whose_program_is_this_sites_net_watch_tick(nw, tmp_path, monkeypatch):
+    import plistlib
+
+    calls = []
+    monkeypatch.setattr(nw, "run", lambda argv, timeout, env=None: calls.append(list(argv)) or nw.Res(0))
+    monkeypatch.setattr(nw, "cmd_warm", lambda a, cfg, deps: 0)
+    monkeypatch.setattr(nw, "HOME", tmp_path / "home")
+    assert nw.main(["install"], cfg=C(nw)) == 0
+    repo_plist = BIN.parent.parent / "macos" / "net-watch" / f"{nw.LABEL}.plist"
+    dest = tmp_path / "home" / "Library/LaunchAgents" / f"{nw.LABEL}.plist"
+    assert dest.read_bytes() == repo_plist.read_bytes()
+    prog = plistlib.loads(dest.read_bytes())["ProgramArguments"]
+    assert prog[0].endswith("site-djbclark/bin/net-watch") and "tick" in prog[1:]
+    assert [c[:2] for c in calls] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]] and calls[1][3] == str(dest)
 
 
 # ---------------------------------------------------------------- tunnel_degraded: tunnel-only collapse is an alert, never a reboot

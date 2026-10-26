@@ -29,3 +29,6 @@ graft/
 
 # telegram-inbox.env is generated from the register and IS committed (GHA reads it).
 !registry/telegram-inbox.env
+
+# net-watch real config (gateway MAC and address): machine-local, never committed
+config/net-watch.toml
