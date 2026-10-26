@@ -1,0 +1,1550 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""net-watch - notice sustained download slowdowns on the home link, notify twice, collect evidence.
+
+    net-watch tick                  launchd runs this every 60 s; returns at once unless a probe is due
+    net-watch status [--json]       state, last samples, baseline, episode, last reboot
+    net-watch probe [--record]      one probe now, printed; changes no state unless --record
+    net-watch reboot [--dry-run]    reboot the Deco mesh (whole group) now
+    net-watch diagnose              take the diagnostics snapshot now, print its path
+    net-watch install|uninstall     the launchd job (macos/net-watch/com.djbclark.net-watch.plist)
+    net-watch warm                  warm uv's cache for the pinned Deco helper (needs PyPI; run while the link is up)
+
+A probe downloads from CDN objects (4 parallel streams, hard max 8 s) bound to the PHYSICAL interface
+(`curl --interface en0`; the default route here is the Tailscale tunnel) plus a smaller sample through
+the default route. A sample is SLOW below `threshold_mbps`. An episode STARTS when slow samples cover
+`sustain_min` minutes with no healthy sample between: one snapshot, ONE hermes-ping, then (if enabled,
+credentials exist and the cooldown allows) ONE Deco reboot per episode. It ENDS after `recover_samples`
+consecutive healthy samples: ONE hermes-ping. Nothing else is ever sent (tool errors: log, at most one
+ping a day). Docs: docs/net-watch.md. Config: ~/.config/net-watch/config.toml (REQUIRED: [deco] host and [home] gateway_mac;
+without them, or off the home network, net-watch measures nothing and calls no Deco).
+State: ~/.local/state/net-watch/ (state.json, net-watch.log, episodes/<ts>-<label>/).
+Deco credentials: read in memory by `sudo-secretspec get` (argv list); only DECO_ADMIN_USER/DECO_ADMIN_PASSWORD reach the
+pinned helper bin/net-watch-deco, which runs with env {PATH, HOME, those two}; never argv, state, logs or pings.
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import fcntl
+import json
+import os
+import re
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path.home()
+STATE_DIR = Path(os.environ.get("NET_WATCH_STATE_DIR", HOME / ".local/state/net-watch"))
+CONFIG_PATH = Path(os.environ.get("NET_WATCH_CONFIG", HOME / ".config/net-watch/config.toml"))
+LABEL = "com.djbclark.net-watch"
+SELF = Path(os.path.realpath(__file__))
+STATE_VERSION = 1
+SAMPLE_KEEP_S = 24 * 3600
+DUE_SLACK_S = 10  # launchd's StartInterval is not exact
+TUNNEL_PREFIXES = ("utun", "ipsec", "ppp", "lo", "gif", "stf", "awdl", "llw", "bridge", "ap")
+SNAP_FILE_CAP = 64 * 1024
+SNAP_DIR_CAP = 2 * 1024 * 1024
+SNAP_TOTAL_CAP = 256 * 1024 * 1024  # all episode directories together; oldest go first
+SNAP_BACKOFF_MIN = (5, 15, 60)  # gaps between periodic snapshots of one episode; the last repeats (hourly)
+EPISODE_KEEP_DAYS = 60
+REBOOT_LOCK_WAIT_S = 150.0  # manual `reboot` waits this long for a running tick to finish
+MAX_BYTES = 5_000_000  # per stream
+UP_BYTES = 1_000_000  # tunnel upload diagnostic payload
+UP_URL = "https://speed.cloudflare.com/__up"
+REBOOT_TRIGGERS = ("direct", "tunnel", "either")
+HOME_UNSURE_TICKS = 2  # ticks of "cannot tell if home" (arp miss, interface flap) tolerated inside a slowdown before it is closed as away
+IDENTITY_UNREADABLE_S = 30 * 60  # gateway MAC unreadable this long with a gateway present: tool error ping (the tool is inert)
+DEFAULT_URLS = [
+    "https://speed.cloudflare.com/__down?bytes=5000000",
+    "https://ash-speed.hetzner.com/100MB.bin",
+    "https://speed.cloudflare.com/__down?bytes=5000000",
+    "https://ash-speed.hetzner.com/100MB.bin",
+]
+DECO_REASON = "net-watch: TP-Link Deco admin access"
+HELPER = SELF.parent / "net-watch-deco"
+ERROR_CLASSES = {"AuthenticationError", "TransportError", "ApiError", "CryptoError", "DecoError", "TimeoutError",
+                 "ConnectionError", "OSError", "ImportError", "HTTPException", "KeyError", "ValueError"}
+
+
+# --------------------------------------------------------------------------- config
+
+
+@dataclass
+class Config:
+    threshold_mbps: float = 30.0
+    sustain_min: float = 10.0
+    healthy_interval_s: float = 300.0
+    slow_interval_s: float = 60.0
+    recover_samples: int = 2
+    reboot_enabled: bool = True
+    reboot_min_cooldown_h: float = 2.0
+    reboot_after_min: float = 10.0
+    reboot_trigger: str = "direct"  # which slow verdict arms an episode and so a reboot: "direct" | "tunnel" | "either"
+    reboot_max_per_day: int = 3  # automatic reboots in any rolling 24 h, whatever the trigger
+    urls: list[str] = field(default_factory=lambda: list(DEFAULT_URLS))
+    probe_max_s: float = 8.0
+    interface: str = ""  # "" = discover
+    gateway: str = ""  # "" = discover
+    snapshot_interval_min: float = 5.0
+    episode_max_h: float = 12.0  # an episode open this long is closed as abandoned
+    home_gateway_macs: list[str] = field(default_factory=list)  # arp MAC(s) of the home gateway; empty = not configured
+    deco_host: str = ""  # REQUIRED for any Deco call; never defaults to the discovered gateway
+
+
+def load_config(path: Path = CONFIG_PATH) -> Config:
+    cfg = Config()
+    try:
+        raw = tomllib.loads(path.read_text())
+    except FileNotFoundError:
+        return cfg
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        log(f"config {path} unreadable ({e}); using defaults")
+        return cfg
+    for k in ("threshold_mbps", "sustain_min", "healthy_interval_s", "slow_interval_s", "recover_samples",
+              "probe_max_s", "interface", "gateway", "snapshot_interval_min", "episode_max_h"):
+        if k in raw:
+            try:
+                setattr(cfg, k, type(getattr(cfg, k))(raw[k]))
+            except (TypeError, ValueError):
+                log(f"config: bad value for {k}; using the default")
+    for k, lo in (("threshold_mbps", 0.001), ("sustain_min", 1), ("recover_samples", 1), ("healthy_interval_s", 10),
+                  ("slow_interval_s", 10), ("probe_max_s", 1), ("snapshot_interval_min", 1), ("episode_max_h", 0.1)):
+        if getattr(cfg, k) < lo:
+            log(f"config: {k}={getattr(cfg, k)} is below {lo}; using the default {getattr(Config(), k)}")
+            setattr(cfg, k, getattr(Config(), k))
+    if isinstance(raw.get("urls"), list) and raw["urls"]:
+        cfg.urls = [str(u) for u in raw["urls"]]
+    rb = raw.get("reboot")
+    rb = rb if isinstance(rb, dict) else {}
+    if "enabled" in rb:
+        if isinstance(rb["enabled"], bool):
+            cfg.reboot_enabled = rb["enabled"]
+        else:
+            cfg.reboot_enabled = False  # not a TOML boolean ("false" as a string, 0, ...): fail safe, never reboot
+            log("config: reboot.enabled is not a boolean; reboots are DISABLED until it is fixed")
+    for key, attr, typ, lo in (("min_cooldown_h", "reboot_min_cooldown_h", float, 0.0), ("after_min", "reboot_after_min", float, 0.0),
+                               ("max_per_day", "reboot_max_per_day", int, 1)):
+        if key in rb:
+            v = rb[key]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or (typ is int and v != int(v)) or v < lo:
+                log(f"config: reboot.{key} must be a number >= {lo:g}; using the default")
+            else:
+                setattr(cfg, attr, typ(v))
+    if "trigger" in rb:
+        if rb["trigger"] in REBOOT_TRIGGERS:
+            cfg.reboot_trigger = rb["trigger"]
+        else:
+            log(f"config: reboot.trigger must be one of {REBOOT_TRIGGERS}; using \"direct\"")
+    cfg.deco_host = str((raw.get("deco") or {}).get("host", cfg.deco_host))
+    gm = (raw.get("home") or {}).get("gateway_mac", [])
+    cfg.home_gateway_macs = [normalize_mac(m) for m in ([gm] if isinstance(gm, str) else gm) if isinstance(m, str) and m.strip()]
+    return cfg
+
+
+# --------------------------------------------------------------------------- small helpers
+
+
+def log(msg: str) -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        p = STATE_DIR / "net-watch.log"
+        if p.exists() and p.stat().st_size > 1_000_000:
+            p.replace(STATE_DIR / "net-watch.log.1")
+        with p.open("a") as f:
+            f.write(f"{datetime.now().isoformat(timespec='seconds')} {msg}\n")
+    except OSError:
+        pass
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+@dataclass
+class Res:
+    rc: int
+    out: str = ""
+    err: str = ""
+    timed_out: bool = False
+
+
+def run(argv: list[str], timeout: float, env: dict | None = None) -> Res:
+    """Run argv (never a shell). Timeout kills it; partial output is kept."""
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env, errors="replace", stdin=subprocess.DEVNULL)
+        return Res(p.returncode, p.stdout, p.stderr)
+    except subprocess.TimeoutExpired as e:
+        dec = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")  # noqa: E731
+        return Res(124, dec(e.stdout), dec(e.stderr), True)
+    except OSError as e:
+        return Res(127, "", str(e))
+
+
+def fmt_t(t: float | None) -> str:
+    return datetime.fromtimestamp(t).strftime("%H:%M:%S") if t else "-"
+
+
+def fmt_mbps(x: float | None) -> str:
+    return "n/a" if x is None else f"{x:.1f}"
+
+
+# --------------------------------------------------------------------------- network discovery
+
+
+def parse_netstat_default(text: str) -> tuple[str, str] | None:
+    """(interface, gateway) of the first default route on a physical interface.
+
+    `netstat -rn -f inet` lines: `default  192.0.2.1  UGScg  en0` / `default  link#25  UCSIg  utun4`.
+    The tunnel (utun4, Tailscale) is skipped: speed must be measured on the physical link.
+    """
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) >= 4 and f[0] == "default":
+            gw, iface = f[1], f[-1]
+            if iface.startswith(TUNNEL_PREFIXES) or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", gw):
+                continue
+            return iface, gw
+    return None
+
+
+def parse_nwi_interface(text: str) -> str | None:
+    """First non-tunnel interface under `IPv4 network interface information` in `scutil --nwi`."""
+    in_v4 = False
+    for line in text.splitlines():
+        if "IPv4 network interface information" in line:
+            in_v4 = True
+            continue
+        if in_v4:
+            m = re.match(r"\s+(\w+)\s*:\s*flags", line)
+            if m and not m.group(1).startswith(TUNNEL_PREFIXES):
+                return m.group(1)
+        if "IPv6 network interface information" in line:
+            in_v4 = False
+    return None
+
+
+def parse_netstat_tunnel(text: str) -> str:
+    """The tunnel interface when the FIRST default route is one (a Tailscale exit node here), else ''."""
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) >= 4 and f[0] == "default":
+            return f[-1] if f[-1].startswith(("utun", "ipsec", "ppp")) else ""
+    return ""
+
+
+def discover_net(cfg: Config, runner: Callable[..., Res] = run) -> dict:
+    """{'interface', 'gateway', 'source'}; config overrides; every part may be '' on failure."""
+    iface, gw, src = cfg.interface, cfg.gateway, "config" if (cfg.interface and cfg.gateway) else ""
+    tunnel = ""
+    if not (iface and gw):
+        r = runner(["netstat", "-rn", "-f", "inet"], 10)
+        hit = parse_netstat_default(r.out) if r.rc == 0 else None
+        tunnel = parse_netstat_tunnel(r.out) if r.rc == 0 else ""
+        if hit:
+            iface, gw, src = iface or hit[0], gw or hit[1], "netstat"
+    if not iface:
+        r = runner(["scutil", "--nwi"], 10)
+        iface = (parse_nwi_interface(r.out) if r.rc == 0 else "") or ""
+        src = "scutil" if iface else src
+    if iface and not gw:
+        r = runner(["ipconfig", "getoption", iface, "router"], 5)
+        cand = r.out.strip()
+        if r.rc == 0 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", cand):
+            gw, src = cand, (src or "ipconfig") + "+ipconfig"
+    mac = ""
+    if gw:
+        for attempt in (0, 1):
+            r = runner(["arp", "-n", gw], 5)
+            m = re.search(r"\bat ((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})\b", r.out) if r.rc == 0 else None
+            mac = normalize_mac(m[1]) if m else ""
+            if mac or attempt:
+                break
+            runner(["ping", "-c", "1", "-t", "2", gw], 5)  # an idle gateway has no arp entry: one ping creates it
+    net = {"interface": iface, "gateway": gw, "gateway_mac": mac, "source": src, "tunnel_iface": tunnel}
+    net["home"], net["home_why"] = check_home(cfg, net)
+    net["home_unsure"] = (not net["home"]) and home_unsure(cfg, net)
+    return net
+
+
+def normalize_mac(s: str) -> str:
+    """arp prints octets without leading zeros (`a:b:c:3:4:5`); compare as lowercase 2-digit octets."""
+    return ":".join(p.zfill(2) for p in s.strip().lower().split(":"))
+
+
+def check_home(cfg: Config, net: dict) -> tuple[bool, str]:
+    """Is this Mac on the home network? Only then may net-watch measure, snapshot or touch the Deco.
+
+    Needs an explicit `[deco] host` and the gateway's arp MAC in `[home] gateway_mac`. The Deco transport does not
+    verify TLS and its login hands the admin password to whatever answers, so identity is pinned by hardware address,
+    not guessed from a subnet (192.168.68.0/24 is the Deco default and appears on other people's networks).
+    """
+    if not cfg.deco_host:
+        return False, "no [deco] host configured"
+    if not cfg.home_gateway_macs:
+        return False, "no [home] gateway_mac configured"
+    if not net.get("interface"):
+        return False, "no physical interface"
+    if not net.get("gateway_mac"):
+        return False, "gateway MAC unknown (arp has no entry)"
+    if net["gateway_mac"] not in cfg.home_gateway_macs:
+        return False, f"gateway {net.get('gateway', '?')} MAC {net['gateway_mac']} is not the home gateway"
+    return True, ""
+
+
+def home_unsure(cfg: Config, net: dict) -> bool:
+    """True when a not-home verdict is only "cannot tell": identity is configured but the physical interface or the gateway MAC
+    could not be read this tick (a lost ARP request, Wi-Fi re-associating). Positive evidence of another network (a MAC that differs)
+    or missing configuration is never unsure."""
+    return bool(cfg.deco_host and cfg.home_gateway_macs and (not net.get("interface") or not net.get("gateway_mac")))
+
+
+# --------------------------------------------------------------------------- probe
+
+
+def curl_download_argv(url: str, iface: str, max_s: float, nbytes: int) -> list[str]:
+    argv = ["curl", "-sS", "-o", "/dev/null", "--max-time", f"{max_s:g}", "--connect-timeout", "4",
+            "-r", f"0-{nbytes - 1}", "-w", "%{size_download} %{time_total} %{speed_download} %{http_code}"]
+    if iface:
+        argv += ["--interface", iface]
+    return argv + ["--", url]
+
+
+def parse_curl_w(res: Res) -> dict:
+    parts = res.out.split()
+    d = {"bytes": 0, "secs": 0.0, "mbps": 0.0, "http": 0, "rc": res.rc}
+    try:
+        d.update(bytes=int(float(parts[0])), secs=float(parts[1]), mbps=float(parts[2]) * 8 / 1e6, http=int(parts[3]))
+    except (IndexError, ValueError):
+        pass
+    if res.rc not in (0, 28) or res.timed_out:
+        d["error"] = (res.err.strip().splitlines() or ["timeout" if res.timed_out else f"rc={res.rc}"])[-1][:160]
+    elif res.rc == 28:
+        d["error"] = "max-time reached"
+    return d
+
+
+def parallel(argvs: list[list[str]], timeout: float, runner: Callable[..., Res]) -> list[Res]:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(argvs))) as ex:
+        return list(ex.map(lambda a: runner(a, timeout), argvs))
+
+
+def host_of(url: str) -> str:
+    return re.sub(r"^\w+://([^/:?]+).*$", r"\1", url)
+
+
+def stream_ok(s: dict) -> bool:
+    """A stream that measured the link: an HTTP 2xx (206 = our range request) and curl finished or hit --max-time."""
+    return 200 <= s["http"] < 300 and s["rc"] in (0, 28)
+
+
+def throughput_mbps(streams: list[dict]) -> tuple[float, int]:
+    """(Mbps, bytes) over the streams that measured something.
+
+    Failed or HTTP-error streams take no part, neither bytes nor time: a third-party host that stalls or is blackholed must
+    not set the denominator for the others. The link carries AT LEAST what its fastest host delivered, so the rate is the
+    best of: each host's streams (sum of bytes over that host's slowest OK stream) and all OK streams together.
+    """
+    ok = [s for s in streams if stream_ok(s)]
+
+    def rate(ss: list[dict]) -> float:
+        b = sum(s["bytes"] for s in ss)
+        return b * 8 / max(max((s["secs"] for s in ss), default=0.0), 0.25) / 1e6 if b else 0.0
+
+    by_host: dict[str, list[dict]] = {}
+    for s in ok:
+        by_host.setdefault(s.get("host", ""), []).append(s)
+    return max([rate(ok)] + [rate(g) for g in by_host.values()]), sum(s["bytes"] for s in ok)
+
+
+def classify_unknown(streams: list[dict], total: int) -> tuple[str, str]:
+    """(reason, kind) of a sample we cannot call slow; ("", "") when it measured the link.
+
+    kind "internet": no stream got any answer (outage, DNS, connect/TLS timeouts): the home internet is dead or unusable
+    (counted by the outage ping). kind "cdn": the hosts answered with errors or empty bodies (their problem, not the link's)."""
+    if all(s["rc"] not in (0, 28) for s in streams):
+        return "every stream failed (outage, DNS or no link)", "internet"
+    if not any(200 <= s["http"] < 300 for s in streams):
+        if all(s["http"] == 0 for s in streams):
+            return "no stream got an HTTP answer (connect or TLS timeouts: link or Deco unusable)", "internet"
+        return "every stream got an HTTP status outside 2xx (CDN error or rate limit)", "cdn"
+    if total == 0:
+        return "zero bytes on every stream", "cdn"
+    return "", ""
+
+
+def upload_payload() -> Path:
+    p = STATE_DIR / "upload.bin"
+    if not p.exists() or p.stat().st_size != UP_BYTES:
+        atomic_write(p, "\0" * UP_BYTES)
+    return p
+
+
+def upload_argv(path: Path, max_s: float) -> list[str]:
+    return ["curl", "-sS", "-o", "/dev/null", "--max-time", f"{max_s:g}", "--connect-timeout", "4", "-X", "POST",
+            "--data-binary", f"@{path}", "-w", "%{size_upload} %{time_total} %{speed_upload} %{http_code}", "--", UP_URL]
+
+
+def do_probe(cfg: Config, net: dict, runner: Callable[..., Res] = run, clock: Callable[[], float] = time.time) -> dict:
+    """One probe: 4 streams on the physical interface (the direct verdict), 2 small ones via the default route (the tunnel
+    verdict when the default route is the Tailscale exit node), and, only when a tunnel is the default route, one small
+    upload through it (a recorded diagnostic: the 2026-10-25 collapse was inbound-only, so in and out are kept apart)."""
+    iface = net.get("interface", "")
+    t0 = clock()
+    urls = [cfg.urls[i % len(cfg.urls)] for i in range(4)]
+    res = parallel([curl_download_argv(u, iface, cfg.probe_max_s, MAX_BYTES) for u in urls], cfg.probe_max_s + 2, runner) if iface else []
+    t1 = clock()
+    streams = []
+    for u, r in zip(urls, res):
+        d = parse_curl_w(r)
+        d["host"] = host_of(u)
+        streams.append(d)
+    mbps, total = throughput_mbps(streams)
+    errors = [f"{s['host']}: {s['error']}" for s in streams if s.get("error") and s["error"] != "max-time reached"]
+    unknown, kind = "", ""  # unknown: a sample we cannot call slow: it measured something other than the home link, or nothing at all
+    if not iface:
+        unknown, kind = "no physical interface discovered (would measure the Tailscale exit node)", "iface"
+    else:
+        unknown, kind = classify_unknown(streams, total)
+    gateway_ok = None
+    if kind == "internet" and net.get("gateway"):
+        g = runner(["ping", "-c", "2", "-t", "3"] + (["-b", iface] if iface else []) + [net["gateway"]], 8)
+        gateway_ok = g.rc == 0
+    if unknown:
+        errors.append(f"unknown sample: {unknown}")
+    # default-route sample (the tunnel when one is the default route): 2 smaller streams, judged by the same rules; pointless for an unknown sample
+    dres = [] if unknown else parallel([curl_download_argv(u, "", cfg.probe_max_s, 2_000_000) for u in urls[:2]], cfg.probe_max_s + 2, runner)
+    ds = []
+    for u, r in zip(urls[:2], dres):
+        d = parse_curl_w(r)
+        d["host"] = host_of(u)
+        ds.append(d)
+    dmbps, dtotal = throughput_mbps(ds)
+    dunknown = classify_unknown(ds, dtotal)[0] if ds else ""
+    default_route = {"mbps": round(dmbps, 2) if dtotal else 0.0, "bytes": dtotal, "streams": ds, "unknown": dunknown}
+    if net.get("tunnel_iface") and not unknown:
+        try:
+            up = parse_curl_w(runner(upload_argv(upload_payload(), cfg.probe_max_s), cfg.probe_max_s + 2))
+            up_ok = stream_ok(up) and up["bytes"] > 0
+            default_route["up"] = {"mbps": round(up["bytes"] * 8 / max(up["secs"], 0.25) / 1e6, 2) if up_ok else None,
+                                   "bytes": up["bytes"], "ok": up_ok, "http": up["http"], "via": net["tunnel_iface"]}
+        except OSError:
+            default_route["up"] = {"mbps": None, "bytes": 0, "ok": False, "http": 0, "via": net["tunnel_iface"]}
+    out = {"t": t0, "interface": iface, "gateway": net.get("gateway", ""), "mbps": round(mbps, 2), "unknown": unknown,
+           "unknown_kind": kind, "bytes": total, "elapsed_s": round(t1 - t0, 2), "streams": streams, "errors": errors,
+           "default_route": default_route}
+    if gateway_ok is not None:
+        out["gateway_ok"] = gateway_ok
+    return out
+
+
+# --------------------------------------------------------------------------- episode engine
+
+
+def new_state() -> dict:
+    return {"version": STATE_VERSION, "samples": [], "last_probe_t": 0.0, "slow_since": None, "last_t": None,
+            "healthy_streak": 0, "healthy_first_t": None, "episode": None, "last_episode": None,
+            "last_reboot": None, "last_reboot_t": None, "last_error_ping_day": "", "last_counters": None,
+            "net": {}}
+
+
+def load_state(path: Path | None = None) -> dict:
+    path = path or STATE_DIR / "state.json"
+    st = new_state()
+    try:
+        raw = json.loads(path.read_text())
+        if isinstance(raw, dict):
+            st.update(raw)
+    except (OSError, ValueError):
+        pass
+    if not isinstance(st.get("samples"), list):
+        st["samples"] = []
+    return st
+
+
+def save_state(st: dict, path: Path | None = None) -> None:
+    atomic_write(path or STATE_DIR / "state.json", json.dumps(st, indent=1, sort_keys=True))
+
+
+def note_reboot(st: dict, t: float) -> None:
+    """Every Deco reboot request (automatic or manual) is logged: `reboot.max_per_day` counts the last 24 h of them."""
+    st["reboot_log"] = [x for x in st.get("reboot_log", []) if x > t - 2 * 86400] + [t]
+
+
+def baseline(st: dict, cfg: Config, now: float) -> float | None:
+    vals = [s["mbps"] for s in st["samples"] if s.get("t", 0) >= now - SAMPLE_KEEP_S and s.get("mbps", 0) >= cfg.threshold_mbps]
+    return round(statistics.median(vals), 1) if vals else None
+
+
+TUNNEL_D_FRAC, TUNNEL_T_FRAC, TUNNEL_RATIO, TUNNEL_CONFIRM, TUNNEL_BASE_MIN = 0.60, 0.25, 0.20, 3, 3
+
+
+def cfg_h(cfg: Config) -> str:
+    return f"{cfg.episode_max_h:g}"
+
+
+def tunnel_baselines(st: dict, now: float) -> tuple[float | None, float | None]:
+    """(D0, T0): medians of the last 24 h of healthy pairs (direct fine, tunnel not collapsed); None until TUNNEL_BASE_MIN such pairs exist."""
+    ok = [s for s in st["samples"] if s.get("tbase") and s.get("t", 0) >= now - SAMPLE_KEEP_S and s.get("default_mbps") is not None]
+    if len(ok) < TUNNEL_BASE_MIN:
+        return None, None
+    return statistics.median(s["mbps"] for s in ok), statistics.median(s["default_mbps"] for s in ok)
+
+
+def interval_for(st: dict, cfg: Config) -> float:
+    tu = st.get("tunnel") or {}
+    return cfg.slow_interval_s if (st.get("slow_since") is not None or st.get("episode") or tu.get("bad") or tu.get("ep")) else cfg.healthy_interval_s
+
+
+def probe_due(st: dict, cfg: Config, now: float) -> bool:
+    return now - float(st.get("last_probe_t") or 0) >= interval_for(st, cfg) - DUE_SLACK_S
+
+
+@dataclass
+class Deps:
+    """Everything with side effects, injectable for tests."""
+    now: Callable[[], float] = time.time
+    probe: Callable[[Config, dict], dict] = do_probe
+    discover: Callable[[Config], dict] = discover_net
+    notify: Callable[[str], bool] = lambda msg: notify_hermes(msg)
+    snapshot: Callable[..., str] = lambda *a, **k: take_snapshot(*a, **k)
+    creds: Callable[[], tuple[bool, str]] = lambda: deco_creds_ok()
+    deco_reboot: Callable[[str], dict] = lambda host: deco_run("reboot", host)
+
+
+def notify_hermes(msg: str) -> bool:
+    r = run(["hermes-ping", msg], 60)
+    if r.rc != 0:
+        log(f"hermes-ping failed rc={r.rc}: {r.err.strip()[:200]}")
+    return r.rc == 0
+
+
+class Watch:
+    def __init__(self, cfg: Config, deps: Deps, state: dict):
+        self.cfg, self.d, self.st = cfg, deps, state
+
+    # -- notifications (the only two kinds of ping an episode produces)
+    def _ping(self, msg: str) -> None:
+        try:
+            self.d.notify(msg)
+        except Exception as e:  # noqa: BLE001
+            log(f"notify raised: {type(e).__name__}")
+
+    def error_ping(self, what: str) -> None:
+        """Tool's own failure: log always, ping at most once per day. `what` is an error class plus a fixed message."""
+        log(f"error: {what}")
+        day = datetime.fromtimestamp(self.d.now()).strftime("%Y-%m-%d")
+        if self.st.get("last_error_ping_day") != day:
+            self.st["last_error_ping_day"] = day
+            self._ping(f"djbclark: net-watch: tool error: {what[:200]} (see ~/.local/state/net-watch/net-watch.log)")
+
+    # -- one sample through the state machine
+    def _outage(self, sample: dict, unknown: str, prev_probe_t: float | None) -> None:
+        """ONE ping when every stream got no answer for sustain_min with the home identity verified: dead or unusable internet
+        would otherwise be silent (an UNKNOWN sample never starts an episode). No reboot, no snapshot: the verdict is not "slow"."""
+        cfg, st, t = self.cfg, self.st, sample["t"]
+        if not (unknown and sample.get("unknown_kind") == "internet"):
+            st["outage_since"], st["outage_pinged"] = None, False
+            return
+        if st.get("outage_since") is None or (prev_probe_t and t - prev_probe_t > 3 * max(cfg.healthy_interval_s, cfg.slow_interval_s)):
+            st["outage_since"], st["outage_pinged"] = t, False  # first one, or the Mac slept in between
+        if not st.get("outage_pinged") and t - st["outage_since"] >= cfg.sustain_min * 60 - DUE_SLACK_S:
+            st["outage_pinged"] = True
+            gw = sample.get("gateway_ok")
+            self._ping(f"djbclark: net-watch: internet unusable at home for {max(1, round((t - st['outage_since']) / 60))} min on "
+                       f"{sample.get('interface') or '?'}: no download stream got an answer; the gateway "
+                       f"{'answers' if gw else ('does NOT answer' if gw is False else 'was not checked')}; no reboot tried (not a slowdown verdict)")
+
+    def process_sample(self, sample: dict) -> None:
+        cfg, st = self.cfg, self.st
+        t = sample["t"]
+        unknown = sample.get("unknown") or ""
+        direct_mbps = sample["mbps"]
+        dr = sample.get("default_route") or {}
+        tunnel_mbps = dr.get("mbps") if (isinstance(dr.get("mbps"), (int, float)) and not dr.get("unknown")) else None
+        direct_slow = (not unknown) and direct_mbps < cfg.threshold_mbps
+        tunnel_slow = tunnel_mbps is not None and tunnel_mbps < cfg.threshold_mbps
+        trigger = cfg.reboot_trigger
+        # which path's slowness arms an episode (and so the one automatic reboot): the config's `reboot.trigger`
+        if trigger == "tunnel":
+            if not unknown and tunnel_mbps is None:
+                unknown, sample["unknown"] = "default route (tunnel) not measurable this sample", "default route (tunnel) not measurable this sample"
+            slow, vm = (not unknown) and tunnel_slow, (tunnel_mbps if tunnel_mbps is not None else direct_mbps)
+        elif trigger == "either":
+            slow, vm = direct_slow or ((not unknown) and tunnel_slow), min(direct_mbps, tunnel_mbps if tunnel_mbps is not None else direct_mbps)
+        else:
+            slow, vm = direct_slow, direct_mbps
+        sample["slow"], sample["vmbps"] = slow, vm
+        rec = {"t": t, "mbps": sample["mbps"], "default_mbps": dr.get("mbps"), "vmbps": vm, "direct_slow": direct_slow,
+               "tunnel_slow": tunnel_slow, "slow": slow, "errors": sample.get("errors", [])[:3]}
+        up = dr.get("up") if isinstance(dr.get("up"), dict) else None
+        if up:
+            rec["default_up_mbps"] = up.get("mbps")  # diagnostic only: never part of a verdict
+        if unknown:
+            rec["unknown"] = unknown[:120]
+        st["samples"].append(rec)
+        st["samples"] = [s for s in st["samples"] if s.get("t", 0) >= t - SAMPLE_KEEP_S][-3000:]
+        prev_probe_t, st["last_probe_t"] = (st.get("last_probe_t") or None), t
+        self._outage(sample, unknown, prev_probe_t)
+        ep = st.get("episode")
+        if ep and t - ep["start_t"] >= cfg.episode_max_h * 3600:
+            self._end_episode(t, why="abandoned")
+            ep = None
+        elif ep and prev_probe_t and t - prev_probe_t > 3 * cfg.slow_interval_s:
+            # no tick for over 3 intervals (the Mac slept or was off): the gap is not slow time, and what happened in it is unknown
+            self._end_episode(prev_probe_t, why="gap")
+            ep = None
+        tu = st.setdefault("tunnel", {"bad": 0, "ok": 0, "ep": None})
+        if tu["ep"]:
+            if t - tu["ep"]["start_t"] >= cfg.episode_max_h * 3600:
+                self._end_tunnel(t, "abandoned")
+            elif prev_probe_t and t - prev_probe_t > 3 * cfg.slow_interval_s:
+                self._end_tunnel(prev_probe_t, "gap")
+        if cfg.reboot_trigger == "direct" and not unknown:
+            self._tunnel(sample, rec, t, prev_probe_t, direct_mbps, tunnel_mbps, direct_slow)
+        if unknown:
+            return  # UNKNOWN neither extends nor resets slow_since, never starts an episode, never reboots. (last_t is not
+            # advanced either, so a long run of unknowns exceeds the gap tolerance below and cannot bridge two slow samples)
+        prev_t, st["last_t"] = st.get("last_t"), t
+        if ep is None:
+            if not slow:
+                st["slow_since"] = None
+                st.pop("reboot_blocked", None)  # a healthy sample re-arms the automatic reboot after an abandoned episode
+                return
+            if st.get("slow_since") is None or (prev_t is not None and t - prev_t > 3 * cfg.slow_interval_s):
+                st["slow_since"] = t  # first slow sample, or too long a gap (asleep) to count as covered
+            if t - st["slow_since"] >= cfg.sustain_min * 60:
+                self._start_episode(sample)
+            return
+        # inside an episode
+        ep["n"] += 1
+        ep["sum_mbps"] += vm
+        ep["min_mbps"] = min(ep["min_mbps"], vm)
+        if slow:
+            st["healthy_streak"], st["healthy_first_t"] = 0, None
+        else:
+            if st["healthy_streak"] == 0:
+                st["healthy_first_t"] = t
+            st["healthy_streak"] += 1
+            if st["healthy_streak"] >= cfg.recover_samples:
+                self._end_episode(t)
+                return
+        self._episode_upkeep(t)
+
+    def _start_episode(self, sample: dict) -> None:
+        cfg, st, t = self.cfg, self.st, sample["t"]
+        slow_since = st["slow_since"]
+        base = baseline(st, cfg, t)
+        ep = {"id": datetime.fromtimestamp(slow_since).strftime("%Y%m%dT%H%M%S"), "start_t": slow_since,
+              "detected_t": t, "n": 0, "sum_mbps": 0.0, "min_mbps": sample.get("vmbps", sample["mbps"]), "baseline": base,
+              "snapshots": [], "last_snap_t": t, "periodic_n": 0, "reboot": None, "post_reboot_snap": False,
+              "interface": sample.get("interface", "")}
+        # every slow sample so far belongs to the episode statistics
+        for s in st["samples"]:
+            if s.get("t", 0) >= slow_since and not s.get("unknown"):
+                ep["n"] += 1
+                ep["sum_mbps"] += s.get("vmbps", s["mbps"])
+                ep["min_mbps"] = min(ep["min_mbps"], s.get("vmbps", s["mbps"]))
+        st["episode"] = ep
+        st["healthy_streak"], st["healthy_first_t"] = 0, None
+        snap = self._snap("start")
+        decision = self._reboot_decision(t)
+        mins = max(1, round((t - slow_since) / 60))
+        verdict = "will try" if decision is None else f"skipped: {decision}"
+        if decision is None:
+            ep["reboot"] = {"state": "pending"}
+        else:
+            ep["reboot"] = {"state": "skipped", "reason": decision}
+        save_state(st)  # ONCE-only: record the start before the ping can fail
+        via = "" if self.cfg.reboot_trigger == "direct" else (
+            f" [trigger {self.cfg.reboot_trigger}: direct {fmt_mbps(sample['mbps'])}, default route {fmt_mbps((sample.get('default_route') or {}).get('mbps'))} Mbps]")
+        self._ping(f"djbclark: net-watch: download {fmt_mbps(sample.get('vmbps', sample['mbps']))} Mbps (baseline {fmt_mbps(base)}) "
+                   f"for {mins} min on {sample.get('interface') or '?'}; snapshot {snap}; reboot {verdict}{via}")
+        self._episode_upkeep(t)
+
+    def _cooldown_left(self, now: float) -> float:
+        """Seconds of reboot cooldown left (<= 0: none)."""
+        last = self.st.get("last_reboot_t")
+        return (last + self.cfg.reboot_min_cooldown_h * 3600 - now) if last else 0.0
+
+    def _limit_reason(self, now: float) -> str:
+        """Non-empty when the automatic reboots of the last 24 h (manual ones included) reached `reboot.max_per_day`."""
+        n = len([x for x in self.st.get("reboot_log", []) if x > now - 86400])
+        return f"{n} reboots in the last 24 h (reboot.max_per_day = {self.cfg.reboot_max_per_day})" if n >= self.cfg.reboot_max_per_day else ""
+
+    def _reboot_decision(self, now: float) -> str | None:
+        """None = try; else the reason it is skipped."""
+        cfg, st = self.cfg, self.st
+        if not cfg.reboot_enabled:
+            return "disabled in config"
+        if not cfg.deco_host:
+            return "no [deco] host configured"
+        if st.get("reboot_blocked"):
+            return "an earlier episode was abandoned still slow (the reboot did not help): no automatic reboot until a healthy sample"
+        if self._cooldown_left(now) > 0:
+            return f"cooldown, last reboot {round((now - st['last_reboot_t']) / 60)} min ago"
+        if self._limit_reason(now):
+            return self._limit_reason(now)
+        ok, why = self.d.creds()
+        if not ok:
+            return why or "no credentials"
+        return None
+
+    def _snap(self, label: str) -> str:
+        try:
+            path = self.d.snapshot(self.cfg, self.st, label, short=(label != "start"), now=self.d.now())
+        except Exception as e:  # noqa: BLE001
+            self.error_ping(f"snapshot failed: {type(e).__name__}")
+            return "(snapshot failed)"
+        if self.st.get("episode") is not None:
+            self.st["episode"]["snapshots"].append(path)
+            self.st["episode"]["last_snap_t"] = self.d.now()
+        return path
+
+    def _episode_upkeep(self, t: float) -> None:
+        """Pending reboot, periodic and post-reboot snapshots. Runs on every known in-episode sample."""
+        cfg, st = self.cfg, self.st
+        ep = st["episode"]
+        rb = ep.get("reboot") or {}
+        n = ep.get("periodic_n", 0)
+        gaps = (cfg.snapshot_interval_min, *SNAP_BACKOFF_MIN[1:])  # 5, 15, 60 min, then hourly: a long episode must not pile up
+        if rb.get("state") == "pending" and t - ep["start_t"] >= cfg.reboot_after_min * 60:
+            self._do_reboot(ep, t)
+        elif rb.get("state") == "done" and not ep["post_reboot_snap"] and t - rb["t"] >= 10 * 60:
+            ep["post_reboot_snap"] = True
+            self._snap("post-reboot-still-slow")
+        elif t - ep.get("last_snap_t", t) >= gaps[min(n, len(gaps) - 1)] * 60:
+            ep["periodic_n"] = n + 1
+            self._snap("periodic")
+
+    def _do_reboot(self, ep: dict, t: float) -> None:
+        st = self.st
+        left = self._limit_reason(t)
+        if self._cooldown_left(t) > 0:  # re-check: a manual reboot or another episode may have used the cooldown since the start decision
+            ep["reboot"] = {"state": "skipped", "reason": f"cooldown, last reboot {round((t - st['last_reboot_t']) / 60)} min ago"}
+            save_state(st)
+            return
+        if left:
+            ep["reboot"] = {"state": "skipped", "reason": left}
+            save_state(st)
+            return
+        host = self.cfg.deco_host
+        rb = {"state": "attempted", "t": t}
+        ep["reboot"] = rb
+        st["last_reboot_t"] = t  # a failed attempt also starts the cooldown
+        note_reboot(st, t)
+        save_state(st)  # never retried in this episode, even if we die here
+        if not host:
+            rb.update(state="failed", outcome="no [deco] host configured")
+        else:
+            try:
+                r = self.d.deco_reboot(host)
+            except Exception as e:  # noqa: BLE001
+                r = {"ok": False, "error": type(e).__name__}
+            if r.get("ok"):
+                rb.update(state="done", outcome=r.get("outcome", "requested"), confirmed=r.get("confirmed"))
+            else:
+                rb.update(state="failed", outcome=f"failed: {str(r.get('error', 'unknown'))[:160]}")
+        st["last_reboot"] = {"t": t, "episode": ep["id"], "state": rb["state"], "outcome": rb.get("outcome", "")}
+        save_state(st)
+
+    def _end_episode(self, t: float, why: str = "") -> None:
+        """why: "" = recovered (recover_samples healthy samples); "gap" = no ticks for over 3 intervals; "abandoned" = open
+        longer than episode_max_h; "away" = left the home network. Always exactly one end ping."""
+        cfg, st = self.cfg, self.st
+        ep = st["episode"]
+        rb = ep.get("reboot") or {}
+        recovered_t = (st.get("healthy_first_t") or t) if not why else t
+        if rb.get("state") == "done" and not ep["post_reboot_snap"] and not why:
+            ep["post_reboot_snap"] = True
+            self._snap("post-reboot-recovered")
+        dur_min = max(1, round((recovered_t - ep["start_t"]) / 60))
+        avg = ep["sum_mbps"] / ep["n"] if ep["n"] else 0.0
+        who = " (manual)" if rb.get("manual") else ""
+        if rb.get("state") == "done":
+            after = max(0, round((recovered_t - rb["t"]) / 60))
+            unconf = rb.get("confirmed") is False
+            rbtxt = (f"reboot{who} requested at {fmt_t(rb['t'])} but UNCONFIRMED (the mesh was not seen to drop and return)" if unconf
+                     else f"reboot{who} done at {fmt_t(rb['t'])}") + ((f", speed recovered {after} min after it" if not unconf else f"; speed recovered {after} min after the request")
+                                                                       if not why else "")
+        elif rb.get("state") in ("failed", "attempted"):
+            rbtxt = f"reboot{who} attempted at {fmt_t(rb['t'])} but {rb.get('outcome', 'failed')}" + ("; recovered by itself" if not why else "")
+        elif rb.get("state") == "pending":
+            rbtxt = "reboot not done (" + ("recovered before it was due)" if not why else "episode closed before it was due)")
+        else:
+            rbtxt = f"no reboot ({rb.get('reason', 'none')})"
+        st["last_episode"] = {"id": ep["id"], "start_t": ep["start_t"], "end_t": recovered_t, "duration_min": dur_min,
+                              "min_mbps": round(ep["min_mbps"], 2), "avg_mbps": round(avg, 2), "reboot": rb, "end_reason": why or "recovered",
+                              "snapshots": ep["snapshots"], "baseline": ep.get("baseline")}
+        st["episode"], st["slow_since"], st["healthy_streak"], st["healthy_first_t"] = None, None, 0, None
+        if why == "abandoned":
+            st["reboot_blocked"] = True  # still slow after 12 h whatever was tried: no automatic reboot again until a healthy sample
+        elif not why:
+            st.pop("reboot_blocked", None)  # recovered: re-armed
+        save_state(st)
+        head = {"": f"download recovered after {dur_min} min",
+                "gap": f"episode closed after {dur_min} min of slowdown: no samples for over {3 * cfg.slow_interval_s:g} s (Mac asleep or off), recovery unknown",
+                "abandoned": f"episode abandoned after {dur_min} min (open longer than {cfg.episode_max_h:g} h), recovery unknown",
+                "away": f"left the home network after {dur_min} min of slowdown, recovery unknown"}[why]
+        self._ping(f"djbclark: net-watch: {head} on {ep.get('interface') or '?'}; "
+                   f"min {ep['min_mbps']:.1f} / avg {avg:.1f} Mbps during (baseline {fmt_mbps(baseline(st, cfg, t))}); {rbtxt}")
+
+    def _tunnel(self, sample: dict, rec: dict, t: float, prev_probe_t: float | None, direct: float, tunnel: float | None, direct_slow: bool) -> None:
+        """Tunnel-only degradation (trigger "direct", the default): the direct path is fine, the default route (Tailscale exit node) has
+        collapsed. Alert after TUNNEL_CONFIRM consecutive valid pairs with D >= 0.60*D0, T <= 0.25*T0 and T/D <= 0.20; baselines D0/T0 come
+        from healthy pairs only and are frozen while degraded. ONE start ping, ONE end ping, one snapshot, NEVER a reboot. A pair whose default
+        route sample timed out, errored or moved zero bytes is not a pair: it neither counts nor resets. Gateway ICMP is not evidence."""
+        cfg, st = self.cfg, self.st
+        tu = st["tunnel"]
+        if tunnel is None:
+            return
+        if st.get("episode") or (prev_probe_t and t - prev_probe_t > 3 * cfg.slow_interval_s and tu["bad"] and not tu["ep"]):
+            tu["bad"] = 0  # a normal (direct) episode owns the slowdown, or the Mac slept in the middle of the confirmation
+            if st.get("episode"):
+                return
+        d0, t0 = tunnel_baselines(st, t)
+        bad = bool(d0 and t0 and direct > 0 and direct >= TUNNEL_D_FRAC * d0 and tunnel <= TUNNEL_T_FRAC * t0 and tunnel / direct <= TUNNEL_RATIO)
+        ep = tu["ep"]
+        if ep is None:
+            tu["bad"] = tu["bad"] + 1 if bad else 0
+            if bad and tu["bad"] == 1:
+                tu["first_t"] = t
+            # the baselines only ever see a pair that looks healthy against them (or any non-slow pair while none exist yet): frozen otherwise
+            rec["tbase"] = (not direct_slow) and (d0 is None or (direct >= TUNNEL_D_FRAC * d0 and tunnel > TUNNEL_T_FRAC * t0))
+            if tu["bad"] >= TUNNEL_CONFIRM:
+                self._start_tunnel(t, d0, t0, direct, tunnel)
+            return
+        ep["n"] += 1
+        ep["min_t"] = min(ep["min_t"], tunnel)
+        if direct_slow:
+            self._end_tunnel(t, "direct_slow")
+            return
+        good = direct > 0 and tunnel > TUNNEL_T_FRAC * ep["t0"] and tunnel / direct > TUNNEL_RATIO
+        tu["ok"] = tu["ok"] + 1 if good else 0
+        if tu["ok"] >= cfg.recover_samples:
+            self._end_tunnel(t, "")
+
+    def _start_tunnel(self, t: float, d0: float, t0: float, direct: float, tunnel: float) -> None:
+        st, cfg = self.st, self.cfg
+        tu = st["tunnel"]
+        via = (st.get("net") or {}).get("tunnel_iface") or "the default route"
+        ep = {"start_t": tu.get("first_t", t), "detected_t": t, "n": TUNNEL_CONFIRM, "min_t": tunnel, "t0": t0, "d0": d0, "via": via, "snapshot": ""}
+        tu["ep"], tu["bad"], tu["ok"] = ep, 0, 0
+        try:
+            ep["snapshot"] = self.d.snapshot(cfg, st, "tunnel-degraded", short=False, now=self.d.now())
+        except Exception as e:  # noqa: BLE001
+            self.error_ping(f"snapshot failed: {type(e).__name__}")
+            ep["snapshot"] = "(snapshot failed)"
+        save_state(st)  # ONCE-only: record the start before the ping can fail
+        self._ping(f"djbclark: net-watch: tunnel-only slowdown: default route via {via} {fmt_mbps(tunnel)} Mbps (baseline {fmt_mbps(t0)}) while the direct path "
+                   f"is fine ({fmt_mbps(direct)} Mbps, baseline {fmt_mbps(d0)}); no reboot attempted; snapshot {ep['snapshot']}")
+
+    def _end_tunnel(self, t: float, why: str) -> None:
+        st = self.st
+        tu = st["tunnel"]
+        ep, tu["ep"], tu["bad"], tu["ok"] = tu["ep"], None, 0, 0
+        dur = max(1, round((t - ep["start_t"]) / 60))
+        st["last_tunnel_episode"] = {"start_t": ep["start_t"], "end_t": t, "duration_min": dur, "min_mbps": round(ep["min_t"], 2), "end_reason": why or "recovered",
+                                     "snapshot": ep["snapshot"]}
+        save_state(st)
+        head = {"": "over (the default route recovered)", "direct_slow": "ended: the direct path got slow too, so this is no longer tunnel-only (a normal slowdown episode takes over)",
+                "gap": "closed: no samples for over 3 intervals (Mac asleep or off), recovery unknown", "abandoned": f"abandoned after {cfg_h(self.cfg)} h open, recovery unknown",
+                "away": "closed: left the home network, recovery unknown"}[why]
+        self._ping(f"djbclark: net-watch: tunnel-only slowdown {head} after {dur} min via {ep['via']}: default route min {ep['min_t']:.1f} Mbps "
+                   f"(baseline {fmt_mbps(ep['t0'])}); no reboot was attempted")
+
+    def _not_measuring(self, now: float, why: str) -> None:
+        """Off the home network, or home identity not configured: no probe, no episode, no snapshot, no Deco call."""
+        st = self.st
+        st["not_measuring"] = {"t": now, "why": why}
+        if st.get("episode"):
+            self._end_episode(now, why="away")
+        if (st.get("tunnel") or {}).get("ep"):
+            self._end_tunnel(now, "away")
+        if st.get("tunnel"):
+            st["tunnel"]["bad"] = st["tunnel"]["ok"] = 0
+        st["slow_since"], st["healthy_streak"], st["healthy_first_t"] = None, 0, None
+        st["outage_since"], st["outage_pinged"] = None, False
+
+    def _track_identity(self, net: dict, now: float) -> None:
+        """The tool is inert while the gateway MAC cannot be read at all (the arp table can be hidden from some processes):
+        after IDENTITY_UNREADABLE_S of that, one tool error ping a day, so it is not silently dead."""
+        st = self.st
+        if net.get("home_unsure") and net.get("interface") and net.get("gateway") and not net.get("gateway_mac"):
+            since = st.setdefault("identity_unread_since", now)
+            if now - since >= IDENTITY_UNREADABLE_S:
+                self.error_ping("net-watch is inert: the gateway MAC cannot be read (arp has no entry), so it cannot tell it is home")
+        else:
+            st.pop("identity_unread_since", None)
+
+    # -- tick
+    def tick(self, force: bool = False) -> bool:
+        now = self.d.now()
+        if not force and not probe_due(self.st, self.cfg, now):
+            return False
+        net = self.d.discover(self.cfg)
+        self.st["net"] = net
+        if not net.get("home"):
+            st = self.st
+            self._track_identity(net, now)
+            if (net.get("home_unsure") and (st.get("episode") or st.get("slow_since") is not None)
+                    and st.get("home_unsure_n", 0) < HOME_UNSURE_TICKS):
+                # "cannot tell" (arp miss, interface flap), not "elsewhere": one lost ARP reply must not close the episode
+                st["home_unsure_n"] = st.get("home_unsure_n", 0) + 1
+                log(f"home identity unsure ({net.get('home_why')}); tick {st['home_unsure_n']} of {HOME_UNSURE_TICKS} tolerated")
+                save_state(st)
+                return True
+            self._not_measuring(now, net.get("home_why") or "not on the home network")
+            save_state(self.st)
+            return True
+        self.st.pop("not_measuring", None)
+        self.st.pop("home_unsure_n", None)
+        self.st.pop("identity_unread_since", None)
+        sample = self.d.probe(self.cfg, net)
+        self.process_sample(sample)
+        save_state(self.st)
+        return True
+
+
+# --------------------------------------------------------------------------- Deco (credentials: sudo-secretspec get, memory only)
+
+CRED_NAMES = ("DECO_ADMIN_USER", "DECO_ADMIN_PASSWORD")
+_CREDS: dict[str, str] = {}  # this process only; never written to disk, argv, state, logs or pings
+INFO_KEYS = {"nodes", "mac", "device_ip", "role", "device_model", "software_ver", "inet_status", "group_status", "signal_level",
+             "band2_4", "band5", "band6", "performance", "cpu_usage", "mem_usage", "internet", "ipv4", "ipv6", "dial_status",
+             "connect_type", "auto_detect_type", "error_code", "link_status", "wan", "lan", "dial_type", "enable_auto_dns",
+             "ip_info", "ip", "mask", "gateway", "dns1", "dns2", "client_count", "totals", "up_speed", "down_speed"}
+HELPER_MESSAGES = {"no credentials", "no host", "device_list returned no nodes", "tplink-deco-api not importable"}
+
+
+def load_creds(runner: Callable[..., Res] = run) -> tuple[dict | None, str]:
+    """(creds, why). One `sudo-secretspec get` per name (argv list, stdin /dev/null); only these two names are ever read."""
+    if _CREDS:
+        return dict(_CREDS), ""
+    vals = {}
+    for name in CRED_NAMES:
+        r = runner(["sudo-secretspec", "get", name, "--reason", DECO_REASON], 45)
+        if r.rc == 127:
+            return None, "no credentials: sudo-secretspec not installed"
+        if r.timed_out:
+            return None, "no credentials: sudo-secretspec timed out"
+        v = r.out.rstrip("\r\n")
+        if r.rc != 0 or not v:
+            return None, "no credentials (DECO_ADMIN_USER/DECO_ADMIN_PASSWORD not set in sudo-secretspec)"
+        vals[name] = v
+    _CREDS.update(vals)
+    return dict(vals), ""
+
+
+def deco_creds_ok(runner: Callable[..., Res] = run) -> tuple[bool, str]:
+    creds, why = load_creds(runner)
+    return creds is not None, why
+
+
+def helper_argv(action: str, host: str = "", offline: bool = True) -> list[str]:
+    """The pinned helper: its lock file fixes every package by hash; --offline keeps a reboot off PyPI during an outage."""
+    return (["uv", "run", "--script", "--locked"] + (["--offline"] if offline else []) + [str(HELPER), action]
+            + (["--host", host] if host else []))
+
+
+def clean_info(x, depth: int = 0):
+    """Allowlist copy of the helper's `info`: unknown keys are dropped at every level, strings clipped."""
+    if depth > 6:
+        return None
+    if isinstance(x, dict):
+        return {k: clean_info(v, depth + 1) for k, v in x.items() if k in INFO_KEYS}
+    if isinstance(x, list):
+        return [clean_info(v, depth + 1) for v in x[:16]]
+    if isinstance(x, str):
+        return x[:80]
+    return x if isinstance(x, (int, float, bool)) or x is None else "?"
+
+
+def helper_result(r: Res, action: str) -> dict:
+    """Turn the helper's output into a result with NO free text from the helper or the tools around it: an error is an
+    error class plus a fixed message (library exceptions can echo URLs, users or key material; uv/secretspec stderr is dropped)."""
+    try:
+        d = json.loads(r.out.strip().splitlines()[-1])
+        assert isinstance(d, dict)
+    except (IndexError, ValueError, AssertionError):
+        why = "Deco helper timed out" if r.timed_out else f"Deco helper did not run (rc={r.rc}); is uv's cache warm? run: net-watch warm"
+        return {"ok": False, "error": why}
+    if not d.get("ok"):
+        cls = d.get("error_class")
+        if cls in ERROR_CLASSES:
+            extra = "".join(f" ({k}={d[k]})" for k in ("status_code", "error_code") if isinstance(d.get(k), int))
+            return {"ok": False, "error": f"{cls}: Deco helper failed{extra}"}
+        return {"ok": False, "error": d["error"] if d.get("error") in HELPER_MESSAGES else "Deco helper failed"}
+    if action == "info":
+        return {"ok": True, "info": clean_info(d.get("info"))}
+    if action == "warm":
+        return {"ok": True}
+    n = d.get("nodes") if isinstance(d.get("nodes"), int) else 0
+    sent = "link dropped after the request, as a reboot does" if d.get("sent") == "dropped" else "accepted"
+    conf = "confirmed: the mesh dropped and came back" if d.get("confirmed") else "unconfirmed: the mesh was not seen to drop and return"
+    return {"ok": True, "confirmed": bool(d.get("confirmed")), "outcome": f"requested for {n} node(s), {sent}; {conf}"}
+
+
+def deco_run(action: str, host: str, runner: Callable[..., Res] = run) -> dict:
+    """Run the helper with env = {PATH, HOME, the two Deco secrets}. Never raises."""
+    creds, why = load_creds()
+    if creds is None:
+        return {"ok": False, "error": why}
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME") or str(HOME), **creds}
+    r = runner(helper_argv(action, host), 300 if action == "reboot" else 90, env=env)
+    return helper_result(r, action)
+
+
+def cmd_warm(a, cfg: Config, deps: Deps) -> int:
+    """Fetch/verify the pinned helper packages into uv's cache (online); no credentials, no Deco, minimal env."""
+    r = run(helper_argv("warm", offline=False), 300, env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME") or str(HOME)})
+    res = helper_result(r, "warm")
+    print("helper ready (offline runs work now)" if res.get("ok") else f"warm failed: {res.get('error')}")
+    return 0 if res.get("ok") else 1
+
+
+# --------------------------------------------------------------------------- diagnostics snapshot
+
+
+def parse_ping(text: str) -> dict:
+    d: dict = {}
+    m = re.search(r"(\d+) packets transmitted, (\d+) (?:packets )?received, ([\d.]+)% packet loss", text)
+    if m:
+        d.update(sent=int(m[1]), received=int(m[2]), loss_pct=float(m[3]))
+    m = re.search(r"= ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms", text)
+    if m:
+        d.update(min=float(m[1]), avg=float(m[2]), max=float(m[3]), stddev=float(m[4]))
+    return d
+
+
+def parse_netstat_ib(text: str) -> dict | None:
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) >= 10 and "<Link#" in line:
+            try:
+                return {"ipkts": int(f[-7]), "ierrs": int(f[-6]), "ibytes": int(f[-5]), "opkts": int(f[-4]),
+                        "oerrs": int(f[-3]), "obytes": int(f[-2])}
+            except ValueError:
+                return None
+    return None
+
+
+def parse_tcp_stats(text: str) -> dict:
+    out = {}
+    for key, pat in (("packets_sent", r"(\d+) packets sent"), ("data_packets_retransmitted", r"(\d+) data packets \(\d+ bytes\) retransmitted"),
+                     ("duplicate_acks", r"(\d+) duplicate acks"), ("packets_received", r"(\d+) packets received"),
+                     ("retransmit_timeouts", r"(\d+) retransmit timeouts?")):
+        m = re.search(pat, text)
+        if m:
+            out[key] = int(m[1])
+    return out
+
+
+def parse_nettop(text: str) -> list[dict]:
+    """`nettop -P -L 2 -s 5 -x` CSV, counters are cumulative: the 5 s delta between the two blocks, top 10 by bytes."""
+    blocks: list[dict[str, dict]] = []
+    for line in text.splitlines():
+        if line.startswith("time,"):
+            blocks.append({})
+            continue
+        f = line.split(",")
+        if blocks and len(f) > 5 and f[1]:
+            try:
+                blocks[-1][f[1]] = {"bytes_in": int(f[4] or 0), "bytes_out": int(f[5] or 0), "retx": int(f[8] or 0) if len(f) > 8 else 0}
+            except ValueError:
+                continue
+    if not blocks:
+        return []
+    last, first = blocks[-1], (blocks[-2] if len(blocks) > 1 else {})
+    zero = {"bytes_in": 0, "bytes_out": 0, "retx": 0}
+    rows = []
+    for proc, v in last.items():
+        p = first.get(proc, zero) if first else zero
+        rows.append({"proc": proc, **{k: max(0, v[k] - p[k]) for k in v}, "window": "delta" if first else "cumulative"})
+    return sorted(rows, key=lambda r: r["bytes_in"] + r["bytes_out"], reverse=True)[:10]
+
+
+def trim_tailscale(text: str) -> dict:
+    d = json.loads(text)
+    peers = []
+    for p in (d.get("Peer") or {}).values():
+        if p.get("ExitNode") or p.get("CurAddr") or p.get("Relay") and p.get("Online"):
+            peers.append({k: p.get(k) for k in ("HostName", "Online", "ExitNode", "CurAddr", "Relay", "TxBytes", "RxBytes")})
+    return {"BackendState": d.get("BackendState"), "ExitNodeStatus": d.get("ExitNodeStatus"),
+            "Self": {k: (d.get("Self") or {}).get(k) for k in ("HostName", "Relay", "CurAddr", "Online")},
+            "using_exit_node": bool(d.get("ExitNodeStatus")) or any(p.get("ExitNode") for p in (d.get("Peer") or {}).values()),
+            "peers": peers[:20]}
+
+
+def wifi_from_wdutil(text: str) -> dict | None:
+    if not re.search(r"RSSI", text):
+        return None
+    d = {}
+    for key in ("SSID", "BSSID", "RSSI", "Noise", "Tx Rate", "Channel", "PHY Mode", "Security", "Band"):
+        m = re.search(rf"^\s*{re.escape(key)}\s*:\s*(.+)$", text, re.M)
+        if m:
+            d[key] = m[1].strip()
+    return d or None
+
+
+def wifi_from_profiler(text: str, iface: str) -> dict | None:
+    try:
+        d = json.loads(text)
+        for blk in d.get("SPAirPortDataType", []):
+            for i in blk.get("spairport_airport_interfaces", []):
+                if i.get("_name") == iface:
+                    cur = i.get("spairport_current_network_information") or {}
+                    return {"interface": iface, "card": i.get("spairport_wireless_card_type"), "channel": cur.get("spairport_network_channel"),
+                            "phymode": cur.get("spairport_network_phymode"), "security": cur.get("spairport_security_mode"),
+                            "tx_rate": cur.get("spairport_network_rate"), "signal_noise": cur.get("spairport_signal_noise"),
+                            "ssid": cur.get("_name")}
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return None
+
+
+class ItemFailed(Exception):
+    """A snapshot item failed; the message is OURS (fixed text, never tool or library output), so it may be recorded."""
+
+
+class Snapper:
+    """Collects one snapshot directory. Each item is best-effort with its own timeout."""
+
+    def __init__(self, cfg: Config, st: dict, outdir: Path, runner: Callable[..., Res], sleep: Callable[[float], None],
+                 deco: Callable[[str], dict] | None):
+        self.cfg, self.st, self.out, self.run, self.sleep, self.deco = cfg, st, outdir, runner, sleep, deco
+        self.index: dict[str, dict] = {}
+        self.written = 0
+        net = st.get("net") or {}
+        self.iface = cfg.interface or net.get("interface") or "en0"
+        self.gw = cfg.gateway or net.get("gateway") or ""
+
+    def write(self, name: str, text: str) -> None:
+        if self.written >= SNAP_DIR_CAP:
+            return
+        text = text if len(text) <= SNAP_FILE_CAP else text[:SNAP_FILE_CAP] + "\n[truncated]\n"
+        self.written += len(text)
+        fd = os.open(self.out / name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # SSID, BSSID, node MACs: owner only
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+
+    def item(self, name: str, fn: Callable[[], str], ext: str = "txt") -> None:
+        t0 = time.time()
+        try:
+            text = fn()
+            self.write(f"{name}.{ext}", text)
+            self.index[name] = {"ok": True, "secs": round(time.time() - t0, 1)}
+        except Exception as e:  # noqa: BLE001
+            # class only (plus our own fixed ItemFailed text): exception messages can carry whatever a tool or library echoed
+            msg = f"{type(e).__name__}: {e}" if isinstance(e, ItemFailed) else type(e).__name__
+            self.index[name] = {"ok": False, "error": msg[:200], "secs": round(time.time() - t0, 1)}
+            try:
+                self.write(f"{name}.error.txt", self.index[name]["error"] + "\n")
+            except OSError:
+                pass
+
+    def cmd(self, argv: list[str], timeout: float) -> str:
+        r = self.run(argv, timeout)
+        head = f"$ {' '.join(argv)}\n# rc={r.rc}{' (timed out)' if r.timed_out else ''}\n"
+        if r.rc == 127:
+            raise ItemFailed(f"not runnable: {argv[0]}")
+        return head + r.out + (("\n# stderr\n" + r.err) if r.err.strip() else "")
+
+    def ping_item(self, host: str, count: int, bound: bool = True) -> str:
+        """Ping bound to the physical interface (`-b`): the default route here is the Tailscale exit node."""
+        argv = ["ping", "-c", str(count), "-i", "0.2", "-q"] + (["-b", self.iface] if bound and self.iface else []) + [host]
+        r = self.run(argv, count * 0.3 + 10)
+        return json.dumps({"host": host, "bound_to": self.iface if bound else "default route", **parse_ping(r.out), "rc": r.rc}, indent=1) + "\n\n" + r.out
+
+    def wifi(self) -> str:
+        r = self.run(["wdutil", "info"], 20)
+        w = wifi_from_wdutil(r.out) if r.rc == 0 else None
+        if w:
+            return json.dumps({"source": "wdutil info", **w}, indent=1) + "\n\n" + r.out
+        r2 = self.run(["system_profiler", "SPAirPortDataType", "-json"], 40)
+        w2 = wifi_from_profiler(r2.out, self.iface) if r2.rc == 0 else None
+        return json.dumps({"source": "system_profiler (wdutil needs root)", **(w2 or {"error": "no Wi-Fi info"})}, indent=1) + "\n\n" + r2.out[:20000]
+
+    def dns(self) -> str:
+        lines = []
+        for srv in [s for s in (self.gw, "1.1.1.1") if s]:
+            for name in ("apple.com", "cloudflare.com", "example.org"):
+                r = self.run(["dig", f"@{srv}", name, "+tries=1", "+time=3", "+stats"], 8)
+                m = re.search(r"Query time: (\d+) msec", r.out)
+                lines.append(f"{srv} {name}: {m[1] + ' ms' if m else 'FAIL rc=' + str(r.rc)}")
+        return "\n".join(lines) + "\n"
+
+    def http_timing(self) -> str:
+        lines = []
+        for url in ("https://www.apple.com/", "https://www.cloudflare.com/", "https://www.google.com/generate_204"):
+            argv = ["curl", "-sS", "-o", "/dev/null", "--max-time", "10", "-w",
+                    "dns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total} http=%{http_code}"]
+            if self.iface:
+                argv += ["--interface", self.iface]
+            r = self.run(argv + [url], 12)
+            lines.append(f"{url} rc={r.rc} {r.out.strip() or r.err.strip()[-120:]}")
+        return "\n".join(lines) + "\n"
+
+    def counters(self) -> str:
+        r1 = self.run(["netstat", "-I", self.iface, "-b"], 10)
+        a = parse_netstat_ib(r1.out)
+        self.sleep(5)
+        r2 = self.run(["netstat", "-I", self.iface, "-b"], 10)
+        b = parse_netstat_ib(r2.out)
+        tcp = parse_tcp_stats(self.run(["netstat", "-s", "-p", "tcp"], 15).out)
+        out: dict = {"interface": self.iface, "counters": b, "tcp": tcp}
+        if a and b:
+            out["rate_5s"] = {"in_mbps": round((b["ibytes"] - a["ibytes"]) * 8 / 5e6, 3), "out_mbps": round((b["obytes"] - a["obytes"]) * 8 / 5e6, 3)}
+        prev = self.st.get("last_counters")
+        if isinstance(prev, dict):
+            out["diff_vs_previous_snapshot"] = {
+                "seconds": round(time.time() - prev.get("t", 0)),
+                "interface": {k: b[k] - (prev.get("counters") or {}).get(k, b[k]) for k in b} if b and prev.get("counters") else None,
+                "tcp": {k: v - (prev.get("tcp") or {}).get(k, v) for k, v in tcp.items()}}
+        self.st["last_counters"] = {"t": time.time(), "counters": b, "tcp": tcp}
+        return json.dumps(out, indent=1) + "\n\n" + r1.out + "\n" + r2.out[:2000]
+
+    def talkers(self) -> str:
+        r = self.run(["nettop", "-P", "-L", "2", "-s", "5", "-t", "external", "-x"], 25)
+        return json.dumps(parse_nettop(r.out), indent=1) + "\n\n# raw\n" + r.out[-20000:]
+
+    def tailscale(self) -> str:
+        r = self.run(["tailscale", "status", "--json"], 15)
+        if r.rc != 0:
+            raise ItemFailed(f"tailscale rc={r.rc}")
+        return json.dumps(trim_tailscale(r.out), indent=1) + "\n"
+
+    def deco_state(self) -> str:
+        if not self.deco:
+            return "skipped: no credentials\n"
+        if not self.cfg.deco_host or not (self.st.get("net") or {}).get("home"):
+            return "skipped: not on the home network, or no [deco] host configured\n"
+        r = self.deco(self.cfg.deco_host)
+        if not r.get("ok"):
+            raise ItemFailed(str(r.get("error", "failed"))[:160])
+        return json.dumps(clean_info(r.get("info")), indent=1) + "\n"
+
+    def exit_ping(self) -> str:
+        r = self.run(["tailscale", "status", "--json"], 15)
+        if r.rc != 0:
+            raise ItemFailed(f"tailscale rc={r.rc}")
+        d = json.loads(r.out)
+        names = [p.get("HostName") for p in (d.get("Peer") or {}).values() if p.get("ExitNode") and p.get("HostName")]
+        if not names:
+            return "no exit node in use\n"
+        return self.cmd(["tailscale", "ping", "-c", "4", "--timeout", "3s", names[0]], 25)
+
+    def rtt_loaded(self) -> str:
+        """Ping through the default route idle, then again during a bounded default-route download: queueing under load shows as the difference."""
+        argv = ["ping", "-c", "8", "-i", "0.3", "-q", "1.1.1.1"]
+        idle = parse_ping(self.run(argv, 15).out)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(self.run, curl_download_argv(DEFAULT_URLS[0], "", 8, MAX_BYTES), 12)
+            loaded = parse_ping(self.run(argv, 15).out)
+            fut.result()
+        return json.dumps({"idle": idle, "loaded": loaded}, indent=1) + "\n"
+
+    def collect(self, short: bool, tunnel: bool = False) -> None:
+        I = self.iface
+        jobs: list[tuple[str, Callable[[], str]]] = [
+            ("wifi", self.wifi),
+            ("ping-gateway", lambda: self.ping_item(self.gw, 10 if short else 20)),
+            ("ping-1.1.1.1", lambda: self.ping_item("1.1.1.1", 5 if short else 10)),
+            ("counters-and-rates", self.counters),
+            ("top-talkers", self.talkers),
+            ("tailscale", self.tailscale),
+            ("uptime-load", lambda: self.cmd(["uptime"], 5)),
+            ("link", lambda: self.cmd(["ifconfig", I], 5) + self.cmd(["networksetup", "-getMedia", I], 5)),
+            ("deco", self.deco_state),
+        ]
+        if tunnel:
+            jobs += [("tailscale-netcheck", lambda: self.cmd(["tailscale", "netcheck"], 45)), ("exit-node-ping", self.exit_ping),
+                     ("rtt-idle-vs-loaded", self.rtt_loaded)]
+        if not short:
+            jobs += [("ping-8.8.8.8", lambda: self.ping_item("8.8.8.8", 10)), ("ping-1.1.1.1-default-route", lambda: self.ping_item("1.1.1.1", 10, bound=False)),
+                     ("dns", self.dns), ("http-timing", self.http_timing),
+                     ("traceroute", lambda: self.cmd(["traceroute", "-n", "-m", "8", "-w", "2", "-q", "1", "1.1.1.1"], 40))]
+        # counters and top-talkers measure a 5 s window each: keep them off the busy pings by running all in a small pool
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            list(ex.map(lambda j: self.item(j[0], j[1]), jobs))
+        self.write("index.json", json.dumps(self.index, indent=1, sort_keys=True))
+
+
+def dir_bytes(d: Path) -> int:
+    return sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+
+
+def prune_episodes(root: Path, now: float, keep_days: int = EPISODE_KEEP_DAYS, total_cap: int | None = None) -> None:
+    """Drop directories older than keep_days, then the oldest ones until the whole tree fits total_cap bytes."""
+    if not root.is_dir():
+        return
+    cap = SNAP_TOTAL_CAP if total_cap is None else total_cap
+    live = []
+    for d in root.iterdir():
+        try:
+            if not d.is_dir():
+                continue
+            if now - d.stat().st_mtime > keep_days * 86400:
+                shutil.rmtree(d, ignore_errors=True)
+            else:
+                live.append((d.stat().st_mtime, d, dir_bytes(d)))
+        except OSError:
+            pass
+    total = sum(b for _, _, b in live)
+    for _, d, b in sorted(live):
+        if total <= cap:
+            break
+        shutil.rmtree(d, ignore_errors=True)
+        total -= b
+
+
+def take_snapshot(cfg: Config, st: dict, label: str = "manual", short: bool = False, now: float | None = None,
+                  runner: Callable[..., Res] = run, sleep: Callable[[float], None] = time.sleep,
+                  root: Path | None = None, deco_fn: Callable[[str], dict] | None = None, creds_fn: Callable[[], tuple[bool, str]] | None = None) -> str:
+    now = now or time.time()
+    root = root or STATE_DIR / "episodes"
+    outdir = root / f"{datetime.fromtimestamp(now).strftime('%Y%m%dT%H%M%S')}-{label}"
+    prune_episodes(root, now)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    outdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if deco_fn is None and cfg.deco_host and (st.get("net") or {}).get("home"):
+        ok, _ = (creds_fn or deco_creds_ok)()
+        deco_fn = (lambda host: deco_run("info", host)) if ok else None
+    sn = Snapper(cfg, st, outdir, runner, sleep, deco_fn)
+    sn.write("meta.json", json.dumps({"t": now, "label": label, "short": short, "interface": sn.iface, "gateway": sn.gw,
+                                      "episode": (st.get("episode") or {}).get("id"), "recent_samples": st.get("samples", [])[-12:]}, indent=1))
+    sn.collect(short, tunnel=(label == "tunnel-degraded"))
+    return str(outdir)
+
+
+# --------------------------------------------------------------------------- CLI
+
+
+class Locked(Exception):
+    pass
+
+
+class lock:
+    """flock on a file. wait_s=0: fail at once with Locked (ticks); wait_s>0: retry until the deadline (manual commands)."""
+
+    def __init__(self, path: Path, wait_s: float = 0.0):
+        self.path, self.wait_s, self.f = path, wait_s, None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.f = open(self.path, "w")  # noqa: SIM115
+        deadline = time.monotonic() + self.wait_s
+        while True:
+            try:
+                fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError as e:
+                if time.monotonic() >= deadline:
+                    self.f.close()
+                    raise Locked from e
+                time.sleep(0.5)
+
+    def __exit__(self, *a):
+        if self.f:
+            self.f.close()
+
+
+def cmd_tick(a, cfg: Config, deps: Deps) -> int:
+    try:
+        with lock(STATE_DIR / "lock"):
+            st = load_state()
+            w = Watch(cfg, deps, st)
+            try:
+                w.tick()
+            except Exception as e:  # noqa: BLE001
+                w.error_ping(f"tick failed: {type(e).__name__}")
+                save_state(st)
+                return 1
+    except Locked:
+        return 0
+    return 0
+
+
+def cmd_probe(a, cfg: Config, deps: Deps) -> int:
+    net = deps.discover(cfg)
+    s = deps.probe(cfg, net)
+    st = load_state()
+    print(json.dumps({"net": net, "baseline": baseline(st, cfg, deps.now()), **s}, indent=1) if a.json else format_probe(s, net, cfg))
+    if a.record:
+        try:
+            with lock(STATE_DIR / "lock"):
+                st = load_state()
+                st["net"] = net
+                if net.get("home"):
+                    Watch(cfg, deps, st).process_sample(s)
+                else:
+                    print(f"(not recorded: not on the home network: {net.get('home_why')})", file=sys.stderr)
+                save_state(st)
+        except Locked:
+            print("(not recorded: another tick holds the lock)", file=sys.stderr)
+    return 0
+
+
+def format_probe(s: dict, net: dict, cfg: Config) -> str:
+    state = f"UNKNOWN ({s['unknown']})" if s.get("unknown") else ("SLOW" if s["mbps"] < cfg.threshold_mbps else "ok")
+    lines = [f"{s['mbps']:.1f} Mbps on {s['interface'] or '(no physical interface)'} via gateway {net.get('gateway') or '?'} "
+             f"({state} vs {cfg.threshold_mbps:g}); {s['bytes'] / 1e6:.1f} MB in {s['elapsed_s']} s",
+             f"default route sample: {s['default_route']['mbps']:.1f} Mbps"
+             + (f" (UNKNOWN: {s['default_route']['unknown']})" if s["default_route"].get("unknown") else "")]
+    up = s["default_route"].get("up")
+    if up:
+        lines.append(f"tunnel upload via {up.get('via')} (diagnostic, not a verdict): "
+                     + (f"{up['mbps']:.1f} Mbps out vs {s['default_route']['mbps']:.1f} Mbps in" if up.get("ok") else f"failed (http {up.get('http')})"))
+    lines += [f"  stream {s_['host']}: {s_['bytes'] / 1e6:.2f} MB {s_['secs']:.2f}s {s_['mbps']:.1f} Mbps http={s_['http']}" + (f" ERR {s_['error']}" if s_.get("error") else "") for s_ in s["streams"]]
+    lines += [f"  error: {e}" for e in s["errors"]]
+    return "\n".join(lines)
+
+
+def cmd_status(a, cfg: Config, deps: Deps) -> int:
+    st = load_state()
+    now = deps.now()
+    ep = st.get("episode")
+    out = {"state": "EPISODE" if ep else ("slow, watching" if st.get("slow_since") else "healthy"),
+           "not_measuring": st.get("not_measuring"),
+           "now": now, "baseline_mbps": baseline(st, cfg, now), "threshold_mbps": cfg.threshold_mbps,
+           "net": st.get("net"), "slow_since": st.get("slow_since"), "next_probe_in_s": max(0, round(interval_for(st, cfg) - DUE_SLACK_S - (now - float(st.get("last_probe_t") or 0)))),
+           "last_samples": st.get("samples", [])[-5:], "episode": ep, "last_episode": st.get("last_episode"),
+           "last_reboot": st.get("last_reboot"), "reboot_trigger": cfg.reboot_trigger, "reboot_blocked_until_healthy": bool(st.get("reboot_blocked")),
+           "reboots_last_24h": len([x for x in st.get("reboot_log", []) if x > now - 86400]), "outage_since": st.get("outage_since")}
+    if a.json:
+        print(json.dumps(out, indent=1))
+        return 0
+    nm = st.get("not_measuring")
+    print(f"state: {'NOT MEASURING: ' + nm['why'] if nm else out['state']}   baseline: {fmt_mbps(out['baseline_mbps'])} Mbps   threshold: {cfg.threshold_mbps:g}   net: {out['net'] or '?'}")
+    for s in out["last_samples"]:
+        print(f"  {fmt_t(s['t'])}  {s['mbps']:7.1f} Mbps  default-route {fmt_mbps(s.get('default_mbps'))}  {'UNKNOWN' if s.get('unknown') else ('SLOW' if s.get('slow') else 'ok')}")
+    if st.get("slow_since"):
+        print(f"slow since {fmt_t(st['slow_since'])} ({round((now - st['slow_since']) / 60)} min)")
+    if ep:
+        avg = ep["sum_mbps"] / ep["n"] if ep["n"] else 0
+        print(f"episode {ep['id']}: since {fmt_t(ep['start_t'])}, {ep['n']} samples, min {ep['min_mbps']:.1f} avg {avg:.1f}; reboot {ep.get('reboot')}; snapshots {ep['snapshots'][:1]}")
+    le = st.get("last_episode")
+    if le:
+        print(f"last episode {le['id']}: {le['duration_min']} min, min {le['min_mbps']} avg {le['avg_mbps']} Mbps, reboot {le['reboot'].get('state')}")
+    lr = st.get("last_reboot")
+    print(f"last reboot: {fmt_t(lr['t']) + ' ' + lr['state'] + ' ' + lr.get('outcome', '') if lr else 'none'}")
+    return 0
+
+
+def cmd_reboot(a, cfg: Config, deps: Deps) -> int:
+    """Manual reboot. Same guards as the automatic one except the cooldown (an explicit request): home network, [deco] host,
+    credentials; takes the tick lock (waits), records last_reboot_t BEFORE the call and settles an open episode's reboot."""
+    net = deps.discover(cfg)
+    host = cfg.deco_host
+    ok, why = deps.creds()
+    if a.dry_run:
+        print(f"dry-run: would reboot the Deco mesh via {host or '(no [deco] host configured)'}; on home network: "
+              f"{'yes' if net.get('home') else 'NO: ' + str(net.get('home_why'))}; credentials: {'present' if ok else why}; nothing touched")
+        return 0
+    if not net.get("home"):
+        print(f"reboot refused: not on the home network ({net.get('home_why')})")
+        return 1
+    if not ok:
+        print(f"reboot skipped: {why}")
+        return 0
+    seen_reboot_t = load_state().get("last_reboot_t")
+    try:
+        with lock(STATE_DIR / "lock", wait_s=REBOOT_LOCK_WAIT_S):
+            st = load_state()
+            if st.get("last_reboot_t") != seen_reboot_t:  # a tick rebooted the mesh while we waited for the lock: not twice in a row
+                print(f"reboot refused: an automatic reboot just ran at {fmt_t(st.get('last_reboot_t'))}; check whether the link recovered, then run again")
+                return 1
+            now = deps.now()
+            ep = st.get("episode")
+            rb = {"state": "attempted", "t": now, "manual": True}
+            if ep is not None:
+                ep["reboot"] = rb  # the automatic reboot of this episode must not fire again minutes later
+            st["last_reboot_t"] = now  # before the call, like the automatic path: a crash mid-call still starts the cooldown
+            note_reboot(st, now)
+            save_state(st)
+            r = deps.deco_reboot(host)
+            rb.update(state="done" if r.get("ok") else "failed", outcome=str(r.get("outcome") or r.get("error", ""))[:200], confirmed=r.get("confirmed"))
+            st["last_reboot"] = {"t": now, "episode": ep["id"] if ep else None, "state": rb["state"], "outcome": rb["outcome"], "manual": True}
+            save_state(st)
+    except Locked:
+        print(f"reboot not started: a tick holds the lock (waited {REBOOT_LOCK_WAIT_S:g} s); try again")
+        return 1
+    print(f"reboot {'requested' if r.get('ok') else 'FAILED'}: {r.get('outcome') or r.get('error')}")
+    return 0 if r.get("ok") else 1
+
+
+def cmd_diagnose(a, cfg: Config, deps: Deps) -> int:
+    st = load_state()
+    st["net"] = deps.discover(cfg)
+    print(deps.snapshot(cfg, st, "manual", short=False, now=deps.now()))
+    return 0
+
+
+def cmd_install(a, cfg: Config, deps: Deps) -> int:
+    src = SELF.parent.parent / "macos" / "net-watch" / f"{LABEL}.plist"
+    dest = HOME / "Library/LaunchAgents" / src.name
+    dom = f"gui/{os.getuid()}"
+    run(["launchctl", "bootout", f"{dom}/{LABEL}"], 20)
+    if a.cmd == "uninstall":
+        dest.unlink(missing_ok=True)
+        print(f"removed {dest}")
+        return 0
+    STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_write(dest, src.read_text())
+    r = run(["launchctl", "bootstrap", dom, str(dest)], 20)
+    print(f"installed {dest}" if r.rc == 0 else f"bootstrap failed: {r.err.strip()}")
+    cmd_warm(a, cfg, deps)  # a failed warm is reported, not fatal: ticks work, only Deco calls need the cache
+    return r.rc
+
+
+def main(argv: list[str] | None = None, deps: Deps | None = None, cfg: Config | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("tick")
+    p = sub.add_parser("status")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("probe")
+    p.add_argument("--record", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("reboot")
+    p.add_argument("--dry-run", action="store_true")
+    sub.add_parser("diagnose")
+    sub.add_parser("install")
+    sub.add_parser("uninstall")
+    sub.add_parser("warm")
+    a = ap.parse_args(argv)
+    os.umask(0o077)  # everything net-watch writes (snapshots: SSID, BSSID, node MACs) is owner-only
+    cfg = cfg or load_config()
+    deps = deps or Deps()
+    fn = {"tick": cmd_tick, "status": cmd_status, "probe": cmd_probe, "reboot": cmd_reboot, "diagnose": cmd_diagnose,
+          "install": cmd_install, "uninstall": cmd_install, "warm": cmd_warm}[a.cmd]
+    return fn(a, cfg, deps)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

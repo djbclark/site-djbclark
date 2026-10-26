@@ -1,0 +1,237 @@
+#!/usr/bin/env -S uv run --script --locked
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["tplink-deco-api==2.0.0"]
+# ///
+"""net-watch-deco - the only code that talks to the TP-Link Deco admin API (helper of bin/net-watch).
+
+    net-watch-deco info   --host H    read-only: nodes, WAN/internet status, load (allowlisted fields only)
+    net-watch-deco reboot --host H    reboot the whole mesh (master relays to every node), then confirm
+    net-watch-deco warm               import the pinned library (no credentials, no Deco): warms uv's cache
+
+Trust boundary: NOT a sandbox. net-watch runs this with env = {PATH, HOME, DECO_ADMIN_USER, DECO_ADMIN_PASSWORD} and nothing
+else, so the rest of the sudo-secretspec vault is never handed over; but this code and its dependencies run as the operator and
+can still call `sudo-secretspec` or read ~/.ssh themselves. The control is the pin: the dependency is pinned (`==`) and bin/net-watch-deco.lock
+pins every transitive package by hash (`uv lock --script bin/net-watch-deco` to bump); the shebang runs it with
+--locked, and net-watch runs it with --offline: a reboot during an outage never needs PyPI (net-watch warm fills the cache while the link
+is up). One JSON object on stdout; error text is an error class plus a fixed message, never str(exception).
+Docs: docs/net-watch.md.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import http.client
+import json
+import os
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+
+CONFIRM_S = 180.0  # after the reboot request: how long to wait for the mesh to drop and come back
+CONFIRM_STEP_S = 10.0
+
+NODE_FIELDS = ("mac", "device_ip", "role", "device_model", "software_ver", "inet_status", "group_status", "signal_level")
+WAN_FIELDS = {"ip", "mask", "mac", "gateway", "dns1", "dns2"}
+FIXED_MESSAGE = "Deco helper call failed (details withheld: they may echo credentials)"
+
+
+def out(obj: dict) -> None:
+    print(json.dumps(obj, default=str))
+
+
+def fail(exc: BaseException, **extra) -> dict:
+    """Error class plus a fixed message. Never str(exc): library errors can carry URLs, users or key material."""
+    d: dict = {"ok": False, "error_class": type(exc).__name__, "error": f"{type(exc).__name__}: {FIXED_MESSAGE}"}
+    for attr in ("status_code", "error_code"):
+        v = getattr(exc, attr, None)
+        if isinstance(v, int):
+            d[attr] = v
+    d.update(extra)
+    return d
+
+
+def pick(obj, fields) -> dict:
+    """Allowlist copy of the named attributes/keys of a dataclass or dict; dataclasses nest through asdict."""
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        obj = dataclasses.asdict(obj)
+    if not isinstance(obj, dict):
+        return {}
+    return {k: obj.get(k) for k in fields}
+
+
+def wan_info(w) -> dict:
+    d = dataclasses.asdict(w) if dataclasses.is_dataclass(w) and not isinstance(w, type) else {}
+    wan, lan = d.get("wan") or {}, d.get("lan") or {}
+    return {"wan": {"dial_type": wan.get("dial_type"), "enable_auto_dns": wan.get("enable_auto_dns"),
+                    "ip_info": pick(wan.get("ip_info") or {}, WAN_FIELDS)},
+            "lan": {"ip_info": pick(lan.get("ip_info") or {}, WAN_FIELDS)}}
+
+
+def internet_status(s) -> dict:
+    d = dataclasses.asdict(s) if dataclasses.is_dataclass(s) and not isinstance(s, type) else {}
+    keys = ("inet_status", "dial_status", "connect_type", "auto_detect_type", "error_code")
+    return {"ipv4": pick(d.get("ipv4") or {}, keys), "ipv6": pick(d.get("ipv6") or {}, keys), "link_status": d.get("link_status")}
+
+
+def read_info(deco, nodes: list[dict]) -> dict:
+    info: dict = {"nodes": [pick(n, NODE_FIELDS) for n in nodes]}
+    for key, fn in (("performance", lambda: pick(deco.get_performance(), ("cpu_usage", "mem_usage"))),
+                    ("internet", lambda: internet_status(deco.get_internet_status())),
+                    ("wan", lambda: wan_info(deco.get_wan_info())),
+                    ("client_count", lambda: len(deco.get_client_list())),
+                    ("totals", lambda: pick(deco.get_client_totals(), ("up_speed", "down_speed")))):
+        try:
+            info[key] = fn()
+        except Exception as e:  # noqa: BLE001
+            info[key] = f"error: {type(e).__name__}"
+    return info
+
+
+def sent_then_dropped(exc: BaseException, deco_error: tuple[type[BaseException], ...]) -> bool:
+    """True when the failure can only have happened AFTER the request reached the Deco.
+
+    The library's transport wraps send-phase failures (connection refused, DNS, connect timeout, TLS) in its own
+    DecoError subclasses; a timeout or reset while waiting for the response surfaces raw. A reboot makes the
+    router drop the connection mid-response, which is the second kind. Anything else is a failure.
+    """
+    if isinstance(exc, deco_error):
+        return False
+    return isinstance(exc, (TimeoutError, ConnectionError, http.client.HTTPException))
+
+
+def confirm_reboot(make_client: Callable[[], object], sleep: Callable[[float], None] = time.sleep,
+                   clock: Callable[[], float] = time.monotonic, window_s: float = CONFIRM_S,
+                   down_errors: tuple[type[BaseException], ...] = (OSError, http.client.HTTPException)) -> dict:
+    """Poll device_list: confirmed = the mesh stopped answering at least once and then answered again.
+
+    Only a link failure (`down_errors`: sockets, HTTP framing, the library's TransportError) counts as "went down". A refused
+    login (session busy, rate limit: AuthenticationError, ApiError) or any other exception does not: one refused login
+    followed by a success must not read as a confirmed reboot."""
+    deadline, went_down = clock() + window_s, False
+    while clock() < deadline:
+        sleep(CONFIRM_STEP_S)
+        try:
+            with make_client() as c:  # type: ignore[attr-defined]
+                n = len(c.request("admin/device", "device_list", {"operation": "read"}).get("device_list", []))
+            if went_down:
+                return {"confirmed": True, "nodes_after": n}
+        except down_errors:
+            went_down = True
+        except Exception:  # noqa: BLE001
+            pass  # it answered, but not as a rebooting mesh does: neither down nor back
+    return {"confirmed": False, "went_down": went_down}
+
+
+def run(action: str, host: str, env: dict, client_cls, deco_error: tuple[type[BaseException], ...],
+        sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+        confirm_s: float = CONFIRM_S, link_errors: tuple[type[BaseException], ...] = ()) -> tuple[dict, int]:
+    user, pw = env.get("DECO_ADMIN_USER", ""), env.get("DECO_ADMIN_PASSWORD", "")
+    if not (user and pw):
+        return {"ok": False, "error": "no credentials"}, 3
+    try:
+        with client_cls(host, user, pw, timeout=15.0) as deco:  # __enter__ logs in
+            raw = deco.request("admin/device", "device_list", {"operation": "read"})
+            nodes = [n for n in raw.get("device_list", []) if isinstance(n, dict)]
+            if action == "info":
+                return {"ok": True, "info": read_info(deco, nodes)}, 0
+            macs = [n["mac"] for n in sorted(nodes, key=lambda n: n.get("role") != "master") if n.get("mac")]
+            if not macs:
+                return {"ok": False, "error": "device_list returned no nodes"}, 5
+            try:
+                deco.request("admin/device", "system", {"operation": "reboot", "params": {"mac_list": [{"mac": m} for m in macs]}})
+                how = "accepted"
+            except Exception as e:  # noqa: BLE001
+                if not sent_then_dropped(e, deco_error):
+                    return fail(e, stage="send"), 1
+                how = "dropped"
+    except Exception as e:  # noqa: BLE001
+        return fail(e), 1
+    conf = confirm_reboot(lambda: client_cls(host, user, pw, timeout=5.0), sleep, clock, confirm_s, (OSError, http.client.HTTPException, *link_errors))
+    return {"ok": True, "nodes": len(macs), "sent": how, "confirmed": bool(conf.get("confirmed"))}, 0
+
+CURL = "/usr/bin/curl"
+
+
+def make_curl_post(transport_error, loads, cookie_re, curl: str = CURL, runner=subprocess.run):
+    """A replacement for `HttpTransport._post` that goes through /usr/bin/curl.
+
+    On this Mac (macOS 27) every Python build gets EHOSTUNREACH (errno 65) connecting to the LAN Deco while /usr/bin/curl works
+    (a local-network restriction on non-platform binaries). Same contract as the library's urllib version: the parsed JSON body,
+    the `sysauth` cookie remembered, HTTP >= 400 -> TransportError(status_code=N), failure to connect -> TransportError, and, after the
+    request was sent, a timeout or dropped connection surfaces RAW (TimeoutError / ConnectionResetError), which is what a rebooting
+    router does and what `sent_then_dropped` counts as "sent". The body goes on stdin (never argv: login bodies carry the encrypted
+    password); argv is a list, TLS is not verified (the library does not either; home identity is pinned by the parent)."""
+
+    def _post(self, url: str, data: bytes):
+        argv = [curl, "-sk", "-m", f"{self.timeout:g}", "--connect-timeout", "5", "-D", "-", "--data-binary", "@-", "-w", "\n%{time_connect}",
+                "-H", "Content-Type: application/json", "-H", "Expect:", "-H", "Accept-Encoding: identity", "-H", "Connection: close"]
+        if self._cookie:
+            argv += ["-H", f"Cookie: {self._cookie}"]
+        try:
+            p = runner(argv + ["--", url], input=data, capture_output=True, timeout=self.timeout + 5)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise transport_error("Failed to POST: curl did not finish") from exc
+        body, _, connect = p.stdout.rpartition(b"\n")
+        try:
+            connected = float(connect) > 0
+        except ValueError:
+            connected = False
+        if p.returncode != 0:
+            if connected and p.returncode == 28:
+                raise TimeoutError("timed out waiting for the response")
+            if connected and p.returncode in (52, 55, 56):
+                raise ConnectionResetError("connection dropped after the request")
+            raise transport_error(f"Failed to POST: curl rc={p.returncode}")
+        head = b""
+        while body.startswith(b"HTTP/"):  # 100 Continue and the like come first; the last header block is the answer
+            head, _, body = body.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        try:
+            status = int(lines[0].split()[1])
+        except (IndexError, ValueError):
+            raise transport_error("Failed to POST: no HTTP status") from None
+        for line in lines[1:]:
+            if line.lower().startswith("set-cookie:"):
+                m = cookie_re.search(line)
+                if m:
+                    self._cookie = m.group(1)
+                    break
+        if status >= 400:
+            raise transport_error(f"Failed to POST: HTTP {status}", status_code=status)
+        return loads(body)
+
+    return _post
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] not in ("info", "reboot", "warm"):
+        print("usage: net-watch-deco info|reboot --host H | warm", file=sys.stderr)
+        return 2
+    try:
+        import tplink_deco_api as lib  # noqa: PLC0415
+    except ImportError as e:
+        out({"ok": False, "error_class": type(e).__name__, "error": "tplink-deco-api not importable"})
+        return 4
+    if argv[0] == "warm":
+        out({"ok": True, "outcome": "library importable"})
+        return 0
+    host = argv[argv.index("--host") + 1] if "--host" in argv[:-1] else ""
+    if not host:
+        out({"ok": False, "error": "no host"})
+        return 2
+    try:
+        import tplink_deco_api.auth.transport as tmod  # noqa: PLC0415
+        tmod.HttpTransport._post = make_curl_post(tmod.TransportError, tmod.loads, tmod._COOKIE_RE)  # python sockets cannot reach the LAN here
+    except (ImportError, AttributeError) as e:
+        out({"ok": False, "error_class": type(e).__name__, "error": "tplink-deco-api not importable"})
+        return 4
+    res, rc = run(argv[0], host, dict(os.environ), lib.DecoClient, (lib.DecoError,), link_errors=(lib.TransportError,))
+    out(res)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())
