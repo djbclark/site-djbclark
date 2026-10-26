@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- net-watch (bin/net-watch): every 60 s a tick that returns at once unless a probe is due (every 5 min
+<!-- net-watch (bin/net-watch, started through bin/net-watch-tick, which snapshots the ARP table for it): every 60 s a tick that returns at once unless a probe is due (every 5 min
      while healthy, every 1 min after a slow sample). Notices a download below 30 Mbps for 10+ minutes,
      pings once at the start and once at the end, collects a diagnostics snapshot, and tries one Deco reboot.
      Installed by `net-watch install`, removed by `net-watch uninstall`. -->
@@ -9,7 +9,7 @@
   <key>Label</key><string>com.djbclark.net-watch</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/djbclark/ops/site-djbclark/bin/net-watch</string>
+    <string>/Users/djbclark/ops/site-djbclark/bin/net-watch-tick</string>
     <string>tick</string>
   </array>
   <key>EnvironmentVariables</key>

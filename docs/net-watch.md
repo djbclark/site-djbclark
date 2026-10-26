@@ -93,6 +93,16 @@ Location permission. Off the home network net-watch is idle (no probes, so no te
 call); an open episode is closed with one "left the home network" ping. Back home it resumes by itself. Copy the MAC
 from `net-watch status` (net: `gateway_mac`) while at home; if the Deco master is replaced, update it.
 
+### ARP and Local Network privacy (`bin/net-watch-tick`)
+
+macOS Local Network privacy hides the ARP table from processes that are not Apple-signed. Under launchd, `arp -n <gateway>` and `ping` work from a bash job and from Apple's `/usr/bin/python3`, but fail from Homebrew/uv Python, even with a bash parent. net-watch needs Python 3.11 or newer, so Apple's Python is not an option, and without the gateway MAC it reports "NOT MEASURING: gateway MAC unknown (arp has no entry)" forever.
+
+So launchd starts `bin/net-watch-tick`, a bash script, not `net-watch`. Each run first deletes the previous `arp.snapshot` (and any stale temp file) as a courtesy, then pings the gateway once (the first IPv4 default route on an interface that is not a tunnel; it uses the same interface-prefix list as `TUNNEL_PREFIXES` in `bin/net-watch`, and a test fails if the two lists differ) and writes the snapshot to `~/.local/state/net-watch/arp.snapshot` (temp file in the same directory, mode 0600, `mv -f`; nothing is written if that path is a directory). The file's **first line is `# net-watch-tick pid <wrapper PID>`**, followed by the `arp -an` output. Only after the `mv` succeeded does the wrapper export `NET_WATCH_VIA_TICK_WRAPPER=<its PID>`; a skipped or failed run exports nothing and also unsets any value it inherited. It then `exec`s `net-watch` with its arguments (the PID stays the same). A snapshot failure is skipped and never fails the tick. Tests may override the tools with `NW_ARP`, `NW_PING` and `NW_NETSTAT`; `NET_WATCH_STATE_DIR` moves the directory.
+
+`net-watch` asks its own `arp` first (so `arp_source` is `arp` in `status --json` `net`). Only when that finds no MAC does it read the snapshot (`arp_source` is `snapshot`). The binding is by PID, not by deletion: the variable must name this process or its parent (`uv run` starts Python as a child of the exec'd wrapper) **and** the file's first line must name that same PID. So a value inherited from a shell or environment, another run's file (two runs overlapping), and a file the wrapper could not delete (read-only state directory) are all refused, whatever they contain. Fail closed: the file must also be a regular file, not a symlink, owned by this uid, mode 0600 or tighter, modified in the last **30 s** (`ARP_SNAPSHOT_MAX_AGE_S`; the wrapper wrote it seconds earlier), and have a line for exactly the gateway IP on exactly the discovered interface (` on <interface>` as a whole word) with a MAC; the header line is not matched as an ARP line. Otherwise there is no MAC, as before. The home check itself is unchanged: the MAC must still be one of `[home] gateway_mac`. What is new is only this: the process the wrapper started, with a snapshot it wrote moments before for the same gateway and interface, can supply the MAC that `arp` cannot.
+
+`net-watch status` shows what the job last saw (`state.json`), so it works from any shell. `net-watch <command>` run by hand (`probe`, `diagnose`, `reboot`, `tick`) never uses a snapshot: a file left by the last tick might describe the network the laptop has just left, and nothing in a shell's environment can make it trusted. From an agent shell it therefore says "NOT MEASURING: gateway MAC unknown" whenever the live `arp` is hidden, exactly as before the wrapper existed. `net-watch-tick <command>` run by hand is the wrapper, so it does use a snapshot, but one it wrote itself a moment earlier, bound to its own PID; that is a legitimate way to measure from a shell, and the wrapper is not launchd-only. Do not export `NET_WATCH_VIA_TICK_WRAPPER` by hand: only the wrapper sets it, and a value that is not the reader's PID or its parent's is ignored. `status` run before the first tick with the new plist also says so.
+
 ## State and files
 
 `~/.local/state/net-watch/`: `state.json` (atomic writes; samples 24 h, episode, last reboot), `net-watch.log`,
@@ -162,7 +172,7 @@ exception text. Logging in to the Deco API signs the Deco app / web UI admin out
 ~/ops/site-djbclark/bin/net-watch status       # ~/ops/site-private/bin/net-watch is the same file through a symlink
 ```
 
-The plist points at `~/ops/site-djbclark/bin/net-watch`, so the branch must be merged there first. `net-watch uninstall` removes it.
+The plist runs `~/ops/site-djbclark/bin/net-watch-tick tick` (see "ARP and Local Network privacy"), so the branch must be merged there first. `net-watch uninstall` removes it.
 No `ProcessType` key is set (Standard): `Adaptive` would behave as `Background` for this XPC-less job (see Known limits 3).
 
 ## Known limits

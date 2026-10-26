@@ -1,0 +1,69 @@
+#!/bin/bash
+# net-watch-tick: the launchd entry point for net-watch.
+#
+# macOS Local Network privacy hides the ARP table from processes that are not Apple-signed, and net-watch (uv/Python >= 3.11)
+# is not. This bash job is allowed to read it: so it writes `arp -an` to $STATE_DIR/arp.snapshot, atomically and 0600, and
+# then exec's the sibling `net-watch`, which reads that file when its own `arp` finds nothing (see docs/net-watch.md).
+# It never fails the tick: any snapshot problem just skips the snapshot. An old snapshot may describe another network, so
+# each run deletes the previous one first, but deletion is only a courtesy: the binding is the PID. The file's first line is
+# `# net-watch-tick pid <this PID>` and, only after the file is in place, it exports NET_WATCH_VIA_TICK_WRAPPER=<this PID>.
+# net-watch reads the snapshot only when the variable names its own PID (or its parent's: `uv run` starts Python as a child
+# of the exec'd wrapper) AND the file's first line names that same PID, so an inherited variable, a concurrent run's file or
+# a file that could not be deleted is never trusted. A skipped or failed run exports nothing (and unsets any inherited value).
+#
+# Tool paths are Apple's, absolute; NW_ARP, NW_PING, NW_NETSTAT override them (tests only).
+set -u
+umask 077 # every file this script creates, including one made by a racing `rm` of the temp name, is owner-only
+
+self=${BASH_SOURCE[0]}
+self=$(/usr/bin/readlink -f "$self" 2>/dev/null) || self=${BASH_SOURCE[0]}
+here=$(dirname "$self")
+
+arp=${NW_ARP:-/usr/sbin/arp}
+ping=${NW_PING:-/sbin/ping}
+netstat=${NW_NETSTAT:-/usr/sbin/netstat}
+state_dir=${NET_WATCH_STATE_DIR:-$HOME/.local/state/net-watch}
+
+# Interface name prefixes that are not the physical link. The same list, in the same order, as TUNNEL_PREFIXES in
+# bin/net-watch (a test fails if they differ).
+tunnel_prefixes=(utun ipsec ppp lo gif stf awdl llw bridge ap)
+
+# First IPv4 default route on a physical interface, as net-watch's parse_netstat_default finds it.
+default_gateway() {
+  local -a f
+  local iface p
+  while read -r -a f; do
+    [ "${#f[@]}" -ge 4 ] && [ "${f[0]}" = default ] || continue
+    iface=${f[${#f[@]} - 1]}
+    for p in "${tunnel_prefixes[@]}"; do
+      [[ $iface == "$p"* ]] && continue 2
+    done
+    [[ ${f[1]} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    printf '%s\n' "${f[1]}"
+    return 0
+  done < <("$netstat" -rn -f inet 2>/dev/null)
+  return 1
+}
+
+snapshot() {
+  local gw tmp
+  rm -f "$state_dir/arp.snapshot" "$state_dir"/arp.snapshot.?????? 2>/dev/null # never leave a snapshot of an earlier network
+  gw=$(default_gateway) || return 1
+  [ -n "$gw" ] || return 1
+  [ -d "$state_dir" ] || mkdir -p "$state_dir" || return 1
+  [ -d "$state_dir/arp.snapshot" ] && return 1 # mv -f would move the temp file into it
+  "$ping" -c 1 -t 2 "$gw" >/dev/null 2>&1 || true
+  tmp=$(mktemp "$state_dir/arp.snapshot.XXXXXX") || return 1
+  # the first line binds the file to this process; net-watch skips it when matching ARP lines
+  if chmod 600 "$tmp" && printf '# net-watch-tick pid %s\n' "$$" >"$tmp" && "$arp" -an >>"$tmp" 2>/dev/null && mv -f "$tmp" "$state_dir/arp.snapshot"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+unset NET_WATCH_VIA_TICK_WRAPPER # never pass on a value the caller set
+if snapshot; then
+  export NET_WATCH_VIA_TICK_WRAPPER=$$
+fi
+exec "$here/net-watch" "$@"
