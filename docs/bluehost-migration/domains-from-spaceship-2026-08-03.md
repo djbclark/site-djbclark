@@ -77,7 +77,7 @@ cannot use custom names because Hyades' Caddy serves only `*.sipb.cloud`.
 
 **Editing the zone:** Dyn's key here is a **client-updater** key — it can change the IP of an
 **existing** hostname but **cannot create one** (`nohost` = "not in this account"). New hostnames are
-made in the Dyn panel. The tool is `~/ops/site-private/bin/dyn-update.py` (run under
+made in the Dyn panel. The tool is `~/ops/site-djbclark/bin/dyn-update.py` (run under
 `sudo-secretspec run`; it refuses non-public IPs and checks DNS first to avoid an abuse-triggering
 `nochg`). **Panel/UI work on this zone goes to Eve's "One-offs" Grok Bot**, which drives the UI
 directly — do not ask Eve to relay it onward.

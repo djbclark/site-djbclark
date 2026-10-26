@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""lan-ip-check - read-only: do the phones still hold the LAN address the inventory records?
+
+    lan-ip-check [--notify] [--dry-run] [--inventory PATH]
+
+Run it after setting router DHCP reservations, then again hours later (past a
+2 h lease and a sleep/reconnect), to see that the addresses held. For every
+inventory host with a `device_lan_ip` it asks the phone over adb (Tailscale
+address, port 5555) for its current Wi-Fi SSID, MAC and IP (`dumpsys wifi`,
+`mWifiInfo`) and compares the IP with the inventory value. The MAC is kept in
+~/.local/state/lan-ip-check/state.json, so a changed MAC (Android re-randomised
+it, which would also void a MAC-keyed reservation) is reported separately from
+a DHCP change.
+
+Exit: 0 all match, 1 an address drifted or a MAC changed, 2 only unreachable
+phones (offline is not drift). `--notify` sends one `hermes-ping` per new
+problem (not repeated while it persists); `--dry-run` prints it instead.
+Changes nothing on the phones, the router or the inventory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+import yaml
+
+OPS = os.environ.get("OPS_ROOT", os.path.expanduser("~/ops"))
+INVENTORY = os.path.join(OPS, "site-djbclark", "inventory", "hosts.yml")
+STATE = os.path.join(
+    os.path.expanduser("~"), ".local", "state", "lan-ip-check", "state.json"
+)
+WIFI_RE = re.compile(
+    r'mWifiInfo SSID: "?(?P<ssid>[^",]*)"?, BSSID: [^,]*, MAC: (?P<mac>[0-9a-f:]{17}), IP: /(?P<ip>[0-9.]+)'
+)
+
+
+def phones(inventory: dict) -> dict[str, dict[str, str]]:
+    """``{name: {ansible_host, device_lan_ip}}`` for every host that records a LAN address."""
+    found: dict[str, dict[str, str]] = {}
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        hosts = node.get("hosts")
+        if isinstance(hosts, dict):
+            for name, hv in hosts.items():
+                hv = hv or {}
+                lan = str(hv.get("device_lan_ip") or "-")
+                if hv.get("ansible_host") and lan != "-":
+                    found[name] = {
+                        "ansible_host": str(hv["ansible_host"]),
+                        "device_lan_ip": lan,
+                    }
+        for value in node.values():
+            walk(value)
+
+    walk(inventory)
+    return found
+
+
+def adb_wifi(ts_ip: str, timeout: float = 10) -> dict[str, str] | None:
+    """Current Wi-Fi ``{ssid, mac, ip}`` from the phone, or None if it cannot be read."""
+    serial = f"{ts_ip}:5555"
+    try:
+        subprocess.run(
+            ["adb", "connect", serial],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        r = subprocess.run(
+            ["adb", "-s", serial, "shell", "dumpsys wifi | grep -m1 'mWifiInfo SSID'"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = WIFI_RE.search(r.stdout or "")
+    return m.groupdict() if r.returncode == 0 and m else None
+
+
+def load_state(path: str) -> dict:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(path: str, state: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".state.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def check(
+    devices: dict[str, dict[str, str]], state: dict, read=adb_wifi, now: str = ""
+) -> tuple[list[str], list[str], int]:
+    """Return ``(report lines, problems, exit code)``; updates ``state`` in place."""
+    lines, problems = [], []
+    unreachable = 0
+    for name, dev in sorted(devices.items()):
+        info = read(dev["ansible_host"])
+        if info is None:
+            unreachable += 1
+            lines.append(f"{name:<5} UNREACHABLE  inventory {dev['device_lan_ip']}")
+            continue
+        entry = state.setdefault("hosts", {}).setdefault(name, {})
+        notes = []
+        if info["ip"] != dev["device_lan_ip"]:
+            problems.append(
+                f"{name}: phone has {info['ip']}, inventory says {dev['device_lan_ip']}"
+            )
+            notes.append(f"DRIFT inventory {dev['device_lan_ip']}")
+        old_mac = entry.get("mac")
+        if old_mac and old_mac != info["mac"]:
+            problems.append(
+                f"{name}: Wi-Fi MAC changed {old_mac} -> {info['mac']} (a MAC-keyed reservation no longer matches)"
+            )
+            notes.append(f"MAC CHANGED from {old_mac}")
+        suffix = ("  <- " + "; ".join(notes)) if notes else "  ok"
+        lines.append(
+            f"{name:<5} {info['ip']:<15} {info['mac']}  {info['ssid']}{suffix}"
+        )
+        entry.update(
+            {"mac": info["mac"], "ip": info["ip"], "ssid": info["ssid"], "seen": now}
+        )
+    code = 1 if problems else (2 if unreachable else 0)
+    return lines, problems, code
+
+
+def notify(problems: list[str], state: dict, dry_run: bool) -> None:
+    """One hermes-ping per new problem set; silent while the same problems persist."""
+    key = "\n".join(sorted(problems))
+    if key == state.get("last_pinged", ""):
+        return
+    message = "lan-ip-check: " + "; ".join(problems) if problems else ""
+    if problems:
+        if dry_run:
+            print(f"would hermes-ping: {message}")
+        else:
+            subprocess.run(["hermes-ping", message], check=False)
+    state["last_pinged"] = key if not dry_run else state.get("last_pinged", "")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--inventory", default=INVENTORY)
+    ap.add_argument("--notify", action="store_true")
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --notify: print the ping instead of sending it",
+    )
+    args = ap.parse_args(argv)
+    with open(args.inventory) as f:
+        devices = phones(yaml.safe_load(f) or {})
+    if not devices:
+        print(f"no host with device_lan_ip in {args.inventory}", file=sys.stderr)
+        return 2
+    state = load_state(STATE)
+    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    lines, problems, code = check(devices, state, now=now)
+    print("\n".join(lines))
+    if args.notify:
+        notify(problems, state, args.dry_run)
+    save_state(STATE, state)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
