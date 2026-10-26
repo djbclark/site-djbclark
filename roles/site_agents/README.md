@@ -16,6 +16,49 @@ install to `~/.local/bin`; plists render to
 | hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
 | s1-ingest | `com.{{ site_ns }}.s1-ingest` | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed |
 
+## Fleet-watch acknowledgement escalation
+
+The existing five-minute `fleet-watch check` also runs `relay.py --sweep`,
+using `FLEET_WATCH_RELAY` or `~/src/djbclark-ade/skills/session-finder/relay.py`.
+Each overdue acknowledgement produces one `hermes-ping` naming the sender,
+target, ID and age. No model or agent message is used for this check.
+The sweep only resolves acks. What is paged is read from
+`relay.py --pending --json` after a successful sweep: each row with
+`kind: expect`, `state: open` and `overdue: true` pages once, with the text
+built from that row (not from the sweep line, which carries peer-chosen
+names). The sweep's `OVERDUE ack` lines are diagnostic only: a line with no
+such row is logged and skipped, and an overdue row with no sweep line logs
+`N open overdue expectation(s) in --pending had no OVERDUE line`, so a
+relay format change shows up in the log instead of silencing the page. If the
+pending list fails or does not parse, nothing is paged, the ledger is kept as
+it is and `pending unavailable; paging deferred` is logged.
+`~/.local/state/fleet-watch/ack-overdue.json` records notices by ID;
+updates use an atomic replacement under a lock, written once before any
+page (a ledger that cannot be written pages nothing that run) and after
+each page. A corrupt ledger, or a non-file at that path, is moved to
+`ack-overdue.json.bad`, logged, and replaced by an empty one. A ping that
+exits nonzero is not recorded and is retried on the next run. A ping killed
+by its timeout may have been delivered, so it is recorded as `uncertain`,
+logged as `timed out, not retried` and not retried: one possibly lost page is
+preferred to a page every five minutes. A ping is not started with less than
+20 s of the step left.
+The paging is once per expectation, not once per ID string: a ledger entry is
+dropped as soon as its row in `--pending --json` is present and no longer
+`open` (acked, reserved for reuse), or when the row was missing on two
+successive successful runs (one missing row, such as a listing gap, keeps
+the entry), so a reused ID pages again. Residual: an ack and a reuse of
+the same ID inside one five-minute window is not seen, because the pending row
+has no `created` field; the follow-up is a `created` field in relay's
+`expect_view` rows, so the ledger can key on `(id, created)`.
+Peer-controlled text is stripped of non-printable characters and clipped
+(ping about 500 characters); the log records the ID and exit code, never the
+text. The step has one 90 s deadline (pings still owed are retried on the next run)
+and a non-blocking lock: an overlapping run logs `ack sweep already running`
+and returns. Missing, failed or empty sweeps are logged; other fleet checks
+continue. The launchd sender label stays `fleet-watch`.
+The scheduled `relay.py --sweep` also re-arms queued records whose deliverer
+is gone and expires old ones; those messages are already owed.
+
 ## APFS compression job (`apfs-compress`)
 
 Weekly Jobber job (Sunday 04:30) that re-applies APFS (decmpfs) compression with
