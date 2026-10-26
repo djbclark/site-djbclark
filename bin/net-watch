@@ -59,6 +59,7 @@ TUNNEL_PREFIXES = ("utun", "ipsec", "ppp", "lo", "gif", "stf", "awdl", "llw", "b
 ARP_SNAPSHOT_NAME = "arp.snapshot"  # written by bin/net-watch-tick (bash, Apple tools) before each tick
 ARP_SNAPSHOT_MAX_AGE_S = 180  # older than this is ignored: three 60 s ticks
 ARP_SNAPSHOT_READ_CAP = 1_000_000
+ARP_SNAPSHOT_ENV = "NET_WATCH_VIA_TICK_WRAPPER"  # bin/net-watch-tick exports it; without it the snapshot is never read
 SNAP_FILE_CAP = 64 * 1024
 SNAP_DIR_CAP = 2 * 1024 * 1024
 SNAP_TOTAL_CAP = 256 * 1024 * 1024  # all episode directories together; oldest go first
@@ -265,13 +266,16 @@ def parse_netstat_tunnel(text: str) -> str:
 ARP_RE = re.compile(r"\bat ((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})\b")
 
 
-def read_arp_snapshot(gw: str, path: Path | None = None, now: float | None = None) -> str:
+def read_arp_snapshot(gw: str, iface: str, path: Path | None = None, now: float | None = None) -> str:
     """The gateway's MAC from the `arp -an` snapshot that bin/net-watch-tick writes before this process starts, else ''.
 
     macOS Local Network privacy hides the ARP table from processes that are not Apple-signed (this one, run by uv), but not
-    from the bash wrapper's `arp`. Fail closed: the file must be a regular file (opened O_NOFOLLOW, so never a symlink) owned
-    by this uid, mode 0600 or tighter, modified within ARP_SNAPSHOT_MAX_AGE_S, with a line for exactly this gateway IP.
-    Anything else is no MAC."""
+    from the bash wrapper's `arp`. Fail closed: only a process started by the wrapper (ARP_SNAPSHOT_ENV=1) reads it at all, so
+    a manual probe/diagnose/reboot never trusts a file that may describe an earlier network. The file must be a regular file
+    (opened O_NOFOLLOW, so never a symlink) owned by this uid, mode 0600 or tighter, modified within ARP_SNAPSHOT_MAX_AGE_S,
+    with a line for exactly this gateway IP on exactly this interface. Anything else is no MAC."""
+    if os.environ.get(ARP_SNAPSHOT_ENV) != "1":
+        return ""
     path = path or STATE_DIR / ARP_SNAPSHOT_NAME
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -289,8 +293,9 @@ def read_arp_snapshot(gw: str, path: Path | None = None, now: float | None = Non
         return ""
     finally:
         os.close(fd)
+    on_iface = re.compile(rf"\son {re.escape(iface)}(?:\s|$)") if iface else None
     for line in text.splitlines():
-        if f"({gw})" in line:
+        if f"({gw})" in line and on_iface and on_iface.search(line):
             m = ARP_RE.search(line)
             if m:
                 return normalize_mac(m[1])
@@ -326,7 +331,7 @@ def discover_net(cfg: Config, runner: Callable[..., Res] = run) -> dict:
                 break
             runner(["ping", "-c", "1", "-t", "2", gw], 5)  # an idle gateway has no arp entry: one ping creates it
         if not mac:  # hidden from this process by Local Network privacy: use the wrapper's snapshot
-            mac = read_arp_snapshot(gw)
+            mac = read_arp_snapshot(gw, iface)
             arp_source = "snapshot" if mac else "arp"
     net = {"interface": iface, "gateway": gw, "gateway_mac": mac, "arp_source": arp_source, "source": src, "tunnel_iface": tunnel}
     net["home"], net["home_why"] = check_home(cfg, net)
