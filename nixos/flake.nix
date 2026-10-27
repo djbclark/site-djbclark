@@ -25,6 +25,19 @@
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
+  # hermes-agent: the entity's agent runtime, serving the five gifted AI pools on the dann host
+  # (lead's green light dann-fa83e3d72734, 2026-10-27). Why a flake input rather than a package in
+  # nixpkgs: the runtime ships its own declarative NixOS module (`nixosModules.default`), which is
+  # the only supported way to install it — the `curl | bash` installer is not used anywhere here.
+  #
+  # NO `inputs.nixpkgs.follows = "nixpkgs"` HERE, deliberately. The module takes its package from
+  # this flake's own `packages.<system>.default`, built against this flake's own nixpkgs pin
+  # (nixos-unstable). Following the host's nixos-26.05 would substitute an older Python, and
+  # nix/pythonLock.nix THROWS rather than guess when the interpreter family does not match
+  # pm/lock.json (checked 2026-10-27: pin gives python 3.14.7, exactly the lock's family). The
+  # host's nixpkgs is therefore not a constraint on this package at all.
+  inputs.hermes-agent.url = "github:djbclark/hermes-agent";
+
   # bb-nix: only its codex-npm-bin package (the Codex CLI on the bb user's and Paseo's PATH) is used.
   # Its services.bb module is no longer imported: the BB service was removed 2026-10-25. History:
   # BB replaced Cloudroom on 2026-10-17 (plan: site-private
@@ -60,6 +73,7 @@
       athena-nixos,
       bb-nix,
       disko,
+      hermes-agent,
       paseo-nix,
       sops-nix,
       ...
@@ -88,6 +102,9 @@
         modules = [
           disko.nixosModules.disko
           sops-nix.nixosModules.sops
+          # `services.hermes-agent` — declared in ./dann/hermes.nix. The module is imported BEFORE
+          # the host config so the host file can read `config.sops.secrets` paths it defines.
+          hermes-agent.nixosModules.default
           ./dann/configuration.nix
           ./dann/disko.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

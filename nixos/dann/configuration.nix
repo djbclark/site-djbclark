@@ -13,6 +13,10 @@
 {
   imports = [
     (modulesPath + "/profiles/qemu-guest.nix")
+    # The entity's agent runtime and the five gifted AI pools (2026-10-27). Kept in its own file
+    # because it is a whole subsystem: provider entries, model policy, and the sops secrets only
+    # it consumes. It imports nothing and declares `services.hermes-agent` itself.
+    ./hermes.nix
   ];
 
   # ── Filesystems ──────────────────────────────────────────────────────────────────────
