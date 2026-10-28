@@ -912,7 +912,9 @@ upr_send_line() {
     [[ -n "$cli" ]] || return 1
     runb 60 env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD "$cli" send "$target" --no-wait --behavior steer "$text" >/dev/null 2>&1
   else
-    runb 60 "$UPSTREAM_RELAY" "$target" "$text" >/dev/null 2>&1
+    # --no-ack: relay's default delivery watch (djbclark-ade PR 81) would exit 3 on a queued line
+    # when an agent session runs this; 0 here means "delivered or queued", the legacy contract.
+    runb 60 "$UPSTREAM_RELAY" "$target" "$text" --no-ack >/dev/null 2>&1
   fi
 }
 
@@ -959,7 +961,7 @@ upr_relay() {
     return 0
   fi
   upr_relay_brief "$ev" "$(upr_draft "$repo" "$n")" >"$brief"
-  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" 2>&1)
+  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" --no-ack 2>&1)    # --no-ack: see upr_send_line
   rc=$?
   ulog "relay $name to $target rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
   ((rc == 0))

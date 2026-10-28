@@ -407,6 +407,18 @@ class PaseoWatch(Harness):
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual((self.home / "relay.sender").read_text().split(), ["fleet-watch"])
 
+    def test_every_relay_turns_the_delivery_watch_off(self) -> None:
+        # relay.py watches delivery by default for an agent sender (djbclark-ade PR 81) and then exits 3 for a
+        # merely queued line, which upr_send_line and upr_relay would read as a failure (and upr_relay would dispatch).
+        self.assertEqual(self.fw("--relay-to", "sess-1", "paseowatch session").returncode, 0)
+        self.assertEqual(self.fw("--relay-test").returncode, 0)
+        self.seed()
+        self.maintainer_replies()
+        self.assertEqual(self.fw().returncode, 0)
+        lines = self.relays()
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertTrue(all(line.split()[-1] == "--no-ack" for line in lines), lines)
+
     def test_a_refused_relay_keeps_the_event_pending_pings_once_and_never_dispatches(self) -> None:
         self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
         self.seed()
