@@ -142,7 +142,10 @@
   system.autoUpgrade = {
     enable = true;
     operation = "switch";
-    flake = "github:djbclark/site-djbclark/deploy-dann?dir=nixos#dann";
+    # dann.dclark.us has its own site since 2026-10-28; the config lives there now. This one
+    # line is the last thing this repo deploys for this host — see
+    # https://github.com/djbclark/site-dann/blob/master/docs/migration-from-site-djbclark.md
+    flake = "github:djbclark/site-dann/deploy-dann?dir=nixos#dann";
     upgrade = false;
     dates = "04:00";
     randomizedDelaySec = "45min";
