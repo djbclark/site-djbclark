@@ -6,37 +6,6 @@
   # .github/workflows/nixos-lock-update.yml bumps it, builds the host, and promotes it
   # (docs/nixos-in-git.md).
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  # disko: declarative disk partitioning, used by nixos-anywhere to install a host from scratch
-  # and to keep the layout reviewable in git. Added 2026-10-25 for the `dann` host.
-  inputs.disko = {
-    url = "github:nix-community/disko";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  # sops-nix: secrets encrypted in git, decrypted on the host at activation by its age key.
-  # The house standard for this (docs/nixos-in-git.md §4: "Secrets never go in nixos/ as plain
-  # text: the Nix store is world-readable and this repo is public ... adopt one before putting
-  # any secret in the configuration"). Adopted 2026-10-25 for the dann host.
-  #
-  # WHY THIS IS SAFE IN A PUBLIC REPO: only the CIPHERTEXT is committed. The host's private age
-  # key lives at /var/lib/sops-nix/key.txt (mode 0600, generated ON the host, never transmitted)
-  # and is deliberately NOT in this repo or in git anywhere.
-  inputs.sops-nix = {
-    url = "github:Mic92/sops-nix";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-
-  # hermes-agent: the entity's agent runtime, serving the five gifted AI pools on the dann host
-  # (lead's green light dann-fa83e3d72734, 2026-10-27). Why a flake input rather than a package in
-  # nixpkgs: the runtime ships its own declarative NixOS module (`nixosModules.default`), which is
-  # the only supported way to install it — the `curl | bash` installer is not used anywhere here.
-  #
-  # NO `inputs.nixpkgs.follows = "nixpkgs"` HERE, deliberately. The module takes its package from
-  # this flake's own `packages.<system>.default`, built against this flake's own nixpkgs pin
-  # (nixos-unstable). Following the host's nixos-26.05 would substitute an older Python, and
-  # nix/pythonLock.nix THROWS rather than guess when the interpreter family does not match
-  # pm/lock.json (checked 2026-10-27: pin gives python 3.14.7, exactly the lock's family). The
-  # host's nixpkgs is therefore not a constraint on this package at all.
-  inputs.hermes-agent.url = "github:djbclark/hermes-agent";
 
   # bb-nix: only its codex-npm-bin package (the Codex CLI on the bb user's and Paseo's PATH) is used.
   # Its services.bb module is no longer imported: the BB service was removed 2026-10-25. History:
@@ -66,16 +35,19 @@
     inputs.nixathena.follows = "nixathena";
   };
 
+  # 2026-10-28: disko, sops-nix and hermes-agent were dropped with the `dann` output — that
+  # host, its declarative disk layout, its sops secrets and its agent runtime are now their
+  # own site, https://github.com/djbclark/site-dann (nixos/, deployed from its deploy-dann
+  # branch). Nothing here referenced them except that one output, so this flake builds
+  # exactly what it built before (proven by an identical vps-primary toplevel drv path).
+
   outputs =
     {
       self,
       nixpkgs,
       athena-nixos,
       bb-nix,
-      disko,
-      hermes-agent,
       paseo-nix,
-      sops-nix,
       ...
     }:
     {
@@ -88,25 +60,6 @@
           paseo-nix.nixosModules.default
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
-          { system.configurationRevision = self.rev or self.dirtyRev or null; }
-        ];
-      };
-
-      # The entity's own host (dann.dclark.us), installed with nixos-anywhere 2026-10-25.
-      # disko.nixosModules.disko is imported HERE rather than in configuration.nix, because the
-      # disk layout is an installation-time concern; keeping it in this flake is what lets
-      # `nixos-anywhere --flake .#dann` find the layout and the system in one place.
-      # The layout itself is ./dann/disko.nix, pulled in by disko's own `disko.devices` option.
-      nixosConfigurations.dann = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          disko.nixosModules.disko
-          sops-nix.nixosModules.sops
-          # `services.hermes-agent` — declared in ./dann/hermes.nix. The module is imported BEFORE
-          # the host config so the host file can read `config.sops.secrets` paths it defines.
-          hermes-agent.nixosModules.default
-          ./dann/configuration.nix
-          ./dann/disko.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }
         ];
       };
