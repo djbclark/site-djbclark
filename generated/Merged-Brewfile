@@ -25,11 +25,10 @@ brew "xh"  # [agent-cli-tools] JSON-friendly HTTP client — pretty-prints/color
 brew "yq"  # [agent-cli-tools] YAML query/edit, jq-style syntax — fits the ansible/registry/brew-fragment YAML these repos have
 
 # === stack: ai-quota-tools ===
-# Homebrew pieces of the aiuse data-source set: OpenUsage and CodexBar casks. Also installed by packaging/install-deps.sh / just install-aiuse-deps: cswap (uv tool claude-swap), caut (cargo), tokscale (npx PATH shim).
+# Homebrew piece of the aiuse data-source set: the CodexBar cask. OpenUsage.ai was removed 2026-10-22 (deprecated; overlap). Do not add the openusage cask back unless support is restored. Also installed by packaging/install-deps.sh / just install-aiuse-deps: cswap (uv tool claude-swap) and tokscale (npx PATH shim). caut and caam are deprecated and are not installed by default.
 # fragment: brew/fragments/ai-quota-tools.yml
 
 cask "codexbar"  # [ai-quota-tools] CodexBar.app + codexbar CLI — primary multi-provider live quotas for aiuse. Formula installs CodexBarCLI as `codexbar` on PATH.
-cask "openusage"  # [ai-quota-tools] OpenUsage.app (openusage.ai) — menu bar + loopback HTTP :6736/v1/limits. After install: open app once; Settings → Command Line → Install for `openusage` CLI. Used by aiuse collectors.openusage (enabled by default).
 
 # === stack: paseo ===
 # Paseo (github.com/getpaseo/paseo), an agentic development environment: desktop app with its own daemon on 127.0.0.1:7263, published on the tailnet by roles/paseo_desktop.
@@ -67,4 +66,4 @@ brew "vectordotdev/brew/vector"  # [stayturgid] serverapp_vector
 brew "victoriametrics"  # [stayturgid] serverapp_victoriametrics
 cask "android-platform-tools"  # [stayturgid] control_node prereqs (ADB); live Brewfile records as cask
 
-# summary: 1 taps, 32 formulae, 4 casks across 5 stack(s)
+# summary: 1 taps, 32 formulae, 3 casks across 5 stack(s)

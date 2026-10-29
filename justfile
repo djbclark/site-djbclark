@@ -378,8 +378,8 @@ brew-diff *args:
 brew-lock *args:
     SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py {{ args }}
 
-# AI quota collectors for aiuse multi-source cross-checks (caut + OpenUsage).
-# OpenUsage: brew cask (fragment brew/fragments/ai-quota-tools.yml).
+# AI quota collector for aiuse multi-source cross-checks (caut). OpenUsage.app was
+# removed 2026-10-22 and again 2026-10-29: do not reinstall (registry/ports.yml).
 # caut: cargo install from GitHub (no Homebrew formula).
 install-caut:
     #!/usr/bin/env bash
@@ -390,15 +390,10 @@ install-caut:
     echo "caut → $(command -v caut || true)"
     caut --version
 
-install-openusage:
-    SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py -- brew install --cask openusage
-    @echo "Open OpenUsage once, then: Settings → Command Line → Install (for PATH CLI)."
-    @echo "aiuse also uses http://127.0.0.1:6736/v1/limits while the app is running."
-
-install-ai-quota-tools: install-openusage install-caut
+install-ai-quota-tools: install-caut
     @echo "Done. Verify: just ai-quota-status"
 
-# Full aiuse collector set: cswap, CodexBar, caut, OpenUsage, tokscale.
+# Full aiuse collector set: cswap, CodexBar, caut, tokscale.
 # Prefers repo packaging/install-deps.sh when aiuse checkout is present.
 aiuse_root := env_var_or_default("AIUSE_ROOT", env("HOME") + "/src/aiuse")
 
@@ -414,7 +409,6 @@ install-aiuse-deps:
     just install-codexbar || true
     just install-tokscale || true
     just install-caut
-    just install-openusage
     just aiuse-deps-status
 
 install-cswap:
@@ -449,13 +443,6 @@ install-tokscale:
 ai-quota-status:
     @echo "=== caut ==="
     @command -v caut >/dev/null && caut --version || echo "MISSING (just install-caut)"
-    @echo "=== openusage CLI ==="
-    @command -v openusage >/dev/null && echo "on PATH: $(command -v openusage)" || echo "CLI not on PATH (install from OpenUsage Settings → Command Line)"
-    @echo "=== OpenUsage.app ==="
-    @test -d /Applications/OpenUsage.app && echo "installed" || echo "missing (just install-openusage)"
-    @echo "=== OpenUsage HTTP :6736 ==="
-    @curl -fsS --max-time 2 http://127.0.0.1:6736/v1/limits >/dev/null 2>&1 \
-      && echo "responding" || echo "not responding (launch OpenUsage.app)"
 
 aiuse-deps-status:
     #!/usr/bin/env bash
@@ -467,9 +454,7 @@ aiuse-deps-status:
       echo "cswap:     $(command -v cswap || echo MISSING)"
       echo "codexbar:  $(command -v codexbar || echo MISSING)"
       echo "caut:      $(command -v caut || echo MISSING)"
-      echo "openusage: $(command -v openusage || echo 'CLI missing')"
       echo "tokscale:  $(command -v tokscale || echo MISSING)"
-      test -d /Applications/OpenUsage.app && echo "OpenUsage.app: installed" || echo "OpenUsage.app: MISSING"
     fi
     just ai-quota-status
 # Herdr server (homebrew.mxcl.herdr) — UDS-only agent multiplexer.
