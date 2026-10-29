@@ -3,8 +3,9 @@ name: teach
 description: >-
   Walk djbclark through today's one or two Claude Code things to install or
   start using (mods, skills, built-ins, already-installed plugins) from the
-  rollout checklist, one AskUserQuestion at a time in /steps fashion, doing each
-  item before the next and ticking it off. Use for /teach, "/teach N" for a
+  rollout checklist, one item at a time: a few paragraphs about the item, then
+  its own AskUserQuestion picklist, doing each item before the next and
+  ticking it off. Use for /teach, "/teach N" for a
   specific day, "/teach list", "what's today's mod", "teach me the next one",
   and when the 04:14 Hermes "run /teach" ping arrives.
 ---
@@ -28,7 +29,8 @@ missed calendar days never skip a number (four idle days, then the next day numb
 
 djbclark is choosing and learning, not reading a report. Same pacing as the `steps`
 skill: **one AskUserQuestion per call**, recommended option first, act on the
-answer before asking the next. Never dump the whole day as prose options.
+answer before asking the next. Never dump the whole day as prose options. One
+item at a time: a few paragraphs about that item, then its picklist (step 3).
 
 ## Procedure
 
@@ -46,18 +48,39 @@ answer before asking the next. Never dump the whole day as prose options.
    `Revisit one of today's items (Recommended)` / `Show today's names again` /
    `Done for today`. Revisiting re-demos or re-explains; it never re-ticks.
    `/teach N` still opens any named day on request.
-3. **`mode: new`: open with one question** naming the day and its one or two items:
-   options `Do both now (Recommended)` / `Only the install` / `Only the use half` /
-   `Skip today, show tomorrow's`. Skipping ticks nothing.
-4. **Install half** (a mod or plugin), in this order, each step narrated in one
-   line:
+3. **`mode: new`: present the day's items one at a time** (djbclark, 2026-10-28; the
+   combined "do both now" question is gone). Name the day and its items in one line,
+   then take the install item, then the use item, each through the **item
+   introduction** below. Each item gets its own picklist; skipping one never skips
+   the other. If djbclark answers a picklist with a question, answer it from the
+   README or source (not from memory), then ask the same picklist again. A day
+   where every item was skipped ticks nothing; ask once whether to show the next
+   day's items instead.
+
+   **Item introduction (before every item's first AskUserQuestion):** write a few
+   short paragraphs (three or four, no bullets), not a summary line:
+   (a) what it is and what it does, concretely;
+   (b) how it behaves in this setup: which sessions, tools or agents it covers and
+   which it cannot see (most delegation here goes through `acp-dispatch`, not
+   Agent-tool subagents), what it costs (context, a hook timeout, a refresh
+   poll), and how it overlaps or conflicts with what is already installed;
+   (c) the command or keystroke that starts it and where it draws.
+   Read the README and, for an install, the hook source first; never state scope,
+   limits or a command name from the checklist alone. Run or `rg` the docs for a
+   slash command before naming it (2026-10-28: the checklist said `/fullscreen`,
+   the command is `/tui fullscreen`, and fullscreen was already the default); fix
+   a wrong checklist entry when ticking the day. Then one picklist, recommended
+   option first, whose options are the four or three listed in step 4b or 5.
+4. **Install item** (a mod or plugin), in this order, each step narrated in one
+   line (do 4a before writing the introduction, so it reports what the code does):
    a. `gh repo view` the source (stars, last push); `claude plugin marketplace add`
       if the marketplace is new; `find` the plugin's files; `rg` its hooks for
       `child_process|execSync|spawn\(|fetch\(|writeFile|process\.env` and read
       anything that hits; `claude plugin validate <dir>`. Mods run unsandboxed as
       djbclark: a hit that is not obviously benign is a question, not a shrug.
-   b. One AskUserQuestion: `Install (Recommended)` / `Skip this one` / `Show me
-      the hook source first`.
+   b. The introduction (above), then one AskUserQuestion: `Install (Recommended)` /
+      `Skip this one` / `Show me the hook source first` (add `Install with <option>
+      changed` when the mod has a setting that matters, e.g. a timeout).
    c. `claude plugin install <name>@<marketplace>`; then
       `~/src/djbclark-ade/bin/self-slash "/reload-plugins"` (fires when the
       session goes idle, so say that) and name the slash command and where
@@ -65,9 +88,10 @@ answer before asking the next. Never dump the whole day as prose options.
       on their own only at ≥110–144 columns; name the command that opens one.
    d. If it can be demonstrated cheaply, do it: a Haiku `Explore` subagent for
       anything that watches subagents; a two-line edit for an edit watcher.
-5. **Use half** (something already present): say in three sentences what it is,
-   what it costs (context bar before/after for a plugin; nothing for a built-in),
-   and the one keystroke or command that starts it. Then one AskUserQuestion:
+5. **Use item** (something already present): the introduction (above; cost is the
+   context bar before/after for a plugin, nothing for a built-in), after checking
+   whether it is already on (`/tui fullscreen` answered "Already using the
+   fullscreen renderer"). Then one AskUserQuestion:
    `Try it now (Recommended)` / `Keep it, no demo` / `Disable or uninstall it` /
    `Later`. A plugin that was disabled for context cost (mattpocock-skills, adhd)
    is enabled only for the trial: `claude plugin enable`, `/reload-plugins`,
