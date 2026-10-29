@@ -71,7 +71,7 @@ stayturgid discovery excludes `site-private`, prints the selected path/source,
 and creates a missing private-companion directory without Git or secrets.
 
 Topology background:
-[stayturgid multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-third-repo-opssite-private).
+[stayturgid multi-site-topology.md §4.10](https://github.com/djbclark/stayturgid/blob/master/docs/architecture/multi-site-topology.md#410-the-site-repo-family-site-public-operator-and-site-private-operator).
 
 ## Where documentation goes
 
