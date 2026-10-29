@@ -26,7 +26,9 @@ file; the global `~/.agents/AGENTS.md` is at its 14,000-byte cap.
   install mcp-proxy-for-aws`, 2026-10-29), called directly in each TUI's config instead of
   the generated `uvx mcp-proxy-for-aws@latest`: one process of about 50 MB, not the `uv`
   wrapper plus Python pair (about 175 MB at start). It no longer re-resolves `@latest` on
-  launch, so upgrade it with `uv tool upgrade mcp-proxy-for-aws`. Each entry sets
+  launch; the nightly `brew-fast-upgrade` (03:10, `uv tool upgrade --all`) keeps it current,
+  or run `uv tool upgrade mcp-proxy-for-aws` by hand. A running agent keeps the old
+  binary until it restarts. Each entry sets
   `AWS_MCP_PROXY_PROFILES=aws-agent`; without it the server fails with
   `JSON-RPC error: -32602: Invalid request parameters("")`. Re-running
   `aws configure agent-toolkit` rewrites the entries back to `uvx`; redo both edits after it.
