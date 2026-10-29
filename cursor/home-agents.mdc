@@ -146,7 +146,9 @@ deployed revision. Heavy builds and `nix flake update` run on Forgejo CI, not on
 
 **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos (`ci/base` + `ci/run/**`,
 `scripts/github-*` wrappers); Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci`
-skill, item 6; djbclark 2026-10-19).
+skill, item 6; djbclark 2026-10-19). **All CI, in every project, is Linux-only: never add, wait on or count a
+macOS job or runner unless djbclark asks for it by name** (djbclark 2026-10-29;
+`memory/feedback_macos_ci_on_request_only.md`).
 
 ## Reply formatting — number every list
 
