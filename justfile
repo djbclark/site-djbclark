@@ -378,22 +378,9 @@ brew-diff *args:
 brew-lock *args:
     SITE_BREW_LOCK="{{ brew_lock }}" bin/brew_flock.py {{ args }}
 
-# AI quota collector for aiuse multi-source cross-checks (caut). OpenUsage.app was
-# removed 2026-10-22 and again 2026-10-29: do not reinstall (registry/ports.yml).
-# caut: cargo install from GitHub (no Homebrew formula).
-install-caut:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo install --locked --git https://github.com/Dicklesworthstone/coding_agent_usage_tracker
-    mkdir -p "${HOME}/.local/bin"
-    ln -sfn "${HOME}/.cargo/bin/caut" "${HOME}/.local/bin/caut"
-    echo "caut → $(command -v caut || true)"
-    caut --version
-
-install-ai-quota-tools: install-caut
-    @echo "Done. Verify: just ai-quota-status"
-
-# Full aiuse collector set: cswap, CodexBar, caut, tokscale.
+# Full aiuse collector set: cswap, CodexBar, tokscale. caut and OpenUsage.app are
+# deprecated and have no recipes (OpenUsage removed 2026-10-22 and 2026-10-29: do not
+# reinstall, registry/ports.yml).
 # Prefers repo packaging/install-deps.sh when aiuse checkout is present.
 aiuse_root := env_var_or_default("AIUSE_ROOT", env("HOME") + "/src/aiuse")
 
@@ -408,7 +395,6 @@ install-aiuse-deps:
     just install-cswap || true
     just install-codexbar || true
     just install-tokscale || true
-    just install-caut
     just aiuse-deps-status
 
 install-cswap:
@@ -440,10 +426,6 @@ install-tokscale:
     chmod +x "${HOME}/.local/bin/tokscale"
     echo "tokscale → ${HOME}/.local/bin/tokscale"
 
-ai-quota-status:
-    @echo "=== caut ==="
-    @command -v caut >/dev/null && caut --version || echo "MISSING (just install-caut)"
-
 aiuse-deps-status:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -453,10 +435,8 @@ aiuse-deps-status:
     else
       echo "cswap:     $(command -v cswap || echo MISSING)"
       echo "codexbar:  $(command -v codexbar || echo MISSING)"
-      echo "caut:      $(command -v caut || echo MISSING)"
       echo "tokscale:  $(command -v tokscale || echo MISSING)"
     fi
-    just ai-quota-status
 # Herdr server (homebrew.mxcl.herdr) — UDS-only agent multiplexer.
 # Registry: paths.yml brew_services + ~/.config/herdr/**; ports.yml UDS note.
 # OliveTin: olivetin/user-actions.yaml (user_herdr_*); reproject with just site-sync.
