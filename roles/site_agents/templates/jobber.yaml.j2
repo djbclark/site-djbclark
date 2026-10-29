@@ -28,11 +28,11 @@ jobs:
     notifyOnError: [*programSink]
     notifyOnFailure: [*programSink, *filesystemSink]
 
-  # Keep the two tool-managed OpenCode plugins at the v2 module shape that
-  # OpenCode 2 requires. `openusage integrations upgrade opencode` and
-  # `rtk init -g --opencode` rewrite those files from still-v1 embedded
-  # templates and silently break the plugins; this restores them only when the
-  # v2 shape is missing, and retires itself once both tools ship v2 upstream.
+  # Keep the tool-managed OpenCode plugin (rtk) at the v2 module shape that
+  # OpenCode 2 requires. `rtk init -g --opencode` rewrites the file from a
+  # still-v1 embedded template and silently breaks the plugin; this restores it
+  # only when the v2 shape is missing, and retires itself once rtk ships v2
+  # upstream. OpenUsage was uninstalled 2026-10-29 and is no longer guarded.
   # 03:45 = after brew-fast-upgrade (03:10, typically ~12 min) and
   # mac-dns-apply (03:30). Source: djbclark-ade/bin/opencode-plugin-guard,
   # notes in djbclark-ade/docs/opencode-plugin-v2.md.
