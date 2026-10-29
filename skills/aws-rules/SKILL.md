@@ -36,6 +36,15 @@ file; the global `~/.agents/AGENTS.md` is at its 14,000-byte cap.
   `AWS_MCP_PROXY_PROFILES` in every MCP config, restart the TUI.
 - 24 default AWS skills were installed by `aws configure agent-toolkit` (`aws-iam`,
   `aws-cdk`, `aws-storage`, ...); more: `aws agent-toolkit search-skills --search-query TEXT`.
+- **`aws-agent` is the account root user, on purpose** (operator, 2026-10-29): the browser
+  login bound the profile to root, and root stays. An IAM policy cannot deny root, and the
+  account is in no AWS Organization, so no SCP either.
+- **Bedrock inference access is OFF since 2026-10-29** (operator ruling; gating to be
+  decided in [issue 141](https://github.com/djbclark/djbclark-ade/issues/141)): the Bedrock
+  API key's IAM user `BedrockAPIKey-hwut` has its service credential `Inactive` and an inline
+  `Deny bedrock:*` policy, so the vault token `AWS_BEARER_TOKEN_BEDROCK` answers 403. Root
+  (and so `aws-mcp` and the `aws-agent` profile) can still call Bedrock; do not invoke Bedrock
+  models unless asked. Re-enable steps are in the issue.
 - Re-sync this file: re-fetch the upstream URL above and replace the rules section below.
 
 ## Precedence
