@@ -29,8 +29,8 @@ this same window would stall on the command that started it.
 
 ## Which client
 
-The persistent BarnOwl is the tmux session `barnowl`
-(`tmux new-session -A -s barnowl barnowl`). `bo` talks only to that session.
+The persistent BarnOwl is the tmux session `barnowl`, started and repaired by
+`bo-a` (`bin/bo-a`, linked into `~/.local/bin`; the operator runs it). `bo` talks only to that session.
 A second `barnowl` process may be sitting on another tty. Do not type into it.
 
 `zctl retrieve` fails here (`No such file or directory while finding
