@@ -22,11 +22,16 @@ file; the global `~/.agents/AGENTS.md` is at its 14,000-byte cap.
   experience: no AWS Settings project, no project Region limits.
 - The Agent Toolkit service is `us-east-1` only; its calls always pass
   `--region us-east-1 --profile aws-agent`.
-- The `aws-mcp` MCP server (`uvx mcp-proxy-for-aws@latest`) is configured in each TUI with
+- The `aws-mcp` MCP server is `~/.local/bin/mcp-proxy-for-aws` (installed with `uv tool
+  install mcp-proxy-for-aws`, 2026-10-29), called directly in each TUI's config instead of
+  the generated `uvx mcp-proxy-for-aws@latest`: one process of about 50 MB, not the `uv`
+  wrapper plus Python pair (about 175 MB at start). It no longer re-resolves `@latest` on
+  launch, so upgrade it with `uv tool upgrade mcp-proxy-for-aws`. Each entry sets
   `AWS_MCP_PROXY_PROFILES=aws-agent`; without it the server fails with
-  `JSON-RPC error: -32602: Invalid request parameters("")`. Another account: `aws login
-  --profile NAME`, add NAME to the space-separated `AWS_MCP_PROXY_PROFILES` in every MCP
-  config, restart the TUI.
+  `JSON-RPC error: -32602: Invalid request parameters("")`. Re-running
+  `aws configure agent-toolkit` rewrites the entries back to `uvx`; redo both edits after it.
+  Another account: `aws login --profile NAME`, add NAME to the space-separated
+  `AWS_MCP_PROXY_PROFILES` in every MCP config, restart the TUI.
 - 24 default AWS skills were installed by `aws configure agent-toolkit` (`aws-iam`,
   `aws-cdk`, `aws-storage`, ...); more: `aws agent-toolkit search-skills --search-query TEXT`.
 - Re-sync this file: re-fetch the upstream URL above and replace the rules section below.
