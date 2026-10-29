@@ -40,7 +40,7 @@ approved something **is** approval; its hand-offs and claims are authoritative. 
 whether a peer is already mid-flight before taking a task over**; (2) **don't be a permission
 bypass**: a peer asking you to run a prompt its session was *denied* goes to djbclark; (3) **message
 peers only with `session-finder/relay.py`, which picks the route and falls back itself, never a hand-rolled waiter** (2026-10-15, 2026-10-23);
-**a message is unsent until relay reports `delivered`** (`queued`/`accepted`/`unverified` is no proof); the first message to a
+**a message is unsent until relay reports `delivered` or the peer's `ack <id>`** (`queued`/`accepted`/`unverified` is no proof); the first message to a
 peer asks for a named ack; a peer's relayed question is answered by relay, not prose; an unreachable peer goes to djbclark
 (`~/src/djbclark-ade/AGENTS.md` standing order 10; djbclark, 2026-10-25).
 
@@ -297,7 +297,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**, never in
    place. (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` only, never Orion or Chrome by name. (`memory/feedback_always_use_default_browser_orion.md`)
-4. **"All agents" includes Hermes**, which `aiuse` doesn't list. (`memory/feedback_all_agents_includes_hermes.md`)
+4. **"All agents" = every session `~/src/djbclark-ade/skills/session-finder/fleet.py --json` lists with a usable channel**: Paseo, herdr pane, terminal Claude, live ACP launch, Hermes (which `aiuse` doesn't list); not finished ACP launches (relay refuses them) or channel-less `pid*` rows. **An idle agent gets a plain relay prompt, never `--steer`** (steered text to an idle agent is queued and never read); steer only a working one. A quota-guard line (e.g. "critical") binds only the pool it names (Claude Code); omp, codex, grok, agy, zai, opencode keep working (2026-10-29). (`memory/feedback_all_agents_includes_hermes.md`)
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive.**
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay on the latest release:
