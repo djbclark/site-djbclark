@@ -17,9 +17,15 @@ you do not already know from `~/src/barnowl/commands.c` (`OWLCMD_*` name and
 the summary string). That file is the command list. BarnOwl source is
 `~/src/barnowl` (github.com/barnowl/barnowl, 1.10).
 
-From a shell, `g list my subs` is this skill. Inside Grok, `/barnowl`, `/g`,
+From a shell, `g list my subs` is this skill. It runs Grok on `grok-4.5` at
+low effort, the weakest model available. Inside Grok, `/barnowl`, `/g`,
 and a sentence such as "list my subscriptions" are the same request.
 `subs` means subscriptions.
+
+At BarnOwl's `:` prompt, `g` is the command in `g-cmd.pl`, loaded from
+`~/.owl/startup`. `:g show my subs` opens the live subscription list in the
+popup. Leave every other `:g` request for the shell command `g`. Grok driving
+this same window would stall on the command that started it.
 
 ## Which client
 
