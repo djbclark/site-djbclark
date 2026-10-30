@@ -12,9 +12,3 @@
 
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.herdr-wrapper/bin:$PATH"
-
-# Same default as ~/.bashrc tier 1. zsh is not the active shell; keep this
-# so a stray zsh still finds Superset notify hooks.
-if [ -z "${SUPERSET_HOME_DIR-}" ] && [ -d "$HOME/.superset" ]; then
-  export SUPERSET_HOME_DIR="$HOME/.superset"
-fi

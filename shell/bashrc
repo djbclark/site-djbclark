@@ -348,14 +348,6 @@ fi
 
 export COMPOSIO_INSTALL_DIR="$HOME/.composio"
 
-# Superset desktop app home. Agent notify hooks (Grok/Claude/Codex) call
-# $SUPERSET_HOME_DIR/hooks/notify.sh. A live Superset terminal injects this;
-# outside one, default to ~/.superset so hooks still run. Do not override
-# if already set -- a pane inside the app wins.
-if [ -z "${SUPERSET_HOME_DIR-}" ] && [ -d "$HOME/.superset" ]; then
-  export SUPERSET_HOME_DIR="$HOME/.superset"
-fi
-
 # 1Password SSH agent.
 export SSH_AUTH_SOCK=~/.1password/agent.sock
 
