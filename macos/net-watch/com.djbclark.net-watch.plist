@@ -9,7 +9,7 @@
   <key>Label</key><string>com.djbclark.net-watch</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/djbclark/ops/site-djbclark/bin/net-watch-tick</string>
+    <string>/Users/djbclark/ops/site-public-djbclark/bin/net-watch-tick</string>
     <string>tick</string>
   </array>
   <key>EnvironmentVariables</key>

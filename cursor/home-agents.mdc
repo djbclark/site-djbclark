@@ -1,18 +1,18 @@
 ---
-description: djbclark home-directory operating rules (canonical copy at ~/ops/site-djbclark/home-agents.md)
+description: djbclark home-directory operating rules (canonical copy at ~/ops/site-public-djbclark/home-agents.md)
 alwaysApply: true
 ---
 
-# Notes for AI sessions working in the home directory
+# Notes for AI sessions in the home directory
 
 This is djbclark's home directory (`~`), not a git repo itself. The projects are `stayturgid`,
-`site-djbclark`, and `site-private` (this file lives in `site-djbclark`; `site-private/home-agents.md`
+`site-public-djbclark`, and `site-private-djbclark` (this file lives in `site-public-djbclark`; `site-private-djbclark/home-agents.md`
 links to it) — each with its own `AGENTS.md`.
 
-Canonical source: `~/ops/site-djbclark/home-agents.md`, which wins on any conflict. This is its
+Canonical source: `~/ops/site-public-djbclark/home-agents.md`, which wins on any conflict. This is its
 condensed copy for `cursor-agent`, which reads `~/.cursor/rules/*.mdc` (frontmatter + body), not a
 symlinked `AGENTS.md`/`CLAUDE.md`, so it is re-synced by hand. It lives in git at
-`site-djbclark/cursor/home-agents.mdc` (via `site-private/cursor/`); `~/.cursor/rules/home-agents.mdc`
+`site-public-djbclark/cursor/home-agents.mdc` (via `site-private-djbclark/cursor/`); `~/.cursor/rules/home-agents.mdc`
 is a symlink to it.
 
 **Only Claude Opus 5.5 or higher edits this file or `home-agents.md`** (djbclark, 2026-10-24): any edit,
@@ -55,11 +55,11 @@ ends**: `--detach --no-wait`, then wait on the printed `rearm` command in the ba
 **Agent-tool sub-agents:** paste the output of `acp-dispatch footer --report
 <scratchpad>/<name>-report.md` into the prompt verbatim (never `$(…)`); read that file, never the
 final message (cut at 4,000 characters). `acp-dispatch check <dir|report>...` lists no-report and
-BLOCKED slices; put them in every handoff. Why: `site-private/memory/reference_agent_rules_ops_housekeeping.md`.
+BLOCKED slices; put them in every handoff. Why: `site-private-djbclark/memory/reference_agent_rules_ops_housekeeping.md`.
 
 ## Reading `aiuse` quota numbers (2026-10-03)
 
-**`used_percent` is the share CONSUMED: 100 means exhausted.** Decide from `remaining_percent`; write
+**`used_percent` is the share CONSUMED; 100 = exhausted.** Decide from `remaining_percent`; write
 "100% used / 0% left", never a bare percentage. Before each batch run `aiuse --available --json
 [--live]` (exit 3 = nothing usable), **always `--json`**, stderr kept out (the human table changes,
 2026-10-17). A 429 names a pool (one TUI can hold several by model family), not the vendor: try its
@@ -73,13 +73,13 @@ One shared MCP server, `http://127.0.0.1:18796/mcp`; never register a per-client
 **Cursor cannot reach it** (no basic-memory tools despite `~/.cursor/mcp.json`): use the `bm` CLI.
 **If it is down, fix it (2026-10-05):** `launchctl kickstart -k gui/$(id -u)/com.djbclark.basic-memory-mcp`.
 
-1. **`main`** is the shared default: `~/ops/site-private/memory`, git-tracked (a write is a commit);
-   notes follow `site-private/memory/schemas/`.
+1. **`main`** is the shared default: `~/ops/site-private-djbclark/memory`, git-tracked (a write is a commit);
+   notes follow `site-private-djbclark/memory/schemas/`.
 2. **`cursor-memory`** (`~/agent-memory/cursor`, outside git) is Cursor's private pool: name it
    explicitly, never the default; no `search_all_projects: true`.
 
 **A semantic search result is not a match**: answer "does X exist?" with `find` or an exact
-`read_note`. Detail: `site-private/memory/basic-memory/README.md`.
+`read_note`. Detail: `site-private-djbclark/memory/basic-memory/README.md`.
 
 ## Where work happens — claimed task workspaces; `~/ops` plain `master` for now (2026-10-25)
 
@@ -88,7 +88,7 @@ or a cow pasture), one writer at a time, never in a shared checkout, which is on
 workspace, `git status` and `git log -3`, stop on an unresolved merge. Exceptions: read-only inspection, a promoter's
 `--ff-only`, installs on the real target (`~/src/djbclark-ade/AGENTS.md` order 9; djbclark, 2026-10-25;
 `memory/feedback_all_work_in_claimed_workspaces.md`). **Transitional, until the ops-promotion pilot passes:** edit
-`~/ops/{stayturgid,site-djbclark,site-private}` in place on `master`. Everywhere, **commit and push your own changes as each
+`~/ops/{stayturgid,site-public-djbclark,site-private-djbclark}` in place on `master`. Everywhere, **commit and push your own changes as each
 unit lands, unasked** (2026-10-12); default `git-commit-own MSG <paths>`, never a bare `git commit` (it takes what another agent
 staged too, 2026-10-18; its pre-commit stashes every unstaged change in the tree for the hook run and clobbers parallel agents,
 2026-10-24). In `~/ops`, a file also holding another agent's edits: stage only your hunks (`git apply --cached`), then
@@ -101,7 +101,7 @@ a vendored copy, a local patch)? In the same session: search its issues and PRs 
 change, consult a `frontier` agent if it helps, then open the issue/PR upstream, so upgrades need no merges
 (2026-10-24, `memory/feedback_upstream_local_changes.md`).
 
-**Data, committed in place:** `site-private/memory/`, `site-djbclark/research/` (public). `git pull
+**Data, committed in place:** `site-private-djbclark/memory/`, `site-public-djbclark/research/` (public). `git pull
 --rebase` before editing, append to `MEMORY.md` (never rewrite it), commit exact paths, push; never
 `commit -a` or `pull --autostash`. Never hand-edit the Codex summaries
 (`memory/codex/memory_summary.md`, `raw_memories.md`): drop notes in `memory/codex/extensions/ad_hoc/`.
@@ -109,23 +109,23 @@ change, consult a `frontier` agent if it helps, then open the issue/PR upstream,
 `git push`; behind: wait or ask.
 
 **A stopped or `launchctl`-disabled service may be deliberate** (2026-10-11): check
-`site-private/memory/` before "repairing" it; never clear the override (`launchctl load
+`site-private-djbclark/memory/` before "repairing" it; never clear the override (`launchctl load
 -w`/`bootstrap` does); fix any role that says otherwise rather than re-enabling the unit.
 
 ## `~/s` is a view — reference `~/src`, never `~/s` (2026-10-06)
 
 **Every path an agent writes, runs, records or hands on is `~/src/<name>` or your claimed workspace, never `~/s/...`** (a
 generated, locked symlink farm); never write to or start a session in `~/s`. After adding or removing
-a top-level `~/src` entry run `just -f ~/s/justfile` (`site-djbclark/tools/s-farm/AGENTS.md`).
+a top-level `~/src` entry run `just -f ~/s/justfile` (`site-public-djbclark/tools/s-farm/AGENTS.md`).
 
 ## Ask where a new thing goes (2026-10-06)
 
 **Before creating a new tool, script, skill or doc in an ops repo, ask djbclark which repo it belongs
-in**, naming anything private. `site-private` is private-only (hook-enforced; no `--no-verify`); the
-rest is public `site-djbclark`. **Exception, no question: a new agent skill goes in
+in**, naming anything private. `site-private-djbclark` is private-only (hook-enforced; no `--no-verify`); the
+rest is public `site-public-djbclark`. **Exception, no question: a new agent skill goes in
 `~/src/djbclark-ade/skills/<name>/`** (djbclark, 2026-10-09; link it with
 `~/src/djbclark-ade/bin/skill-everywhere <name>`); only a private skill (`1password`) goes in
-`site-private/skills/`. (`memory/feedback_ask_where_new_things_go.md`)
+`site-private-djbclark/skills/`. (`memory/feedback_ask_where_new_things_go.md`)
 
 ## MIT / SIPB / Athena work lives on forgejo.mit.edu (2026-10-16)
 
@@ -232,14 +232,14 @@ URL, never `repo#N` (2026-10-17); script notices too, not macOS notifications.
 
 **Asked for periodic updates ("keep me posted")? Use a script, never a recurring model prompt**
 (CronCreate, `/loop`): each firing is a full model turn that re-reads the whole conversation and usually
-finds nothing new. Use or extend `~/ops/site-private/bin/fleet-watch` (no tokens, notifies on change) or
+finds nothing new. Use or extend `~/ops/site-private-djbclark/bin/fleet-watch` (no tokens, notifies on change) or
 write a similar script. **Allowed:** a one-shot future check, and a recurring wake of an agent that no
 script or event can wake, when every firing has real work to do (clarified 2026-10-23).
 (`memory/feedback_periodic_updates_by_script.md`)
 
 ## Heavy builds and tests: run them through `bg` (2026-10-04)
 
-**Run builds and tests (pytest, tox, nox, `run_tests*.py`) via `~/ops/site-private/bin/bg`** (**always
+**Run builds and tests (pytest, tox, nox, `run_tests*.py`) via `~/ops/site-private-djbclark/bin/bg`** (**always
 the full path, bare `bg` is the shell builtin**), in the background. **CI first** (2026-10-18): `bg`
 refuses (exit 3) a repo with no `load-watch ci decide DIR ci|local` decision. It never starts
 "anyway": it waits up to 6 h for load and a slot, then exits 75, and pings djbclark when a run goes
@@ -250,9 +250,9 @@ throttle or SIGSTOP another session's processes.
 **Gradle: one build at a time, machine-wide (2026-10-06).** Check `pgrep -fl
 'GradleWrapperMain|gradle-wrapper.jar'` first; "Waiting for the machine-wide Gradle slot" means
 queued, not hung: don't kill or retry it. Profiles: default `low`; `night` only with an expiry
-(`bin/gradle-limits set night --until 07:00`); don't override with `--max-workers` or `-Dorg.gradle.*`. Detail: site-djbclark `docs/gradle-limits.md`.
+(`bin/gradle-limits set night --until 07:00`); don't override with `--max-workers` or `-Dorg.gradle.*`. Detail: site-public-djbclark `docs/gradle-limits.md`.
 
-**Claim a dev-server port in `site-djbclark/registry/ports.yml` before binding it; drive test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
+**Claim a dev-server port in `site-public-djbclark/registry/ports.yml` before binding it; drive test browsers headless** (`memory/feedback_claim_ports_headless_browser.md`).
 
 ## Waiting on background work, and reading results
 
@@ -269,7 +269,7 @@ from a pipeline: write the file, check `[ -s f ]` first. (`memory/feedback_exit_
 before `cat`/`rg`/Grep for **code discovery**; plain text search is right for prose and config. Relay
 graft's "tokens saved ≈ N" banner as a total. `token-savior` and graft's MCP registration were removed
 2026-10-18. `rtk` owns Bash output compaction: **never run `ts init`**. A no-hit `graft grep`: retry
-with the bare symbol or a short literal. Defects: `site-djbclark/docs/tooling-policy.md`.
+with the bare symbol or a short literal. Defects: `site-public-djbclark/docs/tooling-policy.md`.
 
 ## Run commands yourself (2026-10-06)
 
@@ -311,7 +311,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 
 ## Clipboard — never bare `pbcopy` (2026-10-03)
 
-**"copy to clipboard"/"pbcopy" means `~/ops/site-private/bin/clip`**, never bare `pbcopy` (agent shells
+**"copy to clipboard"/"pbcopy" means `~/ops/site-private-djbclark/bin/clip`**, never bare `pbcopy` (agent shells
 have `LC_CTYPE=C`); human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to
 hand to another agent also goes through `clip`, unasked** (2026-10-06). Save and restore the
 pasteboard around tests.
@@ -324,10 +324,10 @@ the directory. (`memory/feedback_reveal_files_in_finder.md`)
 
 ## Long documents — query the book KB, never paste the book (2026-10-03)
 
-Books: `~/ops/site-private/bin/book-kb`, cheapest first (`book-kb query '<regex>' <slug>` is exact,
+Books: `~/ops/site-private-djbclark/bin/book-kb`, cheapest first (`book-kb query '<regex>' <slug>` is exact,
 then `toc`, then one chapter); a semantic hit is not a match. **Never read `~/kb/raw/<slug>.md`.**
 Query `learning-cfengine` before writing or reviewing CFEngine policy. Detail:
-`site-private/docs/book-kb-vs-book-to-skill.md`.
+`site-private-djbclark/docs/book-kb-vs-book-to-skill.md`.
 
 ## Never waste spent tokens without asking (2026-09-30)
 
@@ -341,7 +341,7 @@ ask djbclark whether to fix it, last in the queue** (2026-10-24).
 **Every agent, every TUI, however launched, runs in its yolo-or-equivalent mode**; `--perm deny` only
 for a security-sensitive slice (prompt-injection exposure; 2026-10-15; cursor cannot deny at all,
 acp-run refuses it). A read-only review runs yolo with a read-only brief and a diff check. Yolo never skips hooks, file-ownership rules, reserve pools, or asking before hard-to-reverse or
-outward-facing actions. Detail: `site-private/memory/feedback_yolo_default_for_all_agents.md`.
+outward-facing actions. Detail: `site-private-djbclark/memory/feedback_yolo_default_for_all_agents.md`.
 
 ## Session logs (Tier 1 handoff pointers)
 
@@ -351,8 +351,8 @@ it. Protocol: `~/src/djbclark-ade/skills/session-handoff/SKILL.md`.
 
 ## Three-way memory/docs policy (start at each repo's AGENTS.md)
 
-No single canonical copy — read all three: `stayturgid/AGENTS.md`, `site-djbclark/AGENTS.md`,
-`site-private/AGENTS.md`.
+No single canonical copy — read all three: `stayturgid/AGENTS.md`, `site-public-djbclark/AGENTS.md`,
+`site-private-djbclark/AGENTS.md`.
 
 ## Research outward first (2026-10-05)
 

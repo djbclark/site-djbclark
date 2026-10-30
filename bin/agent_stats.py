@@ -49,10 +49,10 @@ PROJECTS = Path.home() / ".claude/projects"
 # moving specialised material into skills, which load on demand.
 WATCHED_FILES: list[tuple[str, int]] = [
     (str(Path.home() / "src/djbclark-ade/AGENTS.md"), 200),
-    (str(Path.home() / "ops/site-private/home-agents.md"), 200),
-    (str(Path.home() / "ops/site-djbclark/AGENTS.md"), 200),
+    (str(Path.home() / "ops/site-private-djbclark/home-agents.md"), 200),
+    (str(Path.home() / "ops/site-public-djbclark/AGENTS.md"), 200),
     (str(Path.home() / "ops/stayturgid/AGENTS.md"), 200),
-    (str(Path.home() / "ops/site-private/AGENTS.md"), 200),
+    (str(Path.home() / "ops/site-private-djbclark/AGENTS.md"), 200),
     (str(Path.home() / ".hermes/memories/MEMORY.md"), 400),
     (str(Path.home() / ".hermes/memories/USER.md"), 200),
 ]

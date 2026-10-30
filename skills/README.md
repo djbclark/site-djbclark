@@ -6,7 +6,7 @@ chained symlinks:
 
 - **Public skills** (the default): `~/src/djbclark-ade/skills/<name>/`
   (git: github.com/djbclark/djbclark-ade). Create, edit and commit them there.
-- **Private skills**: `~/ops/site-private/skills/<name>/` (real directory,
+- **Private skills**: `~/ops/site-private-djbclark/skills/<name>/` (real directory,
   listed in `.githooks/private-paths` there). Only `1password` today.
 
 `~/src/djbclark-ade/bin/skill-everywhere <name>` links a skill into every

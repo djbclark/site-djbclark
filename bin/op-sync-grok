@@ -15,7 +15,7 @@ target="Shared with Grok Bot"
 dry=0
 [[ ${1:-} == -n || ${1:-} == --dry-run ]] && { dry=1; shift; }
 # The list names accounts and items, so it stays in site-private.
-list="${1:-${OPS_ROOT:-$HOME/ops}/site-private/1password/sync-to-grok.list}"
+list="${1:-${OPS_ROOT:-$HOME/ops}/site-private-djbclark/1password/sync-to-grok.list}"
 
 # Strip identity/metadata so the JSON works as a create/edit template.
 strip='del(.id, .vault, .version, .created_at, .updated_at, .last_edited_by, .additional_information)'

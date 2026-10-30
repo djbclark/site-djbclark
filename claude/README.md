@@ -12,7 +12,7 @@ toolchain repo and is linked **directly** into `~/.claude/` — no chains:
   session-finder-all, skillopt-sleep, steps), `claude/hooks/*.py|sh` and
   `claude/hooks/handoff-tools/` → `~/src/djbclark-ade/claude/…`
 - skills → `~/src/djbclark-ade/skills/<name>` (private: `1password` stays
-  in `~/ops/site-private/skills/`)
+  in `~/ops/site-private-djbclark/skills/`)
 
 The old hook-registration stanzas documented here previously now live in
 `~/src/djbclark-ade/docs/` (see `docs/skills.md`,

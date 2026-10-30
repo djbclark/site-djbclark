@@ -9,7 +9,7 @@
 # this repository, created on first run, so a reply is reported once.
 #
 # Background: ~/src/Thaw/docs/handoffs/ (handoff standalone-7a4f) and
-# ~/ops/site-private/memory/reference_thaw_3x_private_thaw_next_repo.md.
+# ~/ops/site-private-djbclark/memory/reference_thaw_3x_private_thaw_next_repo.md.
 #
 # Setup: TELEGRAM_BOT_TOKEN must be set as a repository secret (shared
 # with the other monitor-*.yml workflows).

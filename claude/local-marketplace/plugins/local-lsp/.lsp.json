@@ -56,7 +56,7 @@
     }
   },
   "kotlin": {
-    "command": "/Users/djbclark/ops/site-djbclark/bin/kotlin-lsp-lite",
+    "command": "/Users/djbclark/ops/site-public-djbclark/bin/kotlin-lsp-lite",
     "args": [
       "--stdio"
     ],

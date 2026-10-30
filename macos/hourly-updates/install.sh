@@ -8,4 +8,4 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 label="com.djbclark.hourly-updates"
 cp "$here/$label.plist" "$HOME/Library/LaunchAgents/$label.plist"
-exec "$HOME/ops/site-djbclark/bin/launchd_reload.sh" "$label"
+exec "$HOME/ops/site-public-djbclark/bin/launchd_reload.sh" "$label"

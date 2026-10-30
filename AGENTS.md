@@ -16,7 +16,7 @@
 
 > **Session logs (Tier 1 handoff pointer, 2026-10-09):** at session start, read
 > `~/.local/state/handoffs/site-djbclark/<task>/SESSION_LOG.md` (`<task>` is `ops` in
-> the `~/ops/site-djbclark` checkout, else the worktree's directory name; its
+> the `~/ops/site-public-djbclark` checkout, else the worktree's directory name; its
 > `redirect:` key names the canonical `chains/<chain-key>/SESSION_LOG.md`).
 > Compare each listed workspace's `head_sha` to `git rev-parse HEAD`, then state
 > a resume plan before acting. A missing pointer is a fresh start. Only the
@@ -56,7 +56,7 @@ absolute GitHub URL.
   [`${OPS_ROOT:-~/ops}/stayturgid/AGENTS.md`](https://github.com/djbclark/stayturgid/blob/master/AGENTS.md)
   (`https://github.com/djbclark/stayturgid/blob/master/AGENTS.md`).
 - Private / Mac-wide / not-for-public extras →
-  [`${OPS_ROOT:-~/ops}/site-private/AGENTS.md`](https://github.com/djbclark/site-private/blob/master/AGENTS.md)
+  [`${OPS_ROOT:-~/ops}/site-private-djbclark/AGENTS.md`](https://github.com/djbclark/site-private/blob/master/AGENTS.md)
   (`https://github.com/djbclark/site-private/blob/master/AGENTS.md`).
 
 **Never commit passwords or secrets** (same rule as the other two). IPs and
@@ -107,7 +107,7 @@ Topology background:
 | [`registry/ports.yml`](registry/ports.yml), [`registry/paths.yml`](registry/paths.yml)     | Port/path allocation authorities — check before adding either                                                                  | As allocations change                   |
 | [`human/`](human/)                                                                         | Operator-only tasks, credentials checklists, decision records                                                                  | As needed                               |
 | `${OPS_ROOT:-~/ops}/stayturgid` (sibling)                                                  | Public product — code, fleet conventions, product policy slice                                                                 | N/A (other repo)                        |
-| `${OPS_ROOT:-~/ops}/site-private` (sibling)                                                | Private/generic companion — private policy slice + Claude generic memory                                                       | N/A (other repo)                        |
+| `${OPS_ROOT:-~/ops}/site-private-djbclark` (sibling)                                                | Private/generic companion — private policy slice + Claude generic memory                                                       | N/A (other repo)                        |
 
 ## Conventions
 
@@ -161,7 +161,7 @@ inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
 
 `research/` holds research/plan document packages and is **live data, not
 code**, like `site-private/memory/`. Commit changes to it in place on
-`master` in `~/ops/site-djbclark`: `git pull --rebase` first, make one
+`master` in `~/ops/site-public-djbclark`: `git pull --rebase` first, make one
 research-only commit, push at once, leave the tree clean. Since 2026-08-23 the
 rest of this repo is edited the same way ("Where work happens" in
 `home-agents.md`); the old release-flow exemption, the `DATA_DIRS` mapping in
@@ -192,7 +192,7 @@ raw API calls. The `token-savior` MCP server was removed 2026-10-18 (0 calls in
 
 ## Multi-Agent Protocol
 
-Work in `~/ops/site-djbclark` in place on `master` ("Where work happens" in
+Work in `~/ops/site-public-djbclark` in place on `master` ("Where work happens" in
 `home-agents.md`): `git pull --rebase` before writing, commit your own changes,
 push at opportune moments, and leave nothing of yours uncommitted. If another
 agent or the operator has unstaged edits in the checkout, never stash, add or
@@ -210,7 +210,7 @@ djbclark-ade, see below), `shell/`, `macos/`,
 **2026-10-14 skill chain collapse:** skills no longer route through the ops
 repos at all. Every agent TUI links its skills dir directly at
 `~/src/djbclark-ade/skills/<name>` (public) or
-`~/ops/site-private/skills/<name>` (private: `1password`). The `skills/`
+`~/ops/site-private-djbclark/skills/<name>` (private: `1password`). The `skills/`
 symlink layer here and in `site-private` was retired; `claude/agents`,
 `claude/commands`, `claude/hooks` and `zcode/commands` moved to
 `~/src/djbclark-ade/claude/` and `~/src/djbclark-ade/zcode/`. Only
@@ -277,9 +277,9 @@ blocks. **Before writing or reviewing CFEngine policy** — promise semantics,
 `edit_line`, bundle/body syntax, class expressions, normal ordering, testing —
 query it rather than relying on recall:
 
-- `~/ops/site-private/bin/book-kb query '<regex>' learning-cfengine` — exact
+- `~/ops/site-private-djbclark/bin/book-kb query '<regex>' learning-cfengine` — exact
   match, ~0.5–5k tokens. **This is what proves a term is or is not in the book.**
-- `~/ops/site-private/bin/book-kb toc learning-cfengine` — ~2.5k-token chapter
+- `~/ops/site-private-djbclark/bin/book-kb toc learning-cfengine` — ~2.5k-token chapter
   index; then read one chapter (~1.2k median). Add `--deep` for `file:line`
   anchors to every sub-heading.
 - basic-memory `search_notes(project="books", query=…)` — semantic recall when

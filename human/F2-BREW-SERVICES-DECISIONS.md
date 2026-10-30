@@ -56,7 +56,7 @@ brew uninstall mariadb
 ## After any change
 
 ```bash
-cd ${OPS_ROOT:-~/ops}/site-djbclark
+cd ${OPS_ROOT:-~/ops}/site-public-djbclark
 just brew-services-audit
 bin/registry_lint.py
 # compare listeners before/after; update ledger if a kill was executed

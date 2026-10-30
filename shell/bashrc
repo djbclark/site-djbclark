@@ -772,8 +772,8 @@ fi
 # matches open an fzf list). Outside ~/s it defines nothing. Kept after mise
 # because it appends a prompt hook. Detail: site-djbclark/tools/s-farm.
 
-if [ -r "${OPS_ROOT:-$HOME/ops}/site-djbclark/tools/s-farm/shell-init.bash" ]; then
-  . "${OPS_ROOT:-$HOME/ops}/site-djbclark/tools/s-farm/shell-init.bash"
+if [ -r "${OPS_ROOT:-$HOME/ops}/site-public-djbclark/tools/s-farm/shell-init.bash" ]; then
+  . "${OPS_ROOT:-$HOME/ops}/site-public-djbclark/tools/s-farm/shell-init.bash"
 fi
 
 # cow shell integration (v3)

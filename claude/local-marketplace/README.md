@@ -8,7 +8,7 @@ from the official `rust-analyzer-lsp` / `clangd-lsp` plugins.
 Install (from any machine, after `brew install basedpyright marksman gopls
 typescript-language-server taplo kotlin-lsp`):
 
-    claude plugin marketplace add ~/ops/site-private/claude/local-marketplace
+    claude plugin marketplace add ~/ops/site-private-djbclark/claude/local-marketplace
     claude plugin install local-lsp@local     # then /reload-plugins
 
 Notes:

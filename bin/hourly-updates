@@ -25,7 +25,7 @@ dir="${1:-$here/hourly-updates.d}"
 state="${HOURLY_UPDATES_STATE_DIR:-$HOME/.local/state/hourly-updates}"
 mkdir -p "$state"
 
-PING="${HOURLY_UPDATES_PING:-$HOME/ops/site-djbclark/bin/hermes-ping}"
+PING="${HOURLY_UPDATES_PING:-$HOME/ops/site-public-djbclark/bin/hermes-ping}"
 TIMEOUT="${HOURLY_UPDATES_TIMEOUT:-300}"
 
 [ -d "$dir" ] || { echo "hourly-updates: no such dir $dir" >&2; exit 2; }

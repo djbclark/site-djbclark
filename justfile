@@ -1,3 +1,5 @@
+export STAYTURGID_PRIVATE_DIR := env("OPS_ROOT", home_directory() / "ops") / "site-private-djbclark"
+
 # site-djbclark — site inventory wrapper for the stayturgid product.
 
 set shell := ["bash", "-uc"]

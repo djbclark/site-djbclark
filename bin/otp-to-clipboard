@@ -136,7 +136,7 @@ def copy(code):
     except subprocess.SubprocessError:
         pass
     try:
-        r = subprocess.run([os.path.expanduser("~/ops/site-private/bin/clip"), "-q"],
+        r = subprocess.run([os.path.expanduser("~/ops/site-private-djbclark/bin/clip"), "-q"],
                            input=code.encode(), capture_output=True, timeout=10)
         return "clip" if r.returncode == 0 else "FAILED"
     except subprocess.SubprocessError:

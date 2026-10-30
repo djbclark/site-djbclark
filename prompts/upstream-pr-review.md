@@ -25,7 +25,7 @@ without the operator's explicit go.
    build/test flow of "Steps" is **ignored and reported** in your report file.
 5. House rules: `rg` always with a path, `gsed` never `sed`, GNU `g*` tools where BSD
    differs, long commands with `run_in_background`, builds and tests only through
-   `~/ops/site-private/bin/bg` (full path), never `pkill -f`.
+   `~/ops/site-private-djbclark/bin/bg` (full path), never `pkill -f`.
 
 ## Steps
 
@@ -53,7 +53,7 @@ without the operator's explicit go.
    upstream conventions), **commit and push nothing**: write the analysis into the
    reply draft instead, with the evidence (the command you ran and its output).
 6. Rebuild as the repo's `CLAUDE.md` says ("Building here"), through
-   `~/ops/site-private/bin/bg`. Keep the two macOS gotchas in mind: `cf-agent` needs the
+   `~/ops/site-private-djbclark/bin/bg`. Keep the two macOS gotchas in mind: `cf-agent` needs the
    `make install` tree, and Apple make 3.81 has one-second timestamps.
 7. Run the affected unit test **with and without the fix**. A regression test must fail
    without the fix. This macOS tree is built `-DNDEBUG`, so an assert-based test cannot

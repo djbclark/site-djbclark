@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify-ecores.sh -- which cores does each QoS policy actually use?
 #
-#   sudo bash ~/ops/site-private/bin/verify-ecores.sh [LOOPS] [SECONDS]
+#   sudo bash ~/ops/site-private-djbclark/bin/verify-ecores.sh [LOOPS] [SECONDS]
 #
 # For each policy -- (a) none, (b) `taskpolicy -c utility`, (c) `taskpolicy -b` --
 # it starts LOOPS busy loops (default 4), lets them settle, samples

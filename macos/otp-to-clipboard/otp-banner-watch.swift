@@ -26,7 +26,7 @@ import AppKit
 import ApplicationServices
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
-let extractor = "\(home)/ops/site-djbclark/bin/otp-to-clipboard"
+let extractor = "\(home)/ops/site-public-djbclark/bin/otp-to-clipboard"
 let dump = CommandLine.arguments.contains("--dump")
 let ncBundleIDs = ["com.apple.notificationcenterui", "com.apple.NotificationCenter"]
 

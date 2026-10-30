@@ -12,7 +12,7 @@
 # switch use the new settings; a running build keeps its own.
 export PATH="/opt/homebrew/bin:$PATH"
 set -euo pipefail
-repo="$HOME/ops/site-private"
+repo="$HOME/ops/site-private-djbclark"
 profiles="$repo/gradle/profiles"
 state="$HOME/.local/state/gradle-limits"
 live="$state/gradle.properties"

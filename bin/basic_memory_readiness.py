@@ -35,8 +35,8 @@ from typing import Any
 
 DOC_ROOTS = [
     Path.home() / "src/djbclark-ade/docs",
-    Path.home() / "ops/site-private/memory",
-    Path.home() / "ops/site-djbclark/research",
+    Path.home() / "ops/site-private-djbclark/memory",
+    Path.home() / "ops/site-public-djbclark/research",
 ]
 FILE_THRESHOLD = 25
 BYTES_THRESHOLD = 250_000

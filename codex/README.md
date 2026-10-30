@@ -17,7 +17,7 @@ Repository ownership follows the three-way policy:
 
 - durable stayturgid product facts and session handoffs live in
   `${OPS_ROOT:-~/ops}/stayturgid/docs/`;
-- non-sensitive site practice lives in `${OPS_ROOT:-~/ops}/site-djbclark/docs/`;
+- non-sensitive site practice lives in `${OPS_ROOT:-~/ops}/site-public-djbclark/docs/`;
 - generic/private cross-project notes and Codex memory live in site-private
   (`memory/codex/`);
 - authentication, databases, logs, caches, plugins, attachments, and session

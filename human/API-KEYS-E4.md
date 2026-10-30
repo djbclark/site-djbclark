@@ -93,7 +93,7 @@ into `~/Library/LaunchAgents/com.djbclark.litellm.plist` (mode **0600**) from
 the apply-time environment:
 
 ```bash
-cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-public-djbclark
 sudo-secretspec run --reason "apply LiteLLM provider keys" -- just litellm-apply
 ```
 
@@ -184,7 +184,7 @@ Inventory group `site_litellm`: `m1-air` (online), `mac-mini-intel` and
 time (keys travel only into the remote unit file via Ansible, never into git):
 
 ```bash
-cd ${OPS_ROOT:-/Users/djbclark/ops}/site-djbclark
+cd ${OPS_ROOT:-/Users/djbclark/ops}/site-public-djbclark
 # After mini/VPS are online and inventory ansible_host is set:
 LITELLM_HOSTS=mac-mini-intel sudo-secretspec run --reason "LiteLLM keys mini" -- just litellm-apply
 LITELLM_HOSTS=vps-primary sudo-secretspec run --reason "LiteLLM keys vps" -- just litellm-apply

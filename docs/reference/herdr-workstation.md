@@ -263,7 +263,7 @@ just herdr-agents-install   # symlinks into ~/.local/bin; re-run after each rele
 
 Then add the `[[keys.command]]` blocks above to `~/.config/herdr/config.toml`
 and `hreload`. Run `just herdr-agents-install` from the **released**
-`~/ops/site-djbclark` checkout, not a task worktree — the symlinks it creates
+`~/ops/site-public-djbclark` checkout, not a task worktree — the symlinks it creates
 are absolute and must not point at a worktree that gets deleted later (the
 same landmine class site-djbclark#100 fixed for generated fragments).
 

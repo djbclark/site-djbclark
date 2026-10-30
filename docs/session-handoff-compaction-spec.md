@@ -196,7 +196,7 @@ workspaces:
     dirty: true
   - repo: site-private
     task: ops
-    dir: /Users/djbclark/ops/site-private
+    dir: /Users/djbclark/ops/site-private-djbclark
     branch: master
     head_sha: ff5268c…
     dirty: false

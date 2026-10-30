@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/djbclark/ops/site-djbclark/bin/hourly-updates</string>
+        <string>/Users/djbclark/ops/site-public-djbclark/bin/hourly-updates</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

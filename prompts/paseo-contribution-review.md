@@ -35,7 +35,7 @@ The relaying session is the owner: it skips any `/baton` and unattended-run line
    your own (`git worktree add -b <branch>-prep ~/src/paseo-<name>-wt origin/<branch>`), never on the PR's own
    branch, and removed when done. Only `.dev/drafts/` is written in the checkout itself.
 6. House rules: `rg` always with a path, `gsed` never `sed`, GNU `g*` tools where BSD differs, long commands in
-   the background, builds and tests only through `~/ops/site-private/bin/bg` (full path), never `pkill -f`.
+   the background, builds and tests only through `~/ops/site-private-djbclark/bin/bg` (full path), never `pkill -f`.
 
 ## Steps
 

@@ -9,7 +9,7 @@
 #
 # Layout rules: layout.conf beside this file. Background: AGENTS.md beside this file.
 
-tool := env("OPS_ROOT", home_directory() / "ops") / "site-djbclark/tools/s-farm"
+tool := env("OPS_ROOT", home_directory() / "ops") / "site-public-djbclark/tools/s-farm"
 src := env("SFARM_SRC", home_directory() / "src")
 farm := env("SFARM_FARM", home_directory() / "s")
 sfarm := "python3 " + quote(tool / "sfarm.py") + " --src " + quote(src) + " --farm " + quote(farm)

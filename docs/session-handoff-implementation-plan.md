@@ -57,10 +57,10 @@ reality conflicts with this plan, or this plan conflicts with the spec,
 
 ```bash
 test -d ~/src/ops-worktrees/.store && echo OK-store
-test -d ~/ops/site-private/memory && echo OK-memory
+test -d ~/ops/site-private-djbclark/memory && echo OK-memory
 command -v git >/dev/null && echo OK-git
 test -f ~/.claude/settings.json && echo OK-settings
-ggrep -q "ops-memory-sync" ~/ops/site-djbclark/justfile && echo OK-sync
+ggrep -q "ops-memory-sync" ~/ops/site-public-djbclark/justfile && echo OK-sync
 python3 -c 'import sys; assert sys.version_info >= (3,10)' && echo OK-python
 command -v claude >/dev/null && echo OK-claude-cli
 ```
@@ -242,7 +242,7 @@ if __name__ == "__main__":
 | `~/src/ops-worktrees/session-handoff-compaction-spec/site-private` | repo=`site-private` task=`session-handoff-compaction-spec` |
 | `~/src/ops-worktrees/main/stayturgid` | repo=`stayturgid` task=`main` |
 | `~/src/ops-worktrees/main/stayturgid/docs/deep/nested` | same as above |
-| `~/ops/site-djbclark` | repo=`site-djbclark` task=`ops` |
+| `~/ops/site-public-djbclark` | repo=`site-djbclark` task=`ops` |
 | `~/src/ops-worktrees/.store/stayturgid.git` | return 1, vars empty |
 | `~/src/ops-worktrees` | return 1 |
 | `$HOME` | return 1 |
@@ -623,7 +623,7 @@ description: Read/write the out-of-tree Tier 1 session pointer file (SESSION_LOG
 
 # Session Handoff — Tier 1 pointer file
 
-Spec: `~/ops/site-private/docs/session-handoff-compaction-spec.md` (v0.3).
+Spec: `~/ops/site-private-djbclark/docs/session-handoff-compaction-spec.md` (v0.3).
 State root: `~/.local/state/handoffs/<repo>/<task>/SESSION_LOG.md`, where
 `<task>` is the task-workspace dir name under `~/src/ops-worktrees/`
 (`main` for reference checkouts, `ops` for `~/ops` sessions).
@@ -714,8 +714,8 @@ description: Create a deep Tier 2 handoff document in site-private/memory/handof
 
 # Handoff — Tier 2 deep recovery document
 
-Spec: `~/ops/site-private/docs/session-handoff-compaction-spec.md` (v0.3).
-Output: `~/ops/site-private/memory/handoffs/<target-repo>/` — committed
+Spec: `~/ops/site-private-djbclark/docs/session-handoff-compaction-spec.md` (v0.3).
+Output: `~/ops/site-private-djbclark/memory/handoffs/<target-repo>/` — committed
 DIRECTLY TO MASTER under the memory-data exception, pushed immediately.
 
 ## Guards
@@ -731,7 +731,7 @@ DIRECTLY TO MASTER under the memory-data exception, pushed immediately.
 `git log --oneline -15`, `git diff --stat`, `git status -s | head -30`,
 `git branch --show-current`, `git rev-parse HEAD`; Beads state if
 available (`bd list --status=in_progress` in ops-djbclark context);
-`ls ~/ops/site-private/memory/handoffs/<repo>/ 2>/dev/null`.
+`ls ~/ops/site-private-djbclark/memory/handoffs/<repo>/ 2>/dev/null`.
 
 ## Step 2 — Chain tag and lineage
 
@@ -742,7 +742,7 @@ Lineage is an explicit DAG:
 - `handoff_id`: fresh 4-hex id.
 - `parent_handoff_ids`: if this session started from a resume prompt
   naming a parent handoff file, that file's id (deterministic — primary).
-  Else grep `~/ops/site-private/memory/handoffs/<repo>/` for the chain
+  Else grep `~/ops/site-private-djbclark/memory/handoffs/<repo>/` for the chain
   tag as RECOVERY ONLY: a shared bead is a candidate, not proof — read
   the candidate's "Where We're Going"; only clear continuation makes it
   a parent, and the new doc must say `lineage: inferred`. Doubt → ask
@@ -760,7 +760,7 @@ constants); operator preferences expressed; open questions; dependencies.
 
 ## Step 4 — Write the file
 
-Path: `~/ops/site-private/memory/handoffs/<repo>/HANDOFF_{chain}_{slug}_{YYYY-MM-DD}_{handoff_id}.md`
+Path: `~/ops/site-private-djbclark/memory/handoffs/<repo>/HANDOFF_{chain}_{slug}_{YYYY-MM-DD}_{handoff_id}.md`
 (slug: 2–4 kebab words; multi-bead chains use the primary bead in the
 filename). `mkdir -p` the repo dir if needed.
 
@@ -806,8 +806,8 @@ conversation, don't pad.
 
 ## Step 6 — Commit (memory exception flow, EXACTLY this)
 
-1. `cd ~/ops/site-djbclark && just ops-memory-sync`
-2. `cd ~/ops/site-private && git add memory/handoffs/ && git commit -m "memory: handoff <repo>/<filename>"`
+1. `cd ~/ops/site-public-djbclark && just ops-memory-sync`
+2. `cd ~/ops/site-private-djbclark && git add memory/handoffs/ && git commit -m "memory: handoff <repo>/<filename>"`
    — memory-only commit; NOTHING else staged.
 3. `git push` immediately. Leave the tree clean.
 
@@ -822,11 +822,11 @@ validation outcome, the next action.
 **P3.3 Test P3** (static): both files parse as skills — restart check:
 `ls ~/.claude/skills/` shows both; frontmatter has `name` and
 `description`; no line exceeds reasonable length; paths in the bodies
-exist (`~/ops/site-private/memory/`, state root). No agent spawns.
+exist (`~/ops/site-private-djbclark/memory/`, state root). No agent spawns.
 
 Acceptance: both skills present and internally consistent with spec v0.3
 §3–§4. Note: `docs/session-handoff-compaction-spec.md` referenced by both
-skills only exists in `~/ops/site-private/` after this task's PR merges
+skills only exists in `~/ops/site-private-djbclark/` after this task's PR merges
 and a release lands it there — until then the reference is
 forward-looking. Do not "fix" it by pointing at the worktree.
 
@@ -942,7 +942,7 @@ Recent History entry and the sidecar file is deleted.
 
 **P5.5 Tier 2 full flow.** In a session with real accumulated work (this
 spec task itself qualifies), run the `handoff` skill end-to-end. PASS
-iff: file lands in `~/ops/site-private/memory/handoffs/site-private/`
+iff: file lands in `~/ops/site-private-djbclark/memory/handoffs/site-private/`
 with all frontmatter fields; every validation-gate box checkable;
 `ops-memory-sync` ran first; commit is memory-only; pushed; Tier 1
 `latest_handoff` updated to the site-private-relative path.

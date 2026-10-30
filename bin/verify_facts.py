@@ -71,18 +71,18 @@ NEIGHBOUR_WINDOW = 3
 # Repos whose `just` recipes a fact might name. Order is irrelevant; a recipe
 # found in any of them counts as real.
 SEARCH_REPOS = (
-    Path.home() / "ops/site-djbclark",
+    Path.home() / "ops/site-public-djbclark",
     Path.home() / "ops/stayturgid",
-    Path.home() / "ops/site-private",
+    Path.home() / "ops/site-private-djbclark",
     Path.home() / "src/aiuse",
     Path.home() / "orca/projects/djbclark-ade",
     Path.home() / "src/orca",
 )
 
 JUST_REPOS = (
-    Path.home() / "ops/site-djbclark",
+    Path.home() / "ops/site-public-djbclark",
     Path.home() / "ops/stayturgid",
-    Path.home() / "ops/site-private",
+    Path.home() / "ops/site-private-djbclark",
     Path.home() / "src/aiuse",
 )
 

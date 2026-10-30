@@ -32,7 +32,7 @@ import tempfile
 import yaml
 
 OPS = os.environ.get("OPS_ROOT", os.path.expanduser("~/ops"))
-INVENTORY = os.path.join(OPS, "site-djbclark", "inventory", "hosts.yml")
+INVENTORY = os.path.join(OPS, "site-public-djbclark", "inventory", "hosts.yml")
 STATE = os.path.join(
     os.path.expanduser("~"), ".local", "state", "lan-ip-check", "state.json"
 )

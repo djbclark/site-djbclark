@@ -135,7 +135,7 @@ Homebrew prefix follows the LiteLLM / stayturgid pattern: Apple Silicon
 ## Apply
 
 ```bash
-cd ${OPS_ROOT:-~/ops}/site-djbclark
+cd ${OPS_ROOT:-~/ops}/site-public-djbclark
 just site-agents-apply          # first apply
 just site-agents-check          # dry-run (ansible --check)
 just site-agents-status         # launchctl print all labels
@@ -184,7 +184,7 @@ s1-ingest`), which boots the job out and removes its plist.
 To restore pre-F1 hand-managed copies after apply replaced them:
 
 ```bash
-git -C ${OPS_ROOT:-~/ops}/site-djbclark checkout HEAD~1 -- \
+git -C ${OPS_ROOT:-~/ops}/site-public-djbclark checkout HEAD~1 -- \
   roles/site_agents/files/hibernate-disk-check \
   roles/site_agents/templates/system-state-backup.sh.j2
 # Re-render/install manually or re-run an older playbook revision, then:

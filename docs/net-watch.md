@@ -168,11 +168,11 @@ exception text. Logging in to the Deco API signs the Deco app / web UI admin out
 ## Install
 
 ```bash
-~/ops/site-djbclark/bin/net-watch install      # copies the plist to ~/Library/LaunchAgents and bootstraps it
-~/ops/site-djbclark/bin/net-watch status       # ~/ops/site-private/bin/net-watch is the same file through a symlink
+~/ops/site-public-djbclark/bin/net-watch install      # copies the plist to ~/Library/LaunchAgents and bootstraps it
+~/ops/site-public-djbclark/bin/net-watch status       # ~/ops/site-private-djbclark/bin/net-watch is the same file through a symlink
 ```
 
-The plist runs `~/ops/site-djbclark/bin/net-watch-tick tick` (see "ARP and Local Network privacy"), so the branch must be merged there first. `net-watch uninstall` removes it.
+The plist runs `~/ops/site-public-djbclark/bin/net-watch-tick tick` (see "ARP and Local Network privacy"), so the branch must be merged there first. `net-watch uninstall` removes it.
 No `ProcessType` key is set (Standard): `Adaptive` would behave as `Background` for this XPC-less job (see Known limits 3).
 
 ## Known limits

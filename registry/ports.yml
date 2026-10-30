@@ -131,7 +131,7 @@ hosts:
       - {port: 18795, bind: "127.0.0.1", owner: unmanaged, service: claude-mcp-auth, status: active,
          note: "caddy bearer gate for 18794; funnel path 8443/claude-mcp"}
       - {port: 18796, bind: "127.0.0.1", owner: site, service: basic-memory-mcp, status: active,
-         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private/memory and it is the memory search service (replaced the retired memory service)"}
+         note: "2026-09-26: com.djbclark.basic-memory-mcp launchd (roles/basic_memory_mcp). basic-memory mcp --transport streamable-http, path /mcp. One shared server replaces one stdio copy per agent session (13 × ~198 MB phys footprint). Since 2026-09-30 its main project is ~/ops/site-private-djbclark/memory and it is the memory search service (replaced the retired memory service)"}
       - {port: 18797, bind: "127.0.0.1", owner: unmanaged, service: basic-memory-mcp-auth, status: active,
          note: "caddy bearer gate for 18796 (com.djbclark.basic-memory-mcp-auth, ~/.local/libexec/basic-memory-mcp-bridge/Caddyfile); observed listening, registered 2026-10-12"}
       - {port: 18798, bind: "127.0.0.1", owner: site, service: crawl4ai-mcp, status: active,

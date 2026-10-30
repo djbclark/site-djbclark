@@ -11,7 +11,7 @@ session. Measured 2026-09-26: 13 stdio copies ≈ 2.6 GB phys footprint on a
 
 ## What it serves (since 2026-09-30)
 
-The `main` project is `~/ops/site-private/memory`; this server is the memory
+The `main` project is `~/ops/site-private-djbclark/memory`; this server is the memory
 search service for agent memory. The project path and two settings live in
 `~/.basic-memory/config.json`, which this role does not render:
 `ensure_frontmatter_on_sync: false` (otherwise indexing adds `title`/`type` to
@@ -25,5 +25,5 @@ old `disable_permalinks: true` is gone (0.24.1 deleted it from the config on
 re-dumping that YAML. That one-time rewrite of the memory tree was committed as
 site-private `f29f752` (2026-10-24); after it, a note is only rewritten when its
 permalink differs. A new note gets its `permalink:` on first sync: commit it.
-After an upgrade or config change, check `git -C ~/ops/site-private status
+After an upgrade or config change, check `git -C ~/ops/site-private-djbclark status
 --short` for anything beyond that.

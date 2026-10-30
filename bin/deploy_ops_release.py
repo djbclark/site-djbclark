@@ -23,15 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
-REPOSITORIES = ("stayturgid", "site-djbclark", "site-private")
+REPOSITORIES = ("stayturgid", "site-public-djbclark", "site-private-djbclark")
 # Live-data directories (operational data, not code/config) a deploy checkout
 # may carry ahead of the released tag via direct-to-master commits made in
 # place. Since 2026-08-23 every path is edited that way and releases are
 # optional; this mapping only shapes the optional release checks and
 # memory-sync (which fetches and rebases exactly these repos).
 DATA_DIRS = {
-    "site-private": "memory/",
-    "site-djbclark": "research/",
+    "site-private-djbclark": "memory/",
+    "site-public-djbclark": "research/",
 }
 RELEASE_FILE = "ops-release.json"
 LOCAL_CODEX_CONFIG = "codex/config.toml"
@@ -206,7 +206,7 @@ def inspect_local_file_migration(
     target_commit: str,
 ) -> LocalFileMigration | None:
     if (
-        name != "site-private"
+        name != "site-private-djbclark"
         or not ref_tracks_path(path, current_commit, LOCAL_CODEX_CONFIG)
         or ref_tracks_path(path, target_commit, LOCAL_CODEX_CONFIG)
     ):
@@ -576,7 +576,7 @@ def deploy_release(
     fetch: bool = True,
     verify_github: bool = True,
 ) -> list[ReleasePlan]:
-    private_path = ops_root / "site-private"
+    private_path = ops_root / "site-private-djbclark"
     if private_path.exists():
         recover_local_file_backup(private_path)
     plans = [
@@ -750,7 +750,7 @@ def default_lock_path() -> Path:
     if env := os.environ.get("SITE_OPS_RELEASE_STATE"):
         return Path(env).expanduser() / "ops-release.lock"
     xdg_state = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    return Path(xdg_state) / "site-djbclark" / "ops-release.lock"
+    return Path(xdg_state) / "site-public-djbclark" / "ops-release.lock"
 
 
 def default_claim_path() -> Path:
@@ -759,7 +759,7 @@ def default_claim_path() -> Path:
     if env := os.environ.get("SITE_OPS_RELEASE_STATE"):
         return Path(env).expanduser() / "ops-release.claim.json"
     xdg_state = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    return Path(xdg_state) / "site-djbclark" / "ops-release.claim.json"
+    return Path(xdg_state) / "site-public-djbclark" / "ops-release.claim.json"
 
 
 def read_active_claim() -> dict | None:

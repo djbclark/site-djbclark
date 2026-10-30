@@ -15,7 +15,7 @@ base_dir:
   env_var: OPS_ROOT          # contract-level override for other sites
   checkouts:
     - ~/ops/stayturgid       # public product (github.com/djbclark/stayturgid)
-    - ~/ops/site-djbclark    # private site repo (github.com/djbclark/site-djbclark)
+    - ~/ops/site-public-djbclark    # private site repo (github.com/djbclark/site-djbclark)
   scratch: ~/ops/scratch     # stale checkouts parked here; deletion = operator call
 
 prefixes:
@@ -27,7 +27,7 @@ prefixes:
     - "~/.ssh/config.d/stayturgid"          # generated SSH fragment
     - "~/.ssh/authorized_keys"              # marked block only (ET fleet keys)
   site:
-    - "~/ops/site-djbclark/**"
+    - "~/ops/site-public-djbclark/**"
     - "~/Library/LaunchAgents/com.djbclark.*"   # F1: site_agents + LiteLLM et al.
     - "~/.config/systemd/user/com.djbclark.*"   # E5: Linux user units (LiteLLM et al.)
     - "~/.local/share/open-webui/**"             # Open WebUI data dir
@@ -48,8 +48,8 @@ prefixes:
     - "/usr/local/var/system-state/**"          # F1: Intel canonical capture dir
     - "/usr/local/var/log/system-state-backup.log"
     # F4 Merged-Brewfile (source: brew/fragments; projection under generated/)
-    - "~/ops/site-djbclark/brew/**"
-    - "~/ops/site-djbclark/generated/Merged-Brewfile"
+    - "~/ops/site-public-djbclark/brew/**"
+    - "~/ops/site-public-djbclark/generated/Merged-Brewfile"
     # herdr (homebrew.mxcl.herdr): config, UDS sockets, session state — no TCP port
     - "~/.config/herdr/**"
     - "/opt/homebrew/var/log/herdr.log"

@@ -437,7 +437,7 @@ if [ "$MODE" = check ]; then
   echo "Likely cause: 'flag not set' = a macOS update reset the launchd disable flags;"
   echo "'running despite flag' = the watchdogd apple-daemons freeze/TERM enforcement is not"
   echo "keeping up (check ~/Library/Logs/watchdogd/watchdogd.log and apple-daemon-ban.log)."
-  echo "Fix flags: sudo-ask ~/ops/site-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
+  echo "Fix flags: sudo-ask ~/ops/site-public-djbclark/macos/sip-doit-with-sudo.sh   (idempotent)"
   exit 0
 fi
 

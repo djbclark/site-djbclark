@@ -47,7 +47,7 @@ STARTED_AT="$(gdate -u '+%Y-%m-%dT%H:%M:%SZ')"
 trap 'rc=$?; echo "[$(gdate -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc"' EXIT
 echo "[$STARTED_AT] started; scheduled/manual Jobber invocation"
 
-LOCK_BIN="{{ site_agents_home }}/ops/site-djbclark/bin/brew_flock.py"
+LOCK_BIN="{{ site_agents_home }}/ops/site-public-djbclark/bin/brew_flock.py"
 {% raw %}
 MAX_ATTEMPTS="${BREW_FAST_UPGRADE_MAX_ATTEMPTS:-3}"
 RETRY_DELAY_SECS=10

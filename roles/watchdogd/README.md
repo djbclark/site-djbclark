@@ -70,10 +70,10 @@ stays become-free):
 ```bash
 sudo mkdir -p /usr/local/libexec/djbclark
 sudo install -o root -g wheel -m 0755 \
-  ~/ops/site-djbclark/roles/watchdogd/files/apple_daemon_ban_root.sh \
+  ~/ops/site-public-djbclark/roles/watchdogd/files/apple_daemon_ban_root.sh \
   /usr/local/libexec/djbclark/apple_daemon_ban_root.sh
 sudo install -o root -g wheel -m 0440 \
-  ~/ops/site-djbclark/roles/watchdogd/files/sudoers.apple-daemon-ban \
+  ~/ops/site-public-djbclark/roles/watchdogd/files/sudoers.apple-daemon-ban \
   /etc/sudoers.d/apple-daemon-ban
 sudo visudo -cf /etc/sudoers.d/apple-daemon-ban
 ```
@@ -113,10 +113,10 @@ pieces, both in this role:
 
 ```bash
 sudo install -o root -g wheel -m 0755 \
-  ~/ops/site-djbclark/roles/watchdogd/files/auxkc_heal_root.sh \
+  ~/ops/site-public-djbclark/roles/watchdogd/files/auxkc_heal_root.sh \
   /usr/local/libexec/djbclark/auxkc_heal_root.sh
 sudo install -o root -g wheel -m 0440 \
-  ~/ops/site-djbclark/roles/watchdogd/files/sudoers.auxkc-heal \
+  ~/ops/site-public-djbclark/roles/watchdogd/files/sudoers.auxkc-heal \
   /etc/sudoers.d/auxkc-heal
 sudo visudo -cf /etc/sudoers.d/auxkc-heal
 ```

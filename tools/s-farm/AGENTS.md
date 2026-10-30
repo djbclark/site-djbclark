@@ -4,7 +4,7 @@
 in one flat directory. It is a tree of symbolic links, sorted into topics, that
 a tool regenerates. It contains no projects of its own. This file is
 `~/s/AGENTS.md` (and `~/s/CLAUDE.md`); the real file is
-`~/ops/site-djbclark/tools/s-farm/AGENTS.md`.
+`~/ops/site-public-djbclark/tools/s-farm/AGENTS.md`.
 
 ## Rule 1: never reference `~/s`. Reference `~/src`.
 
@@ -42,7 +42,7 @@ not permitted`. That failure is intended. Do not work around it with
 
 ## How it is built
 
-The tool lives in `~/ops/site-djbclark/tools/s-farm/` (git, `master`):
+The tool lives in `~/ops/site-public-djbclark/tools/s-farm/` (git, `master`):
 `justfile` (linked as `~/s/justfile`), `sfarm.py` and `layout.conf` build the
 farm; `shell-init.bash` and `go.py` are the interactive jump described below.
 

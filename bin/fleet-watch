@@ -696,7 +696,7 @@ upr_profile() {
       UPSTREAM_REPOS="${FLEET_WATCH_UPSTREAM_REPOS-cfengine/core cfengine/libntech NorthernTechHQ/libntech}"
       UPSTREAM_IGNORE="${FLEET_WATCH_UPSTREAM_IGNORE-cf-bottom}"
       UPSTREAM_DIR="${FLEET_WATCH_UPSTREAM_DIR:-$HOME/src/cfengine-core}"
-      UPSTREAM_PROMPT="${FLEET_WATCH_UPSTREAM_PROMPT:-$HOME/ops/site-private/prompts/upstream-pr-review.md}"
+      UPSTREAM_PROMPT="${FLEET_WATCH_UPSTREAM_PROMPT:-$HOME/ops/site-private-djbclark/prompts/upstream-pr-review.md}"
       UPSTREAM_CHAIN="${FLEET_WATCH_UPSTREAM_CHAIN:-$HOME/.local/state/handoffs/chains/standalone-3fd9}"
       UPR_BASE=upstream-pr UPR_PING=cfengine-core UPR_TYPES="PullRequest Issue Discussion" UPR_FALLBACK=worker
       UPR_DRAFT_DIR=$UPSTREAM_CHAIN UPR_DRAFT_STEM=upstream-reply
@@ -710,7 +710,7 @@ upr_profile() {
       UPSTREAM_REPOS="${FLEET_WATCH_PASEO_REPOS-getpaseo/paseo william0wang/zcode-acp}"
       UPSTREAM_IGNORE="${FLEET_WATCH_PASEO_IGNORE-}"
       UPSTREAM_DIR="${FLEET_WATCH_PASEO_DIR:-$HOME/src/paseo}"
-      UPSTREAM_PROMPT="${FLEET_WATCH_PASEO_PROMPT:-$HOME/ops/site-private/prompts/paseo-contribution-review.md}"
+      UPSTREAM_PROMPT="${FLEET_WATCH_PASEO_PROMPT:-$HOME/ops/site-private-djbclark/prompts/paseo-contribution-review.md}"
       UPSTREAM_CHAIN="${FLEET_WATCH_PASEO_CHAIN:-$HOME/.local/state/handoffs/chains/paseo-workspace-accent}"
       UPR_BASE=upstream-paseo UPR_PING=paseo UPR_TYPES="PullRequest Issue Discussion" UPR_FALLBACK=ping
       UPR_DRAFT_DIR=$UPSTREAM_DIR/.dev/drafts UPR_DRAFT_STEM=paseo-reply
@@ -1385,7 +1385,7 @@ check() {
   ack_watch
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
-  agents=$(count 'bin/python[0-9.]* [^ ]*/site-private/bin/acp-run ')
+  agents=$(count 'bin/python[0-9.]* [^ ]*/site-private(-djbclark)?/bin/acp-run ')
   # A running build, not an idle Gradle daemon left over from an earlier one.
   builds=$(count 'GradleWrapperMain')
   deploys=$(count 'deploy_fleet.py')
@@ -1583,7 +1583,7 @@ case "${1:-check}" in
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$HOME/ops/site-private/bin/fleet-watch</string>
+    <string>$HOME/ops/site-private-djbclark/bin/fleet-watch</string>
     <string>check</string>
   </array>
   <key>EnvironmentVariables</key>

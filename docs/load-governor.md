@@ -140,7 +140,7 @@ children, state file contents, `--undo-all` (matching, reused, exited), shutdown
 ## Installing the launchd agent (not done; do it when you decide to)
 
 The template is `docs/com.djbclark.load-governor.plist.example`. It runs
-`/opt/homebrew/bin/python3 ~/ops/site-private/bin/load-governor --apply` with `RunAtLoad`,
+`/opt/homebrew/bin/python3 ~/ops/site-private-djbclark/bin/load-governor --apply` with `RunAtLoad`,
 `KeepAlive`, `Nice 5` and `LowPriorityIO`, and deliberately **not** `ProcessType
 Background` (that would starve the governor exactly when it is needed).
 
