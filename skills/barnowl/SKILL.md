@@ -3,9 +3,9 @@ name: barnowl
 description: >-
   Do anything in BarnOwl or Zephyr from plain English: list or change
   subscriptions, read logs, locate someone, send a zephyr, or run a BarnOwl
-  command in the live client. Use when the user runs /barnowl or /g, the shell
-  command g, or asks to list subscriptions, subs, zwrite, a zephyr class, or
-  anything in BarnOwl.
+  command in the live client. Use when the user runs /barnowl, the shell
+  command gr or go, or asks to list subscriptions, subs, zwrite, a zephyr
+  class, or anything in BarnOwl.
 argument-hint: list my subs
 ---
 
@@ -17,15 +17,17 @@ you do not already know from `~/src/barnowl/commands.c` (`OWLCMD_*` name and
 the summary string). That file is the command list. BarnOwl source is
 `~/src/barnowl` (github.com/barnowl/barnowl, 1.10).
 
-From a shell, `g list my subs` is this skill. It runs Grok on `grok-4.5` at
-low effort, the weakest model available. Inside Grok, `/barnowl`, `/g`,
-and a sentence such as "list my subscriptions" are the same request.
-`subs` means subscriptions.
+From a shell, `gr list my subs` runs this skill through Grok and `go list my
+subs` runs it through goose: `gr` is `bin/gr`, `go` is `bin/go`. `gr` uses
+`grok-4.5` at low effort, the weakest Grok model available; `go` uses goose's
+own configured model. Inside any client, `/barnowl` and a sentence such as
+"list my subscriptions" are the same request. The old shell `g` and the slash
+`/g` are gone: `gr` is Grok, `go` is goose. `subs` means subscriptions.
 
 At BarnOwl's `:` prompt, `g` is the command in `g-cmd.pl`, loaded from
 `~/.owl/startup`. `:g show my subs` opens the live subscription list in the
-popup. Leave every other `:g` request for the shell command `g`. Grok driving
-this same window would stall on the command that started it.
+popup. Leave every other `:g` request for the shell command `gr` or `go`. A
+model driving this same window would stall on the command that started it.
 
 ## Which client
 
@@ -90,7 +92,7 @@ and stop. Do not run `kinit`.
 
 ## On this machine
 
-`~/src/djbclark-ade/bin/g` is linked at `~/.local/bin/g`, and `~/.local/bin` is on `PATH` from `~/.bashrc`. `/g` is `claude/commands/g.md`, linked at `~/.grok/commands/g.md` and `~/.claude/commands/g.md`. The skill itself is linked by `bin/skill-everywhere barnowl`.
+`~/src/djbclark-ade/bin/gr` is linked at `~/.local/bin/gr` and `bin/go` at `~/.local/bin/go`, and `~/.local/bin` is on `PATH` from `~/.bashrc`. `/barnowl` is `claude/commands/barnowl.md`, linked at `~/.grok/commands/barnowl.md` and `~/.claude/commands/barnowl.md` (zcode has its own wrapper at `zcode/commands/barnowl.md`). The skill itself is linked by `bin/skill-everywhere barnowl` into every client, goose included (`~/.agents/skills/barnowl`). `go` runs `goose run --no-session -q --output-format json -t "Use the barnowl skill for this BarnOwl request: …"` and prints only the final assistant text.
 
 ## Answer
 

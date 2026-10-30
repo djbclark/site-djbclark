@@ -1,6 +1,7 @@
 # :g inside BarnOwl. Loaded from ~/.owl/startup.
-# The shell command g starts Grok. This command stays in-process, because
-# Grok driving this same window would stall on the command that launched it.
+# The shell commands gr (Grok) and go (goose) start a model. This command stays
+# in-process, because a model driving this same window would stall on the
+# command that launched it.
 package BarnOwl::G;
 
 use strict;
@@ -35,7 +36,8 @@ BarnOwl::new_command(
         usage   => 'g show my subs',
         description =>
             "Lists the live Zephyr subscriptions in a popup.\n"
-            . "The shell command g, outside BarnOwl, runs the same request through Grok.\n",
+            . "The shell commands gr and go, outside BarnOwl, run the same request\n"
+            . "through Grok and goose.\n",
     }
 );
 
