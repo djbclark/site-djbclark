@@ -24,7 +24,7 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 
 Clients: the Mac app adds the other two as hosts (Settings, Add host, Direct connection, `<name>.greyhound-sidemirror.ts.net`,
 port 7263, SSL on); the Android app on the stayturgid phones the same way over Tailscale; any tailnet browser
-opens the URLs above (the bundled web UI); the CLI takes `--host <name>.greyhound-sidemirror.ts.net:7263`
+opens the URLs above (the bundled web UI); the CLI takes `--host wss://<name>.greyhound-sidemirror.ts.net:7263` (the bare `<name>…:7263` form fails with HTTP 400; checked 2026-10-30)
 (the local daemon needs no `--host`).
 
 Status 2026-10-18: all three daemons answer `/api/health` and the web UI over the tailnet (vps-primary at
