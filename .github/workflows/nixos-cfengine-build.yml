@@ -63,6 +63,41 @@ jobs:
           nix build --no-link \
             './nixos#nixosConfigurations.vps-primary.config.system.build.toplevel'
 
+      # tendcf step 8 stage B (tendcf docs/architecture/nixos-passthrough-plan.md section 3):
+      # what enabling the module would add to vps-primary, measured without touching the
+      # host. An enabled twin of the real configuration is built and its closure compared
+      # to the real one: every store path NAME new to the twin must belong to the
+      # cfengine-tendcf package's own runtime closure. Rebuilt system derivations
+      # (system-path, etc, the toplevel) keep their names and are allowed to differ.
+      - name: Stage B closure diff (module enabled vs. vps-primary as deployed)
+        run: |
+          set -euo pipefail
+          base=$(nix build --print-out-paths --no-link \
+            './nixos#nixosConfigurations.vps-primary.config.system.build.toplevel')
+          enabled=$(nix build --print-out-paths --no-link --impure --expr '
+            let flake = builtins.getFlake "path:${builtins.getEnv "GITHUB_WORKSPACE"}/nixos";
+            in (flake.nixosConfigurations.vps-primary.extendModules {
+                  modules = [ { services.cfengine-tendcf.enable = true; } ];
+                }).config.system.build.toplevel')
+          pkg=$(nix build --print-out-paths --no-link './nixos#cfengine-tendcf')
+          echo "## closure diff, deployed -> module enabled"
+          nix store diff-closures "$base" "$enabled"
+          names() { nix path-info -r "$1" | sed -E 's#^/nix/store/[a-z0-9]{32}-##' | sort -u; }
+          names "$base" > /tmp/base.names
+          names "$enabled" > /tmp/enabled.names
+          names "$pkg" > /tmp/pkg.names
+          comm -13 /tmp/base.names /tmp/enabled.names > /tmp/new.names
+          echo "## store path names new to the enabled closure"
+          cat /tmp/new.names
+          unexpected=$(comm -23 /tmp/new.names /tmp/pkg.names)
+          if [ -n "$unexpected" ]; then
+            echo "::error::enabling the module adds paths outside the cfengine-tendcf closure:"
+            echo "$unexpected"
+            exit 1
+          fi
+          grep -qx 'cfengine-tendcf-3.29.0a.b8abf2840' /tmp/new.names
+          echo "only the package and its runtime closure are added"
+
       - name: vps-primary has the module off and no execd unit
         run: |
           set -euo pipefail
