@@ -290,7 +290,7 @@ hosts:
          note: "2026-10-16/22: tinyproxy-google (nixos/modules/google-proxy.nix) port 26369, CONNECT :443 to SearXNG engine allowlist (Google CSE + Bing/Yahoo/DDG/Wiki/shortcuts). Firewall: Hyades egress 18.4.60.84 only. Peer: pastebin.xvm:26370. See docs/google-proxy-vps-primary.md and firecrawl-hyades docs/searxng-egress.md."}
       - {port: 7263,  bind: "127.0.0.1", owner: site, service: paseo, status: active,
          tailscale_serve_port: 7263,
-         note: "2026-10-18: Paseo daemon + web UI as user bb (services.paseo from forgejo.mit.edu/djbclark/paseo-nix, nixos/vps-primary/configuration.nix), using the agent logins in bb's home (/var/lib/bb, a Hetzner Volume since 2026-10-25; the BB service was removed that day) and an agents.slice memory cap. UNAUTHENTICATED and permits command execution: tailnet-only, never funnel. See docs/paseo.md."}
+         note: "2026-10-18: Paseo daemon + web UI as user djbclark (services.paseo from forgejo.mit.edu/djbclark/paseo-nix, nixos/vps-primary/configuration.nix), using the agent logins in djbclark's home (/home/djbclark, a Hetzner Volume) and an agents.slice memory cap. UNAUTHENTICATED and permits command execution: tailnet-only, never funnel. See docs/paseo.md."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:

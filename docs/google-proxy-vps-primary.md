@@ -19,7 +19,7 @@ GP was removed everywhere on 2026-10-23: the tailnet now reaches MIT 18.0.0.0/8 
 Tailscale subnet route on pastebin.xvm.mit.edu (100.104.212.89); vps-primary cannot reach
 MIT at all and is only an exit node. Unit `hyades-public-return-path` still policy-routes
 `from $publicIp` via `enp1s0` (table 100) as a guard should any 18/8 route return; it is a
-no-op without one. On pastebin (the other egress leg), restarting nftables drops
+no-op without one. On pastebin.xvm.mit.edu (the other egress leg), restarting nftables drops
 Tailscale's rules: restart tailscaled right after it.
 
 ## 1. Why tinyproxy, and what was searched first
@@ -88,23 +88,23 @@ Tailscale's rules: restart tailscaled right after it.
 3. If SearXNG gets connection timeouts, check `curl -4 https://ifconfig.me` from the
    microVM: the firewall rule is keyed to that address (`hyadesEgress`).
 
-## 5. Since 2026-10-24: reached through pastebin over the tailnet
+## 5. Since 2026-10-24: reached through pastebin.xvm.mit.edu over the tailnet
 
 1. **What broke.** From 2026-10-23 13:39 UTC nothing sourced inside MIT arrives at `178.105.34.223`: Hyades' SYNs, pings and
    TCP from pastebin.xvm never show up in `tcpdump -i enp1s0` on this host, while ICMP from three check-host.net nodes does.
-   `traceroute` from pastebin dies right after MIT's border router `18.0.161.1`, while `178.105.0.1` (same Hetzner /16) is
+   `traceroute` from pastebin.xvm.mit.edu dies right after MIT's border router `18.0.161.1`, while `178.105.0.1` (same Hetzner /16) is
    reached via `18.0.161.18` and Lumen. The firewall (`nixos-fw` accepts `18.4.60.84`), the listener, `rp_filter` (loose) and
    the table-100 return rule were all checked and correct. It is a route or filter for this address at or beyond MIT's border.
 2. **What the module does now.** `tinyproxy-google` also listens on this host's tailnet address (it waits up to 30 s for it at
-   boot and exits, so systemd retries, if there is none) and `Allow`s pastebin's tailnet address `100.104.212.89`
-   (`relayPeer`). Hyades reaches it as Hyades → pastebin `:26371` (`tinyproxy-vpsrelay`, firecrawl-hyades
+   boot and exits, so systemd retries, if there is none) and `Allow`s pastebin.xvm.mit.edu's tailnet address `100.104.212.89`
+   (`relayPeer`). Hyades reaches it as Hyades → pastebin.xvm.mit.edu `:26371` (`tinyproxy-vpsrelay`, firecrawl-hyades
    `scripts/install-pastebin-egress-proxy`) → tailnet → here, so every request still leaves from this address. The allowlist
    is enforced at both hops. **No iptables rule guards the tailnet path:** tailscaled's `ts-input` chain accepts everything on
    `tailscale0` before `nixos-fw` (`iptables -S ts-input`: `-A ts-input -i tailscale0 -j ACCEPT`), so the gates are WireGuard
-   source authentication, tinyproxy's `Allow` (tailnet peers other than pastebin get 403) and the tailscale ACL. To tighten:
+   source authentication, tinyproxy's `Allow` (tailnet peers other than pastebin.xvm.mit.edu get 403) and the tailscale ACL. To tighten:
    allow only `100.104.212.89` to reach this host on `tcp/26369` in the tailnet policy (admin console). The rate limit the
    public rule applies to Hyades (40 new connections/s per source) therefore does not apply on this path; the same limit is
-   enforced on pastebin's nftables rule for `:26371` instead.
+   enforced on pastebin.xvm.mit.edu's nftables rule for `:26371` instead.
 3. **Restoring the direct path** by MIT fixing the route to `178.105.34.223` would need nothing else on this host (the public
    listener and the `18.4.60.84` rule are untouched).
 4. **The fix that worked, 2026-10-24 night: a different primary address.** MIT's border drops traffic to and from `178.105.34.223`
@@ -113,7 +113,7 @@ Tailscale's rules: restart tailscaled right after it.
    `HETZNER_CLOUD_TOKEN`; the swap needs the server powered off and every Floating IP detached, about 3 minutes of downtime),
    and the old primary and the Floating IP were released. The address comes from DHCP; the module's `proxyIp` names it for the
    firewall, which redirects Hyades' connections to `proxyIp:443` and `:80` to the proxy port. Hyades connects to
-   `http://2.28.231.104:443` directly, so the pastebin relay and the tailnet hop are no longer needed (the relay stays as a
+   `http://2.28.231.104:443` directly, so the pastebin.xvm.mit.edu relay and the tailnet hop are no longer needed (the relay stays as a
    spare). Requests still reach the engines from this address. **Rotation recipe, test method and the gotchas:**
    firecrawl-hyades `docs/rendezvous-plan.md` section 0.
 5. **Credential (2026-10-24 night).** The proxy requires HTTP basic auth (user `hyades`). The unit reads the secrets from
@@ -121,7 +121,7 @@ Tailscale's rules: restart tailscaled right after it.
    current and an optional second the previous one for a no-downtime rotation) through systemd `LoadCredential`, writes one
    `BasicAuth hyades SECRET` per line and refuses to start without the file or with a malformed line, so it is never an open
    proxy; the runtime directory is 0700. The secret is sudo-secretspec `FIRECRAWL_PROXY_AUTH`. A new host needs the file before
-   the first start; rotation and the test are in firecrawl-hyades `docs/searxng-egress.md`. The tailnet listener (for the pastebin
+   the first start; rotation and the test are in firecrawl-hyades `docs/searxng-egress.md`. The tailnet listener (for the pastebin.xvm.mit.edu
    relay) is optional at start: without a tailscale address the proxy still comes up on the public one. The :443/:80 redirects
    live in their own nat chain `hyades-dnat`, rebuilt on every firewall start, so a changed `proxyIp` or `wellKnownPorts` leaves no
    stale rule.

@@ -7,8 +7,8 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 
 1. One daemon per host, all on port **7263** (upstream default 6767), bound to loopback and published on the
    tailnet with `tailscale serve --https=7263`. Never `tailscale funnel`, never a public port.
-2. **No daemon password and no relay** (app.paseo.sh): the tailnet is the boundary, as it was for BB (removed 2026-10-25 on vps-primary)
-   ([bb-vps-primary.md](bb-vps-primary.md)). Paseo runs commands for anyone who reaches it.
+2. **No daemon password and no relay** (app.paseo.sh): the tailnet is the boundary
+   ([agents-vps-primary.md](agents-vps-primary.md)). Paseo runs commands for anyone who reaches it.
 3. Linux builds happen in Forgejo CI, never on a host: [forgejo.mit.edu/djbclark/paseo-nix](https://forgejo.mit.edu/djbclark/paseo-nix)
    packs the npm release into a hash-pinned tarball and carries the NixOS module (`services.paseo`).
 4. Voice mode and dictation are off on the servers (`speech.enable = false`): on, the daemon downloads about
@@ -19,8 +19,8 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 | Host | Daemon | Runs as | URL (tailnet only) | Config |
 | --- | --- | --- | --- | --- |
 | mac | Paseo.app (`brew install --cask paseo`) starts and owns it; LaunchAgent `com.djbclark.paseo-desktop` opens the app hidden at login and `keepRunningAfterQuit` keeps the daemon up after quitting (djbclark, 2026-10-18) | djbclark | https://mac.greyhound-sidemirror.ts.net:7263 | `roles/paseo_desktop` (`just paseo-desktop-apply`): `~/.paseo/config.json` keys, the serve and the LaunchAgent |
-| vps-primary | `services.paseo` (systemd `paseo.service`) | `bb`, using the agent logins in `/var/lib/bb` (home of the former BB service user); state `/var/lib/bb/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; Paseo and its agents run in `agents.slice` (MemoryMax 3G) |
-| get | `services.paseo` in the image (`hostName = "get"`: clients would show the container ID) | djbclark; state `~/.paseo` on `/persist` | https://get.greyhound-sidemirror.ts.net:7263 | `~/src/get` `nixos/paseo.nix`; the TSI port shim is preloaded; get's Tailscale shields are down for this (get `docs/runbook.md` 8.4) |
+| vps-primary | `services.paseo` (systemd `paseo.service`) | djbclark, using the agent logins in `/home/djbclark` ([agents-vps-primary.md](agents-vps-primary.md)); state `/home/djbclark/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; Paseo and its agents run in `agents.slice` (MemoryMax 3G) |
+| get.sipb.cloud | `services.paseo` in the image (`hostName = "get"`: clients would show the container ID) | djbclark; state `~/.paseo` on `/persist` | https://get.greyhound-sidemirror.ts.net:7263 | `~/src/get` `nixos/paseo.nix`; the TSI port shim is preloaded; get's Tailscale shields are down for this (get `docs/runbook.md` 8.4) |
 
 Clients: the Mac app adds the other two as hosts (Settings, Add host, Direct connection, `<name>.greyhound-sidemirror.ts.net`,
 port 7263, SSL on); the Android app on the stayturgid phones the same way over Tailscale; any tailnet browser
@@ -28,7 +28,7 @@ opens the URLs above (the bundled web UI); the CLI takes `--host wss://<name>.gr
 (the local daemon needs no `--host`).
 
 Status 2026-10-18: all three daemons answer `/api/health` and the web UI over the tailnet (vps-primary at
-site-djbclark f919386, get at image `ci-eb12788`, Mac app 0.11.4). Android `sh.paseo` 0.11.4 (stayturgid
+site-djbclark f919386, get.sipb.cloud at image `ci-eb12788`, Mac app 0.11.4). Android `sh.paseo` 0.11.4 (stayturgid
 `bootstrap_apks`, `just deploy-apks`) is on s24 and t2e; hd8 and p7a were off the tailnet and get it on their
 next `deploy-apks`. t2e has all three hosts. On s24 the app ignores taps (finger and adb alike, even
 after `pm clear`); djbclark will debug it later.
@@ -43,9 +43,9 @@ the plain "handoff" and "second opinion" stay with the `handoff` skill and `acp-
 
 1. Bump `pins.env` and relock `bundle/` in paseo-nix, push: the `build` workflow publishes a tarball and prints
    `PIN paseo <url> <hash>`; put that in `pkgs/pins.json` and push.
-2. Build the checks on the runner: bb-build's `nix-build` workflow with `repo=https://forgejo.mit.edu/djbclark/paseo-nix.git`.
+2. Build the checks on the runner: hyades-nix-build's `nix-build` workflow with `repo=https://forgejo.mit.edu/djbclark/paseo-nix.git`.
 3. Update the consumers on the runner too (`update=paseo-nix`, `attrs=none` to only lock; it prints the new `flake.lock`): vps-primary
-   (`dir=nixos`, then promote, [nixos-in-git.md](nixos-in-git.md)) and get (its `paseo-nix` input is pinned by `rev`;
+   (`dir=nixos`, then promote, [nixos-in-git.md](nixos-in-git.md)) and get.sipb.cloud (its `paseo-nix` input is pinned by `rev`;
    deploy with `scripts/deploy`). Deploy only the pushed branch head (`~/CLAUDE.md` 36: rebuilds are shared).
 4. The Mac app updates itself (or `brew upgrade --cask paseo`). Keep the daemons on one version: the apps talk
    to all three.

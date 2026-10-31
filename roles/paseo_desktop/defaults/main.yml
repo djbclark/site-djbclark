@@ -10,7 +10,7 @@ paseo_desktop_port: 7263
 # Tailnet HTTPS port of `tailscale serve` (registry/ports.yml tailscale_serve_port). Never funnel.
 paseo_desktop_serve_port: 7263
 # Daemon config keys (`paseo daemon config set PATH VALUE`; values are JSON). No password and no relay:
-# the tailnet is the boundary (djbclark, 2026-10-18), as for BB on vps-primary.
+# the tailnet is the boundary (djbclark, 2026-10-18).
 paseo_desktop_config:
   daemon.listen: '"127.0.0.1:{{ paseo_desktop_port }}"'
   daemon.hostnames: '["{{ caddy_public_hostname }}"]'
