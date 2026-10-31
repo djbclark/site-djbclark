@@ -1,7 +1,6 @@
 {
   lib,
   pkgs,
-  bb-nix,
   paseo-nix,
   ...
 }:
@@ -63,7 +62,12 @@
     '';
   };
 
-  environment.systemPackages = [ pkgs.vim pkgs.python3 ];
+  # nodejs_24: `npm install -g` scripts of the agents start with `#!/usr/bin/env node`.
+  environment.systemPackages = [
+    pkgs.vim
+    pkgs.python3
+    pkgs.nodejs_24
+  ];
 
   # Joined to the tailnet 2026-10-13 with a one-time tagged auth key
   # (tag:server: no key expiry); node state lives in /var/lib/tailscale.
@@ -152,59 +156,36 @@
     };
   };
 
-  # The BB service (services.bb, bb.service, its tailnet 443/38443 serve units, the `bb` CLI) was
-  # removed 2026-10-25; the bb-nix module is no longer imported (flake.nix). What that module also
-  # provided, and Paseo and its agents still need, is declared here by hand, unchanged: the `bb`
-  # user and group with home /var/lib/bb, its login-shell environment, and its one D-Bus session bus.
-  # The bb-nix input stays because its codex-npm-bin package is still used.
-  # uid/gid pinned to the live values (994/991): NixOS auto-allocation hands out a free id
-  # at first creation, so a rebuilt host or a changed user set could give bb a different one and
-  # leave /var/lib/bb (a separate volume that outlives the host) owned by a stranger.
-  users.groups.bb.gid = 991;
-  users.users.bb = {
-    uid = 994;
-    isSystemUser = true;
-    group = "bb";
-    home = "/var/lib/bb";
-    createHome = true;
-    homeMode = "0700";
-    # A real login shell: agents read their PATH from it.
-    shell = pkgs.bashInteractive;
-    # The agents' tools (Paseo's PATH includes /etc/profiles/per-user/bb/bin). Node too: what
-    # `npm install -g` puts in the prefix below is a script with an `#!/usr/bin/env node` line.
-    packages = [
-      bb-nix.packages.x86_64-linux.codex-npm-bin
-      pkgs.git
-      pkgs.gh
-      pkgs.ripgrep
-      pkgs.nodejs_24
-    ];
-  };
-  # Anthropic's native Claude Code installer, run once as bb, puts its binary in ~/.local/bin.
+  # The agents (Paseo and everything it starts) run as `djbclark`, whose home is /home/djbclark on its
+  # own Hetzner Volume (below): every agent login and install lives there. `djbclark` (uid 1000, group
+  # users, wheel, zsh) is not declared here: it predates this config and NixOS leaves it alone, so its
+  # uid is not pinned by Nix; the volume holds files owned by uid 1000, so keep it that way if the host
+  # is ever rebuilt.
+  # Anthropic's native Claude Code installer, run once as djbclark, puts its binary in ~/.local/bin.
   environment.localBinInPath = true;
-  # Login shells of bb only (the guard on the user name keeps it from touching anyone else): npm
+  # Login shells of djbclark only (the guard on the user name keeps it from touching anyone else): npm
   # global installs go to ~/.local (npm's default prefix is the read-only Node store path), the
   # system CA bundle for Python's stdlib (uv-managed interpreters look in hashed links NixOS does not
-  # create), and bb's one D-Bus session bus.
+  # create), and the one D-Bus session bus below.
   environment.extraInit = ''
-    if [ "$(${pkgs.coreutils}/bin/id -un 2>/dev/null)" = bb ]; then
-      export NPM_CONFIG_PREFIX=/var/lib/bb/.local
-      export PATH=/var/lib/bb/.local/bin:"$PATH"
+    if [ "$(${pkgs.coreutils}/bin/id -un 2>/dev/null)" = djbclark ]; then
+      export NPM_CONFIG_PREFIX=/home/djbclark/.local
+      export PATH=/home/djbclark/.local/bin:"$PATH"
       export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-      export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/bb-session-bus/bus
+      export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/agent-session-bus/bus
     fi
   '';
-  # One D-Bus session bus for bb. A system user has no login session, so without an address an agent
-  # that looks up a keyring (Copilot CLI, Hermes, gh) autolaunches a dbus-daemon that never exits
-  # (22 had piled up in a day). Paseo's agents use it through DBUS_SESSION_BUS_ADDRESS below.
-  systemd.services.bb-session-bus = {
-    description = "D-Bus session bus for the bb user";
+  # One D-Bus session bus for the agents. Without a login session an agent that looks up a keyring
+  # (Copilot CLI, Hermes, gh) autolaunches a dbus-daemon that never exits (22 had piled up in a
+  # day). Paseo's agents use it through DBUS_SESSION_BUS_ADDRESS below.
+  systemd.services.agent-session-bus = {
+    description = "D-Bus session bus for the agents (djbclark)";
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
-      ExecStart = "${pkgs.dbus}/bin/dbus-daemon --session --nofork --nopidfile --address=unix:path=/run/bb-session-bus/bus";
-      User = "bb";
-      Group = "bb";
-      RuntimeDirectory = "bb-session-bus";
+      ExecStart = "${pkgs.dbus}/bin/dbus-daemon --session --nofork --nopidfile --address=unix:path=/run/agent-session-bus/bus";
+      User = "djbclark";
+      Group = "users";
+      RuntimeDirectory = "agent-session-bus";
       RuntimeDirectoryMode = "0700";
       Restart = "on-failure";
       RestartSec = 5;
@@ -212,27 +193,26 @@
   };
 
   # Paseo (github.com/getpaseo/paseo), the agent workspace and the only interface to the agents
-  # (djbclark, 2026-10-25: BB retired). It runs as the `bb` user above, so its agents use the logins
-  # already in /var/lib/bb (docs/bb-vps-primary.md, "Logins"); state in /var/lib/bb/.paseo. Tailnet
+  # (djbclark, 2026-10-25). It runs as djbclark, so its agents use the logins in /home/djbclark
+  # (docs/agents-vps-primary.md, "Logins"); state in /home/djbclark/.paseo. Tailnet
   # 7263 serves the web UI, the apps and the CLI. No password and no relay: the tailnet is the only
   # boundary, and it must never be funnelled. Built by Forgejo CI (forgejo.mit.edu/djbclark/paseo-nix).
   # docs/paseo.md.
   services.paseo = {
     enable = true;
     package = paseo-nix.packages.x86_64-linux.paseo-bin;
-    user = "bb";
+    user = "djbclark";
     hostnames = [ "vps-primary.greyhound-sidemirror.ts.net" ];
     extraPackages = [
-      bb-nix.packages.x86_64-linux.codex-npm-bin
       pkgs.git
       pkgs.gh
       pkgs.ripgrep
     ];
     slice = "agents.slice";
     tailscaleServe.enable = true;
-    # Paseo's agents run as bb too: use bb's one session bus (bb-session-bus above), or Copilot/Hermes
-    # keyring lookups autolaunch dbus-daemons that never exit (djbclark-ade-9e, 2026-10-18).
-    environment.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/bb-session-bus/bus";
+    # Use the one session bus above, or Copilot/Hermes keyring lookups autolaunch dbus-daemons that
+    # never exit (djbclark-ade-9e, 2026-10-18).
+    environment.DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/agent-session-bus/bus";
   };
 
   # One memory cap for Paseo and every agent it starts: the 4 GB host also runs the Gradle cache
@@ -245,14 +225,14 @@
     };
   };
   systemd.services.paseo = {
-    # (bb-session-bus is declared with the bb user above.)
-    wants = [ "bb-session-bus.service" ];
-    after = [ "bb-session-bus.service" ];
+    wants = [ "agent-session-bus.service" ];
+    after = [ "agent-session-bus.service" ];
   };
 
-  # bb's home, /var/lib/bb (tool installs, caches, agent checkouts: ~10 GB), lives on a Hetzner
-  # Volume, not the 85%-full root disk (2026-10-25): Volume 107263872 "vps-primary-bb-home", ext4,
-  # nbg1. Mounted by filesystem UUID, which belongs to the filesystem, not to a /dev/sdX name.
+  # djbclark's home, /home/djbclark (tool installs, caches, agent checkouts: ~10 GB), lives on a Hetzner
+  # Volume, not the 85%-full root disk (2026-10-25; renamed and remounted from the agents' old home
+  # 2026-10-30): Volume 107263872 "vps-primary-home", ext4, nbg1. Mounted by filesystem UUID, which
+  # belongs to the filesystem, not to a /dev/sdX name.
   # It grows in place: enlarge it in the Hetzner console or API, then
   # `resize2fs /dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb` on the mounted host.
   # `nofail` keeps a missing or slow volume from dropping the boot into emergency mode, which
@@ -260,7 +240,7 @@
   # the mount can fail unnoticed, so paseo requires it below. `nosuid,nodev`: the volume holds
   # only agent-controlled downloads and checkouts, so setuid bits and device nodes there are never
   # legitimate. Not `noexec`: nix-ld binaries (Claude Code, Cursor's node) run from ~/.local.
-  fileSystems."/var/lib/bb" = {
+  fileSystems."/home/djbclark" = {
     device = "/dev/disk/by-uuid/cef32561-f50a-4332-ae46-b5ee5a1570eb";
     fsType = "ext4";
     options = [
@@ -273,14 +253,11 @@
   # With the volume absent, paseo must fail to start, never recreate an empty home (and fresh
   # logins and installs) on the root disk underneath the mount point. systemd derives this from
   # WorkingDirectory already; stated so it does not depend on that.
-  # bb-session-bus and the tailscale-serve unit never touch the home, so they need nothing.
-  # Still created before the mount: the empty mount-point directory (the NixOS user database
-  # activation, createHome) and, if the mount failed, paseo's empty /var/lib/bb/.paseo (its
-  # tmpfiles rule, which runs after local-fs.target whether or not a nofail mount succeeded).
-  systemd.services.paseo.unitConfig.RequiresMountsFor = [ "/var/lib/bb" ];
+  # agent-session-bus and the tailscale-serve unit never touch the home, so they need nothing.
+  systemd.services.paseo.unitConfig.RequiresMountsFor = [ "/home/djbclark" ];
 
   # Generic-glibc binaries that agents download run only with nix-ld: the native Claude Code and
-  # Cursor's bundled node (both installed into /var/lib/bb/.local).
+  # Cursor's bundled node (both installed into /home/djbclark/.local).
   programs.nix-ld.enable = true;
 
   # The host builds this configuration from git, never from /etc/nixos:
