@@ -304,7 +304,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay on the latest release:
    upgrade unasked, never hard-code a version path.** (`memory/feedback_ai_tuis_always_latest.md`)
 6. **Never pass `--help` to a live-service CLI subcommand**; `collie` is read-only for agents. **Secrets: `sudo-secretspec`
-   only; load its skill before scripting it** (every subcommand needs `--reason`). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
+   only; load its skill before scripting it** (every subcommand needs `--reason`). **App configs (codexbar, goose, hermes) hold plaintext keys: print key names or booleans, never raw lines or ranges** (2026-10-31). (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search and fetch walk the failover ladder** (`fallback-chains` skill, `web-get`): **search first with the shared
    `firecrawl` MCP's `firecrawl_search`** (`mcp__firecrawl__*`); **never the paid cloud `mcp__claude_ai_Firecrawl__*`** unless
    djbclark asks. **Every page the task needs is eventually fetched**: fall back, fix the tool, or pause and fix it with

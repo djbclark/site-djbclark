@@ -20,7 +20,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 3. **Default browser:** `open <url>` only, never Orion or Chrome by name (`memory/feedback_always_use_default_browser_orion.md`).
 4. **"All agents" = every `session-finder/fleet.py --json` row with a usable channel**: Paseo, terminal Claude, live ACP launch, Hermes; not finished launches or channel-less `pid*` rows. **Idle peer: plain relay prompt, never `--steer`**; steer only a working one. A quota-guard line binds only its named pool (2026-10-29, `memory/feedback_all_agents_includes_hermes.md`).
 5. **New tool, MCP server or plugin? Ask djbclark before adding it to `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive** (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **Nothing is version-pinned: all software tracks latest (2026-10-24). Agent TUIs, CLIs and ACP servers: upgrade unasked, never hard-code a version path** (`memory/feedback_ai_tuis_always_latest.md`).
-6. **Never `--help` on a live-service CLI subcommand** (`collie` is read-only). **Secrets: `sudo-secretspec` only; load its skill first** (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
+6. **No `--help` on live-service CLI subcommands** (`collie` is read-only). **Secrets: `sudo-secretspec` only, skill first; configs: key names only, never raw** (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch walks the ladder** (`fallback-chains`, `web-get`): **search first with the shared `mcp__firecrawl__*`; never the paid `mcp__claude_ai_Firecrawl__*`** unless asked. **Every needed page gets fetched**: fall back, fix the tool or pause for djbclark; never "unfetchable" (`memory/feedback_web_failover_pause.md`).
 8. **Every list in a reply to djbclark is labelled, never `-`/`*` bullets** (tables fine). **Top-level headings `A.`, `B.`; items `A1`, `A2` (sub-items `A1a`), each labelled once; no headings: `1.`, `2.`; question-card options too** (2026-10-24, `memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card** (`memory/feedback_links_clickable_markdown.md`).
 9. **Never discard paid-for work unasked**: don't stop agents/workflows partway or rerun what has a result; quota tight or pause asked: stop scheduling, let running work finish. **Accidental breakage: ask djbclark whether to fix it, last in queue.**
@@ -66,5 +66,5 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Compact Instructions
 
-Keep: task, status, files touched (absolute paths), djbclark's rulings this session, open items, exact next step,
+Keep: task, status, absolute paths touched, djbclark's rulings, open items, exact next step,
 handoff/report/scratchpad paths. Omit tool output, dead ends, committed facts.
