@@ -170,7 +170,7 @@ gemini is deprecated, not installed. Every agent but muse speaks ACP (`acp-run -
 (`~/.local/bin/acp-run`; **always `--model`**, zcode too since 2026-10-15; `--effort`/`--context`
 too; check its `applied:` line; yolo-only since 2026-10-14, `--perm deny` for review-only slices; exit
 0 is not success, verify tests/diff); (2) `paseo run`; (3) non-ACP CLIs:
-their own headless recipe. herdr (bar herdr4paseo/paseo4herdr), Orca and BB are retired; GUI control
+their own headless recipe. herdr (bar herdr4paseo/paseo4herdr) and Orca are retired; GUI control
 is `paseo-screen` (djbclark, 2026-10-31). **copilot is the only reserve: floor 60% left, one small GitHub slice**;
 grok is an ordinary pool (2026-10-18; `acp-run grok --model grok-4.7`). **hermes is never a delegation target. Never an all-vendor
 fan-out**: `route_agent.py plan` picks vendor × model × effort per slice. **cline (uninstalled
