@@ -169,8 +169,9 @@ gemini is deprecated, not installed. Every agent but muse speaks ACP (`acp-run -
 **Delegation route, in order:** (1) **`acp-run <agent> -C <dir> -p '<prompt>' --model <m>`**
 (`~/.local/bin/acp-run`; **always `--model`**, zcode too since 2026-10-15; `--effort`/`--context`
 too; check its `applied:` line; yolo-only since 2026-10-14, `--perm deny` for review-only slices; exit
-0 is not success, verify tests/diff); (2) Orca `worker-start`; (3) a Herdr pane; (4) non-ACP CLIs:
-their own headless recipe. **copilot is the only reserve: floor 60% left, one small GitHub slice**;
+0 is not success, verify tests/diff); (2) `paseo run`; (3) non-ACP CLIs:
+their own headless recipe. herdr (bar herdr4paseo/paseo4herdr), Orca and BB are retired; GUI control
+is `paseo-screen` (djbclark, 2026-10-31). **copilot is the only reserve: floor 60% left, one small GitHub slice**;
 grok is an ordinary pool (2026-10-18; `acp-run grok --model grok-4.7`). **hermes is never a delegation target. Never an all-vendor
 fan-out**: `route_agent.py plan` picks vendor × model × effort per slice. **cline (uninstalled
 2026-10-17) never without djbclark's explicit approval for that run** (refused unless
@@ -202,7 +203,7 @@ git copy, never a TUI copy; list: `docs/skills.md`), e.g. `bigteam`, `model-rout
 
 **Keep context small: by default send discrete, separable tasks to `bigteam`** (or a sub-agent) at the
 minimum model × effort × context that does it well; past ~40k tokens of growth, delegate from then
-on. Compaction is **automatic, never a question to djbclark** (2026-10-15); in herdr, Orca or Paseo
+on. Compaction is **automatic, never a question to djbclark** (2026-10-15); in Paseo
 compact earlier, once, at a natural boundary: `~/src/djbclark-ade/bin/self-slash "/compact
 <focus>"`; a topic change runs the `handoff` skill then `/new`. self-slash refuses while anything is
 on the input line; only then ask djbclark to type it, never send over a draft. Never touch another
@@ -297,7 +298,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**, never in
    place. (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` only, never Orion or Chrome by name. (`memory/feedback_always_use_default_browser_orion.md`)
-4. **"All agents" = every session `~/src/djbclark-ade/skills/session-finder/fleet.py --json` lists with a usable channel**: Paseo, herdr pane, terminal Claude, live ACP launch, Hermes (which `aiuse` doesn't list); not finished ACP launches (relay refuses them) or channel-less `pid*` rows. **An idle agent gets a plain relay prompt, never `--steer`** (steered text to an idle agent is queued and never read); steer only a working one. A quota-guard line (e.g. "critical") binds only the pool it names (Claude Code); omp, codex, grok, agy, zai, opencode keep working (2026-10-29). (`memory/feedback_all_agents_includes_hermes.md`)
+4. **"All agents" = every session `~/src/djbclark-ade/skills/session-finder/fleet.py --json` lists with a usable channel**: Paseo, terminal Claude, live ACP launch, Hermes (which `aiuse` doesn't list); not finished ACP launches (relay refuses them) or channel-less `pid*` rows. **An idle agent gets a plain relay prompt, never `--steer`** (steered text to an idle agent is queued and never read); steer only a working one. A quota-guard line (e.g. "critical") binds only the pool it names (Claude Code); omp, codex, grok, agy, zai, opencode keep working (2026-10-29). (`memory/feedback_all_agents_includes_hermes.md`)
 5. **New tool, MCP server or plugin? Ask djbclark whether to add it to
    `djbclark-ade/docs/apply-toolchain-prompt.md`; a new skill goes in unasked unless sensitive.**
    (`memory/feedback_ask_update_apply_toolchain_prompt.md`) **AI TUIs, agent CLIs and ACP servers stay on the latest release:
