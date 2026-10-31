@@ -101,7 +101,10 @@ Notes that are easy to lose:
    cannot verify TLS on NixOS (its capath has no hashed links), so `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt`
    is set in `~djbclark/.hermes/.env`.
 2. Disk: Hermes (2.5 GB), the npm globals (2 GB) and the agy server (1 GB) are the large pieces. The agy server is
-   re-downloadable and the first to drop.
+   re-downloadable and the first to drop. The home volume reached 73% on 2026-10-31 (the npm cache alone was 1.5 GB);
+   `systemd.tmpfiles.rules` in `configuration.nix` now ages `~/.cache` and `~/.npm/_cacache` out after 14 days and
+   `/tmp` after 3 days (`systemd-tmpfiles-clean.timer`, daily; NixOS's packaged rule is 10 days, ours is the earlier
+   file so it wins; ticket caches `krb5cc_*` are kept). Check with `systemd-tmpfiles --cat-config | grep -E 'djbclark|/tmp'`.
 
 ## Rollback
 
