@@ -7,6 +7,7 @@
 #   fleet-watch load       only the machine-overload check (see Machine overload)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
+#   fleet-watch dann      only the dann.dclark.us check (ssh: last pool verification, gateway, units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch upstream [--profile cfengine|paseo] [--dry-run] [--once]  only the upstream watcher (see Upstream PR watcher)
 #   fleet-watch upstream [--profile P] --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
@@ -169,6 +170,22 @@ VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # Consecutive failed probes before "down" is announced. 3 x 5 min covers the
 # unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
 VPS_DOWN_AFTER="${FLEET_WATCH_VPS_DOWN_AFTER:-3}"
+# dann.dclark.us (2026-10-28, djbclark's ruling that Dann and its host are their own site): the
+# host proves its five AI pools, their secrets and the gateway daily (systemd timer; the module is
+# site-dann/nixos/dann/pool-verify.nix) and leaves the report and its exit status in
+# /var/lib/pool-verify/. This check only reads them over ssh and speaks on transitions, like
+# vps_watch — the host has no messaging platform, and this is the page.
+DANN="${FLEET_WATCH_DANN:-on}"
+DANN_HOST="${FLEET_WATCH_DANN_HOST:-dann.dclark.us}"
+DANN_KEY="${FLEET_WATCH_DANN_KEY:-$HOME/.ssh/dann_vps_ed25519}"
+DANN_TIMEOUT="${FLEET_WATCH_DANN_TIMEOUT:-25}"
+DANN_DOWN_AFTER="${FLEET_WATCH_DANN_DOWN_AFTER:-3}"
+# How stale the last verification may be before it is news: the timer is daily at 05:20 UTC with
+# up to 30 min of jitter, so 36 h tolerates one missed run without paging.
+DANN_MAX_AGE="${FLEET_WATCH_DANN_MAX_AGE:-129600}"
+# No report at all is NOT news on the day of a deploy (the timer has not had its slot yet), so a
+# missing report is announced only after this long without one.
+DANN_NEVER_AFTER="${FLEET_WATCH_DANN_NEVER_AFTER:-93600}"
 # get backup staleness (2026-10-16, asked by the sipb-fa session, approved by djbclark): defeat
 # pulls nightly rsync snapshots of get (restic until 2026-10-20; get parked since then, so "stale"); ~/src/get's `scripts/backup-check stale` prints one line
 # and exits 1 when the last success is older than 30 h or defeat is unreachable (ssh defeat).
@@ -637,6 +654,88 @@ vps_watch() {
     notify "vps-primary" "recovered, healthy again (was: $prev)" && echo ok >"$sf"
   else
     notify "vps-primary" "$detail" && echo "$state" >"$sf"
+  fi
+  return 0
+}
+
+dann_probe() {
+  # One line from dann: "<verify exit|none> <report age s> <failed units> <gateway state>
+  # <upgrade Result> <upgrade ActiveState>". Read-only, no sudo: `dann` can read the report and
+  # query systemd, and the daily verification runs as `hermes` on the host.
+  runb "$DANN_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=8 -o IdentitiesOnly=yes \
+    -o IdentityAgent=none -i "$DANN_KEY" -o StrictHostKeyChecking=accept-new "dann@$DANN_HOST" \
+    'x=$(cat /var/lib/pool-verify/last.exit 2>/dev/null || echo none); \
+     m=$(stat -c %Y /var/lib/pool-verify/last 2>/dev/null || echo 0); \
+     f=$(systemctl --failed --plain --no-legend 2>/dev/null | wc -l); \
+     u=$(systemctl is-active hermes-agent 2>/dev/null || echo unknown); \
+     r=$(systemctl show nixos-upgrade.service -p Result --value 2>/dev/null); \
+     a=$(systemctl show nixos-upgrade.service -p ActiveState --value 2>/dev/null); \
+     echo "$x $(($(date +%s) - m)) ${f:-0} ${u:-unknown} ${r:-none} ${a:-unknown}"' 2>/dev/null |
+    gtail -1
+}
+
+dann_watch() {
+  # Sets DANN_STATE (shown in the status line); notifies itself on transitions only, once per
+  # incident, and records the notified state only when the notice went out — the same contract as
+  # vps_watch, so a failed page is retried rather than lost.
+  DANN_STATE=off
+  [[ "$DANN" == on ]] || return 0
+  local sf="$STATE_DIR/dann-state" cf="$STATE_DIR/dann-fails" nf="$STATE_DIR/dann-noreport"
+  local prev fails out state detail now
+  prev=$(cat "$sf" 2>/dev/null || echo ok)
+  out=$(dann_probe)
+  if [[ -z "$out" ]]; then
+    fails=$(( $(cat "$cf" 2>/dev/null || echo 0) + 1 ))
+    echo "$fails" >"$cf"
+    DANN_STATE="unreachable($fails)"
+    ((fails >= DANN_DOWN_AFTER)) || return 0
+    state=down
+    detail="dann.dclark.us unreachable for $fails checks (ssh dann@$DANN_HOST; the OVH console has the serial console if it stopped booting)"
+  else
+    echo 0 >"$cf"
+    local vx age nfail gw up_res up_act
+    read -r vx age nfail gw up_res up_act <<<"$out"
+    now=$(gdate +%s)
+    # "No report yet" is only news once it has been true for a while (a deploy day looks like
+    # this until 05:20 UTC).
+    if [[ "$vx" == none || "$age" == 0 ]]; then
+      [[ -f "$nf" ]] || echo "$now" >"$nf"
+      if (( now - $(cat "$nf" 2>/dev/null || echo "$now") >= DANN_NEVER_AFTER )); then
+        state=verify-never-ran
+        detail="dann: no pool verification report in ${DANN_NEVER_AFTER}s; on the host: systemctl status pool-verify.timer; journalctl -u pool-verify -n 50"
+      else
+        state=verify-pending
+      fi
+    else
+      rm -f "$nf"
+      if [[ "$up_res" != success && "$up_act" == inactive ]] || [[ "$up_act" == failed ]]; then
+        state=upgrade-failed
+        detail="dann: nixos-upgrade failed (Result=$up_res); ssh dann@$DANN_HOST journalctl -u nixos-upgrade -n 50"
+      elif [[ "$gw" != active ]]; then
+        state=gateway-down
+        detail="dann: hermes-agent is $gw; ssh dann@$DANN_HOST systemctl status hermes-agent"
+      elif [[ "$vx" != 0 ]]; then
+        state=verify-failed
+        detail="dann: pool verification FAILED (exit $vx); ssh dann@$DANN_HOST tail -20 /var/lib/pool-verify/last"
+      elif (( age > DANN_MAX_AGE )); then
+        state=verify-stale
+        detail="dann: last pool verification is $(( age / 3600 ))h old (limit $(( DANN_MAX_AGE / 3600 ))h); ssh dann@$DANN_HOST systemctl status pool-verify.timer"
+      elif (( nfail > 0 )); then
+        state=units-failed
+        detail="dann: $nfail failed systemd unit(s); ssh dann@$DANN_HOST systemctl --failed"
+      else
+        state=ok
+      fi
+    fi
+    DANN_STATE="$state"
+  fi
+  # verify-pending is the pre-first-run quiet state: shown in the status line, never paged.
+  [[ "$state" == verify-pending ]] && return 0
+  [[ "$state" == "$prev" ]] && return 0
+  if [[ "$state" == ok ]]; then
+    notify "dann" "recovered, healthy again (was: $prev)" && echo ok >"$sf"
+  else
+    notify "dann" "$detail" && echo "$state" >"$sf"
   fi
   return 0
 }
@@ -1400,10 +1499,12 @@ check() {
   done
   load_watch
   vps_watch
+  dann_watch
   getbackup_watch check
   local p
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
+  [[ "$DANN_STATE" == off ]] || parts+=("dann=$DANN_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
   local r
   for r in $REPOS; do parts+=("$r=$(repo "$r")"); done
@@ -1477,6 +1578,10 @@ case "${1:-check}" in
   vps)
     vps_watch
     echo "vps=$VPS_STATE"
+    ;;
+  dann)
+    dann_watch
+    echo "dann=$DANN_STATE"
     ;;
   getbackup)
     getbackup_watch manual
