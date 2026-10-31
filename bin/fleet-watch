@@ -184,7 +184,8 @@ DANN_DOWN_AFTER="${FLEET_WATCH_DANN_DOWN_AFTER:-3}"
 # up to 30 min of jitter, so 36 h tolerates one missed run without paging.
 DANN_MAX_AGE="${FLEET_WATCH_DANN_MAX_AGE:-129600}"
 # No report at all is NOT news on the day of a deploy (the timer has not had its slot yet), so a
-# missing report is announced only after this long without one.
+# missing report is announced only after this long without one. Upgrade, gateway and failed-unit
+# failures still alert immediately; malformed probe records alert as probe-invalid.
 DANN_NEVER_AFTER="${FLEET_WATCH_DANN_NEVER_AFTER:-93600}"
 # get backup staleness (2026-10-16, asked by the sipb-fa session, approved by djbclark): defeat
 # pulls nightly rsync snapshots of get (restic until 2026-10-20; get parked since then, so "stale"); ~/src/get's `scripts/backup-check stale` prints one line
@@ -667,11 +668,11 @@ dann_probe() {
     'x=$(cat /var/lib/pool-verify/last.exit 2>/dev/null || echo none); \
      m=$(stat -c %Y /var/lib/pool-verify/last 2>/dev/null || echo 0); \
      f=$(systemctl --failed --plain --no-legend 2>/dev/null | wc -l); \
-     u=$(systemctl is-active hermes-agent 2>/dev/null || echo unknown); \
+     u=$(systemctl is-active hermes-agent 2>/dev/null); \
+     [ -n "$u" ] || u=unknown; \
      r=$(systemctl show nixos-upgrade.service -p Result --value 2>/dev/null); \
      a=$(systemctl show nixos-upgrade.service -p ActiveState --value 2>/dev/null); \
-     echo "$x $(($(date +%s) - m)) ${f:-0} ${u:-unknown} ${r:-none} ${a:-unknown}"' 2>/dev/null |
-    gtail -1
+     echo "$x $(($(date +%s) - m)) ${f:-0} ${u:-unknown} ${r:-none} ${a:-unknown}"' 2>/dev/null
 }
 
 dann_watch() {
@@ -694,35 +695,50 @@ dann_watch() {
   else
     echo 0 >"$cf"
     local vx age nfail gw up_res up_act
-    read -r vx age nfail gw up_res up_act <<<"$out"
-    now=$(gdate +%s)
-    # "No report yet" is only news once it has been true for a while (a deploy day looks like
-    # this until 05:20 UTC).
-    if [[ "$vx" == none || "$age" == 0 ]]; then
-      [[ -f "$nf" ]] || echo "$now" >"$nf"
-      if (( now - $(cat "$nf" 2>/dev/null || echo "$now") >= DANN_NEVER_AFTER )); then
-        state=verify-never-ran
-        detail="dann: no pool verification report in ${DANN_NEVER_AFTER}s; on the host: systemctl status pool-verify.timer; journalctl -u pool-verify -n 50"
-      else
-        state=verify-pending
-      fi
+    local number='[0-9]{1,18}'
+    local activity='(active|reloading|inactive|failed|activating|deactivating|maintenance|refreshing|unknown)'
+    local result='(success|resources|protocol|timeout|exit-code|signal|core-dump|watchdog|start-limit-hit|oom-kill|exec-condition|none)'
+    local record="^(none|$number)[[:blank:]]+$number[[:blank:]]+$number[[:blank:]]+$activity[[:blank:]]+$result[[:blank:]]+$activity$"
+    # Validate the entire single-line record before interpreting any field. Bound numbers to
+    # 18 digits (signed 64-bit safe), then force decimal to avoid octal and expression parsing.
+    if [[ ! "$out" =~ $record ]]; then
+      state=probe-invalid
+      detail="dann: invalid host probe record; check pool-verify report and systemd probe output"
     else
-      rm -f "$nf"
+      read -r vx age nfail gw up_res up_act <<<"$out"
+      age=$((10#$age))
+      nfail=$((10#$nfail))
+      [[ "$vx" == none ]] || vx=$((10#$vx))
+      now=$(gdate +%s)
+      if [[ "$vx" == none ]]; then
+        [[ -f "$nf" ]] || echo "$now" >"$nf"
+      else
+        rm -f "$nf"
+      fi
+      # Host failures page immediately, even while waiting for the first pool report.
       if [[ "$up_res" != success && "$up_act" == inactive ]] || [[ "$up_act" == failed ]]; then
         state=upgrade-failed
         detail="dann: nixos-upgrade failed (Result=$up_res); ssh dann@$DANN_HOST journalctl -u nixos-upgrade -n 50"
       elif [[ "$gw" != active ]]; then
         state=gateway-down
         detail="dann: hermes-agent is $gw; ssh dann@$DANN_HOST systemctl status hermes-agent"
+      elif (( nfail > 0 )); then
+        state=units-failed
+        detail="dann: $nfail failed systemd unit(s); ssh dann@$DANN_HOST systemctl --failed"
+      elif [[ "$vx" == none ]]; then
+        # The 26 h deploy grace applies only to an absent pool report.
+        if (( now - $(cat "$nf" 2>/dev/null || echo "$now") >= DANN_NEVER_AFTER )); then
+          state=verify-never-ran
+          detail="dann: no pool verification report in ${DANN_NEVER_AFTER}s; on the host: systemctl status pool-verify.timer; journalctl -u pool-verify -n 50"
+        else
+          state=verify-pending
+        fi
       elif [[ "$vx" != 0 ]]; then
         state=verify-failed
         detail="dann: pool verification FAILED (exit $vx); ssh dann@$DANN_HOST tail -20 /var/lib/pool-verify/last"
       elif (( age > DANN_MAX_AGE )); then
         state=verify-stale
         detail="dann: last pool verification is $(( age / 3600 ))h old (limit $(( DANN_MAX_AGE / 3600 ))h); ssh dann@$DANN_HOST systemctl status pool-verify.timer"
-      elif (( nfail > 0 )); then
-        state=units-failed
-        detail="dann: $nfail failed systemd unit(s); ssh dann@$DANN_HOST systemctl --failed"
       else
         state=ok
       fi
