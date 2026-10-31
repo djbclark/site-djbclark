@@ -459,8 +459,9 @@ def upload_payload() -> Path:
     return p
 
 
-def upload_argv(path: Path, max_s: float) -> list[str]:
+def upload_argv(path: Path, max_s: float, iface: str = "") -> list[str]:
     return ["curl", "-sS", "-o", "/dev/null", "--max-time", f"{max_s:g}", "--connect-timeout", "4", "-X", "POST",
+            *(["--interface", iface] if iface else []),
             "--data-binary", f"@{path}", "-w", "%{size_upload} %{time_total} %{speed_upload} %{http_code}", "--", UP_URL]
 
 
@@ -512,6 +513,14 @@ def do_probe(cfg: Config, net: dict, runner: Callable[..., Res] = run, clock: Ca
     out = {"t": t0, "interface": iface, "gateway": net.get("gateway", ""), "mbps": round(mbps, 2), "unknown": unknown,
            "unknown_kind": kind, "bytes": total, "elapsed_s": round(t1 - t0, 2), "streams": streams, "errors": errors,
            "default_route": default_route}
+    if iface and not unknown:  # the home uplink on the physical interface, so a slow tunnel upload can be told from a slow uplink
+        try:
+            dup = parse_curl_w(runner(upload_argv(upload_payload(), cfg.probe_max_s, iface), cfg.probe_max_s + 2))
+            dup_ok = stream_ok(dup) and dup["bytes"] > 0
+            out["up"] = {"mbps": round(dup["bytes"] * 8 / max(dup["secs"], 0.25) / 1e6, 2) if dup_ok else None,
+                         "bytes": dup["bytes"], "ok": dup_ok, "http": dup["http"], "via": iface}
+        except OSError:
+            out["up"] = {"mbps": None, "bytes": 0, "ok": False, "http": 0, "via": iface}
     if gateway_ok is not None:
         out["gateway_ok"] = gateway_ok
     return out
@@ -659,6 +668,9 @@ class Watch:
         up = dr.get("up") if isinstance(dr.get("up"), dict) else None
         if up:
             rec["default_up_mbps"] = up.get("mbps")  # diagnostic only: never part of a verdict
+        dup = sample.get("up") if isinstance(sample.get("up"), dict) else None
+        if dup:
+            rec["direct_up_mbps"] = dup.get("mbps")  # diagnostic only: home uplink on the physical interface, never part of a verdict
         if unknown:
             rec["unknown"] = unknown[:120]
         st["samples"].append(rec)
@@ -1474,6 +1486,10 @@ def format_probe(s: dict, net: dict, cfg: Config) -> str:
     if up:
         lines.append(f"tunnel upload via {up.get('via')} (diagnostic, not a verdict): "
                      + (f"{up['mbps']:.1f} Mbps out vs {s['default_route']['mbps']:.1f} Mbps in" if up.get("ok") else f"failed (http {up.get('http')})"))
+    dup = s.get("up")
+    if dup:
+        lines.append(f"direct upload via {dup.get('via')} (diagnostic, not a verdict): "
+                     + (f"{dup['mbps']:.1f} Mbps out vs {s['mbps']:.1f} Mbps in" if dup.get("ok") else f"failed (http {dup.get('http')})"))
     lines += [f"  stream {s_['host']}: {s_['bytes'] / 1e6:.2f} MB {s_['secs']:.2f}s {s_['mbps']:.1f} Mbps http={s_['http']}" + (f" ERR {s_['error']}" if s_.get("error") else "") for s_ in s["streams"]]
     lines += [f"  error: {e}" for e in s["errors"]]
     return "\n".join(lines)

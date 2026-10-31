@@ -863,9 +863,9 @@ def test_probe_binds_physical_interface_and_default_route_sample_does_not(nw):
         return nw.Res(0, "5000000 1.0 5000000 200")
 
     p = nw.do_probe(nw.Config(), {"interface": "en0", "gateway": "x"}, runner)
-    bound = [a for a in seen if "--interface" in a]
+    bound = [a for a in seen if "--interface" in a and "-X" not in a]  # the 4 downloads; the direct upload is covered below
     assert len(bound) == 4 and all(a[a.index("--interface") + 1] == "en0" for a in bound)
-    assert len(seen) - len(bound) == 2 and all(isinstance(a, list) for a in seen)
+    assert len([a for a in seen if "-X" not in a]) - len(bound) == 2 and all(isinstance(a, list) for a in seen)
     assert all(a[a.index("--max-time") + 1] == "8" for a in seen)
     assert p["mbps"] == pytest.approx(160.0)
 
@@ -1220,16 +1220,21 @@ def test_a_tunnel_default_route_gets_one_upload_through_it_recorded_apart_from_t
 
     p = nw.do_probe(nw.Config(), {"interface": "en0", "gateway": "g", "tunnel_iface": "utun4"}, run2)
     ups = [a for a in calls if "-X" in a]
-    assert len(ups) == 1 and "--interface" not in ups[0] and ups[0][-1] == nw.UP_URL and ups[0][ups[0].index("--data-binary") + 1].startswith("@")
+    tun = [a for a in ups if "--interface" not in a]
+    direct = [a for a in ups if "--interface" in a]
+    assert len(ups) == 2 and len(tun) == 1 and len(direct) == 1 and direct[0][direct[0].index("--interface") + 1] == "en0"
+    assert tun[0][-1] == nw.UP_URL and tun[0][tun[0].index("--data-binary") + 1].startswith("@")
     assert p["default_route"]["up"] == {"mbps": 4.0, "bytes": 1_000_000, "ok": True, "http": 200, "via": "utun4"}
+    assert p["up"] == {"mbps": 4.0, "bytes": 1_000_000, "ok": True, "http": 200, "via": "en0"}  # the home uplink, recorded apart
     assert p["default_route"]["mbps"] > 50  # inbound through the tunnel is its own number
     calls.clear()
     nw.do_probe(nw.Config(), {"interface": "en0", "gateway": "g", "tunnel_iface": ""}, run2)
-    assert not [a for a in calls if "-X" in a]  # no tunnel, no upload
+    only = [a for a in calls if "-X" in a]
+    assert len(only) == 1 and only[0][only[0].index("--interface") + 1] == "en0"  # no tunnel: only the direct-path upload
     calls.clear()
     dead = lambda: nw.Res(6, "0 0 0 000")  # noqa: E731
     p = nw.do_probe(nw.Config(), {"interface": "en0", "gateway": "g", "tunnel_iface": "utun4"}, host_runner(nw, dead, dead))
-    assert p["unknown"] and "up" not in p["default_route"]  # an unknown sample moves no extra bytes
+    assert p["unknown"] and "up" not in p["default_route"] and "up" not in p  # an unknown sample moves no extra bytes
 
 
 def test_a_failed_or_slow_tunnel_upload_never_changes_the_verdict(nw):
