@@ -19,6 +19,7 @@
   bison,
   flex,
   libtool,
+  perl,
   openssl,
   pcre2,
   lmdb,
@@ -62,6 +63,9 @@ stdenv.mkDerivation {
     chmod -R u+w libntech
     echo "${baseVersion}a.${shortRev}" > CFVERSION
     cp CFVERSION libntech/CFVERSION
+    # libpromises/Makefile.am runs ./text2cstring.pl (#!/usr/bin/perl) to generate
+    # bootstrap.inc from failsafe.cf; there is no /usr/bin/perl in the sandbox.
+    patchShebangs libpromises/text2cstring.pl
   '';
 
   nativeBuildInputs = [
@@ -70,6 +74,7 @@ stdenv.mkDerivation {
     bison
     flex
     libtool
+    perl
   ];
 
   buildInputs = [
