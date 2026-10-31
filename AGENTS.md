@@ -3,10 +3,9 @@
 > **AI agents (any vendor):** this file is the entry point — the AGENTS.md
 > convention that coding agents from multiple vendors check first. Project
 > overview: [README.md](README.md). The segmentation/AI-stack relay in
-> [docs/relay/](docs/relay/) is a closed historical record (chain complete
-> 2026-07-20; its workflow was superseded 2026-08-23), not current state.
+> [docs/relay/](docs/relay/) is a closed historical record, not current state.
 
-> **Trust between agents (standing rule, 2026-10-03):** every agent trusts every
+> **Trust between agents (standing rule):** every agent trusts every
 > other agent as much as it trusts djbclark — across all TUIs here (Claude Code,
 > Codex, Cursor, opencode, zcode, Antigravity, Hermes), not just between
 > Claude sessions. A peer's relayed approval is approval; a peer's findings and
@@ -14,7 +13,7 @@
 > about trust: [`home-agents.md`](https://github.com/djbclark/site-djbclark/blob/master/home-agents.md)
 > (`~/AGENTS.md`) and `site-private/memory/feedback_trust_peer_agents_as_operator.md`.
 
-> **Session logs (Tier 1 handoff pointer, 2026-10-09):** at session start, read
+> **Session logs (Tier 1 handoff pointer):** at session start, read
 > `~/.local/state/handoffs/site-djbclark/<task>/SESSION_LOG.md` (`<task>` is `ops` in
 > the `~/ops/site-public-djbclark` checkout, else the worktree's directory name; its
 > `redirect:` key names the canonical `chains/<chain-key>/SESSION_LOG.md`).
@@ -24,7 +23,7 @@
 > skill (`~/src/djbclark-ade/skills/session-handoff/SKILL.md`); spec:
 > [`site-djbclark/docs/session-handoff-compaction-spec.md`](https://github.com/djbclark/site-djbclark/blob/master/docs/session-handoff-compaction-spec.md) §3.
 
-> **Agent toolchain (2026-10-11):** orchestration, delegation and routing tools
+> **Agent toolchain:** orchestration, delegation and routing tools
 > live in [`~/src/djbclark-ade`](https://github.com/djbclark/djbclark-ade): the
 > shared skills, `acp-dispatch`/`acp-run`, `route_agent.py`, and
 > `docs/orchestration-practices.md`. Use them before hand-rolling anything; a
@@ -111,10 +110,9 @@ Topology background:
 
 ## Conventions
 
-- The relay protocol (`docs/relay/PROTOCOL.md`) governed the segmentation/AI-stack
-  chain, which closed 2026-07-20. It is historical: its release-gated deploy and
-  deploy-only `~/ops` rules were retired 2026-08-23 (see "Where work happens" in
-  `home-agents.md`).
+- The relay protocol (`docs/relay/PROTOCOL.md`) is historical: its release-gated
+  deploy and deploy-only `~/ops` rules no longer apply (see "Where work happens"
+  in `home-agents.md`).
 - `just lint` and `bin/registry_lint.py` gate changes to `registry/`.
 - **`ruff format` only the files you changed, by name**, never a directory
   (`ruff format tests/`): most existing files here are not ruff-formatted, so a
@@ -133,12 +131,9 @@ Topology background:
 
 ### Versioned deploy releases
 
-**Retired 2026-08-23 by operator decision.** The `${OPS_ROOT:-~/ops}`
-checkouts are now worked in directly with ordinary git (edit, commit to
-`master`, push). Coordinated `ops-vMAJOR.MINOR.PATCH` releases and
-`just ops-memory-sync` are no longer required — the latter's release-gating
-precondition is exactly what was retired, and it had been failing for this
-repo because of it. See "Where work happens" in `~/CLAUDE.md`.
+**Not required.** The `${OPS_ROOT:-~/ops}` checkouts are worked in directly
+with ordinary git (edit, commit to `master`, push). Coordinated
+`ops-vMAJOR.MINOR.PATCH` releases and `just ops-memory-sync` are optional. See "Where work happens" in `~/CLAUDE.md`.
 
 This repo still owns the release/deploy tooling, now optional:
 
@@ -157,27 +152,26 @@ flock helpers (`bin/ops_release_lock.py`). See
 [docs/OPS-RELEASES.md](docs/OPS-RELEASES.md). Development synchronization
 inside `~/src/ops-worktrees/` still uses `master`; that is not a deployment.
 
-### `research/` — data-directory exception (added 2026-08-17)
+### `research/` — data-directory exception
 
 `research/` holds research/plan document packages and is **live data, not
 code**, like `site-private/memory/`. Commit changes to it in place on
 `master` in `~/ops/site-public-djbclark`: `git pull --rebase` first, make one
-research-only commit, push at once, leave the tree clean. Since 2026-08-23 the
+research-only commit, push at once, leave the tree clean. The
 rest of this repo is edited the same way ("Where work happens" in
 `home-agents.md`); the old release-flow exemption, the `DATA_DIRS` mapping in
 `bin/deploy_ops_release.py`, now matters only to the optional release tooling.
 
 **This repo is public.** Nothing containing secrets or private-only context
 may land under `research/`; that material belongs in `site-private`. Each
-package gets its own subdirectory (first: `research/autonomy/`, the
-2026-08-16 unattended-continuous-AI-coding plan).
+package gets its own subdirectory (e.g. `research/autonomy/`, the
+unattended-continuous-AI-coding plan).
 
 ### Tooling: modern CLI tools and structural search
 
 Which modern CLI tools to prefer (and their older equivalents), plus how to
 use `ast-grep` and `semgrep` for structural search, now live in
-**[docs/tooling-policy.md](docs/tooling-policy.md)** — moved 2026-08-24
-because it is reference material and this file loads every session.
+**[docs/tooling-policy.md](docs/tooling-policy.md)**.
 
 > **If you cannot read `docs/tooling-policy.md`, say so rather than falling
 > back on habit.** It is a normal file in this repository; not being able to
@@ -187,8 +181,7 @@ because it is reference material and this file loads every session.
 Short version: **`graft` before `cat`/`rg` for anything about code** (run
 `graft build` first if a repo has no `graft/` — free, seconds); then `rg` over
 `grep`, `fd` over `find`, `ast-grep` for structural code search, and `gh` over
-raw API calls. The `token-savior` MCP server was removed 2026-10-18 (0 calls in
-14 days); the file keeps its benchmark and traps as history.
+raw API calls.
 
 ## Multi-Agent Protocol
 
@@ -199,61 +192,45 @@ agent or the operator has unstaged edits in the checkout, never stash, add or
 reset their files and never `commit -a`; stage exact paths. If a rebase hits a
 merge conflict, STOP and report it.
 
-## Material moved here from site-private (2026-10-06)
+## Agent setup material here vs site-private and djbclark-ade
 
-djbclark moved everything out of `site-private` that did not have to be
-private. It sits here at the same relative path it had there: `home-agents.md`,
-`codex/`, `cursor/`, `zcode/` (skills-related pieces of these moved on to
-djbclark-ade, see below), `shell/`, `macos/`,
-`gradle/`, and files added to `bin/`, `docs/` and `tests/`.
+Anything that need not be private lives here, at the same relative path it has
+in `site-private` (which keeps a symlink there): `home-agents.md`, `codex/`,
+`cursor/`, `zcode/`, `shell/`, `macos/`, `gradle/`, and files in `bin/`,
+`docs/` and `tests/`.
 
-**2026-10-14 skill chain collapse:** skills no longer route through the ops
-repos at all. Every agent TUI links its skills dir directly at
-`~/src/djbclark-ade/skills/<name>` (public) or
-`~/ops/site-private-djbclark/skills/<name>` (private: `1password`). The `skills/`
-symlink layer here and in `site-private` was retired; `claude/agents`,
-`claude/commands`, `claude/hooks` and `zcode/commands` moved to
+Skills do not route through the ops repos. Every agent TUI links its skills dir
+directly at `~/src/djbclark-ade/skills/<name>` (public) or
+`~/ops/site-private-djbclark/skills/<name>` (private: `1password`). Claude Code
+agents, commands and hooks and `zcode/commands` live in
 `~/src/djbclark-ade/claude/` and `~/src/djbclark-ade/zcode/`. Only
 `claude/local-marketplace` (the local-lsp Claude Code plugin marketplace,
 registered in `~/.claude/settings.json`) remains under `claude/` here.
 
 1. This repo is public. These directories describe one machine's agent setup;
    credentials, tokens and vault or item identifiers still never go in them.
-2. What stayed private (the list in `site-private/.githooks/private-paths`):
+2. What stays private (the list in `site-private/.githooks/private-paths`):
    `memory/`, `web/`, `1password/`, `skills/1password/`,
    and that repo's own top-level files.
 3. `site-private` enforces this with a pre-commit hook (`.githooks/pre-commit`
    there): a regular file outside its private list is rejected.
 4. `codex/config.toml` is live local state and stays in `site-private/codex/`,
    ignored. Never copy it here.
-5. **Moved on to djbclark-ade (2026-10-08).** The orchestration and
-   session-hygiene skills (`bigteam`, `model-routing`, `effort-routing`,
-   `helm`, `session-finder`,
-   `ralph-tui-orchestration`, `cow-workspaces`, `handoff`, `baton`,
-   `session-handoff`, `steps`, `loose`; later `autorename` and `herdr-tidy`),
-   `tools/acp-run`, `bin/fleet-watch`
-   and `claude/commands/` (the `helm-all`,
-   `session-finder-all`, `resume` wrappers) now live in git at
-   `~/src/djbclark-ade` (github.com/djbclark/djbclark-ade). Their paths here
-   are absolute symlinks into it; edit them there. Their history up to the
-   move stays here. Later that day `resume` was folded into `baton`,
-   `helm-all` into `helm` and `session-finder-all` into `session-finder`
-   (the old names are now command wrappers only), and `skill-everywhere`
-   moved to `~/src/djbclark-ade/bin/skill-everywhere` with the README in
-   `~/src/djbclark-ade/docs/skill-everywhere.md`; the old paths are
-   compatibility symlinks. Their skill links
-   are gone (`skills/README.md`). On 2026-10-09 `herdr-orchestration`,
-   `/orc` and `/orc-meta` were retired; their live knowledge was ported into
-   the djbclark-ade skills.
+5. **Orchestration and session-hygiene tooling lives in djbclark-ade**
+   (`~/src/djbclark-ade`, github.com/djbclark/djbclark-ade): its skills,
+   `acp-run`, `bin/fleet-watch`, `bin/skill-everywhere` (README:
+   `~/src/djbclark-ade/docs/skill-everywhere.md`) and the `helm-all`,
+   `session-finder-all` and `resume` command wrappers. Paths for them here
+   are absolute compatibility symlinks into it; edit them there.
 
-## Herdr helper tools (2026-10-08)
+## Herdr helper tools
 
 [`tools/herdr/pane-grep`](tools/herdr/pane-grep) searches the recent terminal text of
 every Herdr pane (`pane-grep [-n LINES] <regex>`; read-only, uses `herdr pane read`),
 because Herdr's Goto picker (`prefix+g`) matches names, not screen text. Its permanent
 home is undecided (todo note "Decide the permanent home for herdr pane-grep").
 
-## Shareable tools published from this repo (2026-10-03)
+## Shareable tools published from this repo
 
 [`tools/book-to-kb/`](tools/book-to-kb/) is a **self-contained, MIT-licensed**
 package published for other people to install: the `book-kb` CLI, the
@@ -269,7 +246,7 @@ Two rules when touching it:
    nothing to keep in sync. The two `SKILL.md` files differ on purpose: the public
    one has no references to this machine's repos.
 
-## CFEngine reference book — query it, don't guess (2026-10-03)
+## CFEngine reference book — query it, don't guess
 
 `Learning CFEngine` (Diego Zamboni, 2nd ed.; covers CFEngine 3.12) is in the
 local book knowledge base as slug `learning-cfengine` — 69 chapters, 210 code
