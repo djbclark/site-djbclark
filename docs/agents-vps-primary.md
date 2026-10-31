@@ -9,12 +9,12 @@ password: the tailnet is the only boundary (never `tailscale funnel`, never a pu
 | Piece | Where |
 | --- | --- |
 | Browser URL | `https://vps-primary.greyhound-sidemirror.ts.net:7263` ([paseo.md](paseo.md)). |
-| Configuration | `nixos/vps-primary/configuration.nix` (user, login-shell environment, session bus, volume, nix-ld, `paseo.service`); changes ship as in `docs/nixos-in-git.md`. |
+| Configuration | `nixos/vps-primary/configuration.nix` (login-shell environment, session bus, volume, nix-ld, `paseo.service`); changes ship as in `docs/nixos-in-git.md`. |
 | Account and data | User `djbclark`, home `/home/djbclark` (the agents' installs, logins, checkouts, Paseo state in `~/.paseo`), on its own Hetzner Volume `vps-primary-home` (ext4, UUID `cef32561-f50a-4332-ae46-b5ee5a1570eb`, mounted by UUID with `nofail,nosuid,nodev`; not `noexec` because nix-ld binaries run from `~/.local`). `paseo` has `RequiresMountsFor`, so without the volume it fails to start instead of making an empty home. |
 | Memory | `agents.slice` (`MemoryHigh` 2816M, `MemoryMax` 3G) holds Paseo and every agent it starts (4 GB host, also running the Gradle cache and Athena). |
 | Session bus | `agent-session-bus.service` serves `/run/agent-session-bus/bus`; `DBUS_SESSION_BUS_ADDRESS` points at it for login shells and `paseo`. |
 | nix-ld | `programs.nix-ld.enable`: downloaded generic-glibc binaries (Claude Code, Cursor's node, agy, omp, grok) run. |
-| Installs | All as `djbclark` without root: npm globals into `~/.local` (`NPM_CONFIG_PREFIX=/home/djbclark/.local`, so `npm i -g` never hits the read-only Node store path), vendor installers into `~/.local/bin` or `~/.grok`. `~/.local/bin` is first on the login PATH; Node.js is in the user's profile (npm-installed agents start with `#!/usr/bin/env node`). |
+| Installs | All as `djbclark` without root: npm globals into `~/.local` (`NPM_CONFIG_PREFIX=/home/djbclark/.local`, so `npm i -g` never hits the read-only Node store path), vendor installers into `~/.local/bin` or `~/.grok`. `~/.local/bin` is first on the login PATH; Node.js is system-wide (npm-installed agents start with `#!/usr/bin/env node`). |
 
 ```bash
 ssh vps-ts
@@ -53,7 +53,7 @@ refresh tokens would invalidate each other).
 | Claude Code | `~djbclark/.claude/.credentials.json`, `~djbclark/.claude.json` | signed in (copied once from the Cloudroom account, 2026-10-17) |
 | Codex | `~djbclark/.codex/auth.json` (its `config.toml` was deliberately not copied) | signed in |
 | Cursor | `~djbclark/.cursor`, binary `~djbclark/.local/bin/cursor-agent` | signed in by djbclark |
-| Pi | in `~djbclark` | listed; install (and login) still to retry |
+| Pi | none | not installed |
 | omp | `~djbclark/.omp/agent/agent.db` | signed in 2026-10-18, Anthropic OAuth only (the one provider omp is used for) |
 | grok | `~djbclark/.grok/auth.json` | signed in 2026-10-18 |
 | Hermes | `~djbclark/.hermes/auth.json` | signed in 2026-10-18 via `hermes auth add openai-codex`; `auth.adopt_external_logins` stays false |
@@ -63,7 +63,7 @@ refresh tokens would invalidate each other).
 | zcode | `~djbclark/.zcode/v2/credentials.json` | signed in 2026-10-18 (GLM-5.3, z.ai coding plan) |
 | agy | `~djbclark/.gemini/antigravity-cli/antigravity-oauth-token` | signed in 2026-10-18; no prompt sent yet (hidden burst limit) |
 | qwen | none | skipped: `/auth` offers only an Alibaba ModelStudio key, not OAuth |
-| crush | none | parked: needs the SIPB loopback proxy, a crushrc and `MIT_SIPB_API_KEY` (plan 14.42) |
+| crush | none | not installed |
 | cline | none | installed, kept, unsigned |
 | opencode | `~djbclark/.local/share/opencode/opencode.db`, `~djbclark/.config/opencode/service.json` | signed in 2026-10-18 with the OpenCode Console account (web device login; the models are the paid OpenCode Go plan, none is free) |
 | the rest | see "Install and sign in" | not signed in |
@@ -92,7 +92,6 @@ Sign in as `djbclark`: `ssh vps-ts`, `sudo -u djbclark -H bash -l`.
 | cline | `npm i -g cline` | `cline auth` |
 | zcode | `npm i -g zcode-app-cli` (+ `zcode-acp-server`) | `zcode login --oauth --no-browser`, then pick a model with `/model` |
 | agy | ACP server and CLI from Google's Linux builds, `~/.local/share/agy-acp-server/` | `agy` over SSH, finish the Google URL on the Mac (the login may not persist without a keyring daemon; fallback `GEMINI_API_KEY`). Hidden burst limit: first use only a tiny thread. |
-| crush | built from djbclark's fork branch of the unmerged upstream PR charmbracelet/crush#2450 | needs a provider: run it once and pick one, or add a provider block to `~/.config/crush/crush.json` |
 
 Notes that are easy to lose:
 
@@ -109,4 +108,4 @@ Notes that are easy to lose:
 Never `nixos-rebuild` by hand on the host. Force-push a known-good commit to the deploy branch and start the
 upgrade unit: `git push -f origin <good-sha>:deploy-vps-primary`, then `ssh vps-ts systemctl start nixos-upgrade`
 (`docs/nixos-in-git.md`). A switch never changes the contents of `/home/djbclark` (it may remount the volume when its
-options change, and `createHome` re-applies the root directory's owner and mode).
+options change). `djbclark` is not declared in the NixOS config: it predates it, and the volume's files are owned by uid 1000.
