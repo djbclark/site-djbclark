@@ -116,7 +116,8 @@ Mac-side copies are not shared (single-use refresh tokens would invalidate each 
 | opencode | `~bb/.local/share/opencode/opencode.db`, `~bb/.config/opencode/service.json` | signed in 2026-10-18 with the OpenCode Console account (web device login; the models are the paid OpenCode Go plan, none is free) |
 | the rest | see "Agents" | not signed in |
 
-The same agents on `get` (user `djbclark`, `~/`) were signed in the same way on 2026-10-18; Claude, Cursor and Codex too.
+The same agents on `get` (user `djbclark`, `~/`) were signed in the same way on 2026-10-18; Claude, Cursor and Codex too. They are
+now driven by Paseo on `get` (BB's host daemon there was removed 2026-10-30), with the same logins.
 
 If a login ever shows as signed out, log in fresh as `bb` (do not re-copy a token that may have been refreshed
 elsewhere).
@@ -164,8 +165,9 @@ Notes that are easy to lose:
    entry cannot: `zcode-acp-bb` (sets `ZCODE_BIN` to the vendor `zcode.cjs` under `$(npm root -g)`), `agy-acp-bb`
    (runs the newest `~/.local/share/agy-acp-server/<version>/agy_acp_server.par`, adding `--uid=` on Linux, as the ACP registry does) and `crush-acp-bb` (sets
    `CRUSH_DISABLE_METRICS=1` and `CRUSH_GLOBAL_DATA=$HOME/.local/share/crush-acp`). Every machine needs the three
-   wrappers before it runs those agents; the get repo's `scripts/get-bb-agents wrappers` writes them. Custom agents
-   do run on remote machines (tested on get), although the BB docs say they need a co-located daemon.
+   wrappers before it runs those agents (the get repo's `scripts/get-bb-agents wrappers` wrote them on get; that script is now
+   `scripts/get-agents` and no longer writes them). Custom agents
+   did run on remote machines (tested on get), although the BB docs say they need a co-located daemon.
 4. A new built-in agent shows in `bbcli provider list` about two minutes after install (BB's periodic refresh).
 5. Disk: `/` is about 66% used; Hermes (2.5 GB), the npm globals (2 GB) and the agy server (1 GB) are the large
    pieces. The agy server is re-downloadable and the first to drop.
@@ -186,7 +188,8 @@ Notes that are easy to lose:
 
 ## Enrolling machines
 
-Other machines (the Mac, `get`) run a host daemon that dials out to `:38443`; the server needs no route to them. Use
+Other machines (the Mac) run a host daemon that dials out to `:38443`; `get` did too until 2026-10-30, when its host
+daemon was removed (the get repo's `docs/runbook.md` 9.4; delete its entry here with `bb machine remove get`). The server needs no route to them. Use
 BB's Manual provider, never `bb connect`. The steps, including the enrolment header trick for NixOS (do not run BB's
 own installer there) and the userspace-Tailscale variant for a libkrun microVM, are in the
 [bb-nix README, "Adding another machine"](https://github.com/djbclark/bb-nix#adding-another-machine). In short:
