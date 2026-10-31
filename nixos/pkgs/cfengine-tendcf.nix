@@ -20,6 +20,7 @@
   flex,
   libtool,
   perl,
+  shadow,
   openssl,
   pcre2,
   lmdb,
@@ -75,6 +76,11 @@ stdenv.mkDerivation {
     flex
     libtool
     perl
+    # configure probes PATH for useradd/usermod/userdel (CF3_PATH_ROOT_PROG) and bakes the
+    # paths in; cf-agent/verify_users_pam.c then uses USERMOD outside its HAVE_USERMOD
+    # guard (upstream defect), so a sandbox without them fails to compile. With shadow here
+    # the baked paths are store paths, valid on the host, and users: promises work.
+    shadow
   ];
 
   buildInputs = [
