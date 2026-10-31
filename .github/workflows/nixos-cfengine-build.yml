@@ -1,0 +1,124 @@
+# Builds the tendcf CFEngine fork package from nixos/ (pkgs/cfengine-tendcf.nix) and proves the
+# off-by-default NixOS module (modules/cfengine-tendcf.nix) neither breaks nor changes
+# vps-primary: the package builds and names the fork commit, the host toplevel still builds,
+# and the cf-execd unit exists only when both enable options are true.
+#
+# The Mac has no nix, so this workflow is the build loop for those files.
+
+---
+name: NixOS cfengine-tendcf build
+
+"on":
+  pull_request:
+    paths:
+      - "nixos/**"
+      - ".github/workflows/nixos-cfengine-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: nixos-cfengine-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build cfengine-tendcf, check vps-primary
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Build cfengine-tendcf
+        run: |
+          set -euo pipefail
+          nix build --no-link --print-build-logs './nixos#cfengine-tendcf'
+
+      - name: cf-agent names the fork commit
+        run: |
+          set -euo pipefail
+          out=$(nix build --print-out-paths --no-link './nixos#cfengine-tendcf')
+          version=$("$out/bin/cf-agent" --version)
+          echo "$version"
+          case "$version" in
+            *b8abf2840*) echo "version string names the fork commit b8abf2840" ;;
+            *)
+              echo "::error::cf-agent --version does not contain b8abf2840"
+              exit 1
+              ;;
+          esac
+
+      - name: vps-primary toplevel still builds (module imported, not enabled)
+        run: |
+          set -euo pipefail
+          nix build --no-link \
+            './nixos#nixosConfigurations.vps-primary.config.system.build.toplevel'
+
+      - name: vps-primary has the module off and no execd unit
+        run: |
+          set -euo pipefail
+          enabled=$(nix eval --json \
+            './nixos#nixosConfigurations.vps-primary.config.services.cfengine-tendcf.enable')
+          echo "services.cfengine-tendcf.enable = $enabled"
+          [ "$enabled" = false ]
+          # The unit is only defined when enabled, so the attribute must be absent
+          # (evaluating `.enable` of an absent unit would error rather than print false).
+          absent=$(nix eval --json \
+            './nixos#nixosConfigurations.vps-primary.config.systemd.services' \
+            --apply 'services: !(services ? "cfengine-tendcf-execd")')
+          echo "cfengine-tendcf-execd unit absent = $absent"
+          [ "$absent" = true ]
+
+      - name: Module gating (execd unit needs both options)
+        run: |
+          set -euo pipefail
+          result=$(nix eval --impure --json --expr '
+            let
+              flake = builtins.getFlake "path:${builtins.getEnv "GITHUB_WORKSPACE"}/nixos";
+              mk = cfg: (flake.inputs.nixpkgs.lib.nixosSystem {
+                modules = [
+                  flake.nixosModules.cfengine-tendcf
+                  {
+                    nixpkgs.hostPlatform = "x86_64-linux";
+                    system.stateVersion = "26.05";
+                    services.cfengine-tendcf = cfg;
+                  }
+                ];
+              }).config;
+              enableOnly = mk { enable = true; };
+              both = mk { enable = true; execd.enable = true; };
+              execdOnly = mk { execd.enable = true; };
+              hasUnit = c: c.systemd.services ? "cfengine-tendcf-execd";
+            in
+            {
+              enableOnlyHasUnit = hasUnit enableOnly;
+              bothHasUnit = hasUnit both;
+              execdOnlyHasUnit = hasUnit execdOnly;
+              execdOnlyHasPackage = builtins.elem "cfengine-tendcf" (
+                map (p: p.pname or "") execdOnly.environment.systemPackages
+              );
+              enableOnlyHasPackage = builtins.elem "cfengine-tendcf" (
+                map (p: p.pname or "") enableOnly.environment.systemPackages
+              );
+              tmpfiles = builtins.filter (r: builtins.match ".*cfengine-tendcf.*" r != null) both.systemd.tmpfiles.rules;
+              execStart = builtins.unsafeDiscardStringContext
+                both.systemd.services.cfengine-tendcf-execd.serviceConfig.ExecStart;
+            }')
+          echo "$result" | jq .
+          echo "$result" | jq -e '
+            .enableOnlyHasUnit == false
+            and .bothHasUnit == true
+            and .execdOnlyHasUnit == false
+            and .enableOnlyHasPackage == true
+            and .execdOnlyHasPackage == false
+            and (.tmpfiles == ["d /var/lib/cfengine-tendcf 0755 root root -"])
+            and (.execStart | endswith("/bin/cf-execd --no-fork"))'
