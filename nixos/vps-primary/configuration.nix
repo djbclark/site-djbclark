@@ -114,6 +114,15 @@
   };
   systemd.tmpfiles.rules = [
     "d /var/lib/gradle-cache 0750 gradle-cache gradle-cache -"
+    # Scheduled clean-up (systemd-tmpfiles-clean.timer, daily), 2026-10-31: the agents' download caches on the
+    # home volume (73% full) and /tmp. An entry goes when its mtime, atime and ctime are all older than the age,
+    # so anything in use stays. NixOS's packaged rule is `q /tmp 1777 root root 10d`; this one (the earliest file
+    # name wins) is stricter. The packaged rules already keep ssh-*, sshauth.*, tmux-* and systemd-private-*;
+    # krb5cc_* are Athena ticket caches.
+    "e /home/djbclark/.cache - - - 14d"
+    "e /home/djbclark/.npm/_cacache - - - 14d"
+    "q /tmp 1777 root root 3d"
+    "x /tmp/krb5cc_*"
   ];
 
   virtualisation.podman.enable = true;
