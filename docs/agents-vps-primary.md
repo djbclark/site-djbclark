@@ -50,7 +50,7 @@ refresh tokens would invalidate each other).
 
 | Agent | Where its login lives | Status |
 | --- | --- | --- |
-| Claude Code | `~djbclark/.claude/.credentials.json`, `~djbclark/.claude.json` | signed in (copied once from the Cloudroom account, 2026-10-17) |
+| Claude Code | `~djbclark/.claude/.credentials.json`, `~djbclark/.claude.json` | signed in |
 | Codex | `~djbclark/.codex/auth.json` (its `config.toml` was deliberately not copied) | signed in |
 | Cursor | `~djbclark/.cursor`, binary `~djbclark/.local/bin/cursor-agent` | signed in by djbclark |
 | Pi | none | not installed |
