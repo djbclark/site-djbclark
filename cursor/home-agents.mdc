@@ -12,8 +12,7 @@ links to it) — each with its own `AGENTS.md`.
 Canonical source: `~/ops/site-public-djbclark/home-agents.md`, which wins on any conflict. This is its
 condensed copy for `cursor-agent`, which reads `~/.cursor/rules/*.mdc` (frontmatter + body), not a
 symlinked `AGENTS.md`/`CLAUDE.md`, so it is re-synced by hand. It lives in git at
-`site-public-djbclark/cursor/home-agents.mdc` (via `site-private-djbclark/cursor/`); `~/.cursor/rules/home-agents.mdc`
-is a symlink to it.
+`site-public-djbclark/cursor/home-agents.mdc` (via `site-private-djbclark/cursor/`); `~/.cursor/rules/home-agents.mdc` is a symlink to it.
 
 **Only Claude Opus 5.5 or higher edits this file or `home-agents.md`** (djbclark, 2026-10-24): any edit,
 condense or reflow, including a same-turn instruction fix. Any other model (Cursor's included) never edits
@@ -105,8 +104,7 @@ change, consult a `frontier` agent if it helps, then open the issue/PR upstream,
 --rebase` before editing, append to `MEMORY.md` (never rewrite it), commit exact paths, push; never
 `commit -a` or `pull --autostash`. Never hand-edit the Codex summaries
 (`memory/codex/memory_summary.md`, `raw_memories.md`): drop notes in `memory/codex/extensions/ad_hoc/`.
-**Another agent's unstaged edits:** never stash, add or reset them; `git fetch`; only ahead: plain
-`git push`; behind: wait or ask.
+**Another agent's unstaged edits:** never stash, add or reset them; `git fetch`; only ahead: plain `git push`; behind: wait or ask.
 
 **A stopped or `launchctl`-disabled service may be deliberate** (2026-10-11): check
 `site-private-djbclark/memory/` before "repairing" it; never clear the override (`launchctl load
@@ -280,21 +278,23 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 ## Tools and habits (2026-10-06)
 
 1. **Fast tools:** `rg` **with a path, never `-r` or bare `grep -r`** (2026-10-09; `rtk grep` is BSD grep;
-   2026-10-22: `bash_habits_gate.py` denies recursive `grep`/`ggrep`; a filename uses `plocate -i` when
-   `/opt/homebrew/var/lib/plocate/plocate.db` is fresh enough, nightly 03:30), `fd`, `ast-grep`,
-   `uv` not `pip`, **`aria2c -x8 -s8` for big files** (2026-10-17), **`dust`/`gdu` not `du`/`find` for
-   cache sizing** (2026-10-11). **Literal replace: `srgn -L --fail-none --stdin-detection
-   force-unreadable --glob RELPATH 'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also
-   means nothing matched or nothing in scope (absolute glob, gitignored or dot-directory file, FIND
-   starting `-`: use the Edit tool); **REPL with `\` goes through Python with an assert**; **`sd` is
-   retired for edits**. **Mac code uses brew GNU `g*` tools where BSD differs** (`gnu-tools-check`,
-   2026-10-14); **always `gsed`, never bare `sed`** (2026-10-15; `bash_habits_gate.py` denies it as a
-   Cursor `beforeShellExecution` hook too). **Root/NOPASSWD scripts keep `/usr/bin` tools**; **test a
-   NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`. (`memory/feedback_modern_cli_tools.md`)
-   **Building a command string, quoting, a loop, a conditional or parsing output? Write Python with an
-   argv list (`subprocess.run([...])`), never a nested shell string**: a heredoc inside `ssh "..."` truncates
-   silently and exits 0 (2026-10-25). One plumbing command stays shell; `rg`/`fd`/`jq` stay the command-line
-   tools. (`memory/feedback_prefer_python_over_shell.md`)
+   2026-10-22: `bash_habits_gate.py` denies recursive `grep`/`ggrep`), `fd`, `ast-grep`, `uv` not `pip`,
+   **`aria2c -x8 -s8` for big files** (2026-10-17), **`dust`/`gdu` not `du`/`find` for cache sizing**
+   (2026-10-11). **Literal replace: `srgn -L --fail-none --stdin-detection force-unreadable --glob RELPATH
+   'FIND' -- 'REPL'` from the repo root, never `~`**; exit 1 also means nothing matched or nothing in scope
+   (absolute glob, gitignored or dot-directory file, FIND starting `-`: use the Edit tool); **REPL with `\`
+   goes through Python with an assert**; **`sd` is retired for edits**. **Mac code uses brew GNU `g*` tools
+   where BSD differs** (`gnu-tools-check`, 2026-10-14); **always `gsed`, never bare `sed`** (2026-10-15;
+   `bash_habits_gate.py` denies it as a Cursor `beforeShellExecution` hook too). **Root/NOPASSWD scripts keep
+   `/usr/bin` tools**; **test a NOPASSWD rule with `sudo -k -n CMD`**, never plain `sudo -n`.
+   (`memory/feedback_modern_cli_tools.md`) **Building a command string, quoting, a loop, a conditional or
+   parsing output? Write Python with an argv list (`subprocess.run([...])`), never a nested shell string**: a
+   heredoc inside `ssh "..."` truncates silently and exits 0 (2026-10-25). One plumbing command stays shell;
+   `rg`/`fd`/`jq` stay the command-line tools. (`memory/feedback_prefer_python_over_shell.md`) **Find files:
+   Spotlight is off on purpose (`mdfind` finds nothing). A file over a day old: `plocate -i NAME`
+   (`/opt/homebrew/var/lib/plocate/plocate.db`, nightly 03:30) or NeoFinder; newer: a scoped `fd`/`find` under
+   1-2 likely dirs, with `timeout`; else ask djbclark. Never `fd`/`find` over all of `~`** (2026-10-31).
+   (`memory/feedback_find_files_plocate_neofinder_not_spotlight_or_home_scan.md`)
 2. **Replace shared scripts atomically** (temp file in the same directory, then `mv -f`) **on the `realpath`**, never in
    place. (`memory/feedback_edit_running_scripts_atomically.md`)
 3. **Default browser:** `open <url>` only, never Orion or Chrome by name. (`memory/feedback_always_use_default_browser_orion.md`)
@@ -314,8 +314,7 @@ tell djbclark to type a `!` command. Privileged steps still use their sanctioned
 
 **"copy to clipboard"/"pbcopy" means `~/ops/site-private-djbclark/bin/clip`**, never bare `pbcopy` (agent shells
 have `LC_CTYPE=C`); human-bound prose gets `clip --unwrap`, no Markdown. **Every prompt you write for djbclark to
-hand to another agent also goes through `clip`, unasked** (2026-10-06). Save and restore the
-pasteboard around tests.
+hand to another agent also goes through `clip`, unasked** (2026-10-06). Save and restore the pasteboard around tests.
 
 ## Files djbclark handles by hand — reveal them in Finder (2026-10-24)
 
@@ -347,13 +346,11 @@ outward-facing actions. Detail: `site-private-djbclark/memory/feedback_yolo_defa
 ## Session logs (Tier 1 handoff pointers)
 
 At session start in a git repo, read its Tier 1 pointer (`~/.local/state/handoffs/`), compare
-`head_sha` to `HEAD`, and state a resume plan before acting. Only the workspace-owning session writes
-it. Protocol: `~/src/djbclark-ade/skills/session-handoff/SKILL.md`.
+`head_sha` to `HEAD`, and state a resume plan before acting. Only the workspace-owning session writes it. Protocol: `~/src/djbclark-ade/skills/session-handoff/SKILL.md`.
 
 ## Three-way memory/docs policy (start at each repo's AGENTS.md)
 
-No single canonical copy — read all three: `stayturgid/AGENTS.md`, `site-public-djbclark/AGENTS.md`,
-`site-private-djbclark/AGENTS.md`.
+No single canonical copy — read all three: `stayturgid/AGENTS.md`, `site-public-djbclark/AGENTS.md`, `site-private-djbclark/AGENTS.md`.
 
 ## Research outward first (2026-10-05)
 
