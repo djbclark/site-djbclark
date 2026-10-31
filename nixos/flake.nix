@@ -42,11 +42,20 @@
       ...
     }:
     {
+      # The tendcf CFEngine fork, built from source (pkgs/cfengine-tendcf.nix). Built by
+      # .github/workflows/nixos-cfengine-build.yml.
+      packages.x86_64-linux.cfengine-tendcf =
+        nixpkgs.legacyPackages.x86_64-linux.callPackage ./pkgs/cfengine-tendcf.nix { };
+
+      # services.cfengine-tendcf: off by default, and its cf-execd unit off by default again.
+      nixosModules.cfengine-tendcf = ./modules/cfengine-tendcf.nix;
+
       nixosConfigurations.vps-primary = nixpkgs.lib.nixosSystem {
         specialArgs = { inherit paseo-nix; };
         modules = [
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           paseo-nix.nixosModules.default
+          self.nixosModules.cfengine-tendcf # imported, not enabled: the host's closure is unchanged
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
           { system.configurationRevision = self.rev or self.dirtyRev or null; }
