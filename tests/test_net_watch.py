@@ -1607,7 +1607,7 @@ def test_install_copies_the_repo_plist_whose_program_is_this_sites_net_watch_tic
     dest = tmp_path / "home" / "Library/LaunchAgents" / f"{nw.LABEL}.plist"
     assert dest.read_bytes() == repo_plist.read_bytes()
     prog = plistlib.loads(dest.read_bytes())["ProgramArguments"]
-    assert prog[0].endswith("site-djbclark/bin/net-watch-tick") and "tick" in prog[1:]
+    assert prog[0].endswith(f"{BIN.parent.parent.name}/bin/net-watch-tick") and "tick" in prog[1:]
     assert [c[:2] for c in calls] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]] and calls[1][3] == str(dest)
 
 
