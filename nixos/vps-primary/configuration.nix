@@ -165,23 +165,11 @@
     };
   };
 
-  # The agents (Paseo and everything it starts) run as `djbclark`, whose home is /home/djbclark on its
-  # own Hetzner Volume (below): every agent login and install lives there. The user predates this config
-  # (made by hand 2026-10-17); it is declared here with the live values (2026-10-31) so the uid the volume's
-  # files belong to (1000) is pinned and a rebuilt host cannot give it to anyone else. mutableUsers stays at its
-  # default, so no password or ssh key is managed here. createHome is off: the home is the volume's root, and
-  # a mount that failed must not leave an empty home on the root disk (paseo requires the mount, below).
-  users.users.djbclark = {
-    uid = 1000;
-    isNormalUser = true;
-    description = "Daniel Clark";
-    group = "users";
-    extraGroups = [ "wheel" ];
-    home = "/home/djbclark";
-    createHome = false;
-    shell = pkgs.zsh;
-  };
-  programs.zsh.enable = true; # required for a zsh login shell; the user already uses zsh
+  # The agents (Paseo and everything it starts) run as `djbclark` (declared in modules/users.nix: uid 1000, so the
+  # volume's files keep their owner on a rebuilt host), whose home is /home/djbclark on its own Hetzner Volume
+  # (below): every agent login and install lives there. createHome is off: the home is the volume's root, and a
+  # mount that failed must not leave an empty home on the root disk (paseo requires the mount, below).
+  users.users.djbclark.createHome = false;
   # Anthropic's native Claude Code installer, run once as djbclark, puts its binary in ~/.local/bin.
   environment.localBinInPath = true;
   # Login shells of djbclark only (the guard on the user name keeps it from touching anyone else): npm

@@ -111,4 +111,4 @@ Notes that are easy to lose:
 Never `nixos-rebuild` by hand on the host. Force-push a known-good commit to the deploy branch and start the
 upgrade unit: `git push -f origin <good-sha>:deploy-vps-primary`, then `ssh vps-ts systemctl start nixos-upgrade`
 (`docs/nixos-in-git.md`). A switch never changes the contents of `/home/djbclark` (it may remount the volume when its
-options change). `djbclark` is not declared in the NixOS config: it predates it, and the volume's files are owned by uid 1000.
+options change). `djbclark` is declared in `nixos/modules/users.nix` (uid 1000, which the volume's files belong to).
