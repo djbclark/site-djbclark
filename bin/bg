@@ -82,15 +82,17 @@
 #     carve-out defeated CI-first exactly when the machine is busiest). No route or a refusal: it keeps waiting;
 #   - a release, `local`, `pending` and undecided repos: unchanged, nothing offloads.
 # Routes (header of bin/bg-offload): (1) a tracked scripts/bg-offload-run, (2) a tracked scripts/github-ci-run,
-# (3) Forgejo, for a repo with a tracked scripts/forgejo-ci-run: bg-offload pushes the checked commit to the
-# `forgejo` remote (forgejo.mit.edu) itself and waits with loopback-port-shim's wait-run.sh, (4) generic GitHub: the
-# CI remote (git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin) is djbclark's github.com repo whose
-# ci/base holds agent-ci.yml or linux-ci.yml triggered by a push to ci/run/**, run with the committed
-# ~/src/djbclark-ade/scripts/github-ci-run. A public GitHub repo uses (2)/(4) before (3), a private one (3) first
-# (djbclark 2026-11-01, herdr included). GitHub macOS runners are for PUBLIC repos only (djbclark 2026-11-01): for a
-# private repo every workflow the push carries must be provably Linux (literal non-macOS runs-on labels, local
-# reusable workflows only), else no route (fail closed if gh cannot tell). After a GitHub success the run's
-# artifacts land in ~/.local/state/bg-offload/artifacts/OWNER__REPO/RUN/ (path printed; 7 days, 20 per repo).
+# (3) Forgejo, for a repo with a tracked scripts/forgejo-ci-run: bg-offload pushes the checked commit to ci-run on the
+# `forgejo` remote (forgejo.mit.edu) itself and follows the run that push starts, (4) generic GitHub: the CI remote
+# (git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin) is djbclark's github.com repo whose ci/base holds
+# agent-ci.yml or linux-ci.yml triggered by a push to ci/run/**, run with the committed
+# ~/src/djbclark-ade/scripts/github-ci-run. By GitHub visibility (djbclark 2026-11-01, herdr included): a PUBLIC repo
+# uses (1)/(2)/(4), and (3) only if it has none of those; a PRIVATE repo uses (3) ONLY, never GitHub, Linux or not:
+# no usable Forgejo route, or Forgejo unreachable, refuses the build (exit 3) with a first line `bg: private repo has
+# no Forgejo route: ...` or `bg: FORGEJO UNREACHABLE: ...` and "fix Forgejo (forgejo / forgejo-ci skills); if you
+# cannot, notify djbclark (hermes-ping) and keep doing work that is not blocked"; visibility unreadable (gh failed):
+# no route for that run. After a GitHub success the run's artifacts land in
+# ~/.local/state/bg-offload/artifacts/OWNER__REPO/RUN/ (path printed; 7 days, 20 per repo).
 # bg waits up to BG_OFFLOAD_WAIT (2400 s; the offload has its own budget, outside BG_MAX_WAIT). It needs `gh`,
 # `git` and the GNU tools bg-offload lists (gdate, gawk, gtimeout...). Exit codes: 0 CI's workflow passed on this
 # tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI failed (log tail printed; it can
@@ -259,24 +261,44 @@ probe_route() {
 }
 # foreign_target ARGS: print why a build's command names something outside $top (a directory flag, or an argument
 # that is an existing path outside the repo), or nothing. A tool given by path from a $PATH directory
-# (/usr/bin/make, /opt/homebrew/bin/just) is not another tree. `--opt=VALUE` is read as VALUE.
+# (/usr/bin/make, /opt/homebrew/bin/just) is not another tree. `--opt=VALUE` is read as VALUE, a short option's
+# attached value (`-p../x`) as that value. A shell's -c string (`bash -c 'cd ../x && make'`) cannot be read at all, so
+# it counts too; -C anywhere in a short-option cluster (`make -sC/x`) is a directory flag; -p is one for gradle only
+# (`cargo build -p crate` names a package) (adversary N3).
 foreign_target() {
-  local a v full dir p top_real path_dirs=()
+  local a v full dir p top_real path_dirs=() shell=0 gradle=0
   top_real=$(greadlink -f -- "$top") || { echo "cannot resolve $top"; return; }
   IFS=: read -r -a path_dirs <<< "$PATH"
   for a in "$@"; do
+    case "${a##*/}" in
+      sh|bash|zsh|dash|ksh|mksh|yash|fish) shell=1 ;;
+      gradle|gradlew) gradle=1 ;;
+    esac
+  done
+  for a in "$@"; do
+    if [ "$shell" = 1 ]; then
+      case "$a" in --command|--command=*|-c|-[!-]*c*) echo "a shell command string ($a)"; return ;; esac
+    fi
     case "$a" in
-      -C|-C?*|-p|--project-dir|--project-dir=*|--directory|--directory=*|--manifest-path|--manifest-path=*)
+      --project-dir|--project-dir=*|--directory|--directory=*|--manifest-path|--manifest-path=*)
         echo "directory flag ${a%%=*}"; return ;;
+      -*=*) ;;
+      -[A-Za-z]*)
+        [[ "$a" =~ ^-[A-Za-z]*C ]] && { echo "directory flag -C ($a)"; return; }
+        [ "$gradle" = 1 ] && [[ "$a" =~ ^-p ]] && { echo "directory flag -p ($a)"; return; }
+        ;;
     esac
     v=$a
-    case "$a" in -*=*) v=${a#*=} ;; esac
+    case "$a" in
+      -*=*) v=${a#*=} ;;
+      -[A-Za-z]?*) v=${a#-?} ;;
+    esac
     [ -n "$v" ] && [ -e "$v" ] || continue
     full=$(greadlink -f -- "$v") || { echo "cannot resolve $v"; return; }
     case "$full/" in "$top_real"/*) continue ;; esac
     case "$v" in
       */*)
-        if [ -f "$full" ] && [ -x "$full" ]; then
+        if [ "$v" = "$a" ] && [ -f "$full" ] && [ -x "$full" ]; then
           dir=$(greadlink -f -- "${v%/*}" 2>/dev/null) || dir=""
           for p in "${path_dirs[@]}"; do
             [ -n "$dir" ] && [ -n "$p" ] && [ "$(greadlink -f -- "$p" 2>/dev/null)" = "$dir" ] && continue 2
@@ -327,10 +349,20 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
       [ "$off_rc" = 69 ] || exit "$off_rc"
       no_route="the offload was refused (reason above); nothing ran here"
     fi
+    case "$no_route" in
+      "private repo has no Forgejo route:"*|"FORGEJO UNREACHABLE:"*)
+        # djbclark 2026-11-01: a private repo builds on Forgejo only; say so first, greppably.
+        echo "bg: $no_route" >&2
+        echo "bg: fix Forgejo (forgejo / forgejo-ci skills); if you cannot, notify djbclark (hermes-ping) and keep doing work that is not blocked" >&2
+        ;;
+    esac
     echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
     echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests; so may a release." >&2
-    echo "bg: no CI route was found to run it there now: $no_route" >&2
+    case "$no_route" in
+      "private repo has no Forgejo route:"*|"FORGEJO UNREACHABLE:"*) ;;
+      *) echo "bg: no CI route was found to run it there now: $no_route" >&2 ;;
+    esac
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = pending ]; then
     echo "bg: reminder: $top runs locally pending a CI-first decision; see whether it can move to" >&2
