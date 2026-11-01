@@ -107,56 +107,79 @@ capture() { tmux capture-pane -p -J -t "$pane"; }
 # "window_active pane_active session_attached pane_width pane_current_command" for the pinned pane.
 view_info() { tmux display-message -p -t "$pane" '#{window_active} #{pane_active} #{session_attached} #{pane_width} #{pane_current_command}' 2>/dev/null || true; }
 
-# A popup (":show commands", help) keeps the status bar and draws a box whose
-# bottom edge is a line of "└──┘"; its pager footer says how to close it.
-has_edge() { grep -Eq '^ *└─+┘ *$' <<<"$1"; }
+# What BarnOwl 1.10 draws (screens captured from a 1.10 client: tests/fixtures/barnowl-1.10/):
+#   the message list, then the status bar `── (1/9/9)  all ───` on row R, then ONE message
+#   line (row R+1: the last thing a command or message said; untrusted, and bo's own
+#   `q{ok}` leaves "ok" there), then the type window to the bottom (row R+2 on).
+# Idle = the type window is blank. A command line shows `command: `, a compose `----> zwrite x`,
+# bo's question `bo asks: ...`, a search `command: search`. A popup (":show commands", help)
+# keeps the status bar and draws a box (┌─┐ │ └─┘, or +---+ without fancylines) over the list,
+# whose text can sit beside the box's edge; its footer reads `--More--` or `--End--`.
+# `(─)+`, not `─+`: in a byte-mode awk or grep (mawk, busybox, a locale that failed to load) `+` would
+# repeat only the last byte of the multibyte `─` and a real popup edge would not match.
+has_edge() { LC_ALL=C.UTF-8 grep -Eq '└(─)+┘|┌(─)+┐|\+-----+\+' <<<"$1"; }
 has_pager_footer() { grep -Eq "to quit|--More--|\\(END\\)" <<<"$1"; }
 
-# Lines under the status bar are the type window. A compose expands it.
-type_window() {
-  capture | awk '
-    /^── / { hit = 1; n = 0; next }
-    hit { lines[++n] = $0 }
+# screen_idle: 0 idle; 2 no status bar in the bottom rows (a full-screen page, or a screen we do
+# not recognise); 3 something is in the type window; 4 a popup box is drawn. Leaves the screen it
+# judged in $last_screen. A message body can draw a box or a `── ` line: that only refuses.
+last_screen=
+screen_idle() {
+  # A pane in a tmux mode (copy mode, clock) swallows the typed text: not idle.
+  [[ $(tmux display-message -p -t "$pane" '#{pane_in_mode}' 2>/dev/null || echo 1) == 0 ]] || return 5
+  # $(...) would drop the trailing blank rows, which are the type window: keep them.
+  last_screen=$(capture; printf x)
+  last_screen=${last_screen%x}
+  printf '%s' "$last_screen" | LC_ALL=C.UTF-8 awk '
+    { l[NR] = $0 }
+    /└(─)+┘|┌(─)+┐|\+-----+\+/ { edge = 1 }
+    /^── / { r = NR }
     END {
-      shown = 0
-      for (i = 1; i <= n; i++) {
-        if (lines[i] ~ /[^[:space:]]/) {
-          shown++
-          print lines[i]
-        }
-      }
-      if (shown == 0) print ""
-    }
-  '
+      if (edge) exit 4
+      if (!r) exit 2
+      for (i = r + 2; i <= NR; i++) if (l[i] ~ /[^[:space:]]/) exit 3   # command line, compose (it grows the window), question
+      if (NR - r != 2) exit 2   # status bar, one message line, ONE type row (typewinsize 1, as in the live config)
+      exit 0
+    }'
+}
+
+idle_refusal() {
+  case $1 in
+    4) echo "BarnOwl is showing a popup, or a message on screen draws a box (scroll it off); not sending keys." >&2 ;;
+    3) echo "BarnOwl has a command line, a compose box or a question open; not sending keys." >&2 ;;
+    5) echo "the BarnOwl pane is in a tmux mode (copy mode?); not sending keys." >&2 ;;
+    *) echo "BarnOwl is showing a pager (or an unrecognised screen); not sending keys." >&2 ;;
+  esac
+  exit 3
 }
 
 guard_idle() {
   need_session
   lock_client
-  # Keys sent while a pager or popup is open land in it, not the command line.
-  # No status-bar line means a full-screen page; a popup draws the box above.
-  # Either is refused; a message body that draws such a box is a harmless
-  # false alarm.
-  local screen
-  screen=$(capture)
-  if ! grep -q '^── ' <<<"$screen" || has_edge "$screen"; then
-    echo "BarnOwl is showing a pager or popup (or an unrecognised screen); not sending keys." >&2
-    exit 3
-  fi
-  local lines count first
-  lines=$(type_window)
-  count=$(printf '%s\n' "$lines" | sed '/^$/d' | wc -l)
-  first=$(printf '%s\n' "$lines" | sed '/^$/d' | head -n 1)
-  if [[ "$count" -gt 2 ]]; then
-    echo "BarnOwl looks mid-compose; not sending keys." >&2
-    exit 3
-  fi
-  case "$first" in
-    :*|zwrite*|zcrypt*|"bo asks:"*)
-      echo "BarnOwl already has a command, a zwrite or a bo question in progress; not sending keys." >&2
-      exit 3
-      ;;
-  esac
+  check_idle
+}
+
+# Refuse (exit 3) unless the screen is idle now.
+check_idle() {
+  local rc=0
+  screen_idle || rc=$?
+  [[ $rc -eq 0 ]] || idle_refusal "$rc"
+}
+
+# The same after a human's [y/N], which can take minutes: a pager, compose box or command line
+# that opened meanwhile would receive the keys the answer releases. BarnOwl needs a moment to
+# clear the question it just asked, so a busy type window is retried for about 2.5 s; a pager
+# or popup is refused at once.
+check_idle_after_answer() {
+  local rc i
+  for ((i = 0; i < 10; i++)); do
+    rc=0
+    screen_idle || rc=$?
+    [[ $rc -eq 0 ]] && return 0
+    [[ $rc -eq 3 ]] || idle_refusal "$rc"
+    sleep 0.25
+  done
+  idle_refusal 3
 }
 
 send_line() {
@@ -168,8 +191,15 @@ send_line() {
     echo "refusing to type a line with a control character (newline, tab, ESC); send single-line text only" >&2
     exit 2
   fi
-  tmux send-keys -t "$pane" -l "$line"
-  tmux send-keys -t "$pane" Enter
+  # tmux reads an argument that ends in ";" as a command separator and drops it, so the line
+  # the human approved would be typed without its last character.
+  if [[ $line == *\; ]]; then
+    echo "refusing to type a line that ends in ';' (tmux would drop it)" >&2
+    exit 2
+  fi
+  # One tmux call for the text and the Enter: tmux runs the two as one queue item, so a key the
+  # human types cannot land between them.
+  tmux send-keys -t "$pane" -l "$line" \; send-keys -t "$pane" Enter
 }
 
 # Commands that only look. They need no confirmation.
@@ -255,16 +285,22 @@ print_marked() {
 # perl_eval EXPR KIND GATED: GATED=1 asks the human first, always: arbitrary Perl runs as the
 # operator inside the client. Only `subs` runs ungated, a fixed expression of ours.
 perl_eval() {
-  local expr=$1 kind=$2 gated=$3
-  guard_idle
-  [[ $gated -eq 0 ]] || confirm "perl: $expr"
+  local expr=$1 kind=$2 gated=$3 line
+  need_session
+  lock_client
   # A private output file and marker per call: concurrent callers, and text on
   # the screen, can neither see nor forge each other's.
   [[ -n $out ]] || out=$(scratch out)
   nonce=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
   # The expression is one Perl value. It is wrapped so a failure is visible.
-  local line
   line=":perl do { my \$v = eval { ${expr} }; my \$err = \$@; open my \$fh, q{>}, q{${out}} or die \$!; if (\$err) { print \$fh \"BO_ERR_${nonce}\\n\$err\"; } else { print \$fh (defined \$v ? \$v : q{}); print \$fh \"\\n\" if !defined(\$v) || \$v !~ /\\n\\z/; print \$fh \"BO_OK_${nonce}\\n\"; } close \$fh; q{ok} }"
+  # Everything above is done before the screen is judged, so the check is the last step before
+  # the keys (the window between them is the one tmux call, not scratch files and a pipeline).
+  check_idle   # do not even ask the human while the client is busy
+  if [[ $gated -ne 0 ]]; then
+    confirm "perl: $expr"
+    check_idle_after_answer
+  fi
   send_line "$line"
   wait_marker
   print_marked "$kind"
@@ -273,8 +309,11 @@ perl_eval() {
 cmd_run() {
   local cmd=$1 before after rc=0
   guard_idle
-  read_only_command "$cmd" || confirm "run: $cmd"
-  before=$(capture)
+  if ! read_only_command "$cmd"; then
+    confirm "run: $cmd"
+    check_idle_after_answer
+  fi
+  before=$last_screen   # the screen just judged idle, no second capture between check and keys
   send_line ":${cmd}"
   sleep 0.5
   after=$(capture)

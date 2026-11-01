@@ -1,0 +1,40 @@
+-> OWL ADMIN
+       -----------------------------------------------------------------------
+       Welcome to BarnOwl version 1.10.
+       To see a quick introduction, type ':show quickstart'.
+       Press 'h' for on-line help.
+
+       BarnOwl is free software. Type ':show license' for more
+       informat┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+               │Zephyr: No subscriptions retrieved                                                                         │
+       Please r│                                                                                                           │
+       --------│                                                                                                           │
+   sipb / inst1│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst2│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst3│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst4│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst5│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst6│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst7│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   sipb / inst8│                                                                                                           │
+       message │                                                                                                           │lorem ipsum lore
+   OWL ADMIN   │                                                                                                           │
+       Could no│                                                                                                           │
+               │                                                                                                           │
+               │                                                                                                           │
+               │--End-- (Press 'q' to quit)                                                                                │
+               └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+── (1/10/10)  all ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+

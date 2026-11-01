@@ -1,0 +1,40 @@
+-> OWL ADMIN
+       -----------------------------------------------------------------------
+       Welcome to BarnOwl version 1.10.
+       To see a quick introduction, type ':show quickstart'.
+       Press 'h' for on-line help.
+
+       BarnOwl is free software. Type ':show license' for more
+       informat┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+               │Commands:  (use 'show command <name>' for details)                                                         │
+       Please r│(                         - runs multiple ;-separated commands                                             │
+       --------│aaway                     - Set, enable or disable AIM away message                                        │
+   sipb / inst1│about                     - print information about BarnOwl                                                │
+       message │add-cmd-history           - Add a command to the history                                                   │lorem ipsum lore
+   sipb / inst2│addbuddy                  - add a buddy to a buddylist                                                     │
+       message │aexec                     - run a command from the shell and display in an admin message                   │lorem ipsum lore
+   sipb / inst3│aim                       - AIM specific commands                                                          │
+       message │aimlogin                  - login to an AIM account                                                        │lorem ipsum lore
+   sipb / inst4│aimlogout                 - logout from AIM                                                                │
+       message │aimwrite                  - send an AIM message                                                            │lorem ipsum lore
+   sipb / inst5│alias                     - creates a command alias                                                        │
+       message │alist                     - List AIM users logged in                                                       │lorem ipsum lore
+   sipb / inst6│aperl                     - run a perl expression and display in an admin message                          │
+       message │away                      - Set, enable or disable all away messages                                       │lorem ipsum lore
+   sipb / inst7│beep                      - ring the terminal bell                                                         │
+       message │bindkey                   - creates a binding in a keymap                                                  │lorem ipsum lore
+   sipb / inst8│blist                     - List all buddies logged in                                                     │
+       message │colorclass                - create a filter to color messages of the given class name                      │lorem ipsum lore
+   OWL ADMIN   │colorview                 - change the colors on the current filter                                        │
+       Could no│debug                     - prints a message into the debug log                                            │
+               │del                       - command alias to: delete                                                       │
+               │delbuddy                  - delete a buddy from a buddylist                                                │
+               │--More-- (Space to see more, 'q' to quit)                                                                  │
+               └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+── (1/10/10)  all ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
