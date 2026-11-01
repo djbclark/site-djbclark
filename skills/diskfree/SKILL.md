@@ -137,7 +137,7 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
    workspace was needed — stale Hermes clones/worktrees once held 3.6 GB),
    propose replacing it with a pasture: `cow-pasture create <name> --source
    <repo>` (scrubs gitignored secrets, handles `uchg`, pre-trusts Claude;
-   `--orca` for Orca workers). Never pastures from `~/ops/*` (deployment
+   the `--orca` flag for Orca workers is retired from djbclark-ade 2026-10-31 and now a usage error). Never pastures from `~/ops/*` (deployment
    checkouts — the wrapper refuses).
 2. Reclaim merged work: `cow gc --merged --dry-run`, and with the operator's
    go, for real. Remove an arbitrary one with `cow-pasture remove <name>`
@@ -145,7 +145,7 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
    after).
 3. Never delete or APFS-compress a live pasture tree — its blocks are shared
    with the source; rewriting breaks the sharing and can multiply usage.
-4. New agent workspaces on primaries under `~/src`, `~/orca/projects`,
+4. New agent workspaces on primaries under `~/src`,
    `~/.hermes` should be pastures from the start — see the `cow-workspaces`
    skill.
 
