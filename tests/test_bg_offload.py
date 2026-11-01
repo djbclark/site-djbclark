@@ -184,7 +184,9 @@ class Setup:
     def bg(self, *argv, **env):
         e = {**os.environ, "HOME": str(self.home), "BASH_ENV": str(self.state / "sleep-shim.sh"),
              "BG_OFFLOAD_TESTING": "1", "BG_GH": str(self.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "5",
-             "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1", **env}
+             "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1",
+             # fakebin is a $PATH directory, like a real tool's: its build-app is not "another tree" (F6)
+             "PATH": f"{self.home / 'fakebin'}:{os.environ['PATH']}", **env}
         e = {k: v for k, v in e.items() if v is not None}
         e.pop("BG_LOAD_WAIT", None)  # 0 would skip the gate under test
         cmd = argv or (str(self.home / "fakebin" / "pytest"), "tests/test_a.py")
@@ -1476,3 +1478,35 @@ def test_no_download_after_a_failure(s):
 def test_artifacts_can_be_turned_off(s):
     assert s.bg(_build(s), BG_OFFLOAD_ARTIFACTS="0").returncode == 0
     assert "run download" not in s.read("gh.calls")
+
+
+# F6 (adversary review of 9090cc2): a build that names another tree is never offloaded, so it cannot get this repo's
+# green verdict for a build that never ran anywhere.
+
+@pytest.mark.parametrize("argv", [
+    ("make", "-C", "{other}"),
+    ("make", "-C{other}"),
+    ("{other}/build.sh",),
+    ("./gradlew", "-p", "../other", "build"),
+    ("cargo", "build", "--manifest-path={other}/Cargo.toml"),
+    ("bash", "{other}/build.sh"),
+])
+def test_a_build_naming_another_tree_is_refused_not_offloaded(s, argv):
+    other = s.root / "other"
+    other.mkdir()
+    (other / "build.sh").write_text(f"#!/bin/bash\ntouch {shlex.quote(str(s.marker))}\n")
+    (other / "build.sh").chmod(0o755)
+    (other / "Cargo.toml").write_text("[package]\n")
+    r = s.bg(*[a.format(other=other) for a in argv])
+    _never_ran(s, r)
+    assert "the command names another tree" in r.stderr
+    assert "run instead: scripts/github-ci-run REF" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_a_build_script_inside_the_repo_is_offloaded(s):
+    b = s.work / "build.sh"
+    b.write_text(f"#!/bin/bash\ntouch {shlex.quote(str(s.marker))}\n")
+    b.chmod(0o755)
+    _never_ran(s, s.bg("./build.sh"), 0)
+    assert s.read("runner.calls") != ""

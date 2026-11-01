@@ -73,7 +73,10 @@
 #   - a build or full suite (anything not targeted and not a release): AT ONCE, before the load gate and without
 #     a slot (djbclark 2026-11-01: "route builds to github ci for public repo linux and macos builds, or forgejo
 #     for private repo linux builds"; this 16 GB Mac is memory-starved). No CI route, or an offload refused (see
-#     below): exit 3 as before, naming the recorded CI command, plus one line saying why there is no route;
+#     below): exit 3 as before, naming the recorded CI command, plus one line saying why there is no route. A
+#     command that names another tree (a directory flag -C/-p/--project-dir/--directory/--manifest-path, or an
+#     argument that is an existing path outside the repo, other than a tool from a $PATH directory) is never
+#     offloaded, since this repo's CI cannot vouch for it: exit 3 (adversary F6, 2026-11-01);
 #   - a targeted test run stays here, but once the gate has held it for BG_OFFLOAD_AFTER seconds (default 60) it
 #     goes to CI instead (2026-10-23: a 2 s pytest file sat over an hour in the gate at load 25-93 on 8 cores, the
 #     carve-out defeated CI-first exactly when the machine is busiest). No route or a refusal: it keeps waiting;
@@ -251,6 +254,36 @@ probe_route() {
   [ -n "$no_route" ] || no_route="bg-offload --probe failed"
   return 1
 }
+# foreign_target ARGS: print why a build's command names something outside $top (a directory flag, or an argument
+# that is an existing path outside the repo), or nothing. A tool given by path from a $PATH directory
+# (/usr/bin/make, /opt/homebrew/bin/just) is not another tree. `--opt=VALUE` is read as VALUE.
+foreign_target() {
+  local a v full dir p top_real path_dirs=()
+  top_real=$(greadlink -f -- "$top") || { echo "cannot resolve $top"; return; }
+  IFS=: read -r -a path_dirs <<< "$PATH"
+  for a in "$@"; do
+    case "$a" in
+      -C|-C?*|-p|--project-dir|--project-dir=*|--directory|--directory=*|--manifest-path|--manifest-path=*)
+        echo "directory flag ${a%%=*}"; return ;;
+    esac
+    v=$a
+    case "$a" in -*=*) v=${a#*=} ;; esac
+    [ -n "$v" ] && [ -e "$v" ] || continue
+    full=$(greadlink -f -- "$v") || { echo "cannot resolve $v"; return; }
+    case "$full/" in "$top_real"/*) continue ;; esac
+    case "$v" in
+      */*)
+        if [ -f "$full" ] && [ -x "$full" ]; then
+          dir=$(greadlink -f -- "${v%/*}" 2>/dev/null) || dir=""
+          for p in "${path_dirs[@]}"; do
+            [ -n "$dir" ] && [ -n "$p" ] && [ "$(greadlink -f -- "$p" 2>/dev/null)" = "$dir" ] && continue 2
+          done
+        fi
+        ;;
+    esac
+    echo "$v is outside $top"; return
+  done
+}
 offload_ok=0
 # A failed greadlink must leave this empty, never "./bg-offload" (a file in the caller's repo).
 bg_offload=$(greadlink -f "$0") && bg_offload="${bg_offload%/*}/bg-offload" || bg_offload=
@@ -279,8 +312,13 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_release "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); a release gates on CI and publishes here." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
-    # A build or full suite: to CI at once, no load wait and no slot (header); never run here.
-    if probe_route; then
+    # A build or full suite: to CI at once, no load wait and no slot (header); never run here. Not when the command
+    # names another tree (adversary F6, 2026-11-01): `bg make -C ~/src/other` run from inside a `ci` repo would get
+    # this repo's green CI for a build that never ran anywhere.
+    no_route=$(foreign_target "$@")
+    if [ -n "$no_route" ]; then
+      no_route="the command names another tree ($no_route), so this repo's CI cannot vouch for it"
+    elif probe_route; then
       echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci): running it on CI now." >&2
       offload_now "$@"
       [ "$off_rc" = 69 ] || exit "$off_rc"
