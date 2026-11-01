@@ -92,6 +92,7 @@ def test_bg_refuses_a_bare_suite_in_a_ci_repo(repo, tmp_path_factory):
     assert "FAKE-PYTEST" not in r.stdout
     assert "run instead: scripts/github-test-ref REF" in r.stderr
     assert "a targeted run may stay here" in r.stderr
+    assert "no CI route was found to run it there now:" in r.stderr  # 2026-11-01: a route would have offloaded it
 
 
 def ci_release(*argv):
