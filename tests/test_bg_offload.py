@@ -194,7 +194,7 @@ class Setup:
     def codes(self, codes):
         (self.state / "codes").write_text("".join(f"{c}\n" for c in codes))
 
-    def bg(self, *argv, **env):
+    def bg(self, *argv, cwd=None, **env):
         e = {**os.environ, "HOME": str(self.home), "BASH_ENV": str(self.state / "sleep-shim.sh"),
              "BG_OFFLOAD_TESTING": "1", "BG_GH": str(self.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "5",
              "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1",
@@ -203,7 +203,7 @@ class Setup:
         e = {k: v for k, v in e.items() if v is not None}
         e.pop("BG_LOAD_WAIT", None)  # 0 would skip the gate under test
         cmd = argv or (str(self.home / "fakebin" / "pytest"), "tests/test_a.py")
-        return subprocess.run([str(BG), *cmd], cwd=self.work, env=e, capture_output=True, text=True, timeout=120)
+        return subprocess.run([str(BG), *cmd], cwd=cwd or self.work, env=e, capture_output=True, text=True, timeout=120)
 
     def commit_all(self, msg, on_remote=True):
         git(self.work, "add", "-A")
@@ -1944,3 +1944,46 @@ def test_an_inherited_gh_host_or_repo_never_reaches_gh(s):
     _never_ran(s, r, 0)
     lines = s.read("gh.env").splitlines()
     assert lines and set(lines) == {"|"}
+
+
+@pytest.mark.parametrize("argv", [
+    ("python3", "-c", "import os; os.chdir('{other}'); os.system('make')"),
+    ("python3", "-W", "ignore", "-c", "print(1)"),
+    ("perl", "-e", "chdir '{other}'; system 'make'"),
+    ("perl", "-ne", "print"),
+    ("node", "-e", "process.chdir('{other}')"),
+    ("tcsh", "-c", "cd {other}; make"),
+    ("bash", "-s"),
+    ("env", "MAKEFLAGS=-C{other}", "make"),
+    ("env", "npm_config_prefix={other}", "npm", "run", "build"),
+])
+def test_inline_code_other_shells_and_env_values_are_not_offloaded(s, argv):
+    """r3 F2: inline interpreter code, more shells, a stdin script, and NAME=VALUE words naming another tree."""
+    other = s.root / "other"
+    other.mkdir()
+    r = s.bg(*[a.format(other=other) for a in argv])
+    _never_ran(s, r)
+    assert "the command names another tree" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_a_build_from_an_ignored_or_untracked_directory_is_not_offloaded(s):
+    """r3 F2: the working directory is part of the command; one holding no tracked file is not this repo's build."""
+    (s.work / ".gitignore").write_text("scratch/\n")
+    s.commit_all("ignore scratch")
+    for d in ("scratch", "newdir"):
+        (s.work / d).mkdir()
+        (s.work / d / "Makefile").write_text("all:\n")
+        r = s.bg(_build(s), cwd=s.work / d)
+        _never_ran(s, r)
+        assert "holds no tracked file" in r.stderr
+    assert s.read("runner.calls") == ""
+    _never_ran(s, s.bg(_build(s), cwd=s.work / "tests"), 0)  # control: a tracked subdirectory
+
+
+@pytest.mark.parametrize("argv", [("python3", "-m", "build"), ("python3", "-u", "build.py", "-e", "x")])
+def test_an_interpreter_running_a_module_or_script_is_still_offloaded(s, argv):
+    (s.work / "build.py").write_text("print(1)\n")
+    s.commit_all("build.py")
+    _never_ran(s, s.bg(*argv), 0)
+    assert s.read("runner.calls") != ""

@@ -261,23 +261,39 @@ probe_route() {
 }
 # foreign_target ARGS: print why a build's command names something outside $top (a directory flag, or an argument
 # that is an existing path outside the repo), or nothing. A tool given by path from a $PATH directory
-# (/usr/bin/make, /opt/homebrew/bin/just) is not another tree. `--opt=VALUE` is read as VALUE, a short option's
-# attached value (`-p../x`) as that value. A shell's -c string (`bash -c 'cd ../x && make'`) cannot be read at all, so
-# it counts too; -C anywhere in a short-option cluster (`make -sC/x`) is a directory flag; -p is one for gradle only
-# (`cargo build -p crate` names a package) (adversary N3).
+# (/usr/bin/make, /opt/homebrew/bin/just) is not another tree. `--opt=VALUE` and `NAME=VALUE` are read as VALUE, a
+# short option's attached value (`-p../x`) as that value. A shell's -c string or -s stdin script (`bash -c 'cd ../x
+# && make'`) cannot be read at all, so it counts too, and so does an interpreter's inline code (`python3 -c`,
+# `perl -e`, `node -e`, before its script or module); -C anywhere in a short-option cluster (`make -sC/x`) is a
+# directory flag; -p is one for gradle only (`cargo build -p crate` names a package) (adversary N3). A working
+# directory with no tracked file, or a git-ignored one, is not this repo's build either (adversary r3 F2).
 foreign_target() {
-  local a v full dir p top_real path_dirs=() shell=0 gradle=0
+  local a v full dir p top_real path_dirs=() shell=0 gradle=0 interp=0
   top_real=$(greadlink -f -- "$top") || { echo "cannot resolve $top"; return; }
+  if [ -z "$(git -C "$PWD" ls-files -- . 2>/dev/null | ghead -n 1)" ] || git -C "$PWD" check-ignore -q . 2>/dev/null; then
+    echo "the working directory $PWD holds no tracked file of $top"; return
+  fi
   IFS=: read -r -a path_dirs <<< "$PATH"
   for a in "$@"; do
     case "${a##*/}" in
-      sh|bash|zsh|dash|ksh|mksh|yash|fish) shell=1 ;;
+      sh|bash|zsh|dash|ksh|mksh|yash|fish|tcsh|csh|nu|elvish|xonsh|pwsh|powershell) shell=1 ;;
       gradle|gradlew) gradle=1 ;;
     esac
   done
   for a in "$@"; do
+    # An interpreter's own options (up to its script or module) may hold inline code.
+    if [ "$interp" = 1 ]; then
+      case "$a" in
+        --eval|--eval=*|--command|--command=*|-c|-e|-E|-[!-]*[ceE]*) echo "inline interpreter code ($a)"; return ;;
+        -W|-X|-I|-r) interp=2 ;;  # these take the next word as their value
+        -m|[!-]*) interp=0 ;;
+      esac
+    elif [ "$interp" = 2 ]; then
+      interp=1
+    fi
+    case "${a##*/}" in python|python[0-9]*|perl|ruby|node|bun|deno|osascript) interp=1 ;; esac
     if [ "$shell" = 1 ]; then
-      case "$a" in --command|--command=*|-c|-[!-]*c*) echo "a shell command string ($a)"; return ;; esac
+      case "$a" in --command|--command=*|-Command|-EncodedCommand|-c|-s|-[!-]*[cs]*) echo "a shell command string ($a)"; return ;; esac
     fi
     case "$a" in
       --project-dir|--project-dir=*|--directory|--directory=*|--manifest-path|--manifest-path=*)
@@ -287,10 +303,13 @@ foreign_target() {
         [[ "$a" =~ ^-[A-Za-z]*C ]] && { echo "directory flag -C ($a)"; return; }
         [ "$gradle" = 1 ] && [[ "$a" =~ ^-p ]] && { echo "directory flag -p ($a)"; return; }
         ;;
+      [A-Za-z_]*=*)
+        case "${a#*=}" in -C*|*" -C"*|*--directory*) echo "directory flag in $a"; return ;; esac
+        ;;
     esac
     v=$a
     case "$a" in
-      -*=*) v=${a#*=} ;;
+      -*=*|[A-Za-z_]*=*) v=${a#*=} ;;
       -[A-Za-z]?*) v=${a#-?} ;;
     esac
     [ -n "$v" ] && [ -e "$v" ] || continue
