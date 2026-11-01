@@ -76,11 +76,14 @@ do_checks() {
     rc=1
   fi
 
-  # Hard check 1: no cf-execd unit and no unit that runs cf-execd or cf-agent: service and
-  # timer fields, the rendered text of every unit, and units shipped in systemd.packages.
-  if nix eval --json "$(flake head)#nixosConfigurations.$HOST.config.systemd" \
+  # Hard check 1: no cf-execd unit and nothing that runs cf-execd or cf-agent: system and user
+  # service and timer fields, the rendered text of every unit, units shipped in systemd.packages,
+  # activation scripts, boot.postBootCommands, tmpfiles rules, systemd-targeted environment.etc
+  # entries and system cron jobs (check1.nix). The `scanned` counts must all be above zero, so a
+  # scan that saw nothing cannot pass.
+  if nix eval --json "$(flake head)#nixosConfigurations.$HOST.config" \
     --apply "$(cat "$HERE/check1.nix")" > "$WORK/check1.json"; then
-    if jq -e '.execdUnitPresent == false and (.hits | length) == 0 and (.rawHits | length) == 0 and (.packageHits | length) == 0' \
+    if jq -e '.execdUnitPresent == false and ([.hits, .rawHits, .packageHits, .scriptHits] | all(type == "array" and length == 0)) and ([.scanned[] | . > 0] | all) and (.scanned | length) == 5' \
       "$WORK/check1.json" > /dev/null; then
       echo "check 1 (no cf-execd/cf-agent unit): PASS" | tee -a "$out"
     else
@@ -90,7 +93,7 @@ do_checks() {
     fi
   else
     echo "check 1 (no cf-execd/cf-agent unit): FAIL eval error" | tee -a "$out"
-    echo "::error::could not evaluate the systemd units of $HOST"
+    echo "::error::could not evaluate the units, scripts and cron jobs of $HOST"
     rc=1
   fi
   return "$rc"
