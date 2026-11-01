@@ -1,0 +1,198 @@
+# The consent gate for changes that touch tendcf (the CFEngine fork) on the NixOS host
+# vps-primary. Spec: tendcf docs/architecture/schema-v4-reconciliation-2026-10-31.md section 5.
+# Rules and file layout: docs/tendcf-consent.md.
+#
+# Two jobs, one per event:
+#
+#  - "tendcf consent" runs on EVERY pull request (no path filter at the workflow level, so a
+#    required check never goes missing on an unrelated PR). Its first step decides two things
+#    (consent.py decide): whether the change touches tendcf (`touches`), and whether it changes
+#    anything under nixos/ or the gate's own files (`nix_changed`).
+#      neither            succeeds at once with one line.
+#      nix_changed        installs Nix and runs the two hard checks on the head configuration,
+#                         whatever the text of the diff says (they are eval-only and cheap):
+#                         no cfengine-tendcf-execd service, no service, timer or rendered unit
+#                         that runs cf-execd or cf-agent, no systemd package named cfengine or
+#                         tendcf (check1.nix); the declared option set of
+#                         services.cfengine-tendcf equals {enable, execd.enable, package}
+#                         (run.sh checks).
+#      touches            additionally renders the consent artifact for the merge result against
+#                         the base branch, prints it to the job log and step summary and uploads
+#                         it (tendcf-consent):
+#         AUTHORITY  the PR diff of nixos/ and the tendcf workflow files, flake.lock reduced to
+#                    (input, type, rev, narHash) per changed node, and for each moved git input
+#                    `git diff oldrev..newrev` (nixpkgs is not diffed; EFFECT covers it)
+#         SUMMARY    services.cfengine-tendcf as JCS JSON at base and head, with a diff, and
+#                    the hard-check results
+#         EFFECT     nix store diff-closures of the base and head vps-primary toplevels, built
+#                    on the runner; base is the PR's base branch, which can be ahead of
+#                    deploy-vps-primary
+#         then the plain-language question. The job also fails when a part of the AUTHORITY
+#         cannot be fetched. The PR approver reads the artifact: that is the consent.
+#
+#  - "tendcf push check" runs on pushes to master. When a pushed commit touches tendcf and no
+#    pull request merged into the default branch introduced it (GitHub's commits/<sha>/pulls),
+#    the job goes red with a message pointing at the rule. When any pushed commit changed
+#    nixos/flake.lock (including the weekly lock bot), it also installs Nix and runs the hard
+#    checks on the pushed head. It never reverts or blocks anything.
+#
+# Touching tendcf is defined in .github/scripts/tendcf-consent/consent.py. This workflow only
+# reads the repository (contents: read) and the pull-request association (pull-requests: read).
+# The job to require in branch protection is "tendcf consent". The sibling
+# nixos-cfengine-build.yml still builds the package and runs stage B on PRs that touch nixos/;
+# it is path-filtered, so do not require that one.
+
+---
+name: tendcf consent gate
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: tendcf-consent-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  HOST: vps-primary
+  SCRIPTS: .github/scripts/tendcf-consent
+
+jobs:
+  consent:
+    name: tendcf consent
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      # Default checkout of a pull request is GitHub's merge commit of head into base: what a
+      # merge would deploy. Its first parent is the base tip it was made against.
+      - name: Check out the merge result
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Does this change touch tendcf?
+        id: decide
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if git rev-parse --verify -q 'HEAD^2' > /dev/null; then
+            base=$(git rev-parse 'HEAD^1')
+          else
+            base="$PR_BASE_SHA"
+          fi
+          {
+            echo "BASE_SHA=$base"
+            echo "HEAD_SHA=$head"
+            echo "WORK=$RUNNER_TEMP/consent"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/consent"
+          python3 "$SCRIPTS/consent.py" decide --mode pr --base "$base" --head "$head"
+          if [ "$(grep -c '^touches=true$' "$GITHUB_OUTPUT" || true)" = 0 ]; then
+            echo "::notice::tendcf consent: no tendcf-touching change"
+          fi
+
+      - name: AUTHORITY block
+        if: ${{ steps.decide.outputs.touches == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" authority --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --out "$WORK/authority.md"
+
+      - name: Install Nix
+        if: ${{ steps.decide.outputs.nix_changed == 'true' }}
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Export base and head
+        if: ${{ !cancelled() && steps.decide.outputs.nix_changed == 'true' }}
+        run: bash "$SCRIPTS/run.sh" export
+
+      - name: SUMMARY at base and head
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" summary
+
+      - name: Hard checks 1 and 2 on the head configuration
+        if: ${{ !cancelled() && steps.decide.outputs.nix_changed == 'true' }}
+        run: bash "$SCRIPTS/run.sh" checks
+
+      - name: EFFECT (build both toplevels, diff-closures)
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" effect
+
+      - name: Consent artifact
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" assemble --work "$WORK" --host "$HOST" \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --out "$WORK/consent.md"
+
+      - name: Upload the consent artifact
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tendcf-consent
+          path: ${{ env.WORK }}/consent.md
+          if-no-files-found: warn
+
+  push-check:
+    name: tendcf push check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Pushed tendcf changes came from a merged pull request
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" push-check --slug "${{ github.repository }}" \
+            --before "$BEFORE_SHA" --sha "${{ github.sha }}" \
+            --default-branch "${{ github.event.repository.default_branch }}"
+
+      # A moved flake input can add a unit that runs cf-agent, and the weekly lock bot pushes
+      # flake.lock straight to master, so a lock change gets the same eval-only hard checks
+      # a pull request gets.
+      - name: Did the push change nixos/flake.lock?
+        id: lock
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" lock-changed --before "$BEFORE_SHA" --sha "${{ github.sha }}"
+
+      - name: Install Nix
+        if: ${{ !cancelled() && steps.lock.outputs.lock_changed == 'true' }}
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Hard checks 1 and 2 on the pushed head
+        if: ${{ !cancelled() && steps.lock.outputs.lock_changed == 'true' }}
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          WORK: ${{ runner.temp }}/consent
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          bash "$SCRIPTS/run.sh" export-head
+          bash "$SCRIPTS/run.sh" checks
