@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# EDITING THIS FILE: other agents run it live. Never edit in place: write the new version to a temp file in this
+# directory, `bash -n` it, then `mv -f` it over (~/AGENTS.md item 2; 2026-11-01: in-place edits gave callers a syntax error).
 # bg-offload — run a build or test command on CI instead of this Mac, and report CI's verdict (bg's helper,
 # 2026-10-23; builds and full suites since 2026-11-01).
 #
