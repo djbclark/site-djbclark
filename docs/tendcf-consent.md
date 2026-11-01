@@ -7,6 +7,11 @@ Implementation: `.github/workflows/tendcf-consent.yml` and `.github/scripts/tend
 **It is not an approval record.** It has no nonce, sequence number or signature. The consent is
 the PR approver reading the artifact and answering its closing question.
 
+**Threat model.** The hard checks defend against accidents: an honest change that turns
+`cf-agent` or `cf-execd` on without meaning to. They are a textual tripwire supporting human
+consent, not proof that `cf-agent` cannot run. A deliberately disguised change is out of scope
+(see "Limits" below).
+
 ## Rules (operator djbclark, 2026-10-31)
 
 1. Only changes that touch tendcf go through a PR with the required job **`tendcf consent`**. Other
@@ -50,8 +55,14 @@ gate's own files. That, not the text of the diff, decides whether the hard check
      `systemd.user.services`, `systemd.user.timers`;
   2. the rendered text of any `systemd.units` or `systemd.user.units` entry, or an
      `environment.etc` entry whose target starts with `systemd/` (target and text);
-  3. `systemd.packages`: the package name (`cfengine` or `tendcf`) and the text of every regular
-     file in `${pkg}/lib/systemd/system`. **Reading a package's unit files is import from
+  3. `systemd.packages`: the package name (`cfengine` or `tendcf`) and the text of every file
+     under `${pkg}/lib/systemd/system` and `${pkg}/lib/systemd/user`: regular files, files in
+     subdirectories (drop-ins `*.d/*.conf`, `*.wants/`) and symlinks. A symlink is read through
+     the link, whatever its target: Nix has no `readlink`, so a link into the package and one
+     outside it are read the same way. A symlink that is broken, loops or points at a directory,
+     and an entry that is not a file, directory or symlink, **aborts the eval**, which is a
+     failure (`builtins.readFile` errors cannot be caught, so nothing unreadable is skipped).
+     **Reading a package's files is import from
      derivation: Nix realises each package at eval**, almost always a binary-cache fetch (the
      nixpkgs ones) but a real build for a package that is not cached, such as the tendcf one if
      it were listed. It was chosen over a name-only match because a renamed package hides from
@@ -61,11 +72,22 @@ gate's own files. That, not the text of the diff, decides whether the hard check
      `services.cron.systemCronJobs`.
 
   A guard against a vacuous pass: the result also counts what was scanned (services, units,
-  activation scripts, `etc` entries, shipped unit files) and every count must be above zero.
-  The check is textual: a wrapper binary that runs `cf-agent` indirectly, an `environment.etc`
-  entry given only as `source`, a unit symlink pointing outside its package and
-  `systemd.tmpfiles.settings` are not seen. A green check 1 does not prove the host free of
-  `cf-agent`; AUTHORITY and EFFECT are the channel for those.
+  activation scripts, `etc` entries, shipped unit files). `run.sh` requires `scanned` to have
+  exactly those five keys, each a non-negative integer, and the first four above zero (any
+  NixOS host has them). The shipped-file count may be zero, since a host's packages need not
+  ship unit files; a package it could not enumerate or read fails the eval instead.
+
+  **What this is.** The hard checks defend against **accidents**: an honest change that turns
+  `cf-agent` or `cf-execd` on without meaning to. They are a **textual tripwire supporting human
+  consent, not proof that `cf-agent` cannot run.** A deliberately disguised change (a neutral
+  wrapper script, a source-backed file, a string-built name) is **out of scope** (operator
+  ruling, 2026-11-01). Ruled boundary, not chased: a wrapper binary that runs `cf-agent`
+  indirectly; an `environment.etc` entry given only as `source`, or any other file-backed unit
+  or configuration whose text is not in the evaluated option values; names built from strings.
+  Also not scanned: package files outside `lib/systemd/system` and `lib/systemd/user`, and
+  `systemd.tmpfiles.settings`. A green check 1 does not prove the host free of `cf-agent`;
+  AUTHORITY and EFFECT are the channel for what it misses, and they are rendered only when the
+  change touches tendcf, so a hard-check-only run has neither.
 
   When the change also **touches tendcf** the job renders the consent
   artifact for the merge result (base = the merge commit's first parent) and also fails on a failed
@@ -96,10 +118,18 @@ gate's own files. That, not the text of the diff, decides whether the hard check
    pushed `nixos/` change that does not touch tendcf gets only the eval-only hard checks, not the
    AUTHORITY or EFFECT blocks.
 4. JCS: `jq -cS` equals RFC 8785 for the booleans and ASCII strings in the summary.
-5. The Mac has no nix. The first real run of the Nix steps (`check1.nix`, `run.sh`) is CI. The
-   tests cover the Python decision code, the `jq` condition of check 1 and static guards on the Nix
-   source; `test_check1_nix_flags_each_channel` evaluates `check1.nix` on a synthetic config and
-   runs only where `nix` exists.
+5. The Mac has no nix. The tests cover the Python decision code, the `jq` condition of check 1
+   and static guards on the Nix source. `check1.nix` itself is evaluated on synthetic configs by
+   `test_check1_nix_*` (every hit channel, the packaged-unit cases, and the unreadable-entry
+   cases that must fail the eval), which need `nix`. The CI job **`tendcf gate tests`** (every PR,
+   not a required check) installs Nix, sets `TENDCF_REQUIRE_TOOLS=1` (a missing `nix` or `jq`
+   is a failure, not a skip) and fails when the junit report shows any skipped test. The first
+   run against the real `vps-primary` configuration is still the `tendcf consent` job.
+6. **Ruled boundary (operator, 2026-11-01).** File-backed or indirect execution paths are not
+   chased: a neutral wrapper script, a unit or configuration file supplied as a `source`, a
+   name built from strings, tmpfiles and other launcher configuration outside the scanned
+   options. The gate assumes an honest author making a mistake; a deliberately disguised change
+   defeats it, and only human review of the PR can stop that.
 
 ## Branch protection (lead, not this repo's code)
 

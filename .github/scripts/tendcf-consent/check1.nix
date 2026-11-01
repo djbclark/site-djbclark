@@ -1,8 +1,9 @@
 # Hard check 1 of the tendcf consent job, applied to the whole `config` of the host:
 #   nix eval --json <flake>#nixosConfigurations.<host>.config --apply "$(cat check1.nix)"
 # Result: { execdUnitPresent, hits, rawHits, packageHits, scriptHits, scanned }. The check
-# passes when execdUnitPresent is false, the four hit lists are empty and every `scanned`
-# count is above zero (run.sh checks; the counts keep a mis-wired scan from passing vacuously).
+# passes when execdUnitPresent is false, the four hit lists are empty and `scanned` has exactly
+# the five expected counts, all non-negative integers, four of them above zero (run.sh checks;
+# the counts keep a mis-wired scan from passing vacuously).
 #
 # Each hit is { unit, why }: an item whose text names cf-execd or cf-agent, or that could not
 # be evaluated (a field that cannot be read cannot be proven clear). It checks the effect
@@ -12,15 +13,17 @@
 #   rawHits     the rendered text of every systemd.units and systemd.user.units entry, and
 #               environment.etc entries that install a unit (target systemd/..., name and text)
 #   packageHits systemd.packages: the package name (cfengine or tendcf), and the text of every
-#               regular file in ${pkg}/lib/systemd/system. Reading a package's files at eval is
-#               import-from-derivation: nix realises the package first. The packages are
-#               substituted from the binary cache, and a package that cannot be built or fetched
-#               fails the eval, which the check treats as a failure.
+#               file under ${pkg}/lib/systemd/system and ${pkg}/lib/systemd/user: regular files,
+#               drop-ins in subdirectories and symlinks (read through the link). Reading a
+#               package's files at eval is import-from-derivation: nix realises the package
+#               first. The packages are substituted from the binary cache, and a package that
+#               cannot be built or fetched fails the eval, which the check treats as a failure,
+#               as it does a broken or looping symlink, a link to a directory or a special file.
 #   scriptHits  system.activationScripts (string or .text), boot.postBootCommands,
 #               systemd.tmpfiles.rules and services.cron.systemCronJobs
 # Not covered (textual check, see docs/tendcf-consent.md): a wrapper that execs cf-agent
-# indirectly, environment.etc entries given only as `source`, unit symlinks that point outside
-# their package, and `systemd.tmpfiles.settings`.
+# indirectly, environment.etc entries given only as `source`, package files outside the two
+# unit directories, and `systemd.tmpfiles.settings`.
 config:
 let
   systemd = config.systemd;
@@ -99,17 +102,47 @@ let
       builtins.attrNames units
     );
   # Units linked from packages (systemd.packages) are not in any of the sets above. The name
-  # is checked, and so is the text of every unit file the package ships.
+  # is checked, and so is the text of every file a package ships under lib/systemd/system and
+  # lib/systemd/user: regular files, files in subdirectories (drop-ins `x.service.d/*.conf`,
+  # `*.wants/`), and symlinks (read through the link, whatever its target; Nix has no readlink,
+  # so a link into the package and one outside it are read the same way).
+  # A symlink that is broken, loops or points at a directory, and an entry that is neither a
+  # file, a directory nor a symlink, aborts the eval, which the check treats as a failure:
+  # `builtins.readFile` errors are not catchable, so nothing unreadable is skipped.
   pkgName = p: p.pname or p.name or "?";
-  unitDir = p: "${p}/lib/systemd/system";
+  unitDirs = [
+    "lib/systemd/system"
+    "lib/systemd/user"
+  ];
+  # Every non-directory entry below `root`/`rel` as a path relative to `root`, descending into
+  # real directories only (a symlink is never followed as a directory, so there is no cycle).
+  entriesUnder =
+    root: rel:
+    let
+      dir = if rel == "" then root else "${root}/${rel}";
+      kinds = builtins.readDir dir;
+    in
+    builtins.concatMap (
+      n:
+      let
+        r = if rel == "" then n else "${rel}/${n}";
+      in
+      if kinds.${n} == "directory" then
+        entriesUnder root r
+      else if kinds.${n} == "regular" || kinds.${n} == "symlink" then
+        [ r ]
+      else
+        throw "unreadable entry (${kinds.${n}}): ${root}/${r}"
+    ) (builtins.attrNames kinds);
   shippedFiles =
     p:
-    if builtins.pathExists (unitDir p) then
-      builtins.filter (n: (builtins.readDir (unitDir p)).${n} == "regular") (
-        builtins.attrNames (builtins.readDir (unitDir p))
-      )
-    else
-      [ ];
+    builtins.concatMap (
+      d:
+      if builtins.pathExists "${p}/${d}" then
+        map (f: "${d}/${f}") (entriesUnder "${p}/${d}" "")
+      else
+        [ ]
+    ) unitDirs;
   scanPackages = builtins.concatMap (
     p:
     (
@@ -123,7 +156,7 @@ let
       else
         [ ]
     )
-    ++ builtins.concatMap (n: hit "packages.${pkgName p}/${n}" (builtins.readFile "${unitDir p}/${n}")) (
+    ++ builtins.concatMap (f: hit "packages.${pkgName p}/${f}" (builtins.readFile "${p}/${f}")) (
       shippedFiles p
     )
   ) systemd.packages;
@@ -164,8 +197,10 @@ in
   rawHits = scanUnits "units" systemd.units ++ scanUnits "user.units" systemd.user.units ++ scanEtc;
   packageHits = scanPackages;
   scriptHits = scanActivation ++ hostScripts;
-  # What was looked at. Each count is above zero on any real NixOS host, so a scan that was
-  # wired to the wrong attribute and saw nothing cannot pass (run.sh requires them all > 0).
+  # What was looked at. services, units, activationScripts and etc are above zero on any real
+  # NixOS host, so a scan wired to the wrong attribute and seeing nothing cannot pass (run.sh
+  # requires them > 0). packageFiles can legitimately be zero (no packages, or none with unit
+  # files), and an enumeration or read failure aborts the eval instead of lowering it.
   scanned = {
     services = count (builtins.attrNames systemd.services);
     units = count (builtins.attrNames systemd.units);

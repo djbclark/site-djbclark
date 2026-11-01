@@ -39,6 +39,16 @@
 #    gate's own files, it also installs Nix and runs the hard checks on the pushed head. It
 #    never reverts or blocks anything.
 #
+#  - "tendcf gate tests" runs tests/test_tendcf_consent.py on every pull request with Nix
+#    installed and fails if any test is skipped, so the check1.nix fixtures cannot go unrun.
+#    Not a required check.
+#
+# THREAT MODEL. The hard checks defend against ACCIDENTS: an honest change that turns
+# cf-agent or cf-execd on without meaning to. They are a textual tripwire that supports human
+# consent, not proof that cf-agent cannot run. A deliberately disguised change (a neutral
+# wrapper script, a source-backed file, a string-built name) is out of scope, by the
+# operator's ruling of 2026-11-01; see "Limits" in docs/tendcf-consent.md.
+#
 # Touching tendcf is defined in .github/scripts/tendcf-consent/consent.py. This workflow only
 # reads the repository (contents: read) and the pull-request association (pull-requests: read).
 # The job to require in branch protection is "tendcf consent". The sibling
@@ -149,6 +159,41 @@ jobs:
           name: tendcf-consent
           path: ${{ env.WORK }}/consent.md
           if-no-files-found: warn
+
+  # The gate's own tests, with Nix installed so the check1.nix fixtures run. TENDCF_REQUIRE_TOOLS
+  # turns "nix or jq missing" into a failure, and the junit file must show zero skipped tests,
+  # so this job cannot go green without having evaluated check1.nix. Not a required check.
+  gate-tests:
+    name: tendcf gate tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TENDCF_REQUIRE_TOOLS: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Run tests/test_tendcf_consent.py (Nix fixtures must not be skipped)
+        run: |
+          set -euo pipefail
+          git config --global user.email ci@example.invalid
+          git config --global user.name ci
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/venv/bin/python" -m pytest -q -rs tests/test_tendcf_consent.py \
+            --junitxml="$RUNNER_TEMP/tendcf-tests.xml"
+          if ! grep -q 'skipped="0"' "$RUNNER_TEMP/tendcf-tests.xml"; then
+            echo "::error::tests were skipped; the Nix fixtures must run in this job"
+            exit 1
+          fi
 
   push-check:
     name: tendcf push check

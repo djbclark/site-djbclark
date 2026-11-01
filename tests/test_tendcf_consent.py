@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -360,26 +361,64 @@ CLEAN = {
 }
 
 
-@pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
+def require_tool(name):
+    """Skip when `name` is missing, except in the CI job that sets TENDCF_REQUIRE_TOOLS: there a
+    missing tool is a failure, so a skip cannot hide that the check never ran."""
+    if shutil.which(name) is None:
+        if os.environ.get("TENDCF_REQUIRE_TOOLS"):
+            pytest.fail(f"{name} is required (TENDCF_REQUIRE_TOOLS is set) but not installed")
+        pytest.skip(f"{name} not installed")
+
+
 def test_check1_decision_fails_on_every_hit_channel_and_on_a_vacuous_scan():
+    require_tool("jq")
     hit = [{"unit": "x", "why": "names cf-execd or cf-agent"}]
     assert check1_passes(CLEAN)
     for key in ("hits", "rawHits", "packageHits", "scriptHits"):
         assert not check1_passes({**CLEAN, key: hit}), key
     assert not check1_passes({**CLEAN, "execdUnitPresent": True})
     # F2/F5 non-vacuity: a scan that saw nothing (or a result missing a channel) cannot pass.
-    for k in CLEAN["scanned"]:
+    for k in ("services", "units", "activationScripts", "etc"):
         assert not check1_passes({**CLEAN, "scanned": {**CLEAN["scanned"], k: 0}}), k
     assert not check1_passes({**CLEAN, "scanned": {}})
     without = {k: v for k, v in CLEAN.items() if k != "scriptHits"}
     assert not check1_passes(without)
 
 
-def _check1_eval(tmp_path, config):
-    cfg = tmp_path / "cfg.json"
+def test_check1_decision_allows_zero_package_files():
+    # B5: a host whose packages ship no unit files is valid; a read failure aborts the eval.
+    require_tool("jq")
+    assert check1_passes({**CLEAN, "scanned": {**CLEAN["scanned"], "packageFiles": 0}})
+
+
+@pytest.mark.parametrize(
+    "scanned",
+    [
+        {**CLEAN["scanned"], "extra": 1},
+        {k: v for k, v in CLEAN["scanned"].items() if k != "packageFiles"},
+        {**CLEAN["scanned"], "packageFiles": "7"},
+        {**CLEAN["scanned"], "services": "9"},
+        {**CLEAN["scanned"], "etc": [40]},
+        {**CLEAN["scanned"], "units": None},
+        {**CLEAN["scanned"], "packageFiles": -1},
+        {**CLEAN["scanned"], "packageFiles": 1.5},
+        {"services": 9, "units": 30, "activationScripts": 6, "etc": 40, "other": 2},
+        list(CLEAN["scanned"].values()),
+        "scanned",
+        None,
+    ],
+)
+def test_check1_decision_rejects_a_malformed_scanned_object(scanned):
+    # B6: exact keys, non-negative integer values (jq orders arrays and strings above numbers).
+    require_tool("jq")
+    assert not check1_passes({**CLEAN, "scanned": scanned})
+
+
+def _check1_run(root, config):
+    cfg = root / "cfg.json"
     cfg.write_text(json.dumps(config))
     expr = f"(import {CHECK1}) (builtins.fromJSON (builtins.readFile {cfg}))"
-    r = subprocess.run(
+    return subprocess.run(
         [
             "nix",
             "eval",
@@ -394,23 +433,45 @@ def _check1_eval(tmp_path, config):
         text=True,
         timeout=300,
     )
+
+
+def _check1_eval(root, config):
+    r = _check1_run(root, config)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
 
-def _fake_config(tmp_path):
-    pkg = tmp_path / "pkg"
-    (pkg / "lib/systemd/system").mkdir(parents=True)
-    (pkg / "lib/systemd/system/ok.service").write_text(
-        "[Service]\nExecStart=/bin/true\n"
-    )
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+CLEAN_UNIT = "[Service]\nExecStart=/bin/true\n"
+BAD = "/run/current-system/sw/bin/cf-agent -K"
+BAD_UNIT = "[Service]\nExecStart=" + BAD + "\n"
+# ok.service, its drop-in, a symlink to it, a symlink into share/, one packaged user unit.
+CLEAN_PACKAGE_FILES = 5
+
+
+def _fake_config(root):
+    """A minimal `config` whose one systemd package is root/pkg. Each caller passes a directory
+    of its own: the package is built there and nothing is shared between cases."""
+    pkg = root / "pkg"
+    system = pkg / "lib/systemd/system"
+    _write(system / "ok.service", CLEAN_UNIT)
+    _write(system / "ok.service.d/override.conf", "[Service]\nNice=1\n")
+    (system / "alias.service").symlink_to("ok.service")
+    _write(pkg / "share/clean.service", CLEAN_UNIT)
+    (system / "linked.service").symlink_to("../../../share/clean.service")
+    _write(pkg / "lib/systemd/user/u.service", CLEAN_UNIT)
     return {
         "systemd": {
             "services": {
                 "a": {"script": "echo hi", "serviceConfig": {"ExecStart": "/bin/true"}}
             },
             "timers": {},
-            "units": {"a.service": {"text": "[Service]\nExecStart=/bin/true\n"}},
+            "units": {"a.service": {"text": CLEAN_UNIT}},
             "user": {"services": {}, "timers": {}, "units": {}},
             "packages": [{"pname": "pkg", "outPath": str(pkg)}],
             "tmpfiles": {"rules": ["d /var/x 0755 root root -"]},
@@ -422,80 +483,134 @@ def _fake_config(tmp_path):
     }
 
 
-def _poisoned(tmp_path):
-    bad = "/run/current-system/sw/bin/cf-agent -K"
-    shipped = tmp_path / "pkg" / "lib/systemd/system"
+def _setter(path, value):
+    def apply(cfg, pkg):
+        d = cfg
+        for k in path[:-1]:
+            d = d[k]
+        d[path[-1]] = value
 
-    def setter(path, value):
-        def apply(c):
-            d = c
-            for k in path[:-1]:
-                d = d[k]
-            d[path[-1]] = value
-
-        return apply
-
-    return {
-        "activationScripts string": (
-            "scriptHits",
-            setter(["system", "activationScripts", "x"], bad),
-        ),
-        "activationScripts text": (
-            "scriptHits",
-            setter(["system", "activationScripts", "x"], {"text": bad, "deps": []}),
-        ),
-        "postBootCommands": ("scriptHits", setter(["boot", "postBootCommands"], bad)),
-        "tmpfiles": (
-            "scriptHits",
-            setter(["systemd", "tmpfiles", "rules"], ["f /x - - - - " + bad]),
-        ),
-        "cron": (
-            "scriptHits",
-            setter(["services", "cron", "systemCronJobs"], ["* * * * * root " + bad]),
-        ),
-        "etc systemd text": (
-            "rawHits",
-            setter(
-                ["environment", "etc", "u"],
-                {"target": "systemd/system/u.service", "text": "ExecStart=" + bad},
-            ),
-        ),
-        "etc systemd target": (
-            "rawHits",
-            setter(
-                ["environment", "etc", "u"],
-                {"target": "systemd/system/cf-execd.service", "text": ""},
-            ),
-        ),
-        "user service": (
-            "hits",
-            setter(["systemd", "user", "services", "u"], {"script": bad}),
-        ),
-        "user timer": (
-            "hits",
-            setter(
-                ["systemd", "user", "timers", "u"],
-                {"serviceConfig": {"ExecStart": bad}},
-            ),
-        ),
-        "user unit": (
-            "rawHits",
-            setter(["systemd", "user", "units", "u.service"], {"text": bad}),
-        ),
-        "shipped unit text": (
-            "packageHits",
-            lambda c: (shipped / "helpers.service").write_text(
-                "[Service]\nExecStart=" + bad + "\n"
-            ),
-        ),
-    }
+    return apply
 
 
-@pytest.mark.skipif(
-    shutil.which("nix") is None, reason="needs Nix; CI runs the real check"
-)
-def test_check1_nix_flags_each_channel(tmp_path):
-    # The Mac has no Nix, so this has not been run by the author; it runs wherever `nix` exists.
+def _internal_symlink(cfg, pkg):
+    _write(pkg / "share/evil.service", BAD_UNIT)
+    (pkg / "lib/systemd/system/evil.service").symlink_to("../../../share/evil.service")
+
+
+def _external_symlink(cfg, pkg):
+    target = _write(pkg.parent / "outside/evil.service", BAD_UNIT)
+    (pkg / "lib/systemd/system/evil.service").symlink_to(target)
+
+
+def _symlinked_drop_in(cfg, pkg):
+    _write(pkg / "share/evil.conf", "[Service]\nExecStartPre=" + BAD + "\n")
+    drop = pkg / "lib/systemd/system/ok.service.d"
+    (drop / "evil.conf").symlink_to("../../../../share/evil.conf")
+
+
+# case name -> (hit channel, mutation of (config, package directory))
+POISONED = {
+    "activationScripts string": (
+        "scriptHits",
+        _setter(["system", "activationScripts", "x"], BAD),
+    ),
+    "activationScripts text": (
+        "scriptHits",
+        _setter(["system", "activationScripts", "x"], {"text": BAD, "deps": []}),
+    ),
+    "postBootCommands": ("scriptHits", _setter(["boot", "postBootCommands"], BAD)),
+    "tmpfiles": (
+        "scriptHits",
+        _setter(["systemd", "tmpfiles", "rules"], ["f /x - - - - " + BAD]),
+    ),
+    "cron": (
+        "scriptHits",
+        _setter(["services", "cron", "systemCronJobs"], ["* * * * * root " + BAD]),
+    ),
+    "etc systemd text": (
+        "rawHits",
+        _setter(
+            ["environment", "etc", "u"],
+            {"target": "systemd/system/u.service", "text": "ExecStart=" + BAD},
+        ),
+    ),
+    "etc systemd target": (
+        "rawHits",
+        _setter(
+            ["environment", "etc", "u"],
+            {"target": "systemd/system/cf-execd.service", "text": ""},
+        ),
+    ),
+    "user service": (
+        "hits",
+        _setter(["systemd", "user", "services", "u"], {"script": BAD}),
+    ),
+    "user timer": (
+        "hits",
+        _setter(["systemd", "user", "timers", "u"], {"serviceConfig": {"ExecStart": BAD}}),
+    ),
+    "user unit": (
+        "rawHits",
+        _setter(["systemd", "user", "units", "u.service"], {"text": BAD}),
+    ),
+    "shipped unit text": (
+        "packageHits",
+        lambda cfg, pkg: _write(pkg / "lib/systemd/system/helpers.service", BAD_UNIT),
+    ),
+    "shipped drop-in": (
+        "packageHits",
+        lambda cfg, pkg: _write(
+            pkg / "lib/systemd/system/ok.service.d/evil.conf",
+            "[Service]\nExecStartPre=" + BAD + "\n",
+        ),
+    ),
+    "shipped user unit": (
+        "packageHits",
+        lambda cfg, pkg: _write(pkg / "lib/systemd/user/evil.service", BAD_UNIT),
+    ),
+    "shipped user drop-in": (
+        "packageHits",
+        lambda cfg, pkg: _write(
+            pkg / "lib/systemd/user/u.service.d/evil.conf",
+            "[Service]\nExecStartPre=" + BAD + "\n",
+        ),
+    ),
+    "symlink into the package": ("packageHits", _internal_symlink),
+    "symlink outside the package": ("packageHits", _external_symlink),
+    "symlinked drop-in": ("packageHits", _symlinked_drop_in),
+}
+
+
+def _broken_link(cfg, pkg):
+    (pkg / "lib/systemd/system/gone.service").symlink_to("nowhere.service")
+
+
+def _link_cycle(cfg, pkg):
+    system = pkg / "lib/systemd/system"
+    (system / "a.service").symlink_to("b.service")
+    (system / "b.service").symlink_to("a.service")
+
+
+def _link_to_directory(cfg, pkg):
+    (pkg / "lib/systemd/system/dir.service").symlink_to("ok.service.d")
+
+
+def _special_file(cfg, pkg):
+    os.mkfifo(pkg / "lib/systemd/system/pipe.service")
+
+
+# Entries that cannot be read as text must fail the evaluation, never be skipped.
+UNREADABLE = {
+    "broken symlink": _broken_link,
+    "symlink cycle": _link_cycle,
+    "symlink to a directory": _link_to_directory,
+    "special file": _special_file,
+}
+
+
+def test_check1_nix_clean_fixture_passes_and_counts_every_packaged_file(tmp_path):
+    require_tool("nix")
     clean = _check1_eval(tmp_path, _fake_config(tmp_path))
     assert (
         clean["hits"]
@@ -504,11 +619,29 @@ def test_check1_nix_flags_each_channel(tmp_path):
         == clean["scriptHits"]
         == []
     )
+    assert clean["execdUnitPresent"] is False
+    assert clean["scanned"]["packageFiles"] == CLEAN_PACKAGE_FILES
     assert all(v > 0 for v in clean["scanned"].values())
-    for name, (channel, mutate) in _poisoned(tmp_path).items():
-        cfg = _fake_config(tmp_path)
-        mutate(cfg)
-        assert _check1_eval(tmp_path, cfg)[channel], name
+
+
+@pytest.mark.parametrize("name", sorted(POISONED))
+def test_check1_nix_flags_each_channel(tmp_path, name):
+    # One directory per case: the package built by _fake_config is never shared, so a poisoned
+    # file from one case cannot leak into another or into the clean case above.
+    require_tool("nix")
+    channel, mutate = POISONED[name]
+    cfg = _fake_config(tmp_path)
+    mutate(cfg, tmp_path / "pkg")
+    assert _check1_eval(tmp_path, cfg)[channel], name
+
+
+@pytest.mark.parametrize("name", sorted(UNREADABLE))
+def test_check1_nix_fails_closed_on_an_unreadable_packaged_entry(tmp_path, name):
+    require_tool("nix")
+    cfg = _fake_config(tmp_path)
+    UNREADABLE[name](cfg, tmp_path / "pkg")
+    r = _check1_run(tmp_path, cfg)
+    assert r.returncode != 0, f"{name}: eval succeeded with {r.stdout}"
 
 
 def test_push_nix_changed_without_a_lock_or_cfengine_word(repo):
