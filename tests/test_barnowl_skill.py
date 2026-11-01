@@ -76,6 +76,8 @@ class Env:
               send-keys)
                 shift; printf '%s\\n' "$*" >>"$FAKE_KEYS"
                 if [[ $* == *start_question* ]]; then
+                  # the screen the question leaves behind (the question itself, or whatever the human did)
+                  if [[ -n ${FAKE_SCREEN_AFTER_QUESTION:-} ]]; then cp "$FAKE_SCREEN_AFTER_QUESTION" "$FAKE_SCREEN"; fi
                   # the human: answer into the file the question's callback would write
                   if [[ -n ${FAKE_ANSWER:-} ]]; then
                     p=$(sed -E 's/.*q\\{>\\}, q\\{([^}]*)\\}.*/\\1/' <<<"$*"); printf 'ans:%s\\n' "$FAKE_ANSWER" >"$p"
@@ -254,14 +256,28 @@ class SanitizeAndFrame(unittest.TestCase):
 
 
 class ConfirmationGate(unittest.TestCase):
+    def _after_question(self, e: "Env", screen: str) -> dict[str, str]:
+        path = Path(e.tmp.name) / "after-question.txt"
+        path.write_text(screen)
+        return {"FAKE_SCREEN_AFTER_QUESTION": str(path)}
+
     def test_with_no_human_nothing_but_the_question_is_typed(self) -> None:
         with Env() as e:
-            p = e.run(BO, "run", "zwrite eve -m hi", wait="1")
+            p = e.run(BO, "run", "zwrite eve -m hi", wait="1", extra=self._after_question(e, fixture("08-question")))
             self.assertEqual(p.returncode, 4)
             keys = "\n".join(e.typed())
             self.assertIn("start_question", keys)
             self.assertNotIn(":zwrite", keys)
             self.assertIn("C-g", keys, "the unanswered question must be cancelled")
+
+    def test_the_question_is_cancelled_only_while_it_is_still_on_screen(self) -> None:
+        # The human dismissed bo's question themselves and began a compose, a command line or a
+        # search: a C-g from bo would throw their draft away.
+        for name in ("06-compose", "04-command-line-typed", "15-search-prompt", "01-idle"):
+            with Env() as e:
+                p = e.run(BO, "run", "zwrite eve -m hi", wait="1", extra=self._after_question(e, fixture(name)))
+                self.assertEqual(p.returncode, 4, name)
+                self.assertNotIn("C-g", "\n".join(e.typed()), name)
 
     def test_human_yes_lets_it_through_and_no_does_not(self) -> None:
         with Env() as e:

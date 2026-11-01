@@ -24,8 +24,12 @@ confirm_max=${BO_CONFIRM_MAX:-}
 
 finish() {
   local rc=$?
-  # A question left open at the client would swallow the next caller's keys.
-  [[ -z $pending_question ]] || tmux send-keys -t "$pane" C-g 2>/dev/null || true
+  # A question left open at the client would swallow the next caller's keys. C-g closes it, but
+  # only while OUR question is still the last row of the screen (the type row): if the human has
+  # dismissed it and started a compose or a command line, a C-g would discard what they typed.
+  if [[ -n $pending_question ]] && tmux capture-pane -p -J -t "$pane" 2>/dev/null | tail -n 1 | grep -q '^bo asks: allow '; then
+    tmux send-keys -t "$pane" C-g 2>/dev/null || true
+  fi
   [[ -z $out ]] || rm -f "$out"
   [[ -z $ans ]] || rm -f "$ans"
   if mkdir -p -m 700 "$state" 2>/dev/null; then
