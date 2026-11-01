@@ -1,0 +1,158 @@
+# The consent gate for changes that touch tendcf (the CFEngine fork) on the NixOS host
+# vps-primary. Spec: tendcf docs/architecture/schema-v4-reconciliation-2026-10-31.md section 5.
+# Rules and file layout: docs/tendcf-consent.md.
+#
+# Two jobs, one per event:
+#
+#  - "tendcf consent" runs on EVERY pull request (no path filter at the workflow level, so a
+#    required check never goes missing on an unrelated PR). Its first step decides whether the
+#    change touches tendcf (consent.py decide). If not it succeeds at once with one line. If it
+#    does, the job renders the consent artifact for the merge result against the base branch and
+#    prints it to the job log, the step summary and an uploaded artifact (tendcf-consent):
+#      AUTHORITY  the PR diff of nixos/ and the tendcf workflow files, flake.lock reduced to
+#                 (input, type, rev, narHash) per changed node, and for each moved git input
+#                 `git diff oldrev..newrev` (nixpkgs is not diffed; EFFECT covers it)
+#      SUMMARY    services.cfengine-tendcf as JCS JSON at base and head, with a diff, and the
+#                 two hard checks on the head configuration
+#      EFFECT     nix store diff-closures of the base and head vps-primary toplevels, built on
+#                 the runner
+#    then ends with the plain-language question. Hard checks that fail the job: no
+#    cfengine-tendcf-execd service and no service or timer that runs cf-execd or cf-agent
+#    (check1.nix); the declared option set of services.cfengine-tendcf equals
+#    {enable, execd.enable, package} (run.sh checks). The job fails too when a part of the
+#    AUTHORITY cannot be fetched. The PR approver reads the artifact: that is the consent.
+#
+#  - "tendcf push check" runs on pushes to master. When a pushed commit touches tendcf and no
+#    merged pull request introduced it (GitHub's commits/<sha>/pulls), the job goes red with a
+#    message pointing at the rule. It never reverts or blocks anything.
+#
+# Touching tendcf is defined in .github/scripts/tendcf-consent/consent.py. This workflow only
+# reads the repository (contents: read) and the pull-request association (pull-requests: read).
+# The Mac has no nix: CI is the first real run of the Nix steps. The job to require in branch
+# protection is "tendcf consent". The sibling nixos-cfengine-build.yml still builds the package
+# and runs stage B on PRs that touch nixos/; it is path-filtered, so do not require that one.
+
+---
+name: tendcf consent gate
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: tendcf-consent-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  HOST: vps-primary
+  SCRIPTS: .github/scripts/tendcf-consent
+
+jobs:
+  consent:
+    name: tendcf consent
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      # Default checkout of a pull request is GitHub's merge commit of head into base: what a
+      # merge would deploy. Its first parent is the base tip it was made against.
+      - name: Check out the merge result
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Does this change touch tendcf?
+        id: decide
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if git rev-parse --verify -q 'HEAD^2' > /dev/null; then
+            base=$(git rev-parse 'HEAD^1')
+          else
+            base="$PR_BASE_SHA"
+          fi
+          {
+            echo "BASE_SHA=$base"
+            echo "HEAD_SHA=$head"
+            echo "WORK=$RUNNER_TEMP/consent"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/consent"
+          python3 "$SCRIPTS/consent.py" decide --mode pr --base "$base" --head "$head"
+          if [ "$(grep -c '^touches=true$' "$GITHUB_OUTPUT" || true)" = 0 ]; then
+            echo "::notice::tendcf consent: no tendcf-touching change"
+          fi
+
+      - name: AUTHORITY block
+        if: ${{ steps.decide.outputs.touches == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" authority --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --out "$WORK/authority.md"
+
+      - name: Install Nix
+        if: ${{ steps.decide.outputs.touches == 'true' }}
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Export base and head
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" export
+
+      - name: SUMMARY at base and head
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" summary
+
+      - name: Hard checks 1 and 2 on the head configuration
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" checks
+
+      - name: EFFECT (build both toplevels, diff-closures)
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: bash "$SCRIPTS/run.sh" effect
+
+      - name: Consent artifact
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" assemble --work "$WORK" --host "$HOST" \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --out "$WORK/consent.md"
+
+      - name: Upload the consent artifact
+        if: ${{ !cancelled() && steps.decide.outputs.touches == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tendcf-consent
+          path: ${{ env.WORK }}/consent.md
+          if-no-files-found: warn
+
+  push-check:
+    name: tendcf push check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Pushed tendcf changes came from a merged pull request
+        run: |
+          set -euo pipefail
+          python3 "$SCRIPTS/consent.py" push-check --slug "${{ github.repository }}" \
+            --before "$BEFORE_SHA" --sha "${{ github.sha }}"
