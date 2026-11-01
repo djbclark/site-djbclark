@@ -76,11 +76,17 @@ do_checks() {
     rc=1
   fi
 
-  # Hard check 1: no cf-execd unit and no unit that runs cf-execd or cf-agent: service and
-  # timer fields, the rendered text of every unit, and units shipped in systemd.packages.
-  if nix eval --json "$(flake head)#nixosConfigurations.$HOST.config.systemd" \
+  # Hard check 1: no cf-execd unit and nothing that runs cf-execd or cf-agent: system and user
+  # service and timer fields, the rendered text of every unit, files shipped in systemd.packages
+  # (lib/systemd/system and lib/systemd/user, drop-ins and symlinks included), activation
+  # scripts, boot.postBootCommands, tmpfiles rules, systemd-targeted environment.etc entries and
+  # system cron jobs (check1.nix). The verdict requires `scanned` to be an object with exactly
+  # the five expected counts, each a non-negative integer, and the four that every NixOS host has
+  # above zero, so a scan that saw nothing or returned a malformed result cannot pass.
+  # packageFiles may be zero: an unreadable package file aborts the eval instead.
+  if nix eval --json "$(flake head)#nixosConfigurations.$HOST.config" \
     --apply "$(cat "$HERE/check1.nix")" > "$WORK/check1.json"; then
-    if jq -e '.execdUnitPresent == false and (.hits | length) == 0 and (.rawHits | length) == 0 and (.packageHits | length) == 0' \
+    if jq -e '.execdUnitPresent == false and ([.hits, .rawHits, .packageHits, .scriptHits] | all(type == "array" and length == 0)) and (.scanned | type == "object" and (keys == ["activationScripts","etc","packageFiles","services","units"]) and all(.[]; type == "number" and . >= 0 and . == floor) and .services > 0 and .units > 0 and .activationScripts > 0 and .etc > 0)' \
       "$WORK/check1.json" > /dev/null; then
       echo "check 1 (no cf-execd/cf-agent unit): PASS" | tee -a "$out"
     else
@@ -90,7 +96,7 @@ do_checks() {
     fi
   else
     echo "check 1 (no cf-execd/cf-agent unit): FAIL eval error" | tee -a "$out"
-    echo "::error::could not evaluate the systemd units of $HOST"
+    echo "::error::could not evaluate the units, scripts and cron jobs of $HOST"
     rc=1
   fi
   return "$rc"

@@ -11,11 +11,13 @@
 #      neither            succeeds at once with one line.
 #      nix_changed        installs Nix and runs the two hard checks on the head configuration,
 #                         whatever the text of the diff says (they are eval-only and cheap):
-#                         no cfengine-tendcf-execd service, no service, timer or rendered unit
-#                         that runs cf-execd or cf-agent, no systemd package named cfengine or
-#                         tendcf (check1.nix); the declared option set of
-#                         services.cfengine-tendcf equals {enable, execd.enable, package}
-#                         (run.sh checks).
+#                         no cfengine-tendcf-execd service; nothing that runs cf-execd or
+#                         cf-agent: no system or user service, timer or rendered unit, no
+#                         systemd package (by name or by the unit files it ships), no activation
+#                         script, boot.postBootCommands, tmpfiles rule, systemd-targeted
+#                         environment.etc entry or system cron job (check1.nix); the declared
+#                         option set of services.cfengine-tendcf equals
+#                         {enable, execd.enable, package} (run.sh checks).
 #      touches            additionally renders the consent artifact for the merge result against
 #                         the base branch, prints it to the job log and step summary and uploads
 #                         it (tendcf-consent):
@@ -32,9 +34,20 @@
 #
 #  - "tendcf push check" runs on pushes to master. When a pushed commit touches tendcf and no
 #    pull request merged into the default branch introduced it (GitHub's commits/<sha>/pulls),
-#    the job goes red with a message pointing at the rule. When any pushed commit changed
-#    nixos/flake.lock (including the weekly lock bot), it also installs Nix and runs the hard
-#    checks on the pushed head. It never reverts or blocks anything.
+#    the job goes red with a message pointing at the rule. When the pushed range changed
+#    anything under nixos/ (any .nix file or the lock, including the weekly lock bot) or the
+#    gate's own files, it also installs Nix and runs the hard checks on the pushed head. It
+#    never reverts or blocks anything.
+#
+#  - "tendcf gate tests" runs tests/test_tendcf_consent.py on every pull request with Nix
+#    installed and fails if any test is skipped, so the check1.nix fixtures cannot go unrun.
+#    Not a required check.
+#
+# THREAT MODEL. The hard checks defend against ACCIDENTS: an honest change that turns
+# cf-agent or cf-execd on without meaning to. They are a textual tripwire that supports human
+# consent, not proof that cf-agent cannot run. A deliberately disguised change (a neutral
+# wrapper script, a source-backed file, a string-built name) is out of scope, by the
+# operator's ruling of 2026-11-01; see "Limits" in docs/tendcf-consent.md.
 #
 # Touching tendcf is defined in .github/scripts/tendcf-consent/consent.py. This workflow only
 # reads the repository (contents: read) and the pull-request association (pull-requests: read).
@@ -147,6 +160,41 @@ jobs:
           path: ${{ env.WORK }}/consent.md
           if-no-files-found: warn
 
+  # The gate's own tests, with Nix installed so the check1.nix fixtures run. TENDCF_REQUIRE_TOOLS
+  # turns "nix or jq missing" into a failure, and the junit file must show zero skipped tests,
+  # so this job cannot go green without having evaluated check1.nix. Not a required check.
+  gate-tests:
+    name: tendcf gate tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TENDCF_REQUIRE_TOOLS: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Run tests/test_tendcf_consent.py (Nix fixtures must not be skipped)
+        run: |
+          set -euo pipefail
+          git config --global user.email ci@example.invalid
+          git config --global user.name ci
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/venv/bin/python" -m pytest -q -rs tests/test_tendcf_consent.py \
+            --junitxml="$RUNNER_TEMP/tendcf-tests.xml"
+          if ! grep -q 'skipped="0"' "$RUNNER_TEMP/tendcf-tests.xml"; then
+            echo "::error::tests were skipped; the Nix fixtures must run in this job"
+            exit 1
+          fi
+
   push-check:
     name: tendcf push check
     if: github.event_name == 'push'
@@ -168,18 +216,19 @@ jobs:
             --before "$BEFORE_SHA" --sha "${{ github.sha }}" \
             --default-branch "${{ github.event.repository.default_branch }}"
 
-      # A moved flake input can add a unit that runs cf-agent, and the weekly lock bot pushes
-      # flake.lock straight to master, so a lock change gets the same eval-only hard checks
+      # Any pushed change under nixos/ (a .nix file or the lock) or to the gate's files can add
+      # a unit or script that runs cf-agent without a line that says so, and the weekly lock bot
+      # pushes flake.lock straight to master, so such a push gets the same eval-only hard checks
       # a pull request gets.
-      - name: Did the push change nixos/flake.lock?
-        id: lock
+      - name: Did the push change nixos/ or the gate's files?
+        id: nix
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          python3 "$SCRIPTS/consent.py" lock-changed --before "$BEFORE_SHA" --sha "${{ github.sha }}"
+          python3 "$SCRIPTS/consent.py" nix-changed --before "$BEFORE_SHA" --sha "${{ github.sha }}"
 
       - name: Install Nix
-        if: ${{ !cancelled() && steps.lock.outputs.lock_changed == 'true' }}
+        if: ${{ !cancelled() && steps.nix.outputs.nix_changed == 'true' }}
         uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -187,7 +236,7 @@ jobs:
             access-tokens = github.com=${{ github.token }}
 
       - name: Hard checks 1 and 2 on the pushed head
-        if: ${{ !cancelled() && steps.lock.outputs.lock_changed == 'true' }}
+        if: ${{ !cancelled() && steps.nix.outputs.nix_changed == 'true' }}
         env:
           HEAD_SHA: ${{ github.sha }}
           WORK: ${{ runner.temp }}/consent

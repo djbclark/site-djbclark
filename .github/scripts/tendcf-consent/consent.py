@@ -6,7 +6,8 @@
   authority     the AUTHORITY block of the consent artifact
   assemble      the whole consent artifact: AUTHORITY, SUMMARY, EFFECT, then the question
   push-check    the push-time check for direct pushes to the default branch
-  lock-changed  did a pushed commit change nixos/flake.lock (the push job then runs the hard checks)
+  nix-changed   did the pushed range change anything under nixos/ or the gate's files (the push
+                job then runs the hard checks)
 
 The Nix side (SUMMARY, EFFECT, hard checks) is run.sh. Design: docs/tendcf-consent.md.
 """
@@ -626,16 +627,20 @@ FALLBACK_COMMITS = 20
 def pushed_commits(repo, before, sha):
     """First-parent commits of the pushed range, oldest first. When `before` is zeros or no
     longer in history (a force-push), the last FALLBACK_COMMITS first-parent commits."""
-    have_before = (
+    have_before = known_before(repo, before)
+    args = ["rev-list", "--first-parent", "--reverse"] + (
+        [f"{before}..{sha}"] if have_before else ["-n", str(FALLBACK_COMMITS), sha]
+    )
+    return git(repo, *args).stdout.split()
+
+
+def known_before(repo, before):
+    return (
         bool(before)
         and set(before) != {"0"}
         and git(repo, "cat-file", "-e", f"{before}^{{commit}}", check=False).returncode
         == 0
     )
-    args = ["rev-list", "--first-parent", "--reverse"] + (
-        [f"{before}..{sha}"] if have_before else ["-n", str(FALLBACK_COMMITS), sha]
-    )
-    return git(repo, *args).stdout.split()
 
 
 def parent_of(repo, c):
@@ -645,24 +650,30 @@ def parent_of(repo, c):
     )
 
 
-def lock_changed(repo, before, sha):
-    """True when any pushed commit changed the flake lock."""
-    return any(
-        LOCK_PATH
-        in git(
-            repo, "diff", "--name-only", "--no-renames", parent_of(repo, c), c
-        ).stdout.split()
-        for c in pushed_commits(repo, before, sha)
+def push_base(repo, before, sha):
+    """The revision a pushed range is compared against: `before`, or, when it is unknown,
+    the parent of the oldest commit pushed_commits examines."""
+    if known_before(repo, before):
+        return before
+    commits = pushed_commits(repo, before, sha)
+    return parent_of(repo, commits[0]) if commits else sha
+
+
+def push_nix_changed(repo, before, sha):
+    """True when the pushed range changed anything the hard checks evaluate (nix_changed):
+    any file under nixos/, the lock included, or the gate's own files."""
+    return nix_changed(repo, push_base(repo, before, sha), sha)
+
+
+def cmd_nix_changed(a):
+    changed = push_nix_changed(a.repo, a.before, a.sha)
+    print(
+        f"nixos or gate files changed in the pushed range (hard checks run): {changed}"
     )
-
-
-def cmd_lock_changed(a):
-    changed = lock_changed(a.repo, a.before, a.sha)
-    print(f"{LOCK_PATH} changed in the pushed range: {changed}")
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as f:
-            f.write(f"lock_changed={'true' if changed else 'false'}\n")
+            f.write(f"nix_changed={'true' if changed else 'false'}\n")
     return 0
 
 
@@ -737,11 +748,11 @@ def main(argv=None):
     k.add_argument("--sha", required=True)
     k.add_argument("--default-branch", default="master")
     k.set_defaults(fn=cmd_push_check)
-    lc = sub.add_parser("lock-changed")
-    lc.add_argument("--repo", default=".")
-    lc.add_argument("--before", default="")
-    lc.add_argument("--sha", required=True)
-    lc.set_defaults(fn=cmd_lock_changed)
+    nc = sub.add_parser("nix-changed")
+    nc.add_argument("--repo", default=".")
+    nc.add_argument("--before", default="")
+    nc.add_argument("--sha", required=True)
+    nc.set_defaults(fn=cmd_nix_changed)
     a = p.parse_args(argv)
     return a.fn(a)
 
