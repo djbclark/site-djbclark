@@ -66,11 +66,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792896594,
-        "narHash": "sha256-BfOuCyo8paXRRvgVCJmuBslgpEEGb5FjjJjBzuUb9t0=",
+        "lastModified": 1793551828,
+        "narHash": "sha256-PFrSZOwVxWRmiuP/+npsGf6pSMUuakWeb9LNgys21yg=",
         "ref": "refs/heads/main",
-        "rev": "6b79032379467ffa39ac52b2218dc605bd5866ae",
-        "revCount": 10,
+        "rev": "e7bcc01f5380e818e8f9919712c9b9d6cd6e486d",
+        "revCount": 16,
         "type": "git",
         "url": "https://forgejo.mit.edu/djbclark/paseo-nix"
       },
