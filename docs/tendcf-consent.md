@@ -65,7 +65,9 @@ gate's own files. That, not the text of the diff, decides whether the hard check
   The check is textual: a wrapper binary that runs `cf-agent` indirectly, an `environment.etc`
   entry given only as `source`, a unit symlink pointing outside its package and
   `systemd.tmpfiles.settings` are not seen. A green check 1 does not prove the host free of
-  `cf-agent`; AUTHORITY and EFFECT are the channel for those. When the change also **touches tendcf** it renders the consent
+  `cf-agent`; AUTHORITY and EFFECT are the channel for those.
+
+  When the change also **touches tendcf** the job renders the consent
   artifact for the merge result (base = the merge commit's first parent) and also fails on a failed
   Nix step or an AUTHORITY part that could not be fetched or whose lock rev/URL looks malformed.
   The artifact (`tendcf-consent`, also in the job log and step summary) has AUTHORITY, SUMMARY,
@@ -79,8 +81,8 @@ gate's own files. That, not the text of the diff, decides whether the hard check
   file or the lock, which includes the weekly lock bot) or the gate's own files (`nix_changed`,
   `consent.py nix-changed`: `before` against the head), the job also installs Nix and runs the
   hard checks on the pushed head, red on failure. The text of the diff does not matter: a line
-  that builds `"cf-" + "agent"` is caught on a push as it is on a PR. When the push's `before` is unknown (a force-push, a new branch) the last 20
-  first-parent commits are examined, for both the touches test and the hard checks (the range
+  that builds `"cf-" + "agent"` is caught on a push as it is on a PR. When the push's `before` is unknown (a force-push, a new
+  branch) the last 20 first-parent commits are examined, for both the touches test and the hard checks (the range
   starts at the parent of the oldest of them); older commits of such a push are not.
 
 ## Limits
