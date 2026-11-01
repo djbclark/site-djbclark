@@ -1,7 +1,7 @@
 # Hard check 1 of the tendcf consent job, applied to `config.systemd` of the host:
 #   nix eval --json <flake>#nixosConfigurations.<host>.config.systemd --apply "$(cat check1.nix)"
-# Result: { execdUnitPresent, hits }. The check passes when execdUnitPresent is false and
-# hits is empty (run.sh checks).
+# Result: { execdUnitPresent, hits, rawHits, packageHits }. The check passes when
+# execdUnitPresent is false and the other three are empty (run.sh checks).
 #
 # hits lists every unit in systemd.services or systemd.timers whose start commands or script
 # name cf-execd or cf-agent, and every field that cannot be evaluated (a command that cannot
@@ -75,8 +75,36 @@ let
           [ ]
       ) probes
     ) (builtins.attrNames units);
+  # The rendered text of every unit, which covers raw `systemd.units."x.service".text`
+  # units that never appear in systemd.services, and every Exec* line of services and timers.
+  scanUnits = builtins.concatMap (
+    name:
+    let
+      t = text (systemd.units.${name}.text or "");
+    in
+    if t == null then
+      [
+        {
+          unit = "units.${name}.text";
+          why = "unevaluable";
+        }
+      ]
+    else if naming t then
+      [
+        {
+          unit = "units.${name}.text";
+          why = "names cf-execd or cf-agent";
+        }
+      ]
+    else
+      [ ]
+  ) (builtins.attrNames systemd.units);
+  # Units linked from packages (systemd.packages) are not in any of the sets above.
+  packageNames = map (p: p.pname or p.name or "?") systemd.packages;
 in
 {
   execdUnitPresent = systemd.services ? "cfengine-tendcf-execd";
   hits = scan "services" systemd.services ++ scan "timers" systemd.timers;
+  rawHits = scanUnits;
+  packageHits = builtins.filter (n: builtins.length (builtins.split "cfengine|tendcf" n) > 1) packageNames;
 }

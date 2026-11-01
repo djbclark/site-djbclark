@@ -6,6 +6,7 @@
   authority     the AUTHORITY block of the consent artifact
   assemble      the whole consent artifact: AUTHORITY, SUMMARY, EFFECT, then the question
   push-check    the push-time check for direct pushes to the default branch
+  lock-changed  did a pushed commit change nixos/flake.lock (the push job then runs the hard checks)
 
 The Nix side (SUMMARY, EFFECT, hard checks) is run.sh. Design: docs/tendcf-consent.md.
 """
@@ -37,7 +38,7 @@ TENDCF_PREFIXES = (".github/scripts/tendcf-consent/",)
 # Rest of nixos/: touches tendcf when an added or removed line mentions it. This is how
 # "any vps-primary line that sets services.cfengine-tendcf.*" and the flake lines that import
 # the module or package are caught, without flagging unrelated host edits.
-LINE_RE = re.compile(r"cfengine|cf-execd|cf-agent", re.IGNORECASE)
+LINE_RE = re.compile(r"cfengine|tendcf|cf-execd|cf-agent", re.IGNORECASE)
 # Flake wiring decides which code the host imports. On a PR it counts whole (the consent
 # artifact is exactly the place to see an input move); on a push it does not, because the weekly
 # nixos-lock-update workflow pushes flake.lock to master directly by design.
@@ -111,19 +112,32 @@ def touches(repo, base, head, mode):
     return reasons
 
 
+def nix_changed(repo, base, head):
+    """True when the change moves anything the hard checks evaluate: all of nixos/ (lock
+    included) and the gate's own files. The hard checks are cheap, eval-only, and run on
+    every such change, whatever the text of the diff says."""
+    names = git(repo, "diff", "--name-only", "--no-renames", "-z", base, head).stdout
+    return any(
+        p.startswith("nixos/") or p in TENDCF_FILES or p.startswith(TENDCF_PREFIXES)
+        for p in filter(None, names.split("\0"))
+    )
+
+
 def cmd_decide(a):
     reasons = touches(a.repo, a.base, a.head, a.mode)
     verdict = "true" if reasons else "false"
+    nix = "true" if nix_changed(a.repo, a.base, a.head) else "false"
     if reasons:
         print(f"tendcf-touching change ({len(reasons)} reason(s)):")
         for r in reasons:
             print(f"  - {r}")
     else:
         print("no tendcf-touching change")
+    print(f"nixos or gate files changed (hard checks run): {nix}")
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as f:
-            f.write(f"touches={verdict}\n")
+            f.write(f"touches={verdict}\nnix_changed={nix}\n")
     return 0
 
 
@@ -170,15 +184,38 @@ def is_nixpkgs(kind, source):
     return kind in ("github", "gitlab") and source.lower() == "nixos/nixpkgs"
 
 
-def clone_diff(url, old, new, token):
-    """(stat, patch) for old..new of a remote git repository; blobless, fetched on demand."""
-    extra = None
+REV_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def valid_input(url, old, new):
+    """Lock-derived strings are PR-controlled: only full revs and https/ssh URLs reach git."""
+    return bool(
+        REV_RE.fullmatch(old or "")
+        and REV_RE.fullmatch(new or "")
+        and isinstance(url, str)
+        and url.startswith(("https://", "ssh://"))
+    )
+
+
+def git_env(url, token):
+    """Environment for git against `url`. The GitHub token goes in GIT_CONFIG_* (not argv,
+    so it never shows in `ps`) and only for github.com."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     if token and url.startswith("https://github.com/"):
         basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        extra = [
-            "-c",
-            f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}",
-        ]
+        env.update(
+            GIT_CONFIG_COUNT="1",
+            GIT_CONFIG_KEY_0="http.https://github.com/.extraheader",
+            GIT_CONFIG_VALUE_0=f"AUTHORIZATION: basic {basic}",
+        )
+    return env
+
+
+def clone_diff(url, old, new, token):
+    """(stat, patch) for old..new of a remote git repository; blobless, fetched on demand."""
+    if not valid_input(url, old, new):
+        raise RuntimeError("unexpected rev or url in flake.lock")
+    env = git_env(url, token)
     with tempfile.TemporaryDirectory(prefix="tendcf-input-") as d:
         git(d, "init", "-q")
         git(d, "remote", "add", "o", url)
@@ -189,18 +226,18 @@ def clone_diff(url, old, new, token):
                     "git",
                     "-C",
                     d,
-                    *(extra or []),
                     "fetch",
                     "-q",
                     "--no-tags",
                     "--filter=blob:none",
                     "o",
+                    "--",
                     *refspecs,
                 ],
                 capture_output=True,
                 text=True,
                 timeout=600,
-                env=dict(os.environ, GIT_TERMINAL_PROMPT="0"),
+                env=env,
             )
             return r.returncode == 0
 
@@ -215,13 +252,11 @@ def clone_diff(url, old, new, token):
             fetch("+refs/heads/*:refs/remotes/o/*")
         if not have():
             raise RuntimeError(f"cannot fetch {old[:12]}..{new[:12]} from {url}")
-        # The diff needs the blobs; the promisor remote needs the same credentials.
-        cfg = [] if not extra else extra
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
 
+        # The diff needs the blobs; the promisor remote needs the same credentials (env).
         def run(*args):
             r = subprocess.run(
-                ["git", "-C", d, *cfg, *args],
+                ["git", "-C", d, *args],
                 capture_output=True,
                 text=True,
                 timeout=600,
@@ -382,6 +417,10 @@ def build_authority(repo, base, head, token=None, fetch=clone_diff):
         out.append(
             f"**{name}** `{o[1][:12]}..{n[1][:12]}` from `{repo_url(n[0], n[3])}`\n"
         )
+        if not valid_input(repo_url(n[0], n[3]), o[1], n[1]):
+            problems.append(f"{name}: unexpected rev or url in flake.lock")
+            out.append("**UNAVAILABLE: unexpected rev or url in flake.lock**\n")
+            continue
         try:
             s, p = fetch(repo_url(n[0], n[3]), o[1], n[1], token)
         except Exception as e:  # noqa: BLE001 - any failure makes the authority incomplete
@@ -483,6 +522,8 @@ def build_artifact(work, host, base, head):
     effect = read(j("effect.txt"), "(not produced)")
     failed = (
         "FAIL" in checks
+        or not all(f"check {n}" in checks for n in (1, 2))
+        or checks.count(": PASS") < 2
         or "(not produced)" in (authority, sb, sh, effect)
         or "INCOMPLETE" in authority
     )
@@ -545,9 +586,17 @@ def cmd_assemble(a):
 
 
 def merged_prs(
-    repo_slug, sha, attempts=4, delay=10, run=subprocess.run, sleep=time.sleep
+    repo_slug,
+    sha,
+    default_branch="master",
+    attempts=4,
+    delay=10,
+    run=subprocess.run,
+    sleep=time.sleep,
 ):
-    """Merged PRs that introduced `sha`, from GitHub. The association can lag the push a little."""
+    """PRs merged into the default branch that introduced `sha`, from GitHub. A PR merged
+    elsewhere (another base) did not get this gate's artifact against this branch. The
+    association can lag the push a little."""
     for i in range(attempts):
         r = run(
             ["gh", "api", f"repos/{repo_slug}/commits/{sha}/pulls"],
@@ -559,7 +608,11 @@ def merged_prs(
             raise RuntimeError(
                 f"gh api commits/{sha[:12]}/pulls failed: {r.stderr.strip()}"
             )
-        prs = [p for p in json.loads(r.stdout) if p.get("merged_at")]
+        prs = [
+            p
+            for p in json.loads(r.stdout)
+            if p.get("merged_at") and (p.get("base") or {}).get("ref") == default_branch
+        ]
         if prs:
             return [p["html_url"] for p in prs]
         if i + 1 < attempts:
@@ -567,31 +620,63 @@ def merged_prs(
     return []
 
 
-def push_offenders(repo, repo_slug, before, sha, find_prs=merged_prs):
-    """First-parent commits of the pushed range that touch tendcf and came from no merged PR."""
+FALLBACK_COMMITS = 20
+
+
+def pushed_commits(repo, before, sha):
+    """First-parent commits of the pushed range, oldest first. When `before` is zeros or no
+    longer in history (a force-push), the last FALLBACK_COMMITS first-parent commits."""
     have_before = (
         bool(before)
         and set(before) != {"0"}
         and git(repo, "cat-file", "-e", f"{before}^{{commit}}", check=False).returncode
         == 0
     )
-    rng = f"{before}..{sha}" if have_before else sha
     args = ["rev-list", "--first-parent", "--reverse"] + (
-        [rng] if have_before else ["-1", sha]
+        [f"{before}..{sha}"] if have_before else ["-n", str(FALLBACK_COMMITS), sha]
     )
-    commits = git(repo, *args).stdout.split()
+    return git(repo, *args).stdout.split()
+
+
+def parent_of(repo, c):
+    return (
+        git(repo, "rev-parse", "--verify", "-q", f"{c}^1", check=False).stdout.strip()
+        or EMPTY_TREE
+    )
+
+
+def lock_changed(repo, before, sha):
+    """True when any pushed commit changed the flake lock."""
+    return any(
+        LOCK_PATH
+        in git(
+            repo, "diff", "--name-only", "--no-renames", parent_of(repo, c), c
+        ).stdout.split()
+        for c in pushed_commits(repo, before, sha)
+    )
+
+
+def cmd_lock_changed(a):
+    changed = lock_changed(a.repo, a.before, a.sha)
+    print(f"{LOCK_PATH} changed in the pushed range: {changed}")
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(f"lock_changed={'true' if changed else 'false'}\n")
+    return 0
+
+
+def push_offenders(
+    repo, repo_slug, before, sha, find_prs=merged_prs, default_branch="master"
+):
+    """First-parent commits of the pushed range that touch tendcf and came from no merged PR."""
+    commits = pushed_commits(repo, before, sha)
     offenders = []
     for c in commits:
-        parent = (
-            git(
-                repo, "rev-parse", "--verify", "-q", f"{c}^1", check=False
-            ).stdout.strip()
-            or EMPTY_TREE
-        )
-        reasons = touches(repo, parent, c, "push")
+        reasons = touches(repo, parent_of(repo, c), c, "push")
         if not reasons:
             continue
-        prs = find_prs(repo_slug, c)
+        prs = find_prs(repo_slug, c, default_branch)
         print(
             f"{c[:12]} touches tendcf ({reasons[0]}); merged PR: {prs[0] if prs else 'none'}"
         )
@@ -601,7 +686,9 @@ def push_offenders(repo, repo_slug, before, sha, find_prs=merged_prs):
 
 
 def cmd_push_check(a):
-    commits, offenders = push_offenders(a.repo, a.slug, a.before, a.sha)
+    commits, offenders = push_offenders(
+        a.repo, a.slug, a.before, a.sha, default_branch=a.default_branch
+    )
     if not offenders:
         print(
             f"ok: {len(commits)} pushed commit(s); none touches tendcf outside a merged pull request"
@@ -648,7 +735,13 @@ def main(argv=None):
     k.add_argument("--slug", required=True, help="OWNER/REPO")
     k.add_argument("--before", default="")
     k.add_argument("--sha", required=True)
+    k.add_argument("--default-branch", default="master")
     k.set_defaults(fn=cmd_push_check)
+    lc = sub.add_parser("lock-changed")
+    lc.add_argument("--repo", default=".")
+    lc.add_argument("--before", default="")
+    lc.add_argument("--sha", required=True)
+    lc.set_defaults(fn=cmd_lock_changed)
     a = p.parse_args(argv)
     return a.fn(a)
 
