@@ -52,11 +52,22 @@ numbers.
    (live NeoFinder nightly image — it already `hdiutil compact`s itself), or a
    CCC snapshot while its backup is running.
 
+   **Standing (djbclark, 2026-10-31): a step whose risk is low or none runs without asking**
+   (caches the skill lists, `brew cleanup -s`, Trash, dry-runs). Medium risk, or another
+   session's work, still asks.
+
 ## 1. Measure (read-only)
 
 ```bash
 df -h /System/Volumes/Data
 cow stats                    # pastures: logical vs on-disk (cheap)
+# Standing (djbclark, 2026-10-31): run the dry-run without asking when the stamp is a day or
+# more old (or missing), then touch it. Deleting still needs the operator's go (step 6).
+s=~/.local/state/diskfree/cow-gc-dry-run; mkdir -p "${s%/*}"
+[ -z "$(find "$s" -mtime -1 2>/dev/null)" ] && cow gc --merged --dry-run && touch "$s"
+# Standing: always size Trash and the Homebrew cleanup, no ask (read-only):
+~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 10 ~/.Trash
+brew cleanup -s -n           # dry-run; the Homebrew cache may sit on an external volume, not Data
 tmutil listlocalsnapshots /System/Volumes/Data
 jobber list | rg 'apfs-compress|chrome-cache-trim'
 ~/src/djbclark-ade/bin/load-watch admit --json     # proceed only while status is ok
@@ -140,9 +151,23 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
    the `--orca` flag for Orca workers is retired from djbclark-ade 2026-10-31 and now a usage error). Never pastures from `~/ops/*` (deployment
    checkouts — the wrapper refuses).
 2. Reclaim merged work: `cow gc --merged --dry-run`, and with the operator's
-   go, for real. Remove an arbitrary one with `cow-pasture remove <name>`
-   (plain `cow remove` exits 0 having removed nothing on a bad name — `ls`
-   after).
+   go, for real. Remove an arbitrary one with `cow-pasture remove <name>`, or
+   `cow remove -y --force <project>/<name>` (the full project/name form; plain
+   `cow remove` exits 0 having removed nothing on a bad name — `ls` after).
+   A pasture has its own independent `.git`, so HEAD being pushed is not
+   enough: it is removable only when ALL of these hold in the pasture
+   (`git log @{u}..HEAD` alone misses the rest): `git log --oneline --all --not
+   --remotes` is empty (every branch, tag and detached HEAD), `git rev-list
+   --reflog --not --remotes` is empty, `git stash list` is empty, `git
+   worktree list` lists only itself, no ref points at a blob or tree
+   (`git for-each-ref --format='%(objecttype) %(*objecttype) %(refname)'`),
+   and no uncommitted or untracked file matters: an untracked file that is
+   generated (graft's `opencode.json` MCP config, `bin/graft/.cache`) does not
+   block it, and anything else, or any pasture failing a check above, is
+   copied (or `tar`red) to `~/.local/state/` first
+   (2026-10-31: 6 merged pastures removed this way; a stray third-party
+   `SKILL.md` was archived, not lost). Run it only while `load-watch admit`
+   says ok: removal is short but still churn.
 3. Never delete or APFS-compress a live pasture tree — its blocks are shared
    with the source; rewriting breaks the sharing and can multiply usage.
 4. New agent workspaces on primaries under `~/src`,
@@ -164,6 +189,71 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
   incident once took this Mac from 3.8 GB to 84 GB available (2026-08-03).
 - `/nix` if it exists and nothing uses it (removed on this Mac 2026-10-02)
 - Old installers/DMGs/ISOs in `~/Downloads`
+- **Big SQLite stores** (standing, djbclark 2026-10-31: re-check every pass). plocate is
+  current to the last night: `plocate -d /opt/homebrew/var/lib/plocate/plocate.db --regex -i -0
+  '\.(sqlite3?|db|sqlite-wal|db-wal|vscdb)$' | xargs -0 stat -f '%z %N' | sort -rn | head -40`
+  (`--regex` is needed for the `(..|..)` form). Read free pages with a
+  read-only, WAL-aware connection: `python3 -c` with `sqlite3.connect("file:PATH?mode=ro",
+  uri=True, timeout=5)` and `pragma freelist_count` (it takes no write lock and sees the WAL;
+  the `sqlite3` CLI fails on `s1-evidence` files, 2026-10-31). Never `immutable=1` on a live
+  store: it ignores the WAL (checked 2026-11-01 on hermes `state.db`: `journal_mode` read
+  `delete` instead of `wal`), so the count can describe an older checkpoint. If `mode=ro`
+  fails (no `-shm` to attach), say so and size the file instead of guessing. 2026-10-31 sizes:
+  `s1-evidence/candidates.sqlite3` 12.2 GB (6.1 GB on 2026-10-13, no free pages: real growth),
+  `cas-pack/pack.sqlite3` 4.9 GB (2.3 GB), hermes `state.db` 1.4 GB, `opencode.db` 1.0 GB with 0.49 GB
+  free (the Sunday `sqlite-vacuum` Jobber job reclaims it). Growth of the s1 pair is the one to watch.
+- `~/.local/state/bigteam` (11 GB, 2026-10-31): task dirs of finished fan-outs, holding reports
+  that docs and memory cite, plus repo checkouts. With the operator's go, run
+  `scripts/bigteam-prune.py` (dry run; `--apply` to act). It deletes directories, so every check
+  fails closed: any error or doubt keeps the checkout, and right before each deletion the task dir
+  is re-judged (still a real dir, untouched since planning, no `CLAIM`, no unfinished job) and the
+  checkout's safety is re-checked. It only touches real task dirs (a symlink, or anything resolving outside the root, is
+  skipped) a week or more old by the dir's own mtime, with no unfinished job record (finished with an auto-resume still `scheduled`, `waiting-headroom` or `resuming`, or a `running`, `resume-scheduled` or `blocked` status, is unfinished) and no `CLAIM`
+  file (a `CLAIM` that records DONE still blocks). All `GIT_*` environment variables are cleared
+  for every git call, and git must report the checkout as its own top level. A checkout is kept
+  when anything in it changed in the last 7 days (dir, index, HEAD, HEAD reflog, `FETCH_HEAD`), a
+  rebase, merge, cherry-pick, revert or bisect is in progress, it has submodules, a tracked file
+  is marked assume-unchanged or skip-worktree, it has no remote, a remote URL is, or might
+  be, a path inside the bigteam root (`file://` URLs are percent-decoded as git does, scp-like and
+  ssh hosts resolved with `ssh -G` (for the URL's own user and port); only a host that resolves to addresses none of which is this
+  machine's counts as another machine, so a local name, an alias or name that does not resolve, or
+  a URL the script cannot fully resolve keeps the checkout; sibling checkouts that fetch each other would count each other's unpushed
+  commits as pushed), the git dir holds anything beyond git's standard entries (a note, a
+  custom hook, an LFS store, a customised `info/exclude`; `.git/config` is neither judged nor
+  preserved), or `git status --porcelain=v1 -z --ignored` (untracked files forced on, submodules
+  never ignored, whatever the repo's config says) lists anything but ignored paths. An **ignored**
+  path only passes when it is a known generated directory (`node_modules .venv venv __pycache__
+  .pytest_cache .mypy_cache .ruff_cache`) with no nested git repo (a `.git` entry or a bare repository's HEAD+objects+refs) and no unreadable
+  subdirectory; any other ignored file (a report, `out.rc`, a database, a scratch repo, anything
+  under `.cache`) keeps the checkout. It removes a **linked worktree** with `git worktree remove`
+  (no `--force`) from its main repository (its branch stays there) when its HEAD is on a
+  remote-tracking branch, it has no `refs/worktree`, `refs/bisect` or `refs/rewritten` ref, and
+  nothing in its HEAD reflog is missing from the remote, branch and tag refs (removal deletes the
+  worktree's reflog and per-worktree refs), and a **clone** only when `git worktree list` shows
+  no other worktree, it has no stash, and nothing in any ref (branches, tags, notes, a detached
+  HEAD) or reflog is missing from the remote-tracking refs. "On a remote" means the local
+  remote-tracking refs, which are never fetched: a branch deleted upstream, or a remote that is a
+  local path outside the root, still counts. A repository borrowing objects from a clone
+  (`git clone --shared`) cannot be detected from the clone's side. `--apply` takes a lock
+  (`bigteam-prune.lock` beside the root; exit 3 when another run holds it); a clone whose
+  `rmtree` fails part way is left half deleted (it was clean and pushed) and reported KEPT.
+  No directory anywhere below a checkout, tracked or not, may be a git repository of its own (a
+  `.git` entry or a bare repository), and every commit named by a root pseudo-ref in the git dir
+  (`ORIG_HEAD`, `FETCH_HEAD`, `REBASE_HEAD`, ...) must be on a remote too (a linked worktree: or on
+  a branch or tag), because `reset` and an expired reflog leave those as the only reference.
+  A remote configured with `vcs`, `uploadpack` or `receivepack` keeps the checkout. A clone with a
+  ref (tag or other), a root pseudo-ref (`FETCH_HEAD`, `ORIG_HEAD`, ...), any reflog (clone) or a linked
+  worktree's HEAD reflog entry that names a blob, a tree or a missing object is kept. An http(s), ftp or git remote is
+  "another machine" only when no proxy or address override applies (`http.curloptResolve`, `http.proxy`,
+  `remote.X.proxy`, `core.gitProxy`, `*_PROXY`, `GIT_PROXY_COMMAND`). A linked worktree's HEAD reflog is read on both sides of every entry (a commit may survive only
+  as an old id). An ssh remote is only "another machine" when git's ssh is plain ssh: a
+  `core.sshCommand`, `GIT_SSH` or `GIT_SSH_COMMAND` override, or a `ProxyCommand`/`ProxyJump` in
+  the ssh config, keeps the checkout. Kept reasons name the remote and print its URL without
+  userinfo, path, query or helper-transport arguments (network URLs as scheme, host and port only).
+  Task-dir files outside checkouts (reports, `jobs/`) are never touched. Sizes come from a niced
+  `dust` for the checkouts to be removed only (kept ones are not measured). Everything kept is
+  listed with its reason. 2026-10-31 (earlier script version): 0.68 GB from 11 checkouts; 27 kept
+  (no remote, uncommitted work, or ignored reports).
 
 ## 8. Close out
 
