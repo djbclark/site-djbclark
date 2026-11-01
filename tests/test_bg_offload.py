@@ -81,6 +81,7 @@ echo "pushed https://github.com/$(cat "$d/runner.repo" 2>/dev/null || echo djbcl
 GH_STUB = """#!/bin/bash
 d={state}
 printf '%s\\n' "$*" >> "$d/gh.calls"
+printf '%s|%s\\n' "${{GH_HOST:-}}" "${{GH_REPO:-}}" >> "$d/gh.env"
 case "$1 $2" in
   "run list")
     echo $PPID > "$d/gh.ppid"
@@ -1933,3 +1934,13 @@ def test_builds_in_this_tree_are_still_offloaded(s, argv):
     b.chmod(0o755)
     _never_ran(s, s.bg(*argv), 0)
     assert s.read("runner.calls") != ""
+
+
+# --- round-3 adversary MINORs (r3 F1-F7) ---
+
+def test_an_inherited_gh_host_or_repo_never_reaches_gh(s):
+    """r3 F1: GH_HOST would ask another host whether OWNER/REPO is private, and poll it there."""
+    r = s.bg(_build(s), GH_HOST="ghes.invalid.example", GH_REPO="someone/else")
+    _never_ran(s, r, 0)
+    lines = s.read("gh.env").splitlines()
+    assert lines and set(lines) == {"|"}

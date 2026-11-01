@@ -194,6 +194,9 @@ export GIT_TERMINAL_PROMPT=0
 # The forgejo skill's scripts take their host, user and token variable from the environment (adversary N6): an
 # inherited FORGEJO_HOST would hand another host's token to the checked host's prompt. Route (3) sets the host itself.
 unset FORGEJO_HOST FORGEJO_GIT_USER FORGEJO_TOKEN_VAR
+# The same for gh (adversary r3 F1): an inherited GH_HOST would ask another host whether OWNER/REPO is private, and
+# poll it, while the push goes to github.com. Every gh call here names OWNER/REPO, on github.com.
+unset GH_HOST GH_REPO
 
 say() { echo "bg: $*" >&2; }
 # redact: drop user:password@ from urls in a message
