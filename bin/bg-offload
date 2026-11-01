@@ -30,11 +30,14 @@
 #       own scripts/bg-offload-run with the same contract.
 #   (3) Forgejo: a tracked, executable scripts/forgejo-ci-run opts the repo in; this helper does not run it
 #       (adversary F3, 2026-11-01: herdr's pushes whatever HEAD is when it runs, not the commit checked here). It
-#       notes the newest Actions run id of the Forgejo repo (forgejo-api GET /repos/O/R/actions/runs), pushes the
-#       checked commit itself, `git-forgejo push --force --no-follow-tags --no-recurse-submodules forgejo
-#       <sha>:refs/heads/ci-run` (after deleting ci-run when it already holds that commit, since a no-op push starts
-#       no run: N2), then polls the run list until every run NEWER than that id, of that commit, on ci-run, has
-#       finished (N2: never another branch's run or an older one). The `forgejo` remote must be one url on a Forgejo
+#       notes the newest Actions run id of the Forgejo repo (forgejo-api GET /repos/O/R/actions/runs; a body that is
+#       not a run list is unreadable, r3 F6), pushes the checked commit itself, `git-forgejo push
+#       --force-with-lease=refs/heads/ci-run:<value check (b) saw> --no-follow-tags --no-recurse-submodules forgejo
+#       <sha>:refs/heads/ci-run` (a lease failure means another session moved ci-run: exit 69, nothing overwritten; r3
+#       F3), then polls the run list until every run NEWER than that id, of that commit, on ci-run, has finished (N2:
+#       never another branch's run or an older one). When ci-run already holds the commit, a push would start no run:
+#       if a run of it on ci-run is still going (another session's push), that run is followed; otherwise ci-run is
+#       deleted (with the same lease) and pushed again (N2, r3 F3). The `forgejo` remote must be one url on a Forgejo
 #       host the forgejo skill uses (git-forgejo defaults to forgejo.mit.edu and no other host is configured, so the
 #       list is just forgejo.mit.edu); git-forgejo and forgejo-api must be tracked and unmodified in their checkout,
 #       and jq present; both run with FORGEJO_HOST set to that host and FORGEJO_GIT_USER / FORGEJO_TOKEN_VAR unset
@@ -42,9 +45,12 @@
 #       git (F4, N9), a repo whose config sets push.followTags or submodule.recurse true, or push.recurseSubmodules to
 #       anything but `no`, or that has replace refs or a default info/grafts file, is refused. The publish checks below
 #       ask the `forgejo` remote, through git-forgejo (its token reaches a private repo). When Forgejo cannot run the
-#       build (git-forgejo or the API fails, the push fails, or no run of the push appears within BG_OFFLOAD_APPEAR) it
-#       prints `bg: FORGEJO UNREACHABLE: <why>` and the line "fix Forgejo (forgejo / forgejo-ci skills); if you
-#       cannot, notify djbclark (hermes-ping) and keep doing work that is not blocked", and exits 69.
+#       build (git-forgejo or the API fails, the push fails, no run of the push appears within BG_OFFLOAD_APPEAR, or no
+#       runner takes it within BG_OFFLOAD_APPEAR: every run still waiting/blocked, r3 F4) it prints `bg: FORGEJO
+#       UNREACHABLE: <why>` and the line "fix Forgejo (forgejo / forgejo-ci skills); if you cannot, notify djbclark
+#       (hermes-ping) and keep doing work that is not blocked", and exits 69. A timeout there names the local secret
+#       broker too (git-forgejo and forgejo-api go through sudo-secretspec), and route (3)'s ls-remote gets at least
+#       150 s, past git-forgejo's ~121 s of broker retries (r3 F5).
 #   (4) generic GitHub: no tracked runner, but the CI remote is a github.com repo whose ci/base branch (asked with
 #       `git ls-remote`, then fetched into refs/remotes/<remote>/ci/base when that copy is missing or stale and no
 #       local ci/base exists; a fetch publishes nothing, and one that loses a ref lock to a concurrent bg is fine if
@@ -62,6 +68,12 @@
 #             (exit 3) with that as its first line and the fix-Forgejo line above.
 #   unknown   (gh failed) no route for this run; bg does not guess either way.
 #   not on GitHub (the CI remote is not a github.com repo): (3) only.
+#   Two known ways a PUBLIC repo lands on Forgejo outside the letter of the ruling (adversary r3 F8, left as is: neither
+#   publishes anything new, check (b) still asks forgejo): a transient failure inside route (4) (its ls-remote, ci/base
+#   fetch or ADMIN gh call) falls through to (3) for that run; and a github.com remote behind an SSH host alias
+#   (`github-work:o/r`) is not recognised as GitHub, so it gets (3) only.
+#   gh is always asked about github.com: an inherited GH_HOST/GH_REPO is dropped (r3 F1). A CI remote chosen only by
+#   an inherited $GITHUB_CI_REMOTE gets route (4)'s owner/ADMIN check on routes (1) and (2) too (r3 F7).
 # This replaces the round-1 guard that read the workflows for macOS labels: a private repo never reaches GitHub, a
 # public one may use any runner, so nothing in the workflows decides a route (adversary N1, N4).
 # The CI remote of routes (1), (2) and (4): git config bgoffload.remote in the repo, else $GITHUB_CI_REMOTE, else
@@ -260,11 +272,26 @@ one_push_url() {
 ci_remote() {
   local url
   remote=$(git -C "$top" config --get bgoffload.remote 2>/dev/null) || remote=""
-  [ -n "$remote" ] || remote="${GITHUB_CI_REMOTE:-origin}"
+  if [ -n "$remote" ]; then remote_src=config
+  elif [ -n "${GITHUB_CI_REMOTE:-}" ] && [ "$GITHUB_CI_REMOTE" != origin ]; then remote=$GITHUB_CI_REMOTE; remote_src=env
+  else remote=origin; remote_src=origin
+  fi
   gh_repo=""
   case "$remote" in ""|-*|*[!A-Za-z0-9._-]*) route_why="odd remote name '$remote'"; return 1 ;; esac
   url=$(git -C "$top" remote get-url -- "$remote" 2>/dev/null) && gh_repo=$(github_repo "$url") || gh_repo=""
   return 0
+}
+
+# owner_ok: the CI remote's GitHub repo is djbclark's, or gh reports ADMIN on it, or the remote is named explicitly in
+# git config bgoffload.remote (adversary F12: no ci/run branches pushed to other people's repos). Sets route_why.
+owner_ok() {
+  local perm owner
+  owner=$(printf '%s' "${gh_repo%%/*}" | gtr 'A-Z' 'a-z')
+  [ "$owner" = djbclark ] || [ "$remote_src" = config ] && return 0
+  perm=$(gtimeout 60 "$gh_bin" repo view "$gh_repo" --json viewerPermission --jq .viewerPermission 2>/dev/null) || { perm=""; transient=1; }
+  [ "$perm" = ADMIN ] && return 0
+  route_why="$gh_repo is not djbclark's and gh does not report ADMIN on it (${perm:-unreadable}); bg pushes ci/run branches only to his repos, or to one named with git config bgoffload.remote"
+  return 1
 }
 
 # gh_vis REPO: set $vis to public, private or unknown (gh failed: a transient failure, never cached).
@@ -370,6 +397,17 @@ forgejo_ok() {
   return 0
 }
 
+# fj_rc_why RC SECONDS: what a failed git-forgejo/forgejo-api call means. Both go through sudo-secretspec, whose broker
+# can stall (git-forgejo retries it for about 2 min), so our own timeout is not "Forgejo is down" (adversary r3 F5).
+fj_rc_why() {
+  case "$1" in
+    124|137) echo "no answer within $2 s: Forgejo, or the local secret broker (sudo-secretspec) that git-forgejo and forgejo-api go through" ;;
+    *) echo "rc $1" ;;
+  esac
+}
+# Route (3)'s ls-remote outlasts git-forgejo's broker retries (about 121 s of backoff).
+t_fj_lsremote=$(( t_lsremote > 150 ? t_lsremote : 150 ))
+
 # wf_pushes_ci_run FILE: the workflow has a push trigger on ci/run/** (comments ignored).
 wf_pushes_ci_run() {
   gawk '{ sub(/(^|[[:space:]])#.*/, "") }
@@ -406,15 +444,7 @@ generic_route() {
   fi
   helper_ok "$generic_runner" "$generic_default" \
     || { route_why="the generic GitHub runner $generic_runner is missing, untracked or modified in its checkout"; return 1; }
-  # Whose repo (adversary F12): djbclark's, one he administers, or a remote named explicitly in bgoffload.remote.
-  owner=$(printf '%s' "${gh_repo%%/*}" | gtr 'A-Z' 'a-z')
-  if [ "$owner" != djbclark ] && [ -z "$(git -C "$top" config --get bgoffload.remote 2>/dev/null)" ]; then
-    perm=$(gtimeout 60 "$gh_bin" repo view "$gh_repo" --json viewerPermission --jq .viewerPermission 2>/dev/null) || { perm=""; transient=1; }
-    if [ "$perm" != ADMIN ]; then
-      route_why="$gh_repo is not djbclark's and gh does not report ADMIN on it (${perm:-unreadable}); route (4) pushes ci/run branches only to his repos, or to one named with git config bgoffload.remote"
-      return 1
-    fi
-  fi
+  owner_ok || return 1
   run_group "$t_lsremote" "$tmp/base.lsr" "$tmp/base.err" git -C "$top" ls-remote --refs "$remote" refs/heads/ci/base
   if [ "$rc" != 0 ]; then
     transient=1
@@ -445,8 +475,13 @@ generic_route() {
   return 1
 }
 
-# try_github: route (1) if tracked, else (2), else (4). The CI remote must already be set (ci_remote).
+# try_github: route (1) if tracked, else (2), else (4). The CI remote must already be set (ci_remote). A CI remote that
+# only an inherited GITHUB_CI_REMOTE chose gets route (4)'s owner check on (1) and (2) too (adversary r3 F7: a private
+# fork's `upstream` would otherwise get ci/run branches pushed to someone else's repo).
 try_github() {
+  if [ "$have1" = 1 ] || [ "$have2" = 1 ]; then
+    [ "$remote_src" != env ] || owner_ok || return 1
+  fi
   if [ "$have1" = 1 ]; then kind=custom; runner="$top/scripts/bg-offload-run"; return 0; fi
   if [ "$have2" = 1 ]; then kind=github; runner="${runner_override:-$top/scripts/github-ci-run}"; return 0; fi
   generic_route
@@ -661,14 +696,14 @@ elif [ "$fetch_urls" != "$push_urls" ] || [ "$(printf '%s\n' "$push_urls" | gwc 
   say "offload: remote $remote does not have exactly one url that is both its fetch and push url (set-url, pushurl, pushInsteadOf or several urls); the push target cannot be verified"
 else
   if [ "$kind" = forgejo ]; then
-    run_group "$t_lsremote" "$tmp/lsr" "$tmp/lsr.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" ls-remote --refs "$remote"
+    run_group "$t_fj_lsremote" "$tmp/lsr" "$tmp/lsr.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" ls-remote --refs "$remote"
   else
     run_group "$t_lsremote" "$tmp/lsr" "$tmp/lsr.err" git -C "$top" ls-remote --refs "$remote"
   fi
   if [ "$rc" != 0 ]; then
     refuse=1
     if [ "$kind" = forgejo ]; then
-      say "FORGEJO UNREACHABLE: could not list the refs of the forgejo remote ($fj_host/$fj_repo) through git-forgejo (rc $rc): $(ghead -n 1 "$tmp/lsr.err" | redact)"
+      say "FORGEJO UNREACHABLE: could not list the refs of the forgejo remote ($fj_host/$fj_repo) through git-forgejo ($(fj_rc_why "$rc" "$t_fj_lsremote")): $(ghead -n 1 "$tmp/lsr.err" | redact)"
       say "fix Forgejo (forgejo / forgejo-ci skills); if you cannot, notify djbclark (hermes-ping) and keep doing work that is not blocked"
     fi
     say "offload: could not list the refs at the push target of $remote (rc $rc); not offloading: $(ghead -n 1 "$tmp/lsr.err" | gsed -E 's#//[^/@ ]*@#//#g')"
@@ -776,34 +811,64 @@ if [ "$kind" = forgejo ]; then
   }
   fj_get() { run_group 120 "$2" "$tmp/fj.err" "$fj_api" --host "$fj_host" GET "$1"; }
   runs_api="/repos/$fj_repo/actions/runs"
+  # A run list must be an object with workflow_runs (null when the repo has none); any other 2xx body is unreadable
+  # (adversary r3 F6: a missing key used to read as "no runs yet", id floor 0).
+  runs_ok='if type == "object" and has("workflow_runs") and ((.workflow_runs | type) == "array" or .workflow_runs == null) then (.workflow_runs // []) else error("not a run list") end'
   # A run we accept must be newer than every run that exists before our push (N2: the same commit may already have
   # runs on other branches, or an older ci-run run).
   fj_get "$runs_api?limit=1" "$tmp/fj.min"
-  [ "$rc" = 0 ] || fj_unreachable "could not list the Actions runs of $fj_host/$fj_repo (forgejo-api rc $rc): $(ghead -n 1 "$tmp/fj.err" | redact)"
-  min_id=$(jq -r '[.workflow_runs[]?.id] | max // 0' "$tmp/fj.min" 2>/dev/null)
+  [ "$rc" = 0 ] || fj_unreachable "could not list the Actions runs of $fj_host/$fj_repo ($(fj_rc_why "$rc" 120)): $(ghead -n 1 "$tmp/fj.err" | redact)"
+  min_id=$(jq -r "$runs_ok | [.[].id] | max // 0" "$tmp/fj.min" 2>/dev/null)
   case "$min_id" in ""|*[!0-9]*) fj_unreachable "unreadable Actions run list from $fj_host/$fj_repo" ;; esac
-  # ci-run already at this commit: the push would be a no-op and start no run, so ci-run is deleted first (N2).
-  if [ "$(gawk '$2 == "refs/heads/ci-run" { print $1; exit }' "$tmp/lsr")" = "$head_sha" ]; then
-    run_group "$t_push" "$tmp/del.out" "$tmp/del.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" push \
-      --no-follow-tags --no-recurse-submodules forgejo :refs/heads/ci-run
-    [ "$rc" = 0 ] || fj_unreachable "could not delete ci-run (already at ${head_sha:0:8}) on forgejo to start a fresh run (rc $rc): $(gtail -n 1 "$tmp/del.err" | redact)"
+  cur=$(gawk '$2 == "refs/heads/ci-run" { print $1; exit }' "$tmp/lsr")  # ci-run as check (b) saw it; empty: none
+  follow=""
+  if [ "$cur" = "$head_sha" ]; then
+    # ci-run already holds this commit, so a push would be a no-op and start no run. If a run of it on ci-run is still
+    # going (another session pushed the same commit), follow that run; deleting and re-pushing would cancel it
+    # (adversary r3 F3). Only when every such run is complete is ci-run deleted and re-pushed for a fresh run (N2).
+    fj_get "$runs_api?limit=50" "$tmp/fj.cur"
+    [ "$rc" = 0 ] || fj_unreachable "could not list the Actions runs of $fj_host/$fj_repo ($(fj_rc_why "$rc" 120)): $(ghead -n 1 "$tmp/fj.err" | redact)"
+    pend=$(jq -r --arg s "$head_sha" "$runs_ok"' | [.[] | select(.commit_sha == $s and .prettyref == "ci-run")
+      | select((.status as $x | ["success", "failure", "cancelled", "skipped"] | index($x)) == null) | .id] | min // empty' \
+      "$tmp/fj.cur" 2>/dev/null) || fj_unreachable "unreadable Actions run list from $fj_host/$fj_repo"
+    case "$pend" in
+      "") ;;
+      *[!0-9]*) fj_unreachable "unreadable Actions run list from $fj_host/$fj_repo" ;;
+      *) follow=1; min_id=$((pend - 1)) ;;
+    esac
   fi
-  # Push exactly the commit checked above, never "whatever HEAD is by now", with the flags on the command line
-  # (sudo-secretspec may not pass GIT_CONFIG_PARAMETERS through). A failed push published nothing.
-  run_group "$t_push" "$tmp/push.out" "$tmp/push.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" push --force \
-    --no-follow-tags --no-recurse-submodules forgejo "$head_sha:refs/heads/ci-run"
-  if [ "$rc" != 0 ]; then
-    gtail -n 8 "$tmp/push.err" | redact | gsed 's/^/bg:   /' >&2
-    fj_unreachable "pushing ${head_sha:0:8} to ci-run on $fj_host/$fj_repo failed (rc $rc; its stderr tail is above)"
+  if [ -z "$follow" ]; then
+    # Every write to ci-run carries a lease on the value check (b) saw (adversary r3 F3): if another session moved
+    # ci-run since, git refuses, and bg-offload backs off instead of overwriting or deleting that session's commit.
+    lease="refs/heads/ci-run:$cur"
+    if [ "$cur" = "$head_sha" ]; then
+      run_group "$t_push" "$tmp/del.out" "$tmp/push.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" push \
+        --force-with-lease="$lease" --no-follow-tags --no-recurse-submodules forgejo :refs/heads/ci-run
+      [ "$rc" = 0 ] && lease="refs/heads/ci-run:"
+    fi
+    # Push exactly the commit checked above, never "whatever HEAD is by now", with the flags on the command line
+    # (sudo-secretspec may not pass GIT_CONFIG_PARAMETERS through). A failed push published nothing.
+    [ "$rc" = 0 ] && run_group "$t_push" "$tmp/push.out" "$tmp/push.err" env FORGEJO_HOST="$fj_host" "$git_forgejo" -C "$top" push \
+      --force-with-lease="$lease" --no-follow-tags --no-recurse-submodules forgejo "$head_sha:refs/heads/ci-run"
+    if [ "$rc" != 0 ]; then
+      gtail -n 8 "$tmp/push.err" | redact | gsed 's/^/bg:   /' >&2
+      if gawk '/stale info/ { f = 1 } END { exit !f }' "$tmp/push.err"; then
+        say "offload: ci-run on $fj_host/$fj_repo moved since it was checked (another session is using it); not overwriting it. Run bg again."
+        exit 69
+      fi
+      fj_unreachable "pushing ${head_sha:0:8} to ci-run on $fj_host/$fj_repo failed ($(fj_rc_why "$rc" "$t_push"); its stderr tail is above)"
+    fi
+    say "offload: pushed ${head_sha:0:8} to ci-run on $fj_host/$fj_repo; following the run it starts (newer than run $min_id), up to $t_wait s"
+  else
+    say "offload: ci-run on $fj_host/$fj_repo already holds ${head_sha:0:8} and its run $pend is still going; following it, up to $t_wait s"
   fi
-  say "offload: pushed ${head_sha:0:8} to ci-run on $fj_host/$fj_repo; following the run it starts (newer than run $min_id), up to $t_wait s"
   say "offload: this runs the repo's whole CI workflow, not only: $cmd_text"
   t0=$(gdate +%s); errs=0; seen=0
   while :; do
     fj_get "$runs_api?limit=50" "$tmp/fj.runs"
     el=$(( $(gdate +%s) - t0 ))
     if [ "$rc" != 0 ] || ! jq -r --arg s "$head_sha" --argjson min "$min_id" \
-        '.workflow_runs[] | select(.id > $min and .commit_sha == $s and .prettyref == "ci-run") | [.id, .status, .html_url] | @tsv' \
+        "$runs_ok"' | .[] | select(.id > $min and .commit_sha == $s and .prettyref == "ci-run") | [.id, .status, .html_url] | @tsv' \
         "$tmp/fj.runs" > "$tmp/fj.rows" 2>/dev/null; then
       errs=$((errs + 1))
       if [ "$errs" -ge 5 ]; then
@@ -814,9 +879,9 @@ if [ "$kind" = forgejo ]; then
     else
       errs=0
       if [ ! -s "$tmp/fj.rows" ]; then
-        [ "$el" -lt "$t_appear" ] || fj_unreachable "no Forgejo run of ${head_sha:0:8} on ci-run appeared within ${el} s of the push (Actions off, no workflow for ci-run, or no runner)"
+        [ "$el" -lt "$t_appear" ] || fj_unreachable "no Forgejo run of ${head_sha:0:8} on ci-run appeared within ${el} s of the push (Actions off, or no workflow for ci-run)"
       else
-        seen=1; pending=0 failed=0 odd=0 ok=0 first_fail="" first_url="" n=0
+        seen=1; pending=0 failed=0 odd=0 ok=0 first_fail="" first_url="" n=0 queued=0
         while IFS=$'\t' read -r id status rurl; do
           n=$((n + 1)); [ -n "$first_url" ] || first_url="$rurl"
           case "$status" in
@@ -824,9 +889,14 @@ if [ "$kind" = forgejo ]; then
             skipped) ;;
             failure) failed=1; [ -n "$first_fail" ] || { first_fail="$id"; fail_url="$rurl"; } ;;
             cancelled) odd=1; say "offload: Forgejo run $id was cancelled: $rurl" ;;
+            waiting|blocked) pending=1; queued=$((queued + 1)) ;;
             *) pending=1 ;;
           esac
         done < "$tmp/fj.rows"
+        # Every run still queued past BG_OFFLOAD_APPEAR: no runner took it, so Forgejo cannot run the build (r3 F4).
+        if [ "$queued" = "$n" ] && [ "$el" -ge "$t_appear" ]; then
+          fj_unreachable "no Forgejo runner picked up the run(s) of ${head_sha:0:8} on ci-run within ${el} s (status waiting/blocked): $first_url"
+        fi
         if [ "$pending" = 0 ]; then
           if [ "$failed" = 1 ]; then
             echo "bg: CI FAILED (${el} s, Forgejo): $fail_url"

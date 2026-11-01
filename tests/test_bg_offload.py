@@ -1171,11 +1171,14 @@ FORGEJO_API = """#!/bin/bash
 d={state}
 printf '%s\\n' "$*" >> "$d/fapi.calls"
 [ -f "$d/fapi.fail" ] && {{ echo "forgejo-api: secret broker did not start" >&2; exit 1; }}
+[ -f "$d/fj.badbody" ] && {{ echo '{{"message": "x"}}'; exit 0; }}
 case "$4" in
   */jobs) echo '[{{"id": 5}}]' ;;
   */logs) for i in $(seq 1 80); do echo "job log $i"; done ;;
   *)
     old=$(cat "$d/fj.old.json" 2>/dev/null || echo '[]')
+    # fj.old.later.json: what the existing runs look like from the 3rd call on (a run that finishes meanwhile)
+    if [ -f "$d/fj.old.later.json" ] && [ "$(wc -l < "$d/fapi.calls")" -ge 3 ]; then old=$(cat "$d/fj.old.later.json"); fi
     new='[]'
     if [ -f "$d/fj.pushed" ] && [ ! -f "$d/fj.nonew" ]; then new=$(gsed "s/@SHA@/$(cat "$d/fj.pushed")/g" "$d/fj.new.json"); fi
     jq -n --argjson a "$new" --argjson b "$old" '{{total_count: (($a + $b) | length), workflow_runs: ($a + $b)}}'
@@ -1189,6 +1192,9 @@ printf '%s FORGEJO_HOST=%s FORGEJO_GIT_USER=%s\\n' "$*" "${{FORGEJO_HOST:-}}" "$
 [ "$3" = ls-remote ] && [ -f "$d/gf.lsfail" ] && {{ echo "git-forgejo: secret broker did not start git" >&2; exit 1; }}
 if [ "$3" = push ]; then
   [ -f "$d/gf.pushfail" ] && {{ echo "git-forgejo: secret broker did not start git" >&2; exit 1; }}
+  [ -f "$d/gf.slow" ] && /bin/sleep 5
+  # gf.race: another session moves ci-run on the remote just before this push
+  if [ -f "$d/gf.race" ]; then rm -f "$d/gf.race"; git -C "$2" push -q --force forgejo "HEAD~1:refs/heads/ci-run"; fi
   last="${{@: -1}}"
   case "$last" in
     :*) printf '%s\\n' "$last" >> "$d/gf.deletes" ;;
@@ -1534,7 +1540,7 @@ def test_forgejo_route_pushes_the_checked_commit_and_follows_its_run(s):
     assert subprocess.run(["git", "rev-parse", "refs/heads/ci-run"], cwd=s.fj, capture_output=True, text=True).stdout.strip() == head
     calls = s.read("git-forgejo.calls")
     assert "ls-remote --refs forgejo" in calls  # the publish checks asked forgejo, with the token
-    assert f"push --force --no-follow-tags --no-recurse-submodules forgejo {head}:refs/heads/ci-run" in calls
+    assert f"push --force-with-lease=refs/heads/ci-run: --no-follow-tags --no-recurse-submodules forgejo {head}:refs/heads/ci-run" in calls
     api = s.read("fapi.calls")
     assert "--host forgejo.mit.edu GET /repos/djbclark/stub/actions/runs?limit=1" in api  # the id floor, before the push
     assert not (s.state / "fj.ran").exists()  # the repo's own forgejo-ci-run is never run
@@ -1987,3 +1993,70 @@ def test_an_interpreter_running_a_module_or_script_is_still_offloaded(s, argv):
     s.commit_all("build.py")
     _never_ran(s, s.bg(*argv), 0)
     assert s.read("runner.calls") != ""
+
+
+def test_forgejo_route_follows_a_run_of_the_commit_that_is_still_going(s):
+    """r3 F3: ci-run already holds the commit and its run is still going: follow it, do not delete and re-push."""
+    env = _forgejo(s)
+    git(s.work, "push", "-q", "forgejo", "HEAD:refs/heads/ci-run")
+    head = _head(s.work)
+    (s.state / "fj.old.json").write_text(json.dumps([_fj_run(5, "running", sha=head)]))
+    (s.state / "fj.old.later.json").write_text(json.dumps([_fj_run(5, "success", sha=head)]))
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r, 0)
+    assert "actions/runs/5" in r.stdout and "still going; following it" in r.stderr
+    assert s.read("gf.deletes") == "" and not (s.state / "fj.pushed").exists()
+
+
+def test_forgejo_route_backs_off_when_another_session_moved_ci_run(s):
+    """r3 F3: every write to ci-run carries a lease on the value check (b) saw."""
+    env = _forgejo(s)
+    (s.state / "gf.race").write_text("")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "moved since it was checked" in r.stderr and "FORGEJO UNREACHABLE" not in r.stderr
+    other = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=s.work, capture_output=True, text=True).stdout.strip()
+    assert subprocess.run(["git", "rev-parse", "refs/heads/ci-run"], cwd=s.fj, capture_output=True, text=True).stdout.strip() == other
+    assert s.read("fapi.calls").count("limit=50") == 0  # no run was followed
+
+
+def test_forgejo_route_no_runner_is_unreachable_not_still_going(s):
+    """r3 F4: a run nobody picks up (waiting) is Forgejo unable to run the build, not 'may still be going'."""
+    env = _forgejo(s, new=[_fj_run(9, "waiting")])
+    r = s.bg(_build(s), BG_OFFLOAD_APPEAR="1", **env)
+    _never_ran(s, r)
+    assert "bg: FORGEJO UNREACHABLE: no Forgejo runner picked up" in r.stderr and FIX_FORGEJO in r.stderr
+
+
+def test_forgejo_route_timeout_names_the_secret_broker(s):
+    """r3 F5: our own timeout on git-forgejo may be the local broker, not Forgejo."""
+    env = _forgejo(s)
+    (s.state / "gf.slow").write_text("")
+    r = s.bg(_build(s), BG_OFFLOAD_PUSH_TIMEOUT="1", **env)
+    _never_ran(s, r)
+    assert "bg: FORGEJO UNREACHABLE:" in r.stderr and "no answer within 1 s" in r.stderr and "secret broker" in r.stderr
+
+
+def test_forgejo_route_refuses_a_body_that_is_not_a_run_list(s):
+    """r3 F6: a 2xx body without workflow_runs must not read as 'no runs', id floor 0."""
+    env = _forgejo(s)
+    (s.state / "fj.badbody").write_text("")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "unreadable Actions run list" in r.stderr
+    assert not (s.state / "fj.pushed").exists()
+
+
+def test_an_inherited_github_ci_remote_needs_the_owner_check_on_every_github_route(s):
+    """r3 F7: GITHUB_CI_REMOTE=upstream in a fork would push ci/run branches to someone else's repo via route (2)."""
+    up = _bare(s, "upstream.git")
+    git(s.work, "remote", "add", "upstream", str(up))
+    git(s.work, "push", "-q", "upstream", "HEAD:main")
+    alias = f"{s.alias};{up} https://github.com/someone/upstream.git"
+    r = s.bg(_build(s), GITHUB_CI_REMOTE="upstream", BG_OFFLOAD_URL_ALIAS=alias)
+    _never_ran(s, r)
+    assert "someone/upstream is not djbclark's" in r.stderr
+    assert s.read("runner.calls") == ""
+    (s.state / "repo.perm").write_text("ADMIN\n")
+    (s.state / "runner.repo").write_text("someone/upstream\n")
+    _never_ran(s, s.bg(_build(s), GITHUB_CI_REMOTE="upstream", BG_OFFLOAD_URL_ALIAS=alias), 0)  # control: admin
