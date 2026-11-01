@@ -45,22 +45,6 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1785318670,
-        "narHash": "sha256-dN6Ou5x/+23FZLEpYP3IffO+NyJFzUlGumt1uu3MMaY=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs_2": {
-      "locked": {
         "lastModified": 1792898606,
         "narHash": "sha256-Mg3rRjsbMqhSMxop5PYMXos8SwAjejrxSgVThTvP9eg=",
         "owner": "NixOS",
@@ -99,8 +83,30 @@
       "inputs": {
         "athena-nixos": "athena-nixos",
         "nixathena": "nixathena",
-        "nixpkgs": "nixpkgs_2",
-        "paseo-nix": "paseo-nix"
+        "nixpkgs": "nixpkgs",
+        "paseo-nix": "paseo-nix",
+        "sudo-secretspec": "sudo-secretspec"
+      }
+    },
+    "sudo-secretspec": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793497262,
+        "narHash": "sha256-Yo+dJEQ6Ei253V4vxqpI/OxLWxlb8pei0yc/YAlRZKo=",
+        "owner": "frdminc",
+        "repo": "sudo-secretspec",
+        "rev": "834602c2ef98a2f929b1fccbb1e08daf02600ab9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "frdminc",
+        "ref": "sudo-main",
+        "repo": "sudo-secretspec",
+        "type": "github"
       }
     }
   },
