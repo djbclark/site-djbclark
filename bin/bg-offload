@@ -17,40 +17,63 @@
 #     pytest file sat over an hour in the gate).
 # bg never execs the command after an offload, and exits with the verdict below.
 #
-# Routes, the first that applies wins (the `load-watch ci` text is free text of many shapes and is never executed;
-# an untracked or ignored script is never used: it is not public code, and what it pushes is what this helper
-# vouches for):
+# Routes (the `load-watch ci` text is free text of many shapes and is never executed; an untracked or ignored script
+# in the repo is never used: it is not public code, and what it pushes is what this helper vouches for):
 #   (1) a TRACKED, executable scripts/bg-offload-run in the repo top, (2) a tracked scripts/github-ci-run. Both are
 #       called as `RUNNER --no-wait REF` from the repo top with GITHUB_CI_REMOTE set to the CI remote, and must push
 #       the run and print two lines on stdout, which scripts/github-ci-run already does:
 #         overlay <40-hex commit that the CI run builds> for <ref sha> -> <remote> <branch>
 #         pushed https://github.com/<owner>/<repo>/tree/<branch>    (ShizukuTendCF prints `branch: https://...`
 #                                                                     instead; both are accepted)
-#       then this helper polls GitHub for the verdict (below). A repo with a faster route than the whole CI
-#       workflow may ship its own scripts/bg-offload-run with the same contract.
-#   (3) a tracked, executable scripts/forgejo-ci-run (herdr's shape): a SELF-WAITING route. It pushes to the remote
-#       named `forgejo` and waits for its own run; it is called as `RUNNER REF` from the repo top, bounded by
-#       BG_OFFLOAD_PUSH_TIMEOUT + BG_OFFLOAD_WAIT, and its exit status is the verdict (0 green, else 1; the last
-#       lines of its output are printed). The `forgejo` remote's url must be on a Forgejo host the forgejo skill
-#       uses (skills/forgejo: git-forgejo defaults to forgejo.mit.edu and no other host is configured, so the list
-#       is just forgejo.mit.edu), else no route; the publish checks below ask that remote, through the skill's
-#       git-forgejo (its token reaches a private repo).
+#       The OWNER/REPO printed must be the CI remote's own github.com repo (a trailing / is ignored), and this helper
+#       polls that repo for the verdict (below). A repo with a faster route than the whole CI workflow may ship its
+#       own scripts/bg-offload-run with the same contract.
+#   (3) Forgejo: a tracked, executable scripts/forgejo-ci-run opts the repo in; this helper does not run it
+#       (adversary F3, 2026-11-01: herdr's pushes whatever HEAD is when it runs, not the commit checked here). It
+#       pushes the checked commit itself, `git-forgejo push --force --no-follow-tags --no-recurse-submodules forgejo
+#       <sha>:refs/heads/ci-run`, then waits with the wait tool herdr's runner uses
+#       (~/src/loopback-port-shim/ci/tools/wait-run.sh, RP=<owner>/<repo> of the remote, WAIT_MAX=BG_OFFLOAD_WAIT,
+#       bounded by BG_OFFLOAD_WAIT + BG_OFFLOAD_FORGEJO_GRACE (120 s)). The `forgejo` remote must be one url on a
+#       Forgejo host the forgejo skill uses (git-forgejo defaults to forgejo.mit.edu and no other host is configured,
+#       so the list is just forgejo.mit.edu); git-forgejo and the wait tool (with the bench-env.sh it sources) must be
+#       tracked and unmodified in their checkouts; and, because sudo-secretspec may drop GIT_CONFIG_PARAMETERS on the
+#       way to git-forgejo's git (F4), a repo whose config sets push.followTags or submodule.recurse true, or
+#       push.recurseSubmodules to anything but `no`, or that has replace refs, is refused. The publish checks below
+#       ask the `forgejo` remote, through git-forgejo (its token reaches a private repo).
 #   (4) generic GitHub: no tracked runner, but the CI remote is a github.com repo whose ci/base branch (asked with
 #       `git ls-remote`, then fetched into refs/remotes/<remote>/ci/base when that copy is missing or stale and no
-#       local ci/base exists; a fetch publishes nothing) holds .github/workflows/agent-ci.yml or linux-ci.yml with
-#       a push trigger on ci/run/**. The runner is then the canonical $BG_OFFLOAD_GENERIC_RUNNER (default
-#       ~/src/djbclark-ade/scripts/github-ci-run, same contract as (2)).
+#       local ci/base exists; a fetch publishes nothing, and one that loses a ref lock to a concurrent bg is fine if
+#       the ref is right afterwards, else retried once) holds .github/workflows/agent-ci.yml or linux-ci.yml with a
+#       push trigger on ci/run/**. The repo must be djbclark's, or one gh reports ADMIN on, or the remote must be
+#       named explicitly in git config bgoffload.remote (F12: no ci/run branches pushed to other people's repos).
+#       The runner is ~/src/djbclark-ade/scripts/github-ci-run (same contract as (2)), which must be tracked and
+#       unmodified in that checkout (F5; BG_OFFLOAD_GENERIC_RUNNER replaces it in tests only).
+# Order (F7, djbclark 2026-11-01: public repos build on GitHub, private Linux builds on Forgejo; herdr too, no
+# exception): (1) first. Then, if the repo has scripts/forgejo-ci-run, by the CI remote's visibility (gh repo view):
+# a public github.com repo tries (2), else (4), before (3); anything else (private, not on GitHub, unreadable) tries
+# (3) first, and falls through to (2)/(4) only when the repo has no `forgejo` remote. Without forgejo-ci-run: (2),
+# else (4). A route that fails its own checks is no route.
 # The CI remote of routes (1), (2) and (4): git config bgoffload.remote in the repo, else $GITHUB_CI_REMOTE, else
 # origin (a fork whose origin is upstream sets `git config bgoffload.remote <fork remote>`; upstream never has
 # djbclark's ci/base, so (4) never pushes there). Route (3) always uses `forgejo`.
 # Visibility guard (djbclark 2026-11-01: GitHub's macOS runners only for PUBLIC repos; a private repo's macOS
-# minutes bill about 10x): for routes (2) and (4), when a workflow the run fires (linux-ci.yml or agent-ci.yml,
-# ci/base's copy as the runner overlays it, else HEAD's) mentions macos or xcode outside a comment (runs-on, or a
-# matrix that feeds it), the GitHub repo must be public by `gh repo view OWNER/REPO --json isPrivate`. Private, a
-# remote that is not github.com, or a visibility gh cannot read: no route (fail closed).
+# minutes bill about 10x; adversary F1/F2): for routes (1), (2) and (4), every workflow in the tree the run pushes
+# (HEAD's .github/workflows/*.y{a,}ml, with ci/base's linux-ci.yml/agent-ci.yml in their place where ci/base has
+# them; github-ci-run's neutraliser only removes files, and which ones depends on whether its python has PyYAML, so
+# all of them count) must be provably Linux: every line naming runs-on is `runs-on: LABEL` or `runs-on: [LABEL,
+# ...]` with literal labels none of which looks like macOS/Xcode (macos, xcode, osx, darwin, apple, mac), and every
+# reusable-workflow `uses:` is ./.github/workflows/FILE in that tree. Otherwise (an expression or matrix label, a
+# remote reusable workflow, a flow mapping, an unreadable file) the GitHub repo must be public by `gh repo view
+# OWNER/REPO --json isPrivate`; private, not github.com, or unreadable: no route (fail closed).
 # A linked git worktree (.git is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no
 # GNU tool, nothing publishable (see below): this helper says so and exits 69; bg then refuses a build (exit 3) or
 # goes on waiting at the gate with a targeted run, as it always did.
+# Probe cost (F9): reads of workflow blobs never lazy-fetch without a bound (a partial clone's missing blobs are
+# fetched first, within BG_OFFLOAD_FETCH_TIMEOUT); a timeout knob of 0 or junk means its default; and a --probe's
+# answer is cached for BG_OFFLOAD_PROBE_TTL seconds (300; 0 = off, the default with BG_OFFLOAD_TESTING=1) in
+# ~/.local/state/bg-offload/probe-cache, keyed on the repo, the CI and forgejo remotes and urls, HEAD, the local
+# ci/base copies, the route scripts and the push/submodule config. An answer that came from a failed ls-remote,
+# fetch or gh call is not cached. The full offload never uses the cache.
 #
 # What may be offloaded (adversary reviews of c7cab20 to 2d037f7, 2026-10-23, and djbclark's ruling that followed:
 # bg-offload publishes NOTHING that is not already on the remote; six review rounds, the first three on scanning
@@ -96,54 +119,76 @@
 # resolves outside the repo top also exits 69 (pytest/unittest arguments that look like paths: end in .py,
 # contain `/` or `::`, or are directories; a unittest dotted id is not checked).
 #
-# Budget: the offload has its own budget, not BG_MAX_WAIT: up to BG_OFFLOAD_PUSH_TIMEOUT (900 s) for the runner
-# plus BG_OFFLOAD_WAIT (2400 s) for CI (a self-waiting route (3) gets their sum), after the hold that triggered it,
-# if any. bg's own ping is not sent for it.
+# Budget: the offload has its own budget, not BG_MAX_WAIT: up to BG_OFFLOAD_PUSH_TIMEOUT (900 s) for the runner or
+# route (3)'s push, plus BG_OFFLOAD_WAIT (2400 s) for CI, after the hold that triggered it, if any. bg's own ping is
+# not sent for it.
 #
 # The wait is ours, not the runner's, for routes (1), (2), (4) (github-ci-run's own wait gives up at 480 s and a
 # full Linux CI run of sudo-secretspec takes longer): the runner is started with --no-wait, then this polls `gh run
 # list -R OWNER/REPO` (always -R: gh in some checkouts resolves to an upstream remote) for the runs whose head is
 # the pushed commit until all are completed, up to BG_OFFLOAD_WAIT seconds (default 2400).
 #
-# Artifacts (2026-11-01): after a GitHub verdict of success, each successful run's artifacts are downloaded with
-# `gh run download RUN -R OWNER/REPO -D ~/.local/state/bg-offload/artifacts/OWNER__REPO/RUN/` (bounded by
-# BG_OFFLOAD_ARTIFACT_TIMEOUT, 600 s) and the path is printed. A failed download (or a run with no artifacts) is a
-# warning; the verdict stays 0. BG_OFFLOAD_ARTIFACTS=0 skips it. Route (3) has no download.
+# Artifacts (2026-11-01; F10): after a GitHub verdict of success, each successful run's artifacts are downloaded with
+# `gh run download RUN -R OWNER/REPO` into a temporary directory beside ~/.local/state/bg-offload/artifacts/
+# OWNER__REPO/RUN/, then moved there (replacing an earlier download of the same run), bounded by
+# BG_OFFLOAD_ARTIFACT_TIMEOUT (600 s), and the path is printed. A failed download (or a run with no artifacts) is a
+# warning naming that path; the verdict stays 0. Downloads older than 7 days, and all but the newest 20 per repo, are
+# pruned. BG_OFFLOAD_ARTIFACTS=0 skips it. Route (3) has no download.
 #
 # Exit codes (bg 3 = refused CI-first and 75 = wait budget keep their meaning; neither is used here):
 #   0   at least one CI run concluded success and none failed: "CI's workflow passed on this tree". It does NOT
-#       mean the test the caller named passed on its own: CI ran the repo's whole workflow. Route (3): its
-#       runner exited 0
-#   1   a CI run concluded failure: the failed-step log tail and the full log's path are printed. Route (3): its
-#       runner exited non-zero (its output's tail is printed)
+#       mean the test the caller named passed on its own: CI ran the repo's whole workflow. Route (3): the Forgejo
+#       run of the pushed commit ended success
+#   1   a CI run concluded failure: the failed-step log tail and the full log's path are printed. Route (3): the
+#       Forgejo run ended failure (its job log's tail is printed)
 #   69  not offloaded (no route, the visibility guard, no gh or GNU tool, a tracked change, an unpushed commit,
-#       ci/base commits not on the remote, an unverifiable push target, a named test path CI cannot see, or a
-#       --no-wait runner failed: it may have pushed before failing, but no run is followed): bg refuses a build
-#       (exit 3), or falls back to waiting at the gate with a targeted run
-#   76  CI did not finish within BG_OFFLOAD_WAIT; the run is still going, its URL is printed. Route (3): its runner
-#       was still going at BG_OFFLOAD_PUSH_TIMEOUT + BG_OFFLOAD_WAIT and was stopped
-#   77  pushed, but no verdict: no run appeared, gh kept failing, every run was skipped/neutral, or a run
-#       was cancelled/timed out
+#       ci/base commits not on the remote, an unverifiable push target, a named test path CI cannot see, a
+#       --no-wait runner that failed: it may have pushed before failing, but no run is followed, or route (3)'s push
+#       that failed: a broker or token failure, a rejected push, nothing published): bg refuses a build (exit 3), or
+#       falls back to waiting at the gate with a targeted run
+#   76  CI did not finish within BG_OFFLOAD_WAIT; the run is still going, its URL is printed. Route (3): the wait
+#       tool reported its WAIT_MAX (= BG_OFFLOAD_WAIT) timeout, or our own bound on it fired
+#   77  pushed, but no verdict: no run appeared, gh kept failing, every run was skipped/neutral, a run was
+#       cancelled/timed out, or the runner's printed repo is not the CI remote's. Route (3): the run was
+#       cancelled/skipped, or the wait tool failed without a status
 # Test hooks, honoured ONLY with BG_OFFLOAD_TESTING=1 (an inherited BG_GH or BG_OFFLOAD_RUNNER must not redirect a
 # real run): BG_GH (gh binary), BG_OFFLOAD_RUNNER (route, treated as route (2)), BG_OFFLOAD_TOOLS_EXTRA (more
-# required tools), BG_OFFLOAD_GIT_FORGEJO (git-forgejo), BG_OFFLOAD_URL_ALIAS ("LOCAL-URL HTTPS-URL": a remote
-# whose url is LOCAL-URL counts as HTTPS-URL for the github.com / Forgejo host checks, so a local bare repository
-# can stand in). Knobs: BG_OFFLOAD_GENERIC_RUNNER (route (4)'s runner), BG_OFFLOAD_POLL (poll seconds, default
-# 20), BG_OFFLOAD_APPEAR (seconds to wait for the run to show up, default 240).
+# required tools), BG_OFFLOAD_GIT_FORGEJO (git-forgejo), BG_OFFLOAD_FORGEJO_WAIT (the wait tool),
+# BG_OFFLOAD_GENERIC_RUNNER (route (4)'s runner), BG_OFFLOAD_URL_ALIAS ("LOCAL HTTPS[;LOCAL HTTPS...]": a remote whose
+# url is LOCAL, a local path or file:// url, counts as HTTPS for the github.com / Forgejo host checks, so a local
+# bare repository can stand in). Knobs: BG_OFFLOAD_POLL (poll seconds, default 20), BG_OFFLOAD_APPEAR (seconds to
+# wait for the run to show up, default 240), the timeouts named above, BG_OFFLOAD_PROBE_TTL.
 export PATH="/opt/homebrew/bin:$PATH"
 export GIT_NO_REPLACE_OBJECTS=1  # header: the real history, for the checks and the runner's push
-git_forgejo_default="$HOME/src/djbclark-ade/skills/forgejo/scripts/git-forgejo"
+ade="$HOME/src/djbclark-ade"
+git_forgejo_default="$ade/skills/forgejo/scripts/git-forgejo"
+fj_wait_default="$HOME/src/loopback-port-shim/ci/tools/wait-run.sh"
+generic_default="$ade/scripts/github-ci-run"
 if [ "${BG_OFFLOAD_TESTING:-0}" = 1 ]; then
   gh_bin="${BG_GH:-gh}"; runner_override="${BG_OFFLOAD_RUNNER:-}"
-  git_forgejo="${BG_OFFLOAD_GIT_FORGEJO:-$git_forgejo_default}"; url_alias="${BG_OFFLOAD_URL_ALIAS:-}"
+  git_forgejo="${BG_OFFLOAD_GIT_FORGEJO:-$git_forgejo_default}"; fj_wait="${BG_OFFLOAD_FORGEJO_WAIT:-$fj_wait_default}"
+  generic_runner="${BG_OFFLOAD_GENERIC_RUNNER:-$generic_default}"; url_alias="${BG_OFFLOAD_URL_ALIAS:-}"
+  probe_ttl_default=0
 else
-  gh_bin=gh; runner_override=""; git_forgejo="$git_forgejo_default"; url_alias=""
+  gh_bin=gh; runner_override=""; git_forgejo="$git_forgejo_default"; fj_wait="$fj_wait_default"
+  generic_runner="$generic_default"; url_alias=""; probe_ttl_default=300
+  export FORGEJO_SCRIPTS="${git_forgejo_default%/*}"  # wait-run.sh's forgejo-api: the skill's, not an inherited one
 fi
-generic_runner="${BG_OFFLOAD_GENERIC_RUNNER:-$HOME/src/djbclark-ade/scripts/github-ci-run}"
 forgejo_hosts="forgejo.mit.edu"  # header, route (3): the hosts the forgejo skill's git-forgejo is set up for
 poll="${BG_OFFLOAD_POLL:-20}"
+# knob NAME DEFAULT: a positive whole number of seconds; unset, 0 or junk is DEFAULT (gtimeout 0 would be no limit).
+knob() {
+  local v="${!1:-}"
+  case "$v" in ""|*[!0-9]*) echo "$2"; return ;; esac
+  v=$((10#$v)); [ "$v" -gt 0 ] && echo "$v" || echo "$2"
+}
+t_lsremote=$(knob BG_OFFLOAD_LSREMOTE_TIMEOUT 60); t_fetch=$(knob BG_OFFLOAD_FETCH_TIMEOUT 300)
+t_push=$(knob BG_OFFLOAD_PUSH_TIMEOUT 900); t_wait=$(knob BG_OFFLOAD_WAIT 2400); t_art=$(knob BG_OFFLOAD_ARTIFACT_TIMEOUT 600)
+t_appear=$(knob BG_OFFLOAD_APPEAR 240); t_grace=$(knob BG_OFFLOAD_FORGEJO_GRACE 120)
+probe_ttl="${BG_OFFLOAD_PROBE_TTL:-$probe_ttl_default}"; case "$probe_ttl" in ""|*[!0-9]*) probe_ttl=0 ;; esac
 # Every git that talks to a remote here (ls-remote, fetch) must fail rather than prompt.
 [ -n "${GIT_SSH_COMMAND:-}" ] || export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
+export GIT_TERMINAL_PROMPT=0
 
 say() { echo "bg: $*" >&2; }
 # redact: drop user:password@ from urls in a message
@@ -151,7 +196,7 @@ redact() { gsed -E 's#//[^/@ ]*@#//#g'; }
 
 # Every tool this helper uses must exist: a missing one must refuse, never be swallowed (a missing GNU grep once made
 # the dirty-tree check pass without checking).
-need_tools="git gawk gsed gtimeout greadlink gmktemp ghead gtail gwc gdate gtr"
+need_tools="git gawk gsed gtimeout greadlink gmktemp ghead gtail gwc gdate gtr gfind gsort gsha256sum"
 [ "${BG_OFFLOAD_TESTING:-0}" = 1 ] && need_tools="$need_tools ${BG_OFFLOAD_TOOLS_EXTRA:-}"
 tools_ok() {
   local t
@@ -160,9 +205,18 @@ tools_ok() {
   done
 }
 
-# url_alias_of URL: the url the host checks read (BG_OFFLOAD_URL_ALIAS, tests only).
+# url_alias_of URL: the url the host checks read. BG_OFFLOAD_URL_ALIAS (tests only) is "LOCAL HTTPS[;LOCAL HTTPS...]",
+# and only a LOCAL that is a local path (/... or file://...) is ever aliased (adversary F12).
 url_alias_of() {
-  if [ -n "$url_alias" ] && [ "$1" = "${url_alias%% *}" ]; then printf '%s\n' "${url_alias#* }"; else printf '%s\n' "$1"; fi
+  local pair rest="$url_alias"
+  while [ -n "$rest" ]; do
+    pair=${rest%%;*}
+    if [ "$pair" = "$rest" ]; then rest=""; else rest=${rest#*;}; fi
+    case "$pair" in
+      /*" "*|file://*" "*) [ "$1" = "${pair%% *}" ] && { printf '%s\n' "${pair#* }"; return; } ;;
+    esac
+  done
+  printf '%s\n' "$1"
 }
 # url_host URL: the lower-cased host of an https://, ssh:// or scp-like (user@host:path) url; empty for anything else
 # (http, git://, file, a local path).
@@ -175,15 +229,16 @@ url_host() {
   esac
   printf '%s\n' "$h" | gtr 'A-Z' 'a-z'
 }
-# github_repo URL: print OWNER/REPO of a github.com url, or fail.
-github_repo() {
+# url_repo URL HOST: print OWNER/REPO of an https/ssh/scp url on HOST, or fail.
+url_repo() {
   local u p
   u=$(url_alias_of "$1")
-  [ "$(url_host "$u")" = github.com ] || return 1
+  [ "$(url_host "$u")" = "$2" ] || return 1
   case "$u" in *://*) p=${u#*://}; p=${p#*/} ;; *) p=${u#*:} ;; esac
   p=${p%/}; p=${p%.git}
   case "$p" in */*/*|*[!A-Za-z0-9._/-]*|/*|*/|.*) return 1 ;; ?*/?*) printf '%s\n' "$p" ;; *) return 1 ;; esac
 }
+github_repo() { url_repo "$1" github.com; }
 # one_push_url REMOTE: print the remote's push url when it has exactly one, or fail.
 one_push_url() {
   local u
@@ -191,11 +246,23 @@ one_push_url() {
   [ -n "$u" ] && [ "$(printf '%s\n' "$u" | gwc -l | gtr -d ' ')" = 1 ] && printf '%s\n' "$u"
 }
 
-# ci_remote: set $remote for routes (1), (2), (4): git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin.
+# ci_remote: set $remote (routes (1), (2), (4)): git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin; and
+# $gh_repo, OWNER/REPO when its single push url is a github.com repo (else empty).
 ci_remote() {
+  local url
   remote=$(git -C "$top" config --get bgoffload.remote 2>/dev/null) || remote=""
   [ -n "$remote" ] || remote="${GITHUB_CI_REMOTE:-origin}"
+  gh_repo=""
   case "$remote" in ""|-*|*[!A-Za-z0-9._-]*) route_why="odd remote name '$remote'"; return 1 ;; esac
+  url=$(one_push_url "$remote") && gh_repo=$(github_repo "$url") || gh_repo=""
+  return 0
+}
+
+# gh_vis REPO: set $vis to public, private or unknown (gh failed: a transient failure, never cached).
+gh_vis() {
+  local v
+  v=$(gtimeout 60 "$gh_bin" repo view "$1" --json isPrivate --jq .isPrivate 2> "$tmp/vis.err") || v=error
+  case "$v" in false) vis=public ;; true) vis=private ;; *) vis=unknown; transient=1 ;; esac
 }
 
 # find_base_ref: the ref github-ci-run overlays (its own choice: local ci/base, else the remote-tracking copy) in
@@ -217,22 +284,75 @@ find_base_ref() {
 tracked_exec() {
   [ -f "$1/$2" ] && [ -x "$1/$2" ] && git -C "$1" ls-files --error-unmatch -- "$2" >/dev/null 2>&1
 }
+# tracked_clean FILE: FILE is tracked in its own checkout and unmodified against that checkout's HEAD (adversary F5:
+# a helper outside the repo decides what is pushed or how, so it must be committed code, not another session's edit).
+tracked_clean() {
+  local d="${1%/*}" n="${1##*/}"
+  [ -f "$1" ] && git -C "$d" ls-files --error-unmatch -- "$n" >/dev/null 2>&1 \
+    && git -C "$d" diff --quiet HEAD -- "$n" 2>/dev/null
+}
+# helper_ok FILE DEFAULT [MORE...]: FILE is executable; when it is the DEFAULT (not a test hook), it and MORE (files it
+# sources) are tracked_clean.
+helper_ok() {
+  local f="$1" def="$2" m
+  shift 2
+  [ -f "$f" ] && [ -x "$f" ] || return 1
+  [ "$f" = "$def" ] || return 0
+  for m in "$f" "$@"; do tracked_clean "$m" || return 1; done
+}
 
-# forgejo_ok: route (3)'s remote `forgejo` exists and every push url is on a Forgejo host the skill knows.
+# prefetch_workflows TREEISH...: in a partial clone, fetch the blobs under .github/workflows of each TREEISH (bounded;
+# a fetch publishes nothing), so the reads after it run with GIT_NO_LAZY_FETCH=1 and never fetch without a bound.
+prefetch_workflows() {
+  local t
+  : > "$tmp/pf"
+  for t in "$@"; do
+    GIT_NO_LAZY_FETCH=1 git -C "$top" ls-tree -r "$t" -- .github/workflows/ 2>/dev/null \
+      | gawk '$2 == "blob" { print $3 }' >> "$tmp/pf"
+  done
+  [ -s "$tmp/pf" ] || return 0
+  GIT_NO_LAZY_FETCH=1 git -C "$top" cat-file --batch-check < "$tmp/pf" 2>/dev/null | gawk '$2 == "missing" { print $1 }' > "$tmp/pf.missing"
+  [ -s "$tmp/pf.missing" ] || return 0
+  rg_in="$tmp/pf.missing"
+  run_group "$t_fetch" "$tmp/pf.out" "$tmp/pf.err" git -C "$top" cat-file --batch-check
+  rg_in=""
+}
+# show_blob SPEC OUT: write SPEC (TREEISH:PATH) to OUT without a lazy fetch; fail when it is unreadable.
+show_blob() { GIT_NO_LAZY_FETCH=1 git -C "$top" show "$1" > "$2" 2>/dev/null; }
+
+# forgejo_ok: route (3) (header): the `forgejo` remote exists ($fj_missing=1 if not) on a Forgejo host the skill uses,
+# the push and wait helpers are committed code, and the repo's config cannot make the push carry anything else.
 forgejo_ok() {
-  local urls u h
-  remote=forgejo
-  [ -x "$git_forgejo" ] || { route_why="scripts/forgejo-ci-run needs the forgejo skill's git-forgejo ($git_forgejo), which is missing"; return 1; }
+  local urls u v st
+  remote=forgejo; fj_missing=0; fj_repo=""; fj_host=""
   urls=$(git -C "$top" remote get-url --push --all -- forgejo 2>/dev/null) || urls=""
-  [ -n "$urls" ] || { route_why="scripts/forgejo-ci-run pushes to the remote 'forgejo', which $top does not have"; return 1; }
-  while IFS= read -r u; do
-    h=$(url_host "$(url_alias_of "$u")")
-    case " $forgejo_hosts " in
-      *" $h "*) [ -n "$h" ] && continue ;;
-    esac
-    route_why="the remote 'forgejo' ($(printf '%s' "$u" | redact)) is not on a Forgejo host the forgejo skill uses ($forgejo_hosts); not offloading to it"
+  if [ -z "$urls" ]; then
+    fj_missing=1
+    route_why="scripts/forgejo-ci-run pushes to the remote 'forgejo', which $top does not have"
     return 1
-  done <<< "$urls"
+  fi
+  [ "$(printf '%s\n' "$urls" | gwc -l | gtr -d ' ')" = 1 ] || { route_why="the remote 'forgejo' has more than one push url"; return 1; }
+  u=$(url_alias_of "$urls"); fj_host=$(url_host "$u")
+  case " $forgejo_hosts " in *" $fj_host "*) [ -n "$fj_host" ] ;; *) false ;; esac \
+    && fj_repo=$(url_repo "$urls" "$fj_host") || {
+    route_why="the remote 'forgejo' ($(printf '%s' "$urls" | redact)) is not a repository on a Forgejo host the forgejo skill uses ($forgejo_hosts); not offloading to it"
+    return 1
+  }
+  helper_ok "$git_forgejo" "$git_forgejo_default" \
+    || { route_why="route (3) needs the forgejo skill's git-forgejo ($git_forgejo), committed and unmodified in its checkout"; return 1; }
+  helper_ok "$fj_wait" "$fj_wait_default" "${fj_wait_default%/*}/bench-env.sh" \
+    || { route_why="route (3) needs $fj_wait (the wait tool forgejo-ci-run uses), committed and unmodified in its checkout"; return 1; }
+  # Defence in depth (adversary F4): sudo-secretspec may drop GIT_CONFIG_PARAMETERS on the way to git-forgejo's git,
+  # so the push passes --no-follow-tags --no-recurse-submodules itself, and a repo configured otherwise is refused.
+  v=$(git -C "$top" config --type=bool --get push.followTags 2>/dev/null); st=$?
+  { [ "$st" = 0 ] && [ "$v" = true ]; } || [ "$st" -gt 1 ] && { route_why="push.followTags is set (or unreadable) in $top; route (3) refuses"; return 1; }
+  v=$(git -C "$top" config --type=bool --get submodule.recurse 2>/dev/null); st=$?
+  { [ "$st" = 0 ] && [ "$v" = true ]; } || [ "$st" -gt 1 ] && { route_why="submodule.recurse is set (or unreadable) in $top; route (3) refuses"; return 1; }
+  v=$(git -C "$top" config --get push.recurseSubmodules 2>/dev/null); st=$?
+  { [ "$st" = 0 ] && [ "$v" != no ]; } || [ "$st" -gt 1 ] && { route_why="push.recurseSubmodules is '$v' in $top (not no); route (3) refuses"; return 1; }
+  [ -z "$(git -C "$top" for-each-ref --count=1 refs/replace/ 2>/dev/null)" ] \
+    || { route_why="$top has replace refs (refs/replace/); route (3) refuses"; return 1; }
+  return 0
 }
 
 # wf_pushes_ci_run FILE: the workflow has a push trigger on ci/run/** (comments ignored).
@@ -243,21 +363,42 @@ wf_pushes_ci_run() {
         END { exit !(p && b) }' "$1"
 }
 
-# generic_route: route (4) (header). Sets runner/gh_repo or route_why.
+# fetch_ci_base SHA: make refs/remotes/$remote/ci/base the remote's ci/base (SHA). A concurrent bg may hold the ref's
+# lock (adversary F9): a failed fetch is fine if the ref is at SHA now, else it is retried once.
+fetch_ci_base() {
+  local n
+  for n in 1 2; do
+    run_group "$t_fetch" "$tmp/base.fetch" "$tmp/base.fetch.err" \
+      git -C "$top" fetch --no-tags --quiet "$remote" "+refs/heads/ci/base:refs/remotes/$remote/ci/base"
+    [ "$rc" = 0 ] && return 0
+    [ "$(git -C "$top" rev-parse --verify -q "refs/remotes/$remote/ci/base" 2>/dev/null)" = "$1" ] && return 0
+    sleep 2
+  done
+  return 1
+}
+
+# generic_route: route (4) (header). Sets runner or route_why.
 generic_route() {
-  local url sha cur f
-  ci_remote || return 1
-  if ! url=$(one_push_url "$remote"); then
-    route_why="no tracked scripts/bg-offload-run, scripts/github-ci-run or scripts/forgejo-ci-run, and the CI remote '$remote' is missing or has more than one push url"
+  local sha cur f perm owner
+  kind=generic
+  if [ -z "$gh_repo" ]; then
+    route_why="no tracked scripts/bg-offload-run, scripts/github-ci-run or scripts/forgejo-ci-run, and the CI remote '$remote' is not one github.com repo (set git config bgoffload.remote to a fork's remote)"
     return 1
   fi
-  if ! gh_repo=$(github_repo "$url"); then
-    route_why="no tracked scripts/bg-offload-run, scripts/github-ci-run or scripts/forgejo-ci-run, and the CI remote '$remote' ($(printf '%s' "$url" | redact)) is not a github.com repo (set git config bgoffload.remote to a fork's remote)"
-    return 1
+  helper_ok "$generic_runner" "$generic_default" \
+    || { route_why="the generic GitHub runner $generic_runner is missing, untracked or modified in its checkout"; return 1; }
+  # Whose repo (adversary F12): djbclark's, one he administers, or a remote named explicitly in bgoffload.remote.
+  owner=$(printf '%s' "${gh_repo%%/*}" | gtr 'A-Z' 'a-z')
+  if [ "$owner" != djbclark ] && [ -z "$(git -C "$top" config --get bgoffload.remote 2>/dev/null)" ]; then
+    perm=$(gtimeout 60 "$gh_bin" repo view "$gh_repo" --json viewerPermission --jq .viewerPermission 2>/dev/null) || { perm=""; transient=1; }
+    if [ "$perm" != ADMIN ]; then
+      route_why="$gh_repo is not djbclark's and gh does not report ADMIN on it (${perm:-unreadable}); route (4) pushes ci/run branches only to his repos, or to one named with git config bgoffload.remote"
+      return 1
+    fi
   fi
-  [ -f "$generic_runner" ] && [ -x "$generic_runner" ] || { route_why="the generic GitHub runner $generic_runner is missing"; return 1; }
-  GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_LSREMOTE_TIMEOUT:-60}" "$tmp/base.lsr" "$tmp/base.err" git -C "$top" ls-remote --refs "$remote" refs/heads/ci/base
+  run_group "$t_lsremote" "$tmp/base.lsr" "$tmp/base.err" git -C "$top" ls-remote --refs "$remote" refs/heads/ci/base
   if [ "$rc" != 0 ]; then
+    transient=1
     route_why="could not ask $remote ($gh_repo) for its ci/base (rc $rc): $(ghead -n 1 "$tmp/base.err" | redact)"
     return 1
   fi
@@ -265,13 +406,10 @@ generic_route() {
   [ -n "$sha" ] || { route_why="no tracked CI route script, and $gh_repo (remote $remote) has no ci/base branch with a ci/run/** workflow"; return 1; }
   if ! git -C "$top" show-ref --verify --quiet refs/heads/ci/base; then
     cur=$(git -C "$top" rev-parse --verify -q "refs/remotes/$remote/ci/base" 2>/dev/null) || cur=""
-    if [ "$cur" != "$sha" ]; then
-      GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_FETCH_TIMEOUT:-300}" "$tmp/base.fetch" "$tmp/base.fetch.err" \
-        git -C "$top" fetch --no-tags --quiet "$remote" "+refs/heads/ci/base:refs/remotes/$remote/ci/base"
-      if [ "$rc" != 0 ]; then
-        route_why="could not fetch ci/base from $remote (rc $rc): $(ghead -n 1 "$tmp/base.fetch.err" | redact)"
-        return 1
-      fi
+    if [ "$cur" != "$sha" ] && ! fetch_ci_base "$sha"; then
+      transient=1
+      route_why="could not fetch ci/base from $remote (rc $rc): $(ghead -n 1 "$tmp/base.fetch.err" | redact)"
+      return 1
     fi
   fi
   find_base_ref
@@ -279,19 +417,32 @@ generic_route() {
     route_why="could not read ci/base in $top after asking $remote for it"
     return 1
   fi
+  prefetch_workflows "$base_ref"
   for f in agent-ci.yml linux-ci.yml; do
-    git -C "$top" show "$base_ref:.github/workflows/$f" > "$tmp/wf" 2>/dev/null || continue
-    if wf_pushes_ci_run "$tmp/wf"; then runner="$generic_runner"; kind=generic; return 0; fi
+    show_blob "$base_ref:.github/workflows/$f" "$tmp/wf" || continue
+    if wf_pushes_ci_run "$tmp/wf"; then runner="$generic_runner"; return 0; fi
   done
-  route_why="ci/base (${base_ref#refs/}) of $gh_repo has no .github/workflows/agent-ci.yml or linux-ci.yml with a push trigger on ci/run/**"
+  route_why="ci/base (${base_ref#refs/}) of $gh_repo has no readable .github/workflows/agent-ci.yml or linux-ci.yml with a push trigger on ci/run/**"
   return 1
 }
 
-# route <top>: set $kind (custom, github, forgejo, generic), $runner and $remote, or set $route_why and fail. Only a
-# TRACKED script in the repo is a route; a tracked route that fails its own checks is no route (no fall-through).
+# try_github: route (2) if tracked, else route (4).
+try_github() {
+  ci_remote || return 1
+  if [ "$have2" = 1 ]; then kind=github; runner="$top/scripts/github-ci-run"; return 0; fi
+  generic_route
+}
+# try_forgejo: route (3).
+try_forgejo() { kind=forgejo; runner="$top/scripts/forgejo-ci-run"; forgejo_ok; }
+
+# route: set $kind (custom, github, forgejo, generic), $runner, $remote (and $gh_repo for GitHub routes), or set
+# $route_why and fail. Only a TRACKED script in the repo opts a repo into a route. Order (header): (1); then, when a
+# tracked forgejo-ci-run exists, by the CI remote's visibility: a public github.com repo tries (2)/(4) before (3), any
+# other (private, not GitHub, unreadable) tries (3) first and falls through to (2)/(4) only when it has no `forgejo`
+# remote; without forgejo-ci-run, (2) then (4).
 route() {
-  local r
-  kind=""; runner=""; remote=""; gh_repo=""; route_why=""
+  local gwhy
+  kind=""; runner=""; remote=""; gh_repo=""; route_why=""; fj_missing=0
   [ -d "$top/.git" ] || { route_why="$top is not a repo top with its own .git (a linked worktree has no route)"; return 1; }
   if [ -n "$runner_override" ]; then
     [ -x "$runner_override" ] || { route_why="BG_OFFLOAD_RUNNER $runner_override is not executable"; return 1; }
@@ -299,51 +450,105 @@ route() {
     ci_remote
     return
   fi
-  for r in scripts/bg-offload-run scripts/github-ci-run scripts/forgejo-ci-run; do
-    tracked_exec "$top" "$r" || continue
-    runner="$top/$r"
-    case "$r" in
-      scripts/bg-offload-run) kind=custom; ci_remote; return ;;
-      scripts/github-ci-run) kind=github; ci_remote; return ;;
-      *) kind=forgejo; forgejo_ok; return ;;
-    esac
-  done
-  generic_route
+  if tracked_exec "$top" scripts/bg-offload-run; then
+    kind=custom; runner="$top/scripts/bg-offload-run"
+    ci_remote
+    return
+  fi
+  have2=0; tracked_exec "$top" scripts/github-ci-run && have2=1
+  have3=0; tracked_exec "$top" scripts/forgejo-ci-run && have3=1
+  [ "$have3" = 1 ] || { try_github; return; }
+  ci_remote || return 1
+  vis=unknown
+  [ -n "$gh_repo" ] && gh_vis "$gh_repo"
+  if [ "$vis" = public ]; then
+    try_github && return 0
+    gwhy=$route_why
+    try_forgejo && return 0
+    route_why="$gwhy (and route (3): $route_why)"
+    return 1
+  fi
+  try_forgejo && return 0
+  [ "$fj_missing" = 1 ] || return 1
+  try_github
 }
 
-# macos_workflow: a workflow the run fires (linux-ci.yml, agent-ci.yml: ci/base's copy where the runner overlays it,
-# else HEAD's) mentions macos or xcode outside a comment. Exit 0 yes (an unreadable one counts as yes), 1 no.
-macos_workflow() {
-  local f src
-  for f in .github/workflows/linux-ci.yml .github/workflows/agent-ci.yml; do
-    src=""
-    if [ -n "$base_ref" ] && git -C "$top" cat-file -e "$base_ref:$f" 2>/dev/null; then src="$base_ref:$f"
-    elif git -C "$top" cat-file -e "HEAD:$f" 2>/dev/null; then src="HEAD:$f"
+# workflows_linux_only: header, visibility guard. Every workflow in the tree a GitHub route pushes (HEAD's
+# .github/workflows/*.y{a,}ml with ci/base's linux-ci.yml/agent-ci.yml in their place: what github-ci-run's
+# neutraliser keeps is a subset of this, whichever python it finds) is provably not macOS: every line naming runs-on is
+# `runs-on: LABEL` or `runs-on: [LABEL, ...]` with literal labels none of which looks like macOS/Xcode, and every
+# reusable-workflow `uses:` is ./.github/workflows/FILE in the same tree. Anything else (expressions, anchors, flow
+# mappings, a remote reusable workflow, an unreadable file) is not provable. Exit 0 provable, 1 not ($guard_why).
+workflows_linux_only() {
+  local f n src ov=" "
+  guard_why=""
+  : > "$tmp/wf.list"
+  GIT_NO_LAZY_FETCH=1 git -C "$top" ls-tree -r --name-only HEAD -- .github/workflows/ > "$tmp/wf.head" 2>/dev/null \
+    || { guard_why="HEAD's workflows cannot be listed"; return 1; }
+  # The overlay: ci/base's copy wherever ci/base's tree has the path (its blob is read below; unreadable = not provable).
+  for n in linux-ci.yml agent-ci.yml; do
+    if [ -n "$base_ref" ] && [ -n "$(GIT_NO_LAZY_FETCH=1 git -C "$top" ls-tree "$base_ref" -- ".github/workflows/$n" 2>/dev/null)" ]; then
+      printf '%s\n' "$base_ref:.github/workflows/$n" >> "$tmp/wf.list"
+      ov="$ov$n "
     fi
-    [ -n "$src" ] || continue
-    git -C "$top" show "$src" > "$tmp/wf" 2>/dev/null || return 0
-    gawk '{ sub(/(^|[[:space:]])#.*/, "") } tolower($0) ~ /macos|xcode/ { f = 1 } END { exit !f }' "$tmp/wf" && return 0
   done
-  return 1
+  while IFS= read -r f; do
+    case "$f" in *.yml|*.yaml) ;; *) continue ;; esac
+    n=${f#.github/workflows/}
+    case "$n" in */*) continue ;; esac  # GitHub reads only the top level of .github/workflows
+    case "$ov" in *" $n "*) continue ;; esac
+    printf '%s\n' "HEAD:$f" >> "$tmp/wf.list"
+  done < "$tmp/wf.head"
+  while IFS= read -r src; do
+    show_blob "$src" "$tmp/wf" || { guard_why="${src#*:} cannot be read here"; return 1; }
+    guard_why=$(gawk -v name="${src#*:}" '
+      function bad(why) { print name ":" NR ": " why; found = 1; exit }
+      function label_ok(l) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", l)
+        if (l ~ /^".*"$/ || l ~ /^\047.*\047$/) l = substr(l, 2, length(l) - 2)
+        if (l !~ /^[A-Za-z0-9._-]+$/) return 0
+        l = tolower(l)
+        if (l ~ /macos|xcode|osx|darwin|apple/ || l ~ /(^|[-_.])mac([-_.0-9]|$)/) return 0
+        return 1
+      }
+      /^[[:space:]]*#/ { next }
+      index($0, "runs-on") {
+        if (!match($0, /^[[:space:]]*(-[[:space:]]+)?runs-on[[:space:]]*:[[:space:]]*(.*)$/, m)) bad("runs-on in a form that cannot be read as a literal label")
+        v = m[2]; sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v)
+        if (v ~ /^\[.*\]$/) {
+          k = split(substr(v, 2, length(v) - 2), parts, ",")
+          if (k == 0) bad("empty runs-on")
+          for (i = 1; i <= k; i++) if (!label_ok(parts[i])) bad("runs-on " v " is not a literal non-macOS label")
+        } else if (!label_ok(v)) bad("runs-on " (v == "" ? "(block or empty)" : v) " is not a literal non-macOS label")
+      }
+      index($0, "workflows/") && index($0, "uses") {
+        if ($0 !~ /^[[:space:]]*(-[[:space:]]+)?uses[[:space:]]*:[[:space:]]*["\047]?\.\/\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml["\047]?[[:space:]]*(#.*)?$/)
+          bad("uses a workflow outside this tree")
+      }
+      END { if (!found) exit 0 }' "$tmp/wf")
+    [ -z "$guard_why" ] || return 1
+  done < "$tmp/wf.list"
+  return 0
 }
 
-# vis_guard: header, visibility guard (routes (2), (4)). Fails with $route_why.
+# vis_guard: header, visibility guard, for every route that pushes to GitHub (adversary F1, F2): runs that cannot be
+# shown to stay off macOS need a public repo. Fails with $route_why.
 vis_guard() {
-  local url repo vis
-  case "$kind" in github|generic) ;; *) return 0 ;; esac
+  case "$kind" in custom|github|generic) ;; *) return 0 ;; esac
   # An unreadable ci/base: only the probe gets here with one (the publish check (c) refuses it before the full run
   # calls this guard), so the probe leaves the refusal, and its reason, to that check.
   [ "$base_bad" = 1 ] && return 0
-  macos_workflow || return 0
-  if ! url=$(one_push_url "$remote") || ! repo=$(github_repo "$url"); then
-    route_why="the CI workflow runs on macOS (macos/xcode) but the CI remote '$remote' is not one github.com repo, so its visibility cannot be checked; not offloading"
+  prefetch_workflows HEAD ${base_ref:+"$base_ref"}
+  workflows_linux_only && return 0
+  if [ -z "$gh_repo" ]; then
+    route_why="a workflow may run on macOS ($guard_why) and the CI remote '$remote' is not one github.com repo, so its visibility cannot be checked; not offloading"
     return 1
   fi
-  vis=$(gtimeout 60 "$gh_bin" repo view "$repo" --json isPrivate --jq .isPrivate 2> "$tmp/vis.err") || vis="error"
+  [ "$vis" = public ] || [ "$vis" = private ] || gh_vis "$gh_repo"
   case "$vis" in
-    false) return 0 ;;
-    true) route_why="$repo is PRIVATE and its CI workflow runs on macOS (macos/xcode): GitHub bills private macOS runners about 10x, so macOS builds go to GitHub for public repos only (djbclark 2026-11-01)" ;;
-    *) route_why="could not read whether $repo is private (gh repo view: $(ghead -n 1 "$tmp/vis.err")), and its CI workflow runs on macOS; not offloading (macOS runners for public repos only)" ;;
+    public) return 0 ;;
+    private) route_why="$gh_repo is PRIVATE and a workflow may run on macOS ($guard_why): GitHub bills private macOS runners about 10x, so only provably Linux workflows go to GitHub for a private repo (djbclark 2026-11-01)" ;;
+    *) route_why="could not read whether $gh_repo is private (gh repo view: $(ghead -n 1 "$tmp/vis.err")), and a workflow may run on macOS ($guard_why); not offloading" ;;
   esac
   return 1
 }
@@ -364,7 +569,7 @@ run_group() {
   trap - TERM INT HUP
 }
 
-base_ref=""; base_bad=0
+base_ref=""; base_bad=0; vis=""; transient=0; have2=0; have3=0; fj_missing=0
 # mktmp: the helper's scratch directory, removed on exit. bg may kill us (it runs us as a child): bash runs the EXIT
 # trap when a TERM ends it (checked 2026-10-23), so no TERM trap is needed while polling; only run_group traps TERM,
 # to kill a runner's process group.
@@ -373,16 +578,54 @@ mktmp() {
   trap 'rm -rf "$tmp"' EXIT
 }
 
+# probe_key: what a probe's answer depends on that is cheap to read here (adversary F9): the repo, the CI remote and
+# its url, the forgejo url, HEAD, the local ci/base copies and the route scripts. Network answers (ls-remote, gh) are
+# behind it for up to BG_OFFLOAD_PROBE_TTL seconds (300; 0 = no cache; tests default to 0).
+probe_key() {
+  local r s
+  r=$(git -C "$top" config --get bgoffload.remote 2>/dev/null) || r=""
+  [ -n "$r" ] || r="${GITHUB_CI_REMOTE:-origin}"
+  {
+    printf '%s\n' "$top" "$r" "$url_alias" "$runner_override" "$generic_runner" "$git_forgejo" "$fj_wait"
+    git -C "$top" remote get-url --push --all -- "$r" 2>/dev/null
+    git -C "$top" remote get-url --push --all -- forgejo 2>/dev/null
+    git -C "$top" rev-parse HEAD refs/heads/ci/base "refs/remotes/$r/ci/base" refs/remotes/forgejo/ci/base 2>/dev/null
+    git -C "$top" ls-files -s -- scripts/bg-offload-run scripts/github-ci-run scripts/forgejo-ci-run 2>/dev/null
+    for s in scripts/bg-offload-run scripts/github-ci-run scripts/forgejo-ci-run; do [ -x "$top/$s" ] && echo "x $s"; done
+    git -C "$top" config --get-regexp '^(push|submodule)\.' 2>/dev/null
+  } | gsha256sum | gawk '{ print $1 }'
+}
+
 if [ "${1:-}" = --probe ]; then
   top="${2:-}"
   [ -n "$top" ] || { say "offload: usage: bg-offload --probe TOP"; exit 2; }
   tools_ok || exit 69
   top=$(greadlink -f "$top") || { say "offload: no such directory: $2"; exit 69; }
   mktmp
-  route || { say "offload: $route_why"; exit 69; }
-  [ "$kind" = github ] && find_base_ref
-  vis_guard || { say "offload: $route_why"; exit 69; }
-  exit 0
+  cache=""
+  if [ "$probe_ttl" -gt 0 ]; then
+    cache="$HOME/.local/state/bg-offload/probe-cache/$(probe_key)"
+    c_t=""; c_rc=""; c_why=""
+    [ -f "$cache" ] && IFS=$'\t' read -r c_t c_rc c_why < "$cache"
+    case "$c_t" in ""|*[!0-9]*) c_t=0 ;; esac
+    if [ $(( $(gdate +%s) - c_t )) -lt "$probe_ttl" ] && { [ "$c_rc" = 0 ] || [ "$c_rc" = 69 ]; }; then
+      [ "$c_rc" = 0 ] && exit 0
+      say "offload: $c_why"
+      exit 69
+    fi
+  fi
+  p_rc=0
+  if ! route; then p_rc=69
+  else
+    case "$kind" in custom|github) find_base_ref ;; esac
+    vis_guard || p_rc=69
+  fi
+  if [ -n "$cache" ] && [ "$transient" = 0 ]; then
+    mkdir -p "${cache%/*}" && printf '%s\t%s\t%s\n' "$(gdate +%s)" "$p_rc" "$route_why" > "$cache.$$" && mv -f "$cache.$$" "$cache"
+  fi
+  [ "$p_rc" = 0 ] && exit 0
+  say "offload: $route_why"
+  exit 69
 fi
 
 top="${1:-}"
@@ -470,9 +713,9 @@ elif [ "$fetch_urls" != "$push_urls" ] || [ "$(printf '%s\n' "$push_urls" | gwc 
   say "offload: remote $remote does not have exactly one url that is both its fetch and push url (set-url, pushurl, pushInsteadOf or several urls); the push target cannot be verified"
 else
   if [ "$kind" = forgejo ]; then
-    GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_LSREMOTE_TIMEOUT:-60}" "$tmp/lsr" "$tmp/lsr.err" "$git_forgejo" -C "$top" ls-remote --refs "$remote"
+    run_group "$t_lsremote" "$tmp/lsr" "$tmp/lsr.err" "$git_forgejo" -C "$top" ls-remote --refs "$remote"
   else
-    GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_LSREMOTE_TIMEOUT:-60}" "$tmp/lsr" "$tmp/lsr.err" git -C "$top" ls-remote --refs "$remote"
+    run_group "$t_lsremote" "$tmp/lsr" "$tmp/lsr.err" git -C "$top" ls-remote --refs "$remote"
   fi
   if [ "$rc" != 0 ]; then
     refuse=1
@@ -529,7 +772,7 @@ missing_objects; st=$?
 if [ "$st" = 1 ]; then
   say "offload: $(gwc -l < "$tmp/missing" | gsed 's/ //g') object(s) of the trees the runner reads are not in this partial clone; fetching them"
   rg_in="$tmp/missing"
-  GIT_TERMINAL_PROMPT=0 run_group "${BG_OFFLOAD_FETCH_TIMEOUT:-300}" "$tmp/fetch.out" "$tmp/fetch.err" git -C "$top" cat-file --batch-check
+  run_group "$t_fetch" "$tmp/fetch.out" "$tmp/fetch.err" git -C "$top" cat-file --batch-check
   rg_in=""
   missing_objects; st=$?
 fi
@@ -545,6 +788,11 @@ if ! vis_guard; then
   say "offload: no CI route: $route_why"
   exit 69
 fi
+# A GitHub route is followed on the repo its remote names (adversary F11): no github.com remote, nothing to follow.
+if [ "$kind" != forgejo ] && [ -z "$gh_repo" ]; then
+  say "offload: no CI route: the CI remote '$remote' is not one github.com repo, so its CI run could not be followed; not offloading"
+  exit 69
+fi
 ref="$head_sha"
 if [ -n "$untracked" ]; then what="HEAD ${head_sha:0:8}, already on $remote (the tree has untracked files, which CI does not get)"
 else what="HEAD ${head_sha:0:8}, already on $remote"; fi
@@ -556,9 +804,13 @@ if [ -n "$untracked" ]; then
   [ "$(gwc -l < "$tmp/untracked")" -gt 20 ] && say "offload:   ... and more"
 fi
 
-# 4. Run the route. Route (3) waits for its own run and its exit status is the verdict; the others push the run
-# (their own wait is skipped: --no-wait) and this helper polls GitHub below.
-say "offload: running the repo's CI on $what via ${runner#$top/}${remote:+ (remote $remote)}"
+# 4. Run the route. Route (3): this helper pushes the checked commit itself and waits with the Forgejo wait tool; the
+# others run their runner (its own wait is skipped: --no-wait) and this helper polls GitHub below.
+if [ "$kind" = forgejo ]; then
+  say "offload: running the repo's CI on $what: git-forgejo push to forgejo ci-run, then ${fj_wait##*/}"
+else
+  say "offload: running the repo's CI on $what via ${runner#$top/}${remote:+ (remote $remote)}"
+fi
 out="$tmp/runner.out"
 cd "$top" || exit 69
 # The runner's `git push` must carry the one ref and nothing else, whatever the caller's git config says:
@@ -567,22 +819,51 @@ cd "$top" || exit 69
 # overrides both (a caller's own entries are kept). A malformed caller value already failed `git status` above.
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'push.followtags'='false' 'push.recursesubmodules'='no'"
 if [ "$kind" = forgejo ]; then
-  run_group "$(( ${BG_OFFLOAD_PUSH_TIMEOUT:-900} + ${BG_OFFLOAD_WAIT:-2400} ))" "$out" "$tmp/runner.err" "$runner" "$ref"
-  case "$rc" in
-    0) echo "bg: CI PASSED on this tree (scripts/forgejo-ci-run exited 0): $what"
-       echo "bg: the repo's whole CI workflow passed; the command you named was not selected on its own: $cmd_text"
-       gtail -n 5 "$out" | gsed 's/^/bg:   /'
-       exit 0 ;;
-    124|137) echo "bg: scripts/forgejo-ci-run was still waiting after $(( ${BG_OFFLOAD_PUSH_TIMEOUT:-900} + ${BG_OFFLOAD_WAIT:-2400} )) s and was stopped; the CI run may still be going. Its last lines:"
-       gtail -n 20 "$out" | gsed 's/^/bg:   /'; gtail -n 10 "$tmp/runner.err" | gsed 's/^/bg:   /'
-       exit 76 ;;
-    *) echo "bg: CI FAILED: scripts/forgejo-ci-run exited $rc. Its last lines:"
-       gtail -n 30 "$out" | gsed 's/^/bg:   /'; gtail -n 10 "$tmp/runner.err" | gsed 's/^/bg:   /'
-       exit 1 ;;
+  # Route (3) (adversary F3, F4, F8): push exactly the commit checked above, never "whatever HEAD is by now", with the
+  # flags on the command line (sudo-secretspec may not pass GIT_CONFIG_PARAMETERS through), then wait. A failed push
+  # published nothing: 69, like any refusal.
+  run_group "$t_push" "$tmp/push.out" "$tmp/push.err" "$git_forgejo" -C "$top" push --force --no-follow-tags \
+    --no-recurse-submodules forgejo "$head_sha:refs/heads/ci-run"
+  if [ "$rc" != 0 ]; then
+    say "offload: pushing ${head_sha:0:8} to forgejo ci-run failed (rc $rc); no run is followed. Its stderr tail:"
+    gtail -n 8 "$tmp/push.err" | redact | gsed 's/^/bg:   /' >&2
+    exit 69
+  fi
+  say "offload: pushed ${head_sha:0:8} to ci-run on $fj_host/$fj_repo; waiting for its Forgejo run, up to $t_wait s"
+  say "offload: this runs the repo's whole CI workflow, not only: $cmd_text"
+  t0=$(gdate +%s)
+  RP="$fj_repo" WAIT_MAX="$t_wait" run_group "$((t_wait + t_grace))" "$tmp/wait.out" "$tmp/wait.err" "$fj_wait" "$head_sha" "$tmp/fj.log"
+  el=$(( $(gdate +%s) - t0 ))
+  st_line=$(ghead -n 1 "$tmp/fj.log.status" 2>/dev/null)
+  run_id=$(printf '%s' "$st_line" | gsed -nE 's/^run=([0-9]+) .*/\1/p')
+  run_url="https://$fj_host/$fj_repo/actions${run_id:+/runs/$run_id}"
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    say "offload: the Forgejo run had not finished after ${el} s and the wait was stopped; it may still be going: $run_url"
+    exit 76
+  fi
+  case "$st_line" in
+    *" status=success")
+      echo "bg: CI workflow PASSED on this tree (${el} s, Forgejo): $run_url"
+      echo "bg: ref: $what. The repo's whole CI workflow passed; the command you named was not selected on its own: $cmd_text"
+      exit 0 ;;
+    *" status=failure")
+      echo "bg: CI FAILED (${el} s, Forgejo): $run_url"
+      echo "bg: job log, last 60 lines:"
+      gtail -n 60 "$tmp/fj.log"
+      exit 1 ;;
+    timeout*)
+      say "offload: the Forgejo run had not finished after BG_OFFLOAD_WAIT=$t_wait s; it may still be going: $run_url"
+      exit 76 ;;
+    *" status="*)
+      say "offload: the Forgejo run ended '${st_line##*status=}': $run_url; no verdict"
+      exit 77 ;;
+    *)
+      say "offload: pushed, but ${fj_wait##*/} gave no verdict (rc $rc): $(ghead -n 1 "$tmp/wait.err")"
+      exit 77 ;;
   esac
 fi
 export GITHUB_CI_REMOTE="$remote"  # the CI remote the checks above asked; github-ci-run pushes to it
-run_group "${BG_OFFLOAD_PUSH_TIMEOUT:-900}" "$out" "$tmp/runner.err" "$runner" --no-wait "$ref"
+run_group "$t_push" "$out" "$tmp/runner.err" "$runner" --no-wait "$ref"
 if [ "$rc" != 0 ]; then
   say "offload: the CI runner exited $rc (it may have pushed before failing; no run is followed). Its stderr tail:"
   gtail -n 8 "$tmp/runner.err" | gsed 's/^/bg:   /' >&2
@@ -590,7 +871,7 @@ if [ "$rc" != 0 ]; then
 fi
 commit=$(gawk '/^overlay [0-9a-f]+ for /{print $2; exit}' "$out")
 url=$(gawk '/^(pushed|branch:) https:\/\/github.com\//{print $2; exit}' "$out")
-repo=${url#https://github.com/}; repo=${repo%%/tree/*}
+repo=${url#https://github.com/}; repo=${repo%%/tree/*}; repo=${repo%/}
 branch=${url#*/tree/}
 case "$commit" in *[!0-9a-f]*|"") commit="" ;; esac
 [ "${#commit}" = 40 ] || commit=""
@@ -601,30 +882,46 @@ if [ -z "$commit" ] || [ -z "$repo" ] || [ -z "$branch" ]; then
   gtail -n 8 "$out" | gsed 's/^/bg:   /' >&2
   exit 77
 fi
-say "offload: pushed $branch on $repo (commit ${commit:0:8}); waiting for CI, up to ${BG_OFFLOAD_WAIT:-2400} s"
+# Follow the repo the checks and the guard were about (adversary F11), and only if the runner says it pushed there.
+if [ "$(printf '%s' "$repo" | gtr 'A-Z' 'a-z')" != "$(printf '%s' "$gh_repo" | gtr 'A-Z' 'a-z')" ]; then
+  say "offload: the runner says it pushed to $repo, but the CI remote '$remote' is $gh_repo; no verdict"
+  exit 77
+fi
+repo="$gh_repo"
+say "offload: pushed $branch on $repo (commit ${commit:0:8}); waiting for CI, up to $t_wait s"
 say "offload: this runs the repo's whole CI workflow, not only: $cmd_text"
 
-# download_artifacts: header, Artifacts. Never changes the verdict.
+# download_artifacts: header, Artifacts. Never changes the verdict. Each run is downloaded into a temporary directory
+# beside its target and moved into place (adversary F10: a re-run keeps its id, and a partial download must not
+# linger); then runs older than 7 days, and all but the newest 20 per repo, are pruned.
 download_artifacts() {
-  local id d
+  local id d base part
   [ "${BG_OFFLOAD_ARTIFACTS:-1}" = 0 ] && return 0
+  base="$HOME/.local/state/bg-offload/artifacts/${repo%%/*}__${repo#*/}"
+  mkdir -p "$base" || { say "offload: warning: cannot create $base; artifacts not downloaded (the verdict stands)"; return 0; }
   for id in "${ok_ids[@]}"; do
     case "$id" in ""|*[!0-9]*) continue ;; esac
-    d="$HOME/.local/state/bg-offload/artifacts/${repo%%/*}__${repo#*/}/$id"
-    if mkdir -p "$d" && gtimeout "${BG_OFFLOAD_ARTIFACT_TIMEOUT:-600}" "$gh_bin" run download "$id" -R "$repo" -D "$d" \
-        > "$tmp/dl.out" 2> "$tmp/dl.err"; then
+    d="$base/$id"
+    part=$(gmktemp -d "$base/.part.XXXXXX") || { say "offload: warning: cannot create a download directory in $base (the verdict stands)"; continue; }
+    if gtimeout "$t_art" "$gh_bin" run download "$id" -R "$repo" -D "$part" > "$tmp/dl.out" 2> "$tmp/dl.err" \
+        && rm -rf -- "$d" && mv -- "$part" "$d"; then
+      touch -- "$d"
       echo "bg: artifacts of run $id: $d"
     else
-      say "offload: warning: could not download the artifacts of run $id (the verdict stands): $(ghead -n 1 "$tmp/dl.err")"
-      rmdir "$d" 2>/dev/null
+      rm -rf -- "$part"
+      say "offload: warning: could not download the artifacts of run $id to $d (the verdict stands): $(ghead -n 1 "$tmp/dl.err")"
     fi
   done
+  gfind "$base" -mindepth 1 -maxdepth 1 -type d -name '.part.*' -mmin +120 -exec rm -rf -- {} + 2>/dev/null
+  gfind "$base" -mindepth 1 -maxdepth 1 -type d -regex '.*/[0-9]+' -mtime +7 -exec rm -rf -- {} + 2>/dev/null
+  gfind "$base" -mindepth 1 -maxdepth 1 -type d -regex '.*/[0-9]+' -printf '%T@\t%p\n' 2>/dev/null \
+    | gsort -rn | gtail -n +21 | gawk -F'\t' '{ print $2 }' | while IFS= read -r d; do rm -rf -- "$d"; done
 }
 
 # 5. Wait for every run on that commit.
 t0=$(gdate +%s)
-limit="${BG_OFFLOAD_WAIT:-2400}"
-appear="${BG_OFFLOAD_APPEAR:-240}"
+limit="$t_wait"
+appear="$t_appear"
 errs=0
 rows="$tmp/rows"
 while :; do

@@ -81,13 +81,16 @@
 #     goes to CI instead (2026-10-23: a 2 s pytest file sat over an hour in the gate at load 25-93 on 8 cores, the
 #     carve-out defeated CI-first exactly when the machine is busiest). No route or a refusal: it keeps waiting;
 #   - a release, `local`, `pending` and undecided repos: unchanged, nothing offloads.
-# Routes (header of bin/bg-offload), first match wins: (1) a tracked scripts/bg-offload-run, (2) a tracked
-# scripts/github-ci-run, (3) a tracked scripts/forgejo-ci-run (self-waiting; remote `forgejo` on forgejo.mit.edu),
-# (4) generic GitHub: the CI remote (git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin) is a
-# github.com repo whose ci/base holds agent-ci.yml or linux-ci.yml triggered by a push to ci/run/**, run with
-# ~/src/djbclark-ade/scripts/github-ci-run. GitHub macOS runners are for PUBLIC repos only (djbclark 2026-11-01):
-# a private repo whose workflow runs on macos/xcode has no route (fail closed if gh cannot tell). After a GitHub
-# success the run's artifacts land in ~/.local/state/bg-offload/artifacts/OWNER__REPO/RUN/ (path printed).
+# Routes (header of bin/bg-offload): (1) a tracked scripts/bg-offload-run, (2) a tracked scripts/github-ci-run,
+# (3) Forgejo, for a repo with a tracked scripts/forgejo-ci-run: bg-offload pushes the checked commit to the
+# `forgejo` remote (forgejo.mit.edu) itself and waits with loopback-port-shim's wait-run.sh, (4) generic GitHub: the
+# CI remote (git config bgoffload.remote, else $GITHUB_CI_REMOTE, else origin) is djbclark's github.com repo whose
+# ci/base holds agent-ci.yml or linux-ci.yml triggered by a push to ci/run/**, run with the committed
+# ~/src/djbclark-ade/scripts/github-ci-run. A public GitHub repo uses (2)/(4) before (3), a private one (3) first
+# (djbclark 2026-11-01, herdr included). GitHub macOS runners are for PUBLIC repos only (djbclark 2026-11-01): for a
+# private repo every workflow the push carries must be provably Linux (literal non-macOS runs-on labels, local
+# reusable workflows only), else no route (fail closed if gh cannot tell). After a GitHub success the run's
+# artifacts land in ~/.local/state/bg-offload/artifacts/OWNER__REPO/RUN/ (path printed; 7 days, 20 per repo).
 # bg waits up to BG_OFFLOAD_WAIT (2400 s; the offload has its own budget, outside BG_MAX_WAIT). It needs `gh`,
 # `git` and the GNU tools bg-offload lists (gdate, gawk, gtimeout...). Exit codes: 0 CI's workflow passed on this
 # tree (not "the test you named passed": CI runs the repo's whole workflow), 1 CI failed (log tail printed; it can

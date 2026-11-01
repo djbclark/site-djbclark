@@ -75,7 +75,7 @@ fi
 if [ -f "$d/runner.garbage" ]; then cat "$d/runner.garbage"; exit 0; fi
 if [ -f "$d/runner.fail" ]; then echo "runner exploded" >&2; exit 1; fi
 echo "overlay {commit} for $2 -> origin ci/run/x-abc"
-echo "pushed https://github.com/djbclark/stubrepo/tree/ci/run/x-abc"
+echo "pushed https://github.com/$(cat "$d/runner.repo" 2>/dev/null || echo djbclark/stubrepo)/tree/ci/run/x-abc"
 """
 
 GH_STUB = """#!/bin/bash
@@ -104,8 +104,11 @@ case "$1 $2" in
     ;;
   "run view") cat "$d/failed.log" ;;
   "repo view")
-    # repo.private holds what `--jq .isPrivate` prints; without it gh cannot read the repo (fail closed)
-    if [ -f "$d/repo.private" ]; then cat "$d/repo.private"; else echo "gh: HTTP 404: Not Found" >&2; exit 1; fi
+    # repo.private holds what `--jq .isPrivate` prints, repo.perm what `--jq .viewerPermission` prints; without the
+    # file gh cannot read the repo (fail closed)
+    case "$*" in *viewerPermission*) f="$d/repo.perm" ;; *) f="$d/repo.private" ;; esac
+    printf '%s\\n' "$*" >> "$d/gh.repoview"
+    if [ -f "$f" ]; then cat "$f"; else echo "gh: HTTP 404: Not Found" >&2; exit 1; fi
     ;;
   "run download")
     if [ -f "$d/dl.fail" ]; then echo "no valid artifacts found to download" >&2; exit 1; fi
@@ -154,6 +157,8 @@ class Setup:
         git(tmp_path, "init", "-q", "--bare", str(self.remote))
         git(self.work, "remote", "add", "origin", str(self.remote))
         git(self.work, "push", "-q", "origin", "main")  # HEAD is on the remote: nothing unpushed
+        # origin (a local bare repo) stands in for github.com/djbclark/stubrepo, as a path and as a file:// url
+        self.alias = f"{self.remote} {STUB_REPO};file://{self.remote} {STUB_REPO}"
         self.load_watch("ci")
         self.codes([75])
         gh = self.home / "fakebin" / "gh"
@@ -186,7 +191,7 @@ class Setup:
              "BG_OFFLOAD_TESTING": "1", "BG_GH": str(self.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "5",
              "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1",
              # fakebin is a $PATH directory, like a real tool's: its build-app is not "another tree" (F6)
-             "PATH": f"{self.home / 'fakebin'}:{os.environ['PATH']}", **env}
+             "PATH": f"{self.home / 'fakebin'}:{os.environ['PATH']}", "BG_OFFLOAD_URL_ALIAS": self.alias, **env}
         e = {k: v for k, v in e.items() if v is not None}
         e.pop("BG_LOAD_WAIT", None)  # 0 would skip the gate under test
         cmd = argv or (str(self.home / "fakebin" / "pytest"), "tests/test_a.py")
@@ -427,7 +432,7 @@ def test_killing_bg_stops_the_offload_poller(s):
     (s.state / "runs.json").write_text(json.dumps([run(24, status="in_progress", conclusion=None)]))
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"),
          "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "60",
-         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_WAIT": "120"}
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_WAIT": "120", "BG_OFFLOAD_URL_ALIAS": s.alias}
     e.pop("BG_LOAD_WAIT", None)
     tdir = s.root / "tmpdir"
     tdir.mkdir()
@@ -490,7 +495,7 @@ def test_killing_bg_stops_an_in_flight_push(s):
     (s.state / "runner.slow").write_text("")
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"), "BG_OFFLOAD_TESTING": "1",
          "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "60",
-         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true"}
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_URL_ALIAS": s.alias}
     e.pop("BG_LOAD_WAIT", None)
     p = subprocess.Popen([str(BG), str(s.home / "fakebin" / "pytest"), "tests/test_a.py"], cwd=s.work, env=e,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1053,7 +1058,8 @@ def test_a_leading_zero_git_config_count_still_gets_the_override(s):
 
 def _offload(s, cwd, cmd=("pytest", "tests/test_a.py"), **env):
     e = {**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"),
-         "BG_OFFLOAD_RUNNER": str(s.work / "scripts" / "github-ci-run"), "BG_OFFLOAD_POLL": "0", **env}
+         "BG_OFFLOAD_RUNNER": str(s.work / "scripts" / "github-ci-run"), "BG_OFFLOAD_POLL": "0",
+         "BG_OFFLOAD_URL_ALIAS": s.alias, **env}
     return subprocess.run([str(OFFLOAD), str(cwd), "--", *cmd], cwd=cwd, env=e,
                           capture_output=True, text=True, timeout=60)
 
@@ -1137,19 +1143,35 @@ def test_an_overlay_object_that_cannot_be_fetched_refuses_before_the_runner(s):
     assert s.read("runner.calls") == "" and s.read("gh.calls") == ""
 
 
-# --- 2026-11-01: builds and full suites in a `ci` repo go to CI at once (A); route (3) scripts/forgejo-ci-run and
-# route (4) generic GitHub (B); GitHub macOS runners for public repos only (C); artifacts after a success (D) ---
+# --- 2026-11-01: builds and full suites in a `ci` repo go to CI at once (A); route (3) Forgejo and route (4) generic
+# GitHub (B); GitHub macOS runners for public repos only (C); artifacts after a success (D); and the fixes for the
+# adversary review of 9090cc2 (F1-F12) ---
 
 STUB_REPO = "https://github.com/djbclark/stubrepo.git"
 
+# scripts/forgejo-ci-run only opts a repo into route (3); bg-offload never runs it (F3)
 FORGEJO_RUNNER = """#!/bin/bash
+touch {state}/fj.ran
+"""
+
+# the Forgejo wait tool (wait-run.sh SHA OUT): writes OUT and OUT.status like the real one
+FORGEJO_WAIT = """#!/bin/bash
 d={state}
-printf '%s\\n' "$*" >> "$d/fj.calls"
-pwd -P > "$d/fj.cwd"
-for i in $(seq 1 40); do echo "fj log $i"; done
-[ -f "$d/fj.slow" ] && /bin/sleep 5
-if [ -f "$d/fj.fail" ]; then echo "status=failure"; exit 1; fi
-echo "status=success"
+printf '%s %s RP=%s WAIT_MAX=%s\\n' "$1" "$2" "$RP" "$WAIT_MAX" >> "$d/wait.calls"
+[ -f "$d/wait.slow" ] && /bin/sleep 5
+[ -f "$d/wait.nostatus" ] && {{ echo "forgejo-api: broker failed" >&2; exit 1; }}
+st=$(cat "$d/wait.status" 2>/dev/null || echo "run=7 status=success")
+for i in $(seq 1 80); do echo "job log $i"; done > "$2"
+echo "$st" > "$2.status"
+case "$st" in timeout*) exit 1 ;; esac
+exit 0
+"""
+
+GIT_FORGEJO = """#!/bin/bash
+d={state}
+printf '%s\\n' "$*" >> "$d/git-forgejo.calls"
+[ "$3" = push ] && [ -f "$d/gf.pushfail" ] && {{ echo "git-forgejo: secret broker did not start git" >&2; exit 1; }}
+exec git "$@"
 """
 
 
@@ -1166,13 +1188,17 @@ def _drop_github_route(s):
     s.commit_all("drop scripts/github-ci-run")
 
 
-def _ci_base(s, remote="origin", runs_on="ubuntu-latest", trigger="['ci/run/**']", keep_local=True):
-    """Publish a ci/base holding .github/workflows/agent-ci.yml on REMOTE."""
+def _wf(runs_on="ubuntu-latest", trigger="['ci/run/**']", jobs=None):
+    jobs = jobs or f"  build:\n    runs-on: {runs_on}\n    steps:\n      - run: echo hi\n"
+    return f"name: agent ci\non:\n  push:\n    branches: {trigger}\njobs:\n{jobs}"
+
+
+def _ci_base(s, remote="origin", keep_local=True, body=None, **kw):
+    """Publish a ci/base holding .github/workflows/agent-ci.yml (BODY, else _wf(**kw)) on REMOTE."""
     git(s.work, "checkout", "-q", "-b", "ci/base")
     wf = s.work / ".github" / "workflows" / "agent-ci.yml"
     wf.parent.mkdir(parents=True, exist_ok=True)
-    wf.write_text(f"name: agent ci\non:\n  push:\n    branches: {trigger}\njobs:\n  build:\n"
-                  f"    runs-on: {runs_on}\n    steps:\n      - run: echo hi\n")
+    wf.write_text(body or _wf(**kw))
     git(s.work, "add", "-A")
     git(s.work, "commit", "-q", "-m", "ci/base")
     git(s.work, "push", "-q", remote, "ci/base")
@@ -1180,6 +1206,14 @@ def _ci_base(s, remote="origin", runs_on="ubuntu-latest", trigger="['ci/run/**']
     if not keep_local:
         git(s.work, "branch", "-q", "-D", "ci/base")
         git(s.work, "update-ref", "-d", f"refs/remotes/{remote}/ci/base")
+
+
+def _head_workflow(s, name, text):
+    """Commit (and push) a workflow file on HEAD: github-ci-run keeps it unless it fires on the ci/run push."""
+    wf = s.work / ".github" / "workflows" / name
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text(text)
+    s.commit_all(f"workflow {name}")
 
 
 def _generic_runner(s):
@@ -1193,14 +1227,15 @@ def _generic(s, **kw):
     """Route (4): no tracked runner, origin stands in for github.com/djbclark/stubrepo, ci/base has agent-ci.yml."""
     _drop_github_route(s)
     _ci_base(s, **kw)
-    return {"BG_OFFLOAD_GENERIC_RUNNER": _generic_runner(s), "BG_OFFLOAD_URL_ALIAS": f"{s.remote} {STUB_REPO}"}
+    return {"BG_OFFLOAD_GENERIC_RUNNER": _generic_runner(s)}
 
 
-def _forgejo(s, host="forgejo.mit.edu", push_forgejo=True):
+def _forgejo(s, host="forgejo.mit.edu", push_forgejo=True, keep_github=False):
     """Route (3): a tracked scripts/forgejo-ci-run and a `forgejo` remote standing in for https://HOST/djbclark/stub."""
     fj = _bare(s, "forgejo.git")
     git(s.work, "remote", "add", "forgejo", str(fj))
-    _drop_github_route(s)
+    if not keep_github:
+        _drop_github_route(s)
     (s.work / "scripts").mkdir(exist_ok=True)
     runner = s.work / "scripts" / "forgejo-ci-run"
     runner.write_text(FORGEJO_RUNNER.format(state=shlex.quote(str(s.state))))
@@ -1209,14 +1244,25 @@ def _forgejo(s, host="forgejo.mit.edu", push_forgejo=True):
     if push_forgejo:
         git(s.work, "push", "-q", "forgejo", "HEAD:main")
     gf = s.home / "fakebin" / "git-forgejo"
-    gf.write_text(f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(s.state / 'git-forgejo.calls'))}\nexec git \"$@\"\n")
+    gf.write_text(GIT_FORGEJO.format(state=shlex.quote(str(s.state))))
     gf.chmod(0o755)
-    return {"BG_OFFLOAD_GIT_FORGEJO": str(gf), "BG_OFFLOAD_URL_ALIAS": f"{fj} https://{host}/djbclark/stub.git"}
+    wait = s.root / "wait-run.sh"
+    wait.write_text(FORGEJO_WAIT.format(state=shlex.quote(str(s.state))))
+    wait.chmod(0o755)
+    s.fj = fj
+    return {"BG_OFFLOAD_GIT_FORGEJO": str(gf), "BG_OFFLOAD_FORGEJO_WAIT": str(wait),
+            "BG_OFFLOAD_URL_ALIAS": f"{s.alias};{fj} https://{host}/djbclark/stub.git"}
 
 
 def _never_ran(s, r, code=3):
     assert r.returncode == code, r.stderr
     assert not s.marker.exists() and "FAKE-BUILD" not in r.stdout
+
+
+def _probe(s, **env):
+    e = {**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"),
+         "BG_OFFLOAD_URL_ALIAS": s.alias, **env}
+    return subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env=e, capture_output=True, text=True, timeout=60)
 
 
 # A: a build goes to CI at once, exits with the verdict, never runs here
@@ -1244,7 +1290,7 @@ def test_a_build_without_a_route_is_refused_as_before(s):
     r = s.bg(_build(s))
     _never_ran(s, r)
     assert "run instead: scripts/github-ci-run REF" in r.stderr
-    assert "no CI route was found to run it there now:" in r.stderr and "is not a github.com repo" in r.stderr
+    assert "no CI route was found to run it there now:" in r.stderr and "generic GitHub runner" in r.stderr
     assert s.read("runner.calls") == ""
 
 
@@ -1303,18 +1349,15 @@ def test_generic_route_needs_a_ci_run_push_trigger(s):
 
 def test_generic_route_needs_ci_base_on_the_remote(s):
     _drop_github_route(s)
-    env = {"BG_OFFLOAD_GENERIC_RUNNER": _generic_runner(s), "BG_OFFLOAD_URL_ALIAS": f"{s.remote} {STUB_REPO}"}
-    r = s.bg(_build(s), **env)
+    r = s.bg(_build(s), BG_OFFLOAD_GENERIC_RUNNER=_generic_runner(s))
     _never_ran(s, r)
     assert "has no ci/base branch" in r.stderr
 
 
 def test_generic_route_needs_a_github_remote(s):
-    env = _generic(s)
-    env.pop("BG_OFFLOAD_URL_ALIAS")
-    r = s.bg(_build(s), **env)
+    r = s.bg(_build(s), BG_OFFLOAD_URL_ALIAS="", **_generic(s))
     _never_ran(s, r)
-    assert "is not a github.com repo" in r.stderr
+    assert "is not one github.com repo" in r.stderr
     assert s.read("runner.calls") == ""
 
 
@@ -1341,61 +1384,233 @@ def test_generic_route_refuses_a_local_ci_base_ahead_of_the_remote(s):
     assert s.read("runner.calls") == ""
 
 
-# B3: forgejo-ci-run, self-waiting
+# F5: the default generic runner must be committed, unmodified code; the override is a test hook only
 
-def test_forgejo_route_runs_the_self_waiting_runner(s):
+def _ade_runner(s, tracked=True):
+    ade = s.home / "src" / "djbclark-ade"
+    (ade / "scripts").mkdir(parents=True, exist_ok=True)
+    r = ade / "scripts" / "github-ci-run"
+    r.write_text(RUNNER_STUB.format(state=shlex.quote(str(s.state)), commit=COMMIT))
+    r.chmod(0o755)
+    git(ade, "init", "-q", "-b", "main")
+    git(ade, "config", "user.name", "t")
+    git(ade, "config", "user.email", "t@example.invalid")
+    if tracked:
+        git(ade, "add", "scripts/github-ci-run")
+        git(ade, "commit", "-q", "-m", "runner")
+    return r
+
+
+def test_the_default_generic_runner_is_used_when_committed(s):
+    _generic(s)
+    _ade_runner(s)
+    _never_ran(s, s.bg(_build(s)), 0)
+    assert s.read("runner.calls") != ""
+
+
+def test_a_modified_default_generic_runner_is_no_route(s):
+    _generic(s)
+    r = _ade_runner(s)
+    r.write_text(r.read_text() + "# another session's edit\n")
+    res = s.bg(_build(s))
+    _never_ran(s, res)
+    assert "missing, untracked or modified" in res.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_an_untracked_default_generic_runner_is_no_route(s):
+    _generic(s)
+    _ade_runner(s, tracked=False)
+    res = s.bg(_build(s))
+    _never_ran(s, res)
+    assert "missing, untracked or modified" in res.stderr
+
+
+# F12: route (4) pushes only to djbclark's repos, ones he administers, or an explicit bgoffload.remote; the URL alias
+# hook only aliases local paths
+
+def _someone_elses(s):
+    env = _generic(s)
+    env["BG_OFFLOAD_URL_ALIAS"] = f"{s.remote} https://github.com/someone/stubrepo.git"
+    (s.state / "runner.repo").write_text("someone/stubrepo\n")
+    return env
+
+
+def test_generic_route_refuses_someone_elses_repo(s):
+    r = s.bg(_build(s), **_someone_elses(s))
+    _never_ran(s, r)
+    assert "someone/stubrepo is not djbclark's" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+def test_generic_route_takes_a_repo_djbclark_administers(s):
+    env = _someone_elses(s)
+    (s.state / "repo.perm").write_text("ADMIN\n")
+    _never_ran(s, s.bg(_build(s), **env), 0)
+
+
+def test_generic_route_takes_someone_elses_repo_named_in_bgoffload_remote(s):
+    env = _someone_elses(s)
+    git(s.work, "config", "bgoffload.remote", "origin")
+    _never_ran(s, s.bg(_build(s), **env), 0)
+
+
+def test_the_url_alias_hook_never_aliases_a_network_url(s):
+    env = _forgejo(s)
+    git(s.work, "remote", "set-url", "forgejo", "https://codeberg.org/djbclark/stub.git")
+    env["BG_OFFLOAD_URL_ALIAS"] = f"{s.alias};https://codeberg.org/djbclark/stub.git https://forgejo.mit.edu/djbclark/stub.git"
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "is not a repository on a Forgejo host" in r.stderr
+
+
+# F11: the run is followed on the CI remote's repo, and only if the runner says it pushed there
+
+def test_a_runner_that_names_another_repo_gets_no_verdict(s):
+    (s.state / "runner.repo").write_text("djbclark/other\n")
+    r = s.bg(_build(s))
+    _never_ran(s, r, 77)
+    assert "the runner says it pushed to djbclark/other" in r.stderr
+    assert "run list" not in s.read("gh.calls")
+
+
+def test_a_trailing_slash_in_the_runners_repo_is_the_same_repo(s):
+    (s.state / "runner.repo").write_text("djbclark/stubrepo/\n")
+    _never_ran(s, s.bg(_build(s)), 0)
+    assert all("-R djbclark/stubrepo " in c or c.endswith("-R djbclark/stubrepo") for c in s.read("gh.calls").splitlines()
+               if c.startswith("run "))
+
+
+def test_a_github_route_whose_remote_is_not_github_is_refused_before_the_runner(s):
+    r = s.bg(_build(s), BG_OFFLOAD_URL_ALIAS="")
+    _never_ran(s, r)
+    assert "is not one github.com repo, so its CI run could not be followed" in r.stderr
+    assert s.read("runner.calls") == ""
+
+
+# B3 / F3 / F4 / F8: route (3) pushes the checked commit itself and waits with the Forgejo wait tool
+
+def test_forgejo_route_pushes_the_checked_commit_and_waits(s):
     env = _forgejo(s)
     r = s.bg(_build(s), **env)
     _never_ran(s, r, 0)
-    assert s.read("fj.calls").strip() == _head(s.work)
-    assert s.read("fj.cwd").strip() == os.path.realpath(s.work)
-    assert "CI PASSED" in r.stdout and "status=success" in r.stdout
-    assert "ls-remote --refs forgejo" in s.read("git-forgejo.calls")  # the checks asked forgejo, with the token
-    assert s.read("gh.calls") == "" and s.read("runner.calls") == ""
+    head = _head(s.work)
+    assert "CI workflow PASSED" in r.stdout and "https://forgejo.mit.edu/djbclark/stub/actions/runs/7" in r.stdout
+    assert subprocess.run(["git", "rev-parse", "refs/heads/ci-run"], cwd=s.fj, capture_output=True, text=True).stdout.strip() == head
+    calls = s.read("git-forgejo.calls")
+    assert "ls-remote --refs forgejo" in calls  # the publish checks asked forgejo, with the token
+    assert f"push --force --no-follow-tags --no-recurse-submodules forgejo {head}:refs/heads/ci-run" in calls
+    assert s.read("wait.calls").split()[0] == head and "RP=djbclark/stub WAIT_MAX=2400" in s.read("wait.calls")
+    assert not (s.state / "fj.ran").exists()  # the repo's own forgejo-ci-run is never run
+    assert s.read("runner.calls") == "" and "run list" not in s.read("gh.calls")
 
 
-def test_forgejo_route_failure_is_exit_1_with_its_last_lines(s):
+@pytest.mark.parametrize("status,code,needle", [
+    ("run=8 status=failure", 1, "job log 80"),
+    ("run=8 status=cancelled", 77, "ended 'cancelled'"),
+    ("timeout id=8", 76, "had not finished after BG_OFFLOAD_WAIT"),
+])
+def test_forgejo_route_verdicts(s, status, code, needle):
     env = _forgejo(s)
-    (s.state / "fj.fail").write_text("")
+    (s.state / "wait.status").write_text(status + "\n")
     r = s.bg(_build(s), **env)
-    _never_ran(s, r, 1)
-    assert "CI FAILED: scripts/forgejo-ci-run exited 1" in r.stdout
-    assert "status=failure" in r.stdout and "fj log 40" in r.stdout
+    _never_ran(s, r, code)
+    assert needle in r.stdout + r.stderr
 
 
-def test_forgejo_route_still_waiting_at_the_budget_is_76(s):
+def test_forgejo_route_wait_tool_failing_without_a_status_is_no_verdict(s):
     env = _forgejo(s)
-    (s.state / "fj.slow").write_text("")
-    r = s.bg(_build(s), BG_OFFLOAD_PUSH_TIMEOUT="1", BG_OFFLOAD_WAIT="1", **env)
-    _never_ran(s, r, 76)
+    (s.state / "wait.nostatus").write_text("")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r, 77)
+    assert "gave no verdict" in r.stderr
+
+
+def test_forgejo_route_our_own_bound_firing_is_76(s):
+    env = _forgejo(s)
+    (s.state / "wait.slow").write_text("")
+    _never_ran(s, s.bg(_build(s), BG_OFFLOAD_WAIT="1", BG_OFFLOAD_FORGEJO_GRACE="1", **env), 76)
+
+
+def test_forgejo_route_push_failure_is_a_refusal_not_a_red_ci(s):
+    env = _forgejo(s)
+    (s.state / "gf.pushfail").write_text("")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)  # 69 from bg-offload, so bg refuses (3)
+    assert "pushing" in r.stderr and "failed" in r.stderr and "CI FAILED" not in r.stdout
+    assert s.read("wait.calls") == ""
+
+
+def test_forgejo_route_without_its_wait_tool_is_no_route(s):
+    env = _forgejo(s)
+    env["BG_OFFLOAD_FORGEJO_WAIT"] = str(s.root / "no-such-wait-run.sh")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "the wait tool forgejo-ci-run uses" in r.stderr
+    assert s.read("git-forgejo.calls") == ""
+
+
+@pytest.mark.parametrize("key,value", [("push.followTags", "true"), ("submodule.recurse", "true"),
+                                       ("push.recurseSubmodules", "on-demand")])
+def test_forgejo_route_refuses_config_that_could_carry_more_than_the_commit(s, key, value):
+    env = _forgejo(s)
+    git(s.work, "config", key, value)
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "route (3) refuses" in r.stderr
+    assert "push" not in s.read("git-forgejo.calls")
 
 
 def test_forgejo_route_refuses_a_host_the_forgejo_skill_does_not_use(s):
     r = s.bg(_build(s), **_forgejo(s, host="codeberg.org"))
     _never_ran(s, r)
-    assert "is not on a Forgejo host" in r.stderr
-    assert s.read("fj.calls") == ""
+    assert "is not a repository on a Forgejo host" in r.stderr
 
 
 def test_forgejo_route_checks_the_forgejo_remote_not_origin(s):
     r = s.bg(_build(s), **_forgejo(s, push_forgejo=False))  # HEAD is on origin, not on forgejo
     _never_ran(s, r)
     assert "not on the remote forgejo" in r.stderr
-    assert s.read("fj.calls") == ""
+    assert "push" not in s.read("git-forgejo.calls")
 
 
-def test_forgejo_route_without_a_forgejo_remote_is_no_route(s):
+# F7: order by visibility
+
+def test_a_public_repo_builds_on_github_even_with_forgejo_ci_run(s):
+    env = _forgejo(s, keep_github=True)
+    (s.state / "repo.private").write_text("false\n")
+    _never_ran(s, s.bg(_build(s), **env), 0)
+    assert s.read("runner.calls") != "" and s.read("wait.calls") == ""
+
+
+@pytest.mark.parametrize("private", ["true", None])  # private, or visibility unreadable
+def test_a_private_repo_builds_on_forgejo_first(s, private):
+    env = _forgejo(s, keep_github=True)
+    if private:
+        (s.state / "repo.private").write_text(private + "\n")
+    _never_ran(s, s.bg(_build(s), **env), 0)
+    assert s.read("runner.calls") == "" and s.read("wait.calls") != ""
+
+
+def test_a_public_repo_without_a_github_route_falls_back_to_forgejo(s):
+    env = _forgejo(s)  # no github-ci-run, no ci/base: neither (2) nor (4)
+    (s.state / "repo.private").write_text("false\n")
+    _never_ran(s, s.bg(_build(s), **env), 0)
+    assert s.read("wait.calls") != ""
+
+
+def test_forgejo_ci_run_without_a_forgejo_remote_falls_through_to_github(s):
     env = _forgejo(s)
     git(s.work, "remote", "remove", "forgejo")
-    r = s.bg(_build(s), **env)
-    _never_ran(s, r)
-    assert "pushes to the remote 'forgejo'" in r.stderr
-    assert s.read("fj.calls") == ""
+    _ci_base(s)
+    env["BG_OFFLOAD_GENERIC_RUNNER"] = _generic_runner(s)
+    _never_ran(s, s.bg(_build(s), **env), 0)
+    assert s.read("runner.calls") != "" and s.read("wait.calls") == ""
 
 
-# C: GitHub macOS runners for public repos only
+# C / F1 / F2: GitHub macOS runners for public repos only; a private repo needs provably Linux workflows
 
-@pytest.mark.parametrize("runs_on", ["macos-14", "xcode-27"])
+@pytest.mark.parametrize("runs_on", ["macos-14", "xcode-27", "${{ matrix.os }}", "${{ vars.RUNNER }}", "[self-hosted, macOS]"])
 def test_a_private_repo_never_gets_github_macos_runners(s, runs_on):
     env = _generic(s, runs_on=runs_on)
     (s.state / "repo.private").write_text("true\n")
@@ -1403,6 +1618,32 @@ def test_a_private_repo_never_gets_github_macos_runners(s, runs_on):
     _never_ran(s, r)
     assert "is PRIVATE" in r.stderr
     assert "repo view djbclark/stubrepo --json isPrivate" in s.read("gh.calls")
+    assert s.read("runner.calls") == ""
+
+
+MAC_JOB = "  m:\n    runs-on: macos-14\n    steps:\n      - run: echo hi\n"
+
+
+@pytest.mark.parametrize("case", ["reusable", "workflow_run", "remote_reusable", "flow_mapping", "anchor"])
+def test_a_private_repo_is_refused_for_every_indirect_macos_shape(s, case):
+    """The adversary's repro cases (F1): the macOS job is not in linux-ci.yml/agent-ci.yml, or not a literal label."""
+    if case == "reusable":
+        _head_workflow(s, "build.yml", f"on: workflow_call\njobs:\n{MAC_JOB}")
+        body = _wf(jobs="  b:\n    uses: ./.github/workflows/build.yml\n")
+    elif case == "workflow_run":
+        _head_workflow(s, "mac.yml", f"on:\n  workflow_run:\n    workflows: [ci]\n    types: [completed]\njobs:\n{MAC_JOB}")
+        body = None
+    elif case == "remote_reusable":
+        body = _wf(jobs="  b:\n    uses: someone/repo/.github/workflows/mac.yml@v1\n")
+    elif case == "flow_mapping":
+        body = _wf(jobs="  b: {runs-on: macos-14, steps: [{run: echo hi}]}\n")
+    else:
+        body = "x: &mac macos-14\n" + _wf(runs_on="*mac")
+    env = _generic(s, body=body)
+    (s.state / "repo.private").write_text("true\n")
+    r = s.bg(_build(s), **env)
+    _never_ran(s, r)
+    assert "is PRIVATE" in r.stderr
     assert s.read("runner.calls") == ""
 
 
@@ -1421,32 +1662,91 @@ def test_unreadable_visibility_refuses_a_macos_workflow(s):
     assert s.read("runner.calls") == ""
 
 
-def test_a_private_repo_with_a_linux_workflow_is_not_asked(s):
-    env = _generic(s)
+def test_a_private_repo_with_provably_linux_workflows_is_not_asked(s):
+    _head_workflow(s, "build.yml", "on: workflow_call\njobs:\n  b:\n    runs-on: [self-hosted, linux]\n    steps:\n      - run: echo hi\n")
+    env = _generic(s, body=_wf(jobs="  b:\n    uses: './.github/workflows/build.yml'  # local\n"))
     (s.state / "repo.private").write_text("true\n")
     _never_ran(s, s.bg(_build(s), **env), 0)
-    assert "repo view" not in s.read("gh.calls")
+    assert s.read("gh.repoview") == ""
 
 
 def test_route_2_is_guarded_too(s):
     _ci_base(s, runs_on="macos-14")  # the tracked scripts/github-ci-run overlays this
     (s.state / "repo.private").write_text("true\n")
-    r = s.bg(_build(s), BG_OFFLOAD_URL_ALIAS=f"{s.remote} {STUB_REPO}")
+    r = s.bg(_build(s))
     _never_ran(s, r)
     assert "is PRIVATE" in r.stderr
     assert s.read("runner.calls") == ""
 
 
+def test_route_1_is_guarded_too(s):
+    _drop_github_route(s)
+    custom = s.work / "scripts" / "bg-offload-run"
+    custom.parent.mkdir(exist_ok=True)
+    custom.write_text(RUNNER_STUB.format(state=shlex.quote(str(s.state)), commit=COMMIT))
+    custom.chmod(0o755)
+    _head_workflow(s, "linux-ci.yml", _wf(runs_on="macos-14"))  # commits bg-offload-run too
+    (s.state / "repo.private").write_text("true\n")
+    r = s.bg(_build(s))
+    _never_ran(s, r)
+    assert "is PRIVATE" in r.stderr
+    assert s.read("runner.calls") == ""
+    (s.state / "repo.private").write_text("false\n")
+    _never_ran(s, s.bg(_build(s)), 0)  # control: public
+
+
 def test_route_2_macos_workflow_on_a_remote_that_is_not_github_refuses(s):
     _ci_base(s, runs_on="macos-14")
     (s.state / "repo.private").write_text("false\n")
-    r = s.bg(_build(s))
+    r = s.bg(_build(s), BG_OFFLOAD_URL_ALIAS="")
     _never_ran(s, r)
     assert "is not one github.com repo" in r.stderr
     assert s.read("runner.calls") == ""
 
 
-# D: artifacts after a GitHub success
+# F9: the probe's network answers are cached, timeouts of 0 mean the default, and a partial clone's workflow blobs are
+# fetched with a bound, never lazily
+
+def test_the_probe_caches_its_answer_until_head_changes(s):
+    env = {**_generic(s, runs_on="macos-14"), "BG_OFFLOAD_PROBE_TTL": "300"}
+    (s.state / "repo.private").write_text("true\n")
+    a = _probe(s, **env)
+    b = _probe(s, **env)
+    assert a.returncode == b.returncode == 69 and "is PRIVATE" in b.stderr
+    assert len(s.read("gh.repoview").splitlines()) == 1  # the second answer came from the cache
+    (s.work / "more.txt").write_text("x\n")
+    s.commit_all("new HEAD")
+    assert _probe(s, **env).returncode == 69
+    assert len(s.read("gh.repoview").splitlines()) == 2
+
+
+def test_a_failed_gh_answer_is_not_cached(s):
+    env = {**_generic(s, runs_on="macos-14"), "BG_OFFLOAD_PROBE_TTL": "300"}  # no repo.private: gh fails
+    assert _probe(s, **env).returncode == 69
+    assert _probe(s, **env).returncode == 69
+    assert len(s.read("gh.repoview").splitlines()) == 2
+
+
+def test_a_timeout_of_zero_means_the_default_not_no_limit(s):
+    env = _generic(s, keep_local=False)
+    r = s.bg(_build(s), BG_OFFLOAD_LSREMOTE_TIMEOUT="0", BG_OFFLOAD_FETCH_TIMEOUT="0", BG_OFFLOAD_PUSH_TIMEOUT="0",
+             BG_OFFLOAD_WAIT="0", **env)
+    _never_ran(s, r, 0)
+
+
+def test_a_partial_clone_gets_its_ci_base_workflow_with_a_bounded_fetch(s):
+    env = _generic(s, keep_local=False)
+    git(s.remote, "config", "uploadpack.allowFilter", "true")
+    git(s.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
+    part = s.root / "partial"
+    git(s.root, "clone", "-q", "-b", "main", "--filter=blob:none", f"file://{s.remote}", str(part))
+    r = subprocess.run([str(OFFLOAD), "--probe", str(part)], capture_output=True, text=True, timeout=60,
+                       env={**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1",
+                            "BG_GH": str(s.home / "fakebin" / "gh"), "BG_OFFLOAD_URL_ALIAS": s.alias, **env})
+    assert r.returncode == 0, r.stderr
+
+
+# D / F10: artifacts after a GitHub success
 
 def _artifacts(s, rid=11):
     return s.home / ".local" / "state" / "bg-offload" / "artifacts" / "djbclark__stubrepo" / str(rid)
@@ -1458,15 +1758,37 @@ def test_artifacts_are_downloaded_after_a_success(s):
     d = _artifacts(s)
     assert (d / "app.zip").exists()
     assert f"artifacts of run 11: {d}" in r.stdout
-    assert f"run download 11 -R djbclark/stubrepo -D {d}" in s.read("gh.calls")
+    assert "run download 11 -R djbclark/stubrepo -D" in s.read("gh.calls")
 
 
-def test_a_failed_download_is_only_a_warning(s):
+def test_a_rerun_with_the_same_id_replaces_the_download(s):
+    assert s.bg(_build(s)).returncode == 0
+    r = s.bg(_build(s))
+    assert r.returncode == 0, r.stderr
+    assert "artifacts of run 11:" in r.stdout and "warning" not in r.stderr
+    assert sorted(p.name for p in _artifacts(s).parent.iterdir()) == ["11"]  # no partial download left behind
+
+
+def test_a_failed_download_is_only_a_warning_naming_the_path(s):
     (s.state / "dl.fail").write_text("")
     r = s.bg(_build(s))
     assert r.returncode == 0, r.stderr
-    assert "warning: could not download the artifacts of run 11" in r.stderr
+    assert f"warning: could not download the artifacts of run 11 to {_artifacts(s)}" in r.stderr
     assert not _artifacts(s).exists()
+    assert [p for p in _artifacts(s).parent.iterdir()] == []
+
+
+def test_old_and_surplus_downloads_are_pruned(s):
+    base = _artifacts(s).parent
+    now = time.time()
+    for i in range(100, 125):
+        (base / str(i)).mkdir(parents=True)
+        os.utime(base / str(i), (now - 3600 + i, now - 3600 + i))
+    os.utime(base / "124", (now - 8 * 86400, now - 8 * 86400))  # newest id, but 8 days old
+    assert s.bg(_build(s)).returncode == 0
+    left = {p.name for p in base.iterdir()}
+    assert "11" in left and "124" not in left and len(left) == 20
+    assert "100" not in left  # the oldest beyond 20 went
 
 
 def test_no_download_after_a_failure(s):
