@@ -142,9 +142,11 @@ deployed revision. Heavy builds and `nix flake update` run on Forgejo CI, not on
 
 **Heavy jobs run in CI, not on the Mac: GitHub runners for GitHub-sourced repos (`ci/base` + `ci/run/**`,
 `scripts/github-*` wrappers); Forgejo/Hyades CI for MIT/SIPB and private work that needs it** (`forgejo-ci`
-skill, item 6). **Builds go to CI by repo visibility (2026-11-01): public repos on GitHub, Linux or macOS for
-macOS-only builds; private Linux on Forgejo/Hyades; private macOS-only builds stay local via `bg`. No macOS leg in
-PR checks unless djbclark asks for it by name** (`memory/feedback_macos_ci_on_request_only.md`).
+skill, item 6). **Builds, compiles and full test runs go to CI by repo visibility (2026-11-01), forks and scratch
+checkouts too (push a branch to the djbclark fork): public repos on GitHub, Linux or macOS for macOS-only builds;
+private Linux on Forgejo/Hyades. Never `cargo build/check` or `make` locally first to catch errors: read the CI
+log. Local only with no CI route (private macOS-only, via `bg`) or if djbclark says so. No macOS leg in PR checks
+unless djbclark asks for it by name** (`memory/feedback_macos_ci_on_request_only.md`).
 
 ## Reply formatting — number every list
 

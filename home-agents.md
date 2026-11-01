@@ -44,8 +44,8 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 23. **New tool, script, skill or doc in an ops repo? Ask djbclark which repo** (`site-{private,public}-djbclark`). **Exception: a new agent skill goes in `~/src/djbclark-ade/skills/<name>/` unasked** (`memory/feedback_ask_where_new_things_go.md`).
 35. **MIT/SIPB/Athena on forgejo.mit.edu under `djbclark/`** (README; `djbclark/mit`); never in ops (`memory/feedback_mit_things_live_on_forgejo.md`). `git-forgejo` to push. **No agent posts on `SIPB/*`:** fork-only AI issue + human draft as a **fork comment**; end with those `djbclark/*` links (`memory/feedback_sipb_two_tier_issues.md`).
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` → `deploy-vps-primary`); never a local, side-branch or old commit. Deploy in flight: wait, redeploy the new head, verify the revision. Heavy builds and `nix flake update`: Forgejo CI, not vps-primary.
-37. **Heavy jobs and builds: CI, not the Mac: public repos on GitHub (Linux, or macOS for macOS-only builds), private Linux on Forgejo/Hyades; private macOS-only builds stay local via `bg`. No macOS leg in PR checks unless asked by name** (`forgejo-ci` item 6; `memory/feedback_macos_ci_on_request_only.md`).
-38. **Changed a third-party project's source? Dupe-search its issues/PRs, tidy, `frontier` if useful, file upstream as issue/PR** (`memory/feedback_upstream_local_changes.md`).
+37. **Heavy jobs, builds, compiles, full test runs: CI, not the Mac, forks and scratch checkouts too (push a branch to the djbclark fork). Public repos on GitHub (Linux; macOS for macOS-only builds), private Linux on Forgejo/Hyades. Never `cargo build/check` or `make` locally first to catch errors: read the CI log. Local only with no CI route (private macOS-only, via `bg`) or if djbclark says so. No macOS leg in PR checks unless asked by name** (`forgejo-ci` item 6; `memory/feedback_macos_ci_on_request_only.md`).
+38. **Changed third-party source? Dupe-search its issues/PRs, tidy, `frontier` if useful, file upstream as issue/PR** (`memory/feedback_upstream_local_changes.md`).
 
 ## Other agents, delegation
 
