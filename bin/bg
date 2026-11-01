@@ -17,7 +17,8 @@
 # mode; there is no per-pid utility clamp, restart the command through bg instead.
 #
 # Admission gate: before starting, wait while the 1-minute load average per core is above
-# BG_MAX_LOAD_PER_CORE (default 1.5, i.e. 12 on 8 cores), checking every 15 s. Piling another
+# BG_MAX_LOAD_PER_CORE (default 2.5, i.e. 20 on 8 cores; was 1.5 until 2026-11-01, raised because load
+# per core is a weak signal on this Mac and memory churn is the real one), checking every 15 s. Piling another
 # build onto an overloaded machine makes every build slower. BG_LOAD_WAIT=0 skips the gate for a
 # test or a small command, never for a Gradle command (2026-10-10); any other value just means
 # "gate on". When the load drops after a wait, bg pauses 5-30 s at random and reads it again, so
@@ -348,7 +349,7 @@ wait_tick() {
   fi
 }
 
-max_per_core="${BG_MAX_LOAD_PER_CORE:-1.5}"
+max_per_core="${BG_MAX_LOAD_PER_CORE:-2.5}"
 wait_s="${BG_LOAD_WAIT:-900}"
 # A Gradle build always keeps the load gate (2026-10-10: a release build started with
 # BG_LOAD_WAIT=0 at load 30 and the machine went to 50-70). BG_LOAD_WAIT=0 is for small test files.
