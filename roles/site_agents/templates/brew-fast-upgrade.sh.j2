@@ -93,14 +93,32 @@ sudo_casks() {
     .casks[] | select([.artifacts[] | keys[]] | any(. == "pkg" or . == "installer")) | .token'
 }
 
+# Installed casks whose .app artifact is no longer on disk, one per line.
+# Moving an app away (e.g. to the external volume) without `brew uninstall
+# --cask` makes every upgrade of that cask die with "App source ... is not
+# there", which failed verification every night from 2026-10-31 (zulip,
+# kiro-cli). Such a cask is left out and reported; `brew uninstall --cask`
+# it, or put the app back, to make brew track it again. Computed once per run
+# (a `brew info --installed` costs network time) into MISSING_APP_CASKS.
+missing_app_casks() {
+  local token path
+  brew info --json=v2 --installed 2>/dev/null | jq -r '
+    .casks[] | .token as $t | .artifacts[]? | objects | select(.app) |
+    "\($t)\t\(.app[1].target? // ("/Applications/" + .app[0]))"' |
+    while IFS=$'\t' read -r token path; do
+      [ -e "$path" ] || echo "$token"
+    done | gsort -u
+}
+
 # Casks never upgraded by this script, even by hand (BREW_FAST_UPGRADE_SKIP_CASKS
-# overrides, space-separated). paseo (djbclark 2026-10-24): every cask upgrade
-# quits Paseo.app and runs `paseo daemon stop --force`, killing every agent
-# session on the production daemon, and three upgrades on 2026-10-24 still left
-# Paseo.app at 0.12.0 (cause unknown). The app updates itself; take paseo back
-# out of this list once the revert is explained and a daemon stop is acceptable.
+# overrides, space-separated), plus the missing-app casks above. paseo (djbclark
+# 2026-10-24): every cask upgrade quits Paseo.app and runs `paseo daemon stop
+# --force`, killing every agent session on the production daemon, and three
+# upgrades on 2026-10-24 still left Paseo.app at 0.12.0 (cause unknown). The app
+# updates itself; take paseo back out of this list once the revert is explained
+# and a daemon stop is acceptable.
 held_casks() {
-  printf '%s\n' ${BREW_FAST_UPGRADE_SKIP_CASKS-paseo}
+  printf '%s\n' ${BREW_FAST_UPGRADE_SKIP_CASKS-paseo} ${MISSING_APP_CASKS:-}
 }
 
 # Outdated formulae and casks (greedy: auto_updates and :latest casks too),
@@ -126,7 +144,7 @@ report_sudo_casks() {
   skip="$(held_casks)"
   if [ -n "$skip" ]; then
     held="$(brew outdated --cask --greedy --quiet 2>/dev/null | ggrep -Fx -f <(printf '%s\n' "$skip") || true)"
-    [ -n "$held" ] && echo "[brew-fast-upgrade] held, not upgraded (BREW_FAST_UPGRADE_SKIP_CASKS): $(printf '%s ' $held)"
+    [ -n "$held" ] && echo "[brew-fast-upgrade] held, not upgraded (BREW_FAST_UPGRADE_SKIP_CASKS, or app missing from disk: brew uninstall --cask it or restore the app): $(printf '%s ' $held)"
   fi
   return 0
 }
@@ -312,45 +330,44 @@ uv_outdated_tools() {
     ggrep -E '^[^- ].* \[latest: ' | ggrep -vE '\[required: (file:|git\+|/)' || true
 }
 
-# npm binaries whose global trees this script manages, one per line,
-# deduped: the user-prefix npm (~/.local — hermes-managed, holds
-# zcode-app-cli, the ACP servers and friends) and Homebrew's own npm
-# (/opt/homebrew — cline, bailian-cli and friends). The trimmed script
-# PATH resolves bare `npm` to Homebrew's, so callers must pass one of
-# these explicitly or they silently manage only the Homebrew tree (which
-# is exactly what happened before 2026-10-10: the ~/.local agent CLIs
-# were never upgraded by this script).
-npm_global_bins() {
-  local bin seen=""
-  for bin in "$HOME/.local/bin/npm" "$(command -v npm 2>/dev/null || true)"; do
-    [ -n "$bin" ] && [ -x "$bin" ] || continue
-    [ "$bin" = "$seen" ] && continue
-    echo "$bin"
-    seen="$bin"
+# npm global prefixes this script manages, one per line: the user prefix
+# (~/.local — holds zcode-app-cli, the ACP servers and friends) and
+# Homebrew's own (cline, bailian-cli and friends). Managed by --prefix on
+# the one `npm` on PATH, not by picking an npm binary: the hermes-managed
+# ~/.local/bin/npm was removed 2026-10-28, after which Homebrew's npm
+# (global prefix ~/.local via ~/.npmrc) silently managed only the user
+# tree, never pinned zcode-app-cli@latest, and left the Homebrew tree
+# (bailian-cli) unmanaged. Before 2026-10-10 the opposite mistake left the
+# ~/.local agent CLIs unmanaged.
+npm_global_prefixes() {
+  local prefix
+  for prefix in "$HOME/.local" "$(brew --prefix 2>/dev/null || true)"; do
+    [ -n "$prefix" ] && [ -d "$prefix/lib/node_modules" ] || continue
+    echo "$prefix"
   done
 }
 
-# Outdated globally-installed npm package names for the npm binary passed
-# as $1, one per line (empty when clean, or when npm/jq isn't available).
+# Outdated globally-installed npm package names for the prefix passed as $1,
+# one per line (empty when clean, or when npm/jq isn't available).
 npm_outdated_globals() {
-  local npm_bin="${1:-npm}"
-  command -v "$npm_bin" >/dev/null 2>&1 || return 0
+  local prefix="$1"
+  command -v npm >/dev/null 2>&1 || return 0
   if ! command -v jq >/dev/null 2>&1; then
     echo "[brew-fast-upgrade] jq not found; skipping npm global upgrade check." >&2
     return 0
   fi
   # Never chase `npm` itself: Homebrew's tree is owned by the node formula
   # (self-install dies against its EEXIST bin symlinks), and the user
-  # tree's npm is a hermes-managed symlink (both observed failing in the
+  # tree's npm was a hermes-managed symlink (both observed failing in the
   # 2026-10-08/09 nightly logs).
-  "$npm_bin" outdated -g --json 2>/dev/null | jq -r 'keys[]? | select(. != "npm")'
+  npm outdated -g --prefix "$prefix" --json 2>/dev/null | jq -r 'keys[]? | select(. != "npm")'
 }
 
 run_npm_pass() {
-  local npm_bin pkg rc=0 ran=0
+  local prefix pkg rc=0 ran=0
   local pkgs
 
-  while IFS= read -r npm_bin; do
+  while IFS= read -r prefix; do
     ran=1
     pkgs=()
     # zcode-app-cli ships several builds a day; pin @latest every run in the
@@ -358,30 +375,30 @@ run_npm_pass() {
     # Homebrew's tree would fork a second install whose
     # /opt/homebrew/bin/zcode symlink can shadow ~/.local/bin/zcode in
     # daemon PATHs (stray created and removed 2026-10-10).
-    if [ "$npm_bin" = "$HOME/.local/bin/npm" ]; then
+    if [ "$prefix" = "$HOME/.local" ]; then
       pkgs=("zcode-app-cli@latest")
     fi
     while IFS= read -r pkg; do
       [ -n "$pkg" ] && [ "$pkg" != "zcode-app-cli" ] && pkgs+=("${pkg}@latest")
-    done < <(npm_outdated_globals "$npm_bin")
+    done < <(npm_outdated_globals "$prefix")
 
     if [ "${#pkgs[@]}" -eq 0 ]; then
-      echo "[brew-fast-upgrade] npm globals ($npm_bin): nothing to upgrade."
+      echo "[brew-fast-upgrade] npm globals ($prefix): nothing to upgrade."
       continue
     fi
 
     # One batched install call per tree avoids per-package npm startup
     # overhead. (Not bun: `bun add -g` installs into its own ~/.bun tree,
     # ignoring npm prefixes, so it would fork both trees this manages.)
-    echo "[brew-fast-upgrade] npm globals ($npm_bin): upgrading ${pkgs[*]}"
-    if ! "$npm_bin" install -g "${pkgs[@]}"; then
+    echo "[brew-fast-upgrade] npm globals ($prefix): upgrading ${pkgs[*]}"
+    if ! npm install -g --prefix "$prefix" "${pkgs[@]}"; then
       echo "[brew-fast-upgrade] npm install -g failed for: ${pkgs[*]}"
       rc=1
     fi
-  done < <(npm_global_bins)
+  done < <(npm_global_prefixes)
 
   if [ "$ran" -eq 0 ]; then
-    echo "[brew-fast-upgrade] npm globals: npm not installed; skipping."
+    echo "[brew-fast-upgrade] npm globals: no global npm tree found; skipping."
     return 0
   fi
   return "$rc"
@@ -390,12 +407,12 @@ run_npm_pass() {
 # A successful brew/npm/uv invocation is not enough: confirm nothing is still
 # outdated. Prints what remains when verification fails.
 verify_clean() {
-  local brew_remaining npm_remaining uv_remaining npm_bin
+  local brew_remaining npm_remaining uv_remaining prefix
   brew_remaining="$(brew_outdated_upgradable)"
   npm_remaining=""
-  while IFS= read -r npm_bin; do
-    npm_remaining+="$(npm_outdated_globals "$npm_bin")"
-  done < <(npm_global_bins)
+  while IFS= read -r prefix; do
+    npm_remaining+="$(npm_outdated_globals "$prefix")"
+  done < <(npm_global_prefixes)
   uv_remaining="$(uv_outdated_tools)"
 
   if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ] || [ -n "$uv_remaining" ]; then
@@ -410,6 +427,7 @@ verify_clean() {
 
 run_upgrade_and_restart_apps() {
   local attempt stale_rc=0
+  MISSING_APP_CASKS="$(missing_app_casks)"
 
   for attempt in $(gseq 1 "$MAX_ATTEMPTS"); do
     echo "[brew-fast-upgrade] attempt $attempt/$MAX_ATTEMPTS"
@@ -449,7 +467,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass uv_outdated_tools npm_global_bins npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
