@@ -8,6 +8,7 @@
 {
   imports = [
     ./hardware-configuration.nix
+    ./sudo-secretspec.nix
     ../modules/google-proxy.nix
     ../modules/packages.nix
     ../modules/terminals.nix

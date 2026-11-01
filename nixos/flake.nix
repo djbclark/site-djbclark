@@ -27,6 +27,17 @@
     inputs.nixathena.follows = "nixathena";
   };
 
+  # sudo-secretspec: the privilege boundary for credentials on this host. A flake input because
+  # it ships its own NixOS module (`nixosModules.default`, option services.sudo-secretspec),
+  # whose sudoers policy is derived from the broker binary by import-from-derivation (Nix's
+  # default allows it; vps-primary/sudo-secretspec.nix pins it). Follows our nixpkgs, same as
+  # site-dann. `sudo-main` is the shipping branch (release v0.21.1-sudo.3); the weekly
+  # nixos-lock-update workflow moves it and builds the result before promoting.
+  inputs.sudo-secretspec = {
+    url = "github:frdminc/sudo-secretspec/sudo-main";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   # 2026-10-28: disko, sops-nix and hermes-agent were dropped with the `dann` output — that
   # host, its declarative disk layout, its sops secrets and its agent runtime are now their
   # own site, https://github.com/djbclark/site-dann (nixos/, deployed from its deploy-dann
@@ -39,6 +50,7 @@
       nixpkgs,
       athena-nixos,
       paseo-nix,
+      sudo-secretspec,
       ...
     }:
     {
@@ -55,6 +67,7 @@
         modules = [
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           paseo-nix.nixosModules.default
+          sudo-secretspec.nixosModules.default # services.sudo-secretspec, enabled in vps-primary/sudo-secretspec.nix
           self.nixosModules.cfengine-tendcf # imported, not enabled: the host's closure is unchanged
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
