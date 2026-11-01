@@ -1,0 +1,40 @@
+-> OWL ADMIN
+       -----------------------------------------------------------------------
+       Welcome to BarnOwl version 1.11~git20250813.1f65aee-1.
+       To see a quick introduction, type ':show quickstart'.
+       Press 'h' for on-line help.
+
+       BarnOwl is free software. Type ':show license' for more
+       informat┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+               │Commands:  (use 'show command <name>' for details)                                                         │
+       Please r│(                         - runs multiple ;-separated commands                                             │
+       --------│about                     - print information about BarnOwl                                                │
+   sipb / inst1│add-cmd-history           - Add a command to the history                                                   │
+       message │addbuddy                  - add a buddy to a buddylist                                                     │lorem ipsum lore
+   sipb / inst2│aexec                     - run a command from the shell and display in an admin message                   │
+       message │alias                     - creates a command alias                                                        │lorem ipsum lore
+   sipb / inst3│aperl                     - run a perl expression and display in an admin message                          │
+       message │away                      - Set, enable or disable all away messages                                       │lorem ipsum lore
+   sipb / inst4│beep                      - ring the terminal bell                                                         │
+       message │bindkey                   - creates a binding in a keymap                                                  │lorem ipsum lore
+   sipb / inst5│blist                     - List all buddies logged in                                                     │
+       message │colorclass                - create a filter to color messages of the given class name                      │lorem ipsum lore
+   sipb / inst6│colorview                 - change the colors on the current filter                                        │
+       message │debug                     - prints a message into the debug log                                            │lorem ipsum lore
+   sipb / inst7│del                       - command alias to: delete                                                       │
+       message │delbuddy                  - delete a buddy from a buddylist                                                │lorem ipsum lore
+   sipb / inst8│delete                    - mark a message for deletion                                                    │
+       message │delete-and-expunge        - delete a message                                                               │lorem ipsum lore
+   OWL ADMIN   │delx                      - command alias to: delete-and-expunge                                           │
+       Could no│dump                      - dump messages to a file                                                        │
+               │echo                      - pops up a message in popup window                                              │
+               │edit:backward-paragraph   - Move backward to the start of paragraph.                                       │
+               │--More-- (Space to see more, 'q' to quit)                                                                  │
+               └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+── (1/10/10)  all ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+

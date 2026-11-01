@@ -15,7 +15,8 @@ The helper is `scripts/bo` in this skill (`~/src/djbclark-ade/skills/barnowl/scr
 The command list is `bo run 'show commands'`; a command's flags are in
 `bo run 'help COMMAND'`, or in `commands.c` of
 [github.com/barnowl/barnowl](https://github.com/barnowl/barnowl) (the `OWLCMD_*`
-name and its summary string). The installed client is BarnOwl 1.10.
+name and its summary string). The installed client on pastebin is BarnOwl built from upstream master (package `1.11~git20250813.1f65aee-1`,
+[djbclark/barnowl-debian](https://forgejo.mit.edu/djbclark/barnowl-debian/releases)); Debian's own is 1.10.
 `~/src/barnowl` is **not** the client source: it is djbclark's modules repo
 (forgejo.mit.edu/djbclark/barnowl): `Goose`, `HistoryLoad`, `InstanceStyle`
 and the `bo-a` launcher.

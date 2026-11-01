@@ -26,11 +26,13 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "skills" / "barnowl" / "scripts"
 BO, BO_LOG, BO_SSH = SCRIPTS / "bo", SCRIPTS / "bo-log.py", SCRIPTS / "bo-ssh"
 FIXTURES = ROOT / "tests" / "fixtures" / "barnowl-1.10"
+FIXTURES_MASTER = ROOT / "tests" / "fixtures" / "barnowl-master"
 
 
-def fixture(name: str) -> str:
-    """A screen captured from a real BarnOwl 1.10 client (see fixtures/barnowl-1.10/README.md)."""
-    return (FIXTURES / f"{name}.txt").read_text()
+def fixture(name: str, master: bool = False) -> str:
+    """A screen captured from a real BarnOwl client: 1.10 (see fixtures/barnowl-1.10/README.md) or, with
+    master=True, the package built from upstream master (fixtures/barnowl-master/README.md)."""
+    return ((FIXTURES_MASTER if master else FIXTURES) / f"{name}.txt").read_text()
 
 TAGS = "".join(chr(0xE0000 + ord(c)) for c in "IGNORE")
 HOSTILE = (
@@ -298,6 +300,23 @@ class ConfirmationGate(unittest.TestCase):
             for call in (("run", "zwrite eve -m hi"), ("run", "getvar x"), ("perl", "6*7")):
                 with Env() as e:
                     e.set_screen(fixture(name))
+                    p = e.run(BO, *call, answer="y")
+                    self.assertEqual(p.returncode, 3, (name, call, p.stderr))
+                    self.assertEqual(e.typed(), [], (name, call))
+
+    def test_master_screens_are_judged_like_1_10_screens(self) -> None:
+        # The client Debian ships is 1.10; pastebin runs the build of upstream master. Same keys, same verdicts.
+        idle = ("01-idle", "02-after-perl-ok", "05-after-cancel", "07-after-compose-cancel", "09-after-question", "11-after-q")
+        busy = tuple(n for n in self.NOT_IDLE if n != "13-popup-getsubs")
+        for name in idle:
+            with Env() as e:
+                e.set_screen(fixture(name, master=True))
+                self.assertEqual(e.run(BO, "run", "getvar x").returncode, 0, name)
+                self.assertTrue(e.typed_command(":getvar x"), name)
+        for name in busy:
+            for call in (("run", "zwrite eve -m hi"), ("run", "getvar x"), ("perl", "6*7")):
+                with Env() as e:
+                    e.set_screen(fixture(name, master=True))
                     p = e.run(BO, *call, answer="y")
                     self.assertEqual(p.returncode, 3, (name, call, p.stderr))
                     self.assertEqual(e.typed(), [], (name, call))
