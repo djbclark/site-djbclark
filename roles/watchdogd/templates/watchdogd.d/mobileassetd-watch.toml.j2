@@ -1,0 +1,27 @@
+# Alert when mobileassetd stays busy; it is NOT banned or frozen.
+# 2026-11-01: someone asked whether mobileassetd had been disabled. It is in
+# no ban list (apple_daemon_ban.sh, sip-doit-with-sudo.sh,
+# apple_daemon_ban_root.sh) and read 0.0 percent CPU twice, so djbclark chose
+# to collect data before deciding: this rule only tells him when it averages
+# 50 percent CPU or more over ~12 s for three passes in a row (~15 min).
+# Whether to freeze it is his call; sample it (sample/spindump) first.
+# Rendered by roles/watchdogd; edit the role.
+name = "mobileassetd-watch"
+interval_s = 300
+
+[probe]
+# Exit 0 under the limit, 1 at or over it, 75 top unusable (skip).
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/proc_cpu_probe.py", "mobileassetd", "--max", "50"]
+skip_exit_codes = [75]
+timeout_s = 60
+
+[policy]
+down_before_action = 3
+grace_s = 0
+action = "alert"
+ignore_stress = true
+
+[notify]
+down = "{name} DOWN: mobileassetd busy ({detail}); not banned, sample it before deciding"
+recovered = "{name} RECOVERED: {detail}"

@@ -82,6 +82,7 @@ watchdogd_services:
   - auxkc-heal
   - hermes-quota
   - finder-mds
+  - mobileassetd-watch
 
 # shutdown-thaw: a second, persistent LaunchAgent next to the watchdog
 # (2026-10-15). It thaws the SIGSTOPped Apple daemons when a logout, restart
