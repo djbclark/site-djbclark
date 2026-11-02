@@ -15,12 +15,15 @@ The helper is `scripts/bo` in this skill (`~/src/djbclark-ade/skills/barnowl/scr
 The command list is `bo run 'show commands'`; a command's flags are in
 `bo run 'help COMMAND'`, or in `commands.c` of
 [github.com/barnowl/barnowl](https://github.com/barnowl/barnowl) (the `OWLCMD_*`
-name and its summary string). The installed client on pastebin is BarnOwl built from upstream master (package `1.11~git20250813.1f65aee-1`,
+name and its summary string). The installed client on pastebin is BarnOwl built from upstream master (package `1.11~git20250813.1f65aee-3`,
 [djbclark/barnowl-debian](https://forgejo.mit.edu/djbclark/barnowl-debian/releases)); Debian's own is 1.10.
 `~/src/barnowl` is **not** the client source: it is djbclark's modules repo
 (forgejo.mit.edu/djbclark/barnowl): `Goose`, `HistoryLoad`, `InstanceStyle`, `Theme`
 (colours; style `themed`; added 2026-11-01) and the `bo-a` launcher. Since 2026-11-01 a real client for testing them is built by
 `~/src/barnowl/t/live/local/run.sh` (local podman VM, never the live pastebin session).
+Since `-3` (2026-11-02) the `themed`/`instancebold` styles wrap body lines wider than the pane
+(`wrap_long_lines`, default on), so in `bo screen` one long message spans several rows; `bo log`
+is unaffected and stays the way to read message text.
 
 Inside BarnOwl the user has `:goose <request>` (plain English, from the
 `Goose` module); this skill is the same idea for an agent outside the client.
