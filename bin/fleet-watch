@@ -9,6 +9,7 @@
 #   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch dann      only the dann.dclark.us check (ssh: last pool verification, gateway, units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
+#   fleet-watch phantom [--dry-run]  only the phantom-running check: Paseo agents stuck "running" (see Phantom "running" Paseo agents)
 #   fleet-watch upstream [--profile cfengine|paseo] [--dry-run] [--once]  only the upstream watcher (see Upstream PR watcher)
 #   fleet-watch upstream [--profile P] --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
 #   fleet-watch install   write the launchd agent (every 5 min) and load it
@@ -1496,6 +1497,377 @@ except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
 PY
 }
 
+# Phantom "running" Paseo agents (2026-11-02, RCA ~/.local/state/bigteam/lead-2026-11-02/phantom-running-rca.md E):
+# Paseo can keep an agent "running" for good after a cancel it never settled (agent 428f5f02, 17:55Z). Alert only:
+# this never stops, archives, reloads, restarts or prompts the agent. Each run lists `paseo ls` running agents and
+# `paseo inspect`s them. A signal set holds when (2a) Status is running and UpdatedAt is FLEET_WATCH_PHANTOM_SILENT
+# seconds (default 900) or more old, and then, by provider:
+#   opencode (2b)  its session is absent from GET /api/session/active (basic auth from
+#                  ~/.local/state/opencode/service.json, never printed) AND the newest session_message row (opencode.db,
+#                  mode=ro) is type idle and newer than the newest user row; or, fast path (2c), the agent is running and
+#                  daemon.log has "reported running but no active run was cancelled" / "cancellation was not acknowledged"
+#                  for its id since its UpdatedAt (a refused stop need not wait the 15 min);
+#   any other (2d) 2a and 2c both.
+# A hit needs the same signals, the same UpdatedAt, on two runs FLEET_WATCH_PHANTOM_GAP seconds (default 270) or more apart
+# (the candidate is $STATE_DIR/phantom.json). Per agent and episode (id + UpdatedAt) it sends one
+# `hermes-ping "paseo: <name> <id8> phantom-running since <UpdatedAt> (<provider>); see RCA G"` and one plain relay.py
+# notice (no --steer, RELAY_SENDER_NAME=fleet-watch-phantom) to the owning seat: the source-agent-id of the agent's last
+# paseo-system user message, else FLEET_WATCH_PHANTOM_LEAD (default 7c58015b). A failed send is retried on later runs (3 tries).
+# `fleet-watch phantom [--dry-run]` runs just this check and prints one line per running agent with its signals;
+# --dry-run reads only: no ping, no relay, no state written (it prints what it would send).
+PHANTOM="${FLEET_WATCH_PHANTOM:-on}"
+PHANTOM_PASEO="${FLEET_WATCH_PASEO:-paseo}"
+PHANTOM_HERMES_PING="${FLEET_WATCH_HERMES_PING:-$HOME/.local/bin/hermes-ping}"
+PHANTOM_LEAD="${FLEET_WATCH_PHANTOM_LEAD:-7c58015b}"
+PHANTOM_SILENT="${FLEET_WATCH_PHANTOM_SILENT:-900}"
+PHANTOM_GAP="${FLEET_WATCH_PHANTOM_GAP:-270}"
+PHANTOM_TIMEOUT="${FLEET_WATCH_PHANTOM_TIMEOUT:-120}"
+
+phantom_watch() {
+  # $1 = check (scheduled, quiet), manual (prints) or dry (prints, sends and writes nothing).
+  local mode=${1:-check}
+  [[ "$PHANTOM" == on || "$mode" != check ]] || return 0
+  "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$UPSTREAM_RELAY" <<'PY' || true
+import datetime
+import fcntl
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from base64 import b64encode
+from pathlib import Path
+
+mode, directory, hermes, target, relay = sys.argv[1:]
+root = Path(directory)
+home = Path.home()
+dry = mode == "dry"
+quiet = mode == "check"
+state_file = root / "phantom.json"
+PASEO = os.environ.get("FLEET_WATCH_PASEO", "paseo")
+HERMES_PING = os.environ.get("FLEET_WATCH_HERMES_PING", str(home / ".local/bin/hermes-ping"))
+LEAD = os.environ.get("FLEET_WATCH_PHANTOM_LEAD", "7c58015b")
+SILENT = float(os.environ.get("FLEET_WATCH_PHANTOM_SILENT", "900"))
+GAP = float(os.environ.get("FLEET_WATCH_PHANTOM_GAP", "270"))
+DEADLINE = time.monotonic() + float(os.environ.get("FLEET_WATCH_PHANTOM_TIMEOUT", "120"))
+CMD_TIMEOUT = float(os.environ.get("FLEET_WATCH_PHANTOM_CMD_TIMEOUT", "30"))
+NOW = float(os.environ.get("FLEET_WATCH_PHANTOM_NOW") or time.time())
+PASEO_DIR = Path(os.environ.get("FLEET_WATCH_PHANTOM_PASEO_DIR", str(home / ".paseo")))
+OC_DB = os.environ.get("FLEET_WATCH_PHANTOM_OC_DB", str(home / ".local/share/opencode/opencode.db"))
+OC_SERVICE = os.environ.get("FLEET_WATCH_PHANTOM_OC_SERVICE", str(home / ".local/state/opencode/service.json"))
+MAX_TRIES = 3
+REFUSAL = (b"reported running but no active run was cancelled", b"cancellation was not acknowledged")
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+SOURCE = re.compile(r'source-agent-id=\\?"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\?"')
+
+
+def clean(text, limit):
+    text = " ".join(str(text)[:limit * 4].split())
+    return "".join(c for c in text if c.isprintable())[:limit]
+
+
+def log(message):
+    try:
+        with (root / "fleet-watch.log").open("a") as stream:
+            stream.write(f"{time.strftime('%F %T')} phantom: {message}\n")
+    except OSError as error:
+        print(f"phantom: {message} (log unwritable: {clean(error, 120)})", file=sys.stderr)
+
+
+def say(line):
+    if not quiet:
+        print(line)
+
+
+def run(args):
+    left = DEADLINE - time.monotonic()
+    if left <= 0:
+        raise RuntimeError("step deadline reached")
+    result = subprocess.run(args, capture_output=True, text=True, timeout=min(CMD_TIMEOUT, left))
+    if result.returncode:
+        raise RuntimeError(f"{Path(args[0]).name} {args[1]} exited {result.returncode}: {clean(result.stderr, 200)}")
+    return result.stdout
+
+
+def epoch(stamp):
+    try:
+        return datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def agent_record(agent_id):
+    """The agent's persisted JSON (~/.paseo/agents/<cwd slug>/<id>.json), or {}."""
+    for path in (PASEO_DIR / "agents").glob(f"*/{agent_id}.json"):
+        try:
+            data = json.loads(path.read_text())
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
+def session_id(record):
+    for key in ("runtimeInfo", "persistence"):
+        sub = record.get(key)
+        if isinstance(sub, dict) and isinstance(sub.get("sessionId"), str):
+            return sub["sessionId"]
+    return None
+
+
+def oc_active(sid):
+    """True when the opencode service lists SID as active, False when it does not; raises when unreadable.
+    The password is read for the Authorization header and never printed or logged."""
+    svc = json.loads(Path(OC_SERVICE).read_text())
+    auth = b64encode(f"{svc.get('user') or 'opencode'}:{svc['password']}".encode()).decode()
+    req = urllib.request.Request(svc["url"].rstrip("/") + "/api/session/active", headers={"Authorization": f"Basic {auth}"})
+    with urllib.request.urlopen(req, timeout=10) as response:
+        body = json.loads(response.read().decode())
+    if not isinstance(body, dict):
+        raise ValueError("unexpected /api/session/active body")
+    active = body["data"] if isinstance(body.get("data"), dict) else body
+    return sid in active
+
+
+def oc_idle_after_user(sid):
+    """True when the newest session_message row of SID is type idle and newer than the newest user row
+    (by seq, the table's own order); False otherwise. Read-only."""
+    con = sqlite3.connect(f"file:{OC_DB}?mode=ro", uri=True, timeout=10)
+    try:
+        last = con.execute("select type, seq from session_message where session_id=? order by seq desc limit 1", (sid,)).fetchone()
+        if not last or last[0] != "idle":
+            return False
+        user = con.execute("select max(seq) from session_message where session_id=? and type='user'", (sid,)).fetchone()[0]
+        return user is None or last[1] > user
+    finally:
+        con.close()
+
+
+def oc_owner(sid):
+    """source-agent-id of the newest paseo-system user message of SID, or None."""
+    con = sqlite3.connect(f"file:{OC_DB}?mode=ro", uri=True, timeout=10)
+    try:
+        for (data,) in con.execute("select data from session_message where session_id=? and type='user' and data like '%paseo-system%' "
+                                   "order by seq desc limit 20", (sid,)):
+            found = SOURCE.findall(data)
+            if found:
+                return found[-1]
+    finally:
+        con.close()
+    return None
+
+
+def refusals_since(agent_id, since):
+    """Count of daemon.log refusal lines for AGENT_ID with `time` (epoch ms) after SINCE (epoch seconds). Scans daemon.log and
+    any rotated *-daemon.log written since then."""
+    needle = agent_id.encode()
+    found = 0
+    for path in sorted(PASEO_DIR.glob("*daemon.log")):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            with path.open("rb") as stream:
+                for line in stream:
+                    if needle not in line or not any(p in line for p in REFUSAL):
+                        continue
+                    try:
+                        when = json.loads(line).get("time")
+                    except ValueError:
+                        continue
+                    if isinstance(when, (int, float)) and when / 1000.0 > since:
+                        found += 1
+        except OSError:
+            continue
+    return found
+
+
+def log_owner(agent_id):
+    """Owner from `paseo logs` text for a provider with no sqlite to read: the last source-agent-id seen."""
+    try:
+        found = SOURCE.findall(run([PASEO, "logs", agent_id, "--tail", "200", "--json"]))
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        return None
+    return found[-1] if found else None
+
+
+def evaluate(agent_id, info):
+    """(is_candidate, signals text, session id). Raises on an unreadable cross-check: no verdict then."""
+    provider = str(info.get("Provider") or "?").lower()
+    updated = epoch(info.get("UpdatedAt"))
+    if info.get("Status") != "running" or info.get("Archived") or updated is None:
+        return False, "not running", None
+    age = int(max(0, NOW - updated))
+    s2a = age >= SILENT
+    s2c = refusals_since(agent_id, updated) > 0
+    sid = None
+    if provider == "opencode":
+        sid = session_id(agent_record(agent_id))
+        if sid is None:
+            raise RuntimeError("no opencode session id in the agent record")
+        s2b = None
+        if s2a and not s2c:
+            s2b = (not oc_active(sid)) and oc_idle_after_user(sid)
+        holds = (s2a and bool(s2b)) or s2c
+        text = f"silent={age // 60}m 2a={'yes' if s2a else 'no'} 2b={'n/a' if s2b is None else 'yes' if s2b else 'no'} 2c={'yes' if s2c else 'no'}"
+    else:
+        holds = s2a and s2c
+        text = f"silent={age // 60}m 2a={'yes' if s2a else 'no'} 2c={'yes' if s2c else 'no'}"
+    return holds, text, sid
+
+
+def save(state):
+    fd, name = tempfile.mkstemp(prefix=".phantom-", dir=root)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(state, stream)
+        os.replace(name, state_file)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def load():
+    try:
+        state = json.loads(state_file.read_text())
+        if isinstance(state, dict):
+            return {"candidates": state.get("candidates") if isinstance(state.get("candidates"), dict) else {},
+                    "notified": state.get("notified") if isinstance(state.get("notified"), dict) else {}}
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        log("unusable phantom.json; starting empty")
+    return {"candidates": {}, "notified": {}}
+
+
+def send_ping(text):
+    try:
+        result = subprocess.run([HERMES_PING, text], capture_output=True, timeout=60,
+                                env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return clean(error, 80)
+    return f"exit {result.returncode}" if result.returncode else None
+
+
+def send_relay(seat, text):
+    try:
+        result = subprocess.run([relay, seat, text, "--no-ack"], capture_output=True, text=True, timeout=90,
+                                env=dict(os.environ, RELAY_SENDER_NAME="fleet-watch-phantom"))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return clean(error, 80)
+    return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
+
+
+def relay_parts(agent_id, sid, name, provider, updated, signals):
+    """(owning seat, plain relay text). The seat is the source-agent-id of the agent's last paseo-system user message,
+    else the lead. No question mark and no request: a notice, nothing to answer."""
+    try:
+        seat = oc_owner(sid) if sid else log_owner(agent_id)
+    except (OSError, sqlite3.Error):
+        seat = None
+    if not seat or seat == agent_id:
+        seat = LEAD
+    return seat, (f"fleet-watch phantom monitor: Paseo agent {name} {agent_id[:8]} ({provider}) has shown running since {updated} "
+                  f"while its stop was refused or its provider session is idle ({signals}). Nothing was stopped, reloaded or restarted. "
+                  f"Recovery options: RCA section G in ~/.local/state/bigteam/lead-2026-11-02/phantom-running-rca.md. No reply needed.")
+
+
+def would(agent_id, sid, name, provider, updated, signals, ping_text):
+    seat, text = relay_parts(agent_id, sid, name, provider, updated, signals)
+    print(f"  would ping: {ping_text}")
+    print(f"  would relay to {seat}: {text}")
+
+def main():
+    with (root / "phantom.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("already running")
+            return
+        state = load()
+        listing = json.loads(run([PASEO, "ls", "--json"]))
+        running = [a for a in listing if isinstance(a, dict) and a.get("status") == "running" and isinstance(a.get("id"), str)]
+        seen = {}
+        for item in running:
+            agent_id = item["id"]
+            if not UUID.match(agent_id):
+                continue
+            try:
+                info = json.loads(run([PASEO, "inspect", agent_id, "--json"]))
+                holds, signals, sid = evaluate(agent_id, info)
+            except (OSError, ValueError, KeyError, RuntimeError, sqlite3.Error, subprocess.TimeoutExpired) as error:
+                log(f"{agent_id[:8]}: no verdict: {clean(error, 200)}")
+                say(f"phantom: {agent_id[:8]} no verdict: {clean(error, 160)}")
+                continue
+            name = clean(info.get("Name") or item.get("name") or agent_id[:8], 60)
+            provider = clean(info.get("Provider") or "?", 30)
+            updated = str(info.get("UpdatedAt"))
+            key = f"{agent_id}|{updated}"
+            if not holds:
+                say(f"phantom: {name} {agent_id[:8]} ({provider}) ok: {signals}")
+                continue
+            seen[key] = True
+            cand = state["candidates"].get(key)
+            first = cand.get("first") if isinstance(cand, dict) and isinstance(cand.get("first"), (int, float)) else None
+            note = state["notified"].get(key) if isinstance(state["notified"].get(key), dict) else None
+            ping_text = f"paseo: {name} {agent_id[:8]} phantom-running since {updated} ({provider}); see RCA G"
+            confirmed = first is not None and NOW - first >= GAP
+            if note is None and not confirmed:
+                wait = f"first seen {int(NOW - first)}s ago, a hit needs {int(GAP)}s" if first is not None else "first check"
+                say(f"phantom: {name} {agent_id[:8]} ({provider}) CANDIDATE: {signals}; {wait}")
+                if first is None and not dry:
+                    state["candidates"][key] = {"first": NOW, "signals": signals}
+                if dry:
+                    would(agent_id, sid, name, provider, updated, signals, ping_text)
+                continue
+            say(f"phantom: {name} {agent_id[:8]} ({provider}) PHANTOM: {signals}")
+            if dry:
+                would(agent_id, sid, name, provider, updated, signals, ping_text)
+                continue
+            note = note or {"at": NOW, "ping": False, "relay": False, "tries": 0}
+            if note.get("tries", 0) >= MAX_TRIES:
+                state["notified"][key] = note
+                continue
+            seat, relay_text = relay_parts(agent_id, sid, name, provider, updated, signals)
+            note["tries"] = note.get("tries", 0) + 1
+            if not note["ping"]:
+                reason = send_ping(ping_text)
+                note["ping"] = reason is None
+                if reason:
+                    log(f"{agent_id[:8]}: hermes-ping failed: {reason}")
+            if not note["relay"]:
+                reason = send_relay(seat, relay_text)
+                note["relay"] = reason is None
+                if reason:
+                    log(f"{agent_id[:8]}: relay to {seat} failed: {reason}")
+            if note["ping"] and note["relay"]:
+                note["tries"] = MAX_TRIES
+            state["notified"][key] = note
+            log(f"{agent_id[:8]}: phantom episode {updated}: ping={note['ping']} relay={note['relay']} seat={seat}")
+        if not dry:
+            # A candidate that no longer holds is dropped. A sent-notice entry is kept 7 days, so a stuck agent that stays
+            # running with the same UpdatedAt is never re-paged; a recovered one that sticks again has a new UpdatedAt.
+            state["candidates"] = {k: v for k, v in state["candidates"].items() if k in seen}
+            state["notified"] = {k: v for k, v in state["notified"].items()
+                                 if k in seen or NOW - float(v.get("at", 0)) < 7 * 86400}
+            try:
+                save(state)
+            except OSError as error:
+                log(f"state not writable: {clean(error, 200)}")
+        say(f"phantom: checked {len(running)} running agent(s)")
+
+
+try:
+    main()
+except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+    log(f"unavailable: {clean(error, 240)}")
+    say(f"phantom: unavailable: {clean(error, 200)}")
+PY
+}
+
 check() {
   ack_watch
   local agents builds deploys parts=() h sshdk=""
@@ -1517,6 +1889,7 @@ check() {
   vps_watch
   dann_watch
   getbackup_watch check
+  phantom_watch check
   local p
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
@@ -1602,6 +1975,14 @@ case "${1:-check}" in
   getbackup)
     getbackup_watch manual
     echo "getbackup=$GETBACKUP_STATE"
+    ;;
+  phantom)
+    shift
+    case ${1:-} in
+      "") phantom_watch manual ;;
+      --dry-run) phantom_watch dry ;;
+      *) echo "usage: fleet-watch phantom [--dry-run]" >&2; exit 2 ;;
+    esac
     ;;
   upstream)
     shift
@@ -1727,7 +2108,7 @@ EOF
     rm -f "$PLIST" && echo "removed $LABEL"
     ;;
   *)
-    gsed -n '2,12p' "$0"
+    gsed -n '2,/^#   fleet-watch uninstall/p' "$0"
     exit 1
     ;;
 esac
