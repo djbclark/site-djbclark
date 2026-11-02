@@ -93,5 +93,7 @@ To follow upstream: `git fetch upstream && git rebase upstream/main` in `~/src/b
 when the key is on (it also turns on per-process cwd reads); `split_widths`/`split_line`
 in `src/widgets/process_table/process_data.rs` draw it (the separator uses the theme's
 `selected_border_colour`); grouping and expansion are in `get_normal_data`
-(`src/widgets/process_table.rs`). Sorting uses the joined text; search still matches the
-full command. Docs: `docs/content/configuration/config-file/processes.md`, "Split Command".
+(`src/widgets/process_table.rs`). Sorting uses the joined text; plain search matches the full
+command, and the `cwd=` keyword (e.g. `cwd=~/src/bottom`) matches the working directory as shown
+(`src/widgets/process_table/query*`). Docs: `docs/content/configuration/config-file/processes.md`,
+"Split Command", and `docs/content/usage/widgets/process.md` (search keywords).
