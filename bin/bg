@@ -48,7 +48,13 @@
 # kills anything: `bg-wait-PID-T` (first real wait, load gate or slot: budget = the rest of BG_MAX_WAIT, heartbeat from the wait
 # loop, `done` on every exit path through an EXIT trap) and `bg-run-PID-T` (the run, registered and beaten every poll by the
 # detached watcher above, `done` when the process ends; budget 30m, BG_DEADLINE=45m for a known long run). Neither record has
-# a --pid: `deadline start` refuses a pid that is its own caller's ancestor, and bg is that ancestor. BG_NO_DEADLINE=1 opts out;
+# a --pid: `deadline start` refuses a pid that is its own caller's ancestor, and bg is that ancestor. Each has a --holder instead
+# (2026-11-02; never signalled, so the ancestor rule does not apply): bg's own pid for the wait, the watcher's pid for the run.
+# When the holder is gone and `done` never ran (a SIGKILLed process group: the EXIT trap and the watcher die with it), the sweep
+# retires the record silently as `abandoned` instead of announcing an expiry for work that never ran. The run record is also
+# registered only once the run has STARTED: bg touches a private marker file ($HOME/.local/state/bg/run-started.PID.T) just
+# before the exec, the watcher waits for it, and if bg is gone first the watcher registers nothing and logs no history line.
+# BG_NO_DEADLINE=1 opts out;
 # under `deadline run` (DEADLINE_NAME set) bg registers nothing. `deadline` missing or failing: one warning on stderr (the
 # watcher's, which has no stderr, goes to ~/.local/state/bg/deadline.log), and bg goes on; its output and exit status are
 # unchanged. Tests: DEADLINE_STATE_DIR to a temp dir (never ~/.local/state/deadlines), BG_DEADLINE_CMD for a stand-in.
@@ -525,7 +531,7 @@ bg_wait_rec() {
   local n; n=$(gdate +%s)
   if [ -z "$bg_wait_name" ]; then
     bg_wait_name="bg-wait-$$-$bg_t0"
-    if bg_dl start "$bg_wait_name" --budget "$((max_wait - $1))s" --heartbeat 10m --owner "$bg_dl_owner" --on-expire notify; then
+    if bg_dl start "$bg_wait_name" --budget "$((max_wait - $1))s" --heartbeat 10m --owner "$bg_dl_owner" --on-expire notify --holder "$$"; then
       bg_wait_live=1
       bg_wait_beat=$n
       trap bg_wait_end EXIT
@@ -642,16 +648,28 @@ fi
 # Long-run watcher (see the header): forked here, so it watches this pid through the exec.
 bg_hist="$HOME/.local/state/bg/history.tsv"
 mkdir -p "${bg_hist%/*}"
+bg_mark="$HOME/.local/state/bg/run-started.$$.$bg_t0"
 bg_watch() {
-  local pid="$1" t0 lstart now el med limit pinged=0 poll="${BG_WATCH_POLL:-30}" dl="" hb dl_beat=1
+  local pid="$1" t0 lstart now el med limit pinged=0 poll="${BG_WATCH_POLL:-30}" dl="" hb dl_beat=1 w=0
+  # The run has started once bg has touched the marker, the moment before its exec (the pid stays the same through the exec).
+  # bg gone first (killed in between): nothing started, nothing is registered or recorded.
+  lstart=$(ps -o lstart= -p "$pid" 2>/dev/null)
+  while [ ! -e "$bg_mark" ]; do
+    if [ -z "$lstart" ] || [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" != "$lstart" ]; then rm -f "$bg_mark"; return 0; fi
+    [ "$w" -ge 600 ] && break   # 60 s: never seen, bg alive: treat it as started rather than watch nothing
+    w=$((w + 1))
+    sleep 0.1
+  done
+  rm -f "$bg_mark"
   t0=$(gdate +%s)
   # Run deadline (header): registered here, in the detached watcher, so bg never waits for it. Its stderr is /dev/null,
-  # so a failure is logged to bg_dl_log instead of printed.
+  # so a failure is logged to bg_dl_log instead of printed. The watcher is the holder ($BASHPID; bash 3.2 has none and falls
+  # back to the command's pid, which is gone just as well when the group is killed).
   if [ "$bg_dl_on" = 1 ]; then
     bg_dl_log="$HOME/.local/state/bg/deadline.log"
     case "$poll" in *[!0-9]*|"") hb=600 ;; *) hb=$((4 * poll)); [ "$hb" -lt 600 ] && hb=600 ;; esac
     dl="bg-run-$pid-$t0"
-    bg_dl start "$dl" --budget "${BG_DEADLINE:-30m}" --heartbeat "${hb}s" --owner "$bg_dl_owner" --on-expire notify || dl=""
+    bg_dl start "$dl" --budget "${BG_DEADLINE:-30m}" --heartbeat "${hb}s" --owner "$bg_dl_owner" --on-expire notify --holder "${BASHPID:-$$}" || dl=""
   fi
   lstart=$(ps -o lstart= -p "$pid" 2>/dev/null)
   med=$(gawk -F'\t' -v r="$bg_repo" -v k="$bg_k" '$3 == r && $4 == k { d[n++] = $2 }
@@ -690,4 +708,5 @@ for v in OMP_NUM_THREADS OPENBLAS_NUM_THREADS MKL_NUM_THREADS NUMEXPR_NUM_THREAD
   [ -n "${!v:-}" ] || export "$v=1"
 done
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
+: > "$bg_mark" 2>/dev/null   # the run starts now (see the header): the watcher registers its deadline on seeing this
 exec taskpolicy -c utility "$@"
