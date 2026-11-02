@@ -116,6 +116,19 @@ shared_mcp_servers:
       # first, then the free LiteLLM pool. The router hides both keys from firecrawl-mcp.
       FIRECRAWL_ROUTER_SIPB_KEY: "{{ lookup('env', 'MIT_SIPB_API_KEY') | default('', true) }}"
       FIRECRAWL_ROUTER_LITELLM_KEY: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
+  # greptile (2026-11-01): Greptile's hosted MCP server (https://api.greptile.com/mcp, 21 tools, ~47.7 KB of
+  # schemas) behind ONE keyless local endpoint with an 8-tool review allowlist (bin/greptile-mcp-proxy in
+  # this repo, linked into shared_mcp_bin_dir by the role). The daemon reads GREPTILE_API_KEY itself, once,
+  # through `sudo-secretspec get`; the key is never in this plist, argv or any client config. Path /mcp, so a
+  # bare GET answers 405 (liveness, as for the others). Docs: roles/shared_mcp/README.md.
+  - name: greptile
+    port: 18808
+    link_src: "{{ playbook_dir | dirname }}/bin/greptile-mcp-proxy"
+    argv:
+      - "{{ shared_mcp_bin_dir }}/greptile-mcp-proxy"
+      - --listen
+      - "127.0.0.1:18808"
+    env: {}
 
 # The self-hosted Firecrawl and its gate token. The token is a real secret (the
 # gate is on the public internet): it comes from sudo-secretspec

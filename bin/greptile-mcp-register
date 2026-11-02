@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""greptile-mcp-register: register the shared Greptile MCP endpoint (http://127.0.0.1:18808/mcp) in every agent TUI.
+
+Mirrors how the shared firecrawl server (127.0.0.1:18804) is registered, entry for entry:
+  cursor    ~/.cursor/mcp.json                    mcpServers.greptile = {url}
+  codex     ~/.codex/config.toml                  [mcp_servers.greptile] url, tool_timeout_sec
+  opencode  ~/.config/opencode/opencode.json      mcp.greptile = {type: remote, url, enabled, timeout}
+  agy       ~/.gemini/config/mcp_config.json      mcpServers.greptile = mcp-proxy --transport streamablehttp URL
+and, additionally, Claude Code (user scope, through `claude mcp add`, which firecrawl does not have).
+No client config holds a credential: the proxy adds Greptile's bearer key itself.
+
+Each edited file is first copied to <file>.bak-2026-11-01-greptile (never overwritten), then replaced atomically
+(temp file beside the realpath, check, os.replace). Idempotent. `--check` writes nothing and says what would change.
+Hermes and omp are not registered: firecrawl is not an MCP entry in either (Hermes uses it as a web backend).
+
+  greptile-mcp-register [--check] [--targets cursor,codex,opencode,agy,claude]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+URL = "http://127.0.0.1:18808/mcp"
+SUFFIX = ".bak-2026-11-01-greptile"
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+CODEX_BLOCK = f'\n[mcp_servers.greptile]\nurl = "{URL}"\ntool_timeout_sec = 180.0\n'
+
+
+def replace_atomically(path: Path, text: str, check) -> None:
+    real = Path(os.path.realpath(path))
+    if not real.exists():
+        raise SystemExit(f"{real}: missing (is that TUI installed?)")
+    backup = real.with_name(real.name + SUFFIX)
+    if not backup.exists():
+        shutil.copy2(real, backup)
+    fd, tmp = tempfile.mkstemp(dir=real.parent, prefix=real.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        check(Path(tmp).read_text(encoding="utf-8"))
+        os.chmod(tmp, real.stat().st_mode & 0o7777)
+        os.replace(tmp, real)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def json_target(path: Path, container: str, entry: dict, dry: bool) -> str:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    servers = doc.setdefault(container, {})
+    if servers.get("greptile") == entry:
+        return "already registered"
+    servers["greptile"] = entry
+    if not dry:
+        replace_atomically(path, json.dumps(doc, indent=2, ensure_ascii=False) + "\n", json.loads)
+    return "would register" if dry else "registered"
+
+
+def codex(dry: bool) -> str:
+    path = HOME / ".codex" / "config.toml"
+    text = path.read_text(encoding="utf-8")
+    cur = tomllib.loads(text).get("mcp_servers", {}).get("greptile")
+    if cur and cur.get("url") == URL:
+        return "already registered"
+    if cur:
+        raise SystemExit(f"{path}: [mcp_servers.greptile] exists with another url; fix it by hand")
+    if not dry:
+        new = text.rstrip("\n") + "\n" + CODEX_BLOCK
+
+        def ok(t: str) -> None:
+            assert tomllib.loads(t)["mcp_servers"]["greptile"]["url"] == URL
+
+        replace_atomically(path, new, ok)
+    return "would register" if dry else "registered"
+
+
+def claude(dry: bool) -> str:
+    path = HOME / ".claude.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    cur = (doc.get("mcpServers") or {}).get("greptile")
+    if cur and cur.get("url") == URL:
+        return "already registered"
+    if dry:
+        return "would register"
+    backup = path.with_name(path.name + SUFFIX)
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    # The CLI owns the locking against running sessions that rewrite ~/.claude.json.
+    subprocess.run(["claude", "mcp", "add", "--scope", "user", "--transport", "http", "greptile", URL],
+                   stdin=subprocess.DEVNULL, check=True, timeout=60)
+    return "registered"
+
+
+TARGETS = {
+    "cursor": lambda dry: json_target(HOME / ".cursor" / "mcp.json", "mcpServers", {"url": URL}, dry),
+    "codex": codex,
+    "opencode": lambda dry: json_target(HOME / ".config" / "opencode" / "opencode.json", "mcp",
+                                        {"type": "remote", "url": URL, "enabled": True, "timeout": 180000}, dry),
+    "agy": lambda dry: json_target(HOME / ".gemini" / "config" / "mcp_config.json", "mcpServers",
+                                   {"disabled": False, "command": str(HOME / ".local" / "bin" / "mcp-proxy"),
+                                    "args": ["--transport", "streamablehttp", URL]}, dry),
+    "claude": claude,
+}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--check", action="store_true", help="write nothing; report what would change")
+    ap.add_argument("--targets", default=",".join(TARGETS))
+    args = ap.parse_args()
+    names = [t for t in args.targets.split(",") if t]
+    bad = [t for t in names if t not in TARGETS]
+    if bad:
+        ap.error(f"unknown target(s): {', '.join(bad)}")
+    rc = 0
+    for name in names:
+        try:
+            print(f"{name}: {TARGETS[name](args.check)}")
+        except (OSError, ValueError, SystemExit, subprocess.SubprocessError, AssertionError) as e:
+            rc = 1
+            print(f"{name}: FAILED {type(e).__name__}: {e}" if not isinstance(e, SystemExit) else f"{name}: FAILED {e}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

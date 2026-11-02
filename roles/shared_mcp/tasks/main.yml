@@ -15,6 +15,16 @@
   when: shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list | length > 0
   no_log: true
 
+# Daemons this repo owns (bin/greptile-mcp-proxy) are symlinked into the bin dir, as firecrawl-router is.
+- name: Link repo-owned shared MCP daemons into the bin dir
+  ansible.builtin.file:
+    src: "{{ item.link_src }}"
+    dest: "{{ item.argv[0] }}"
+    state: link
+    force: true
+  loop: "{{ shared_mcp_servers | selectattr('link_src', 'defined') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+
 - name: Locate each shared MCP server binary
   ansible.builtin.stat:
     path: "{{ item.argv[0] }}"

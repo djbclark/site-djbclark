@@ -200,7 +200,7 @@ basic-memory-mcp-check *args:
 
 shared_mcp_hosts := env_var_or_default("SHARED_MCP_HOSTS", "mac")
 
-# One shared crawl4ai / arxiv / paper-search / firecrawl MCP server each
+# One shared crawl4ai / arxiv / paper-search / firecrawl / greptile MCP server each
 # (roles/shared_mcp). firecrawl needs FIRECRAWL_SELFHOST_API_KEY (the Hyades
 # gate token) and, for its commercial fallback, FIRECRAWL_API_KEY, so apply
 # and check through the -secrets / secretspec wrappers.
@@ -214,7 +214,7 @@ shared-mcp-check *args:
     sudo-secretspec run --reason "check shared MCP apply (dry run)" -- env ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/shared_mcp.yml --limit "{{ shared_mcp_hosts }}" {{ args }}
 
 shared-mcp-status:
-    @for s in crawl4ai:18798 arxiv:18800 paper-search:18802 firecrawl:18804; do n=${s%%:*}; p=${s##*:}; \
+    @for s in crawl4ai:18798 arxiv:18800 paper-search:18802 firecrawl:18804 greptile:18808; do n=${s%%:*}; p=${s##*:}; \
       l=$(launchctl print "gui/$(id -u)/com.djbclark.$n-mcp" >/dev/null 2>&1 && echo loaded || echo "not loaded"); \
       c=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$p/mcp"); \
       echo "$n: launchd $l, http://127.0.0.1:$p/mcp -> $c"; done

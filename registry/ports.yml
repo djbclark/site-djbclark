@@ -144,6 +144,8 @@ hosts:
          note: "2026-10-14: com.djbclark.firecrawl-mcp launchd (roles/shared_mcp). firecrawl-mcp HTTP_STREAMABLE_SERVER, path /mcp, backend = self-hosted Firecrawl on Hyades (djbclark-firecrawl.sipb.cloud; seven microVMs, deploy files in forgejo.mit.edu/djbclark/firecrawl-hyades since 2026-10-16) via djbclark-ade bin/firecrawl-router"}
       - {port: 18805, bind: "127.0.0.1", owner: site, service: firecrawl-router-open, status: active,
          note: "2026-10-14: firecrawl-router --listen 127.0.0.1:18805 --open, started inside com.djbclark.firecrawl-mcp (roles/shared_mcp). No token, loopback only, for Hermes' firecrawl web backend"}
+      - {port: 18808, bind: "127.0.0.1", owner: site, service: greptile-mcp, status: active,
+         note: "2026-11-01: com.djbclark.greptile-mcp launchd (roles/shared_mcp). bin/greptile-mcp-proxy: Greptile's hosted MCP (api.greptile.com/mcp, 21 tools) behind a keyless local /mcp with an 8-tool review allowlist (get_me, list_pull_requests, get_merge_request, list_merge_request_comments, list_code_reviews, get_code_review, trigger_code_review, search_greptile_comments); GREPTILE_API_KEY read once via sudo-secretspec. 18809 stays free for a bearer gate"}
       # :14000 litellm-uv-tool removed 2026-08-21 — the row was wrong, not just
       # stale. There was never a second proxy: the uv-tool install IS what
       # serves the :4000 litellm-proxy row above, so the two were the same
