@@ -313,5 +313,10 @@
   # Cap the persistent journal (754 MB on 2026-10-24 on a 30 GB root, djbclark disk hygiene).
   services.journald.extraConfig = "SystemMaxUse=200M";
 
+  # tendcf's CFEngine fork: package and work directory only. cf-execd stays off: tendcf
+  # enforces nothing on a Nix host (tendcf spec D3; djbclark go-ahead 2026-11-01).
+  services.cfengine-tendcf.enable = true;
+  services.cfengine-tendcf.execd.enable = false;
+
   system.stateVersion = "26.05";
 }
