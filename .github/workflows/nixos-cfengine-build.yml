@@ -1,7 +1,7 @@
 # Builds the tendcf CFEngine fork package from nixos/ (pkgs/cfengine-tendcf.nix) and proves the
 # NixOS module (modules/cfengine-tendcf.nix) on vps-primary installs only the package and its
 # work directory: the package builds and names the fork commit, the host toplevel builds, the
-# module adds nothing outside the package's closure, cf-execd stays off (tendcf spec D3), and
+# module introduces no store-path name outside the package's closure, cf-execd stays off (tendcf spec D3), and
 # the cf-execd unit exists only when both enable options are true.
 #
 # The Mac has no nix, so this workflow is the build loop for those files.
@@ -97,7 +97,7 @@ jobs:
             exit 1
           fi
           grep -qx 'cfengine-tendcf-3.29.0a.b8abf2840' /tmp/new.names
-          echo "only the package and its runtime closure are added"
+          echo "every newly introduced store-path name belongs to the package runtime closure"
 
       - name: vps-primary has the module on, cf-execd off and no execd unit
         run: |

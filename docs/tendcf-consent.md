@@ -131,9 +131,11 @@ gate's own files. That, not the text of the diff, decides whether the hard check
    options. The gate assumes an honest author making a mistake; a deliberately disguised change
    defeats it, and only human review of the PR can stop that.
 
-## Branch protection (lead, not this repo's code)
+## Branch protection (ruling R-S3-3, operator 2026-11-01)
 
-Require the status check named **`tendcf consent`**. Also set: strict status checks (branch up to
-date before merge, since `pull_request` does not re-run when the base moves), dismiss stale
-approvals on new pushes, and read-only default workflow permissions. Do not require `tendcf push check` (it only
-runs on pushes) or `Build cfengine-tendcf, check vps-primary` (path-filtered).
+site-djbclark has no GitHub branch protection: three bot workflows push to `master` with the
+workflow token, and a personal repository cannot let the Actions bot bypass a required check.
+Before merging a tendcf change, a successful `tendcf consent` job on the current merge result and
+djbclark's approval of its artifact are required by convention. The `tendcf push check` is a
+visible red backstop, not a blocker. Forgejo get is protected: required consent check, branch up
+to date, stale approvals dismissed, admins exempt.
