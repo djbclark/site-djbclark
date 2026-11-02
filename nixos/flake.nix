@@ -68,7 +68,7 @@
           athena-nixos.nixosModules.default # nixathena default + athena + athena-afs
           paseo-nix.nixosModules.default
           sudo-secretspec.nixosModules.default # services.sudo-secretspec, enabled in vps-primary/sudo-secretspec.nix
-          self.nixosModules.cfengine-tendcf # imported, not enabled: the host's closure is unchanged
+          self.nixosModules.cfengine-tendcf # enabled by the host; cf-execd remains disabled
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
           { system.configurationRevision = self.rev or self.dirtyRev or null; }
