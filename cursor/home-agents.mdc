@@ -112,7 +112,9 @@ change, consult a `frontier` agent if it helps, then open the issue/PR upstream,
 
 **Every path an agent writes, runs, records or hands on is `~/src/<name>` or your claimed workspace, never `~/s/...`** (a
 generated, locked symlink farm); never write to or start a session in `~/s`. After adding or removing
-a top-level `~/src` entry run `just -f ~/s/justfile` (`site-public-djbclark/tools/s-farm/AGENTS.md`).
+a top-level `~/src` entry run `just -f ~/s/justfile` (`site-public-djbclark/tools/s-farm/AGENTS.md`). **A brief that names a
+worktree or pasture gives every path inside it as an absolute path** (2026-11-02: a slice whose brief named a worktree made its first
+edits in the shared checkout, and they had to be moved by patch).
 
 ## Ask where a new thing goes
 
