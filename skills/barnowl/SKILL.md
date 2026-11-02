@@ -15,7 +15,7 @@ The helper is `scripts/bo` in this skill (`~/src/djbclark-ade/skills/barnowl/scr
 The command list is `bo run 'show commands'`; a command's flags are in
 `bo run 'help COMMAND'`, or in `commands.c` of
 [github.com/barnowl/barnowl](https://github.com/barnowl/barnowl) (the `OWLCMD_*`
-name and its summary string). The installed client on pastebin is BarnOwl built from upstream master (package `1.11~git20250813.1f65aee-3`,
+name and its summary string). The installed client on pastebin is BarnOwl built from upstream master (package `1.11~git20250813.1f65aee-5`,
 [djbclark/barnowl-debian](https://forgejo.mit.edu/djbclark/barnowl-debian/releases)); Debian's own is 1.10.
 `~/src/barnowl` is **not** the client source: it is djbclark's modules repo
 (forgejo.mit.edu/djbclark/barnowl): `Goose`, `HistoryLoad`, `InstanceStyle`, `Theme`
@@ -26,7 +26,7 @@ Since `-3` (2026-11-02) the `themed`/`instancebold` styles wrap body lines wider
 is unaffected and stays the way to read message text.
 
 Inside BarnOwl the user has `:goose <request>` (plain English, from the
-`Goose` module); this skill is the same idea for an agent outside the client.
+`Goose` module) when BarnOwl runs unconfined; this skill is the same idea for an agent outside the client.
 `subs` means subscriptions.
 
 ## Which client, and how to reach it
@@ -34,6 +34,13 @@ Inside BarnOwl the user has `:goose <request>` (plain English, from the
 The persistent BarnOwl is the tmux session `barnowl` on `pastebin.xvm.mit.edu`,
 started and repaired by `bo-a` (`~/src/barnowl/bin/bo-a`). `bo` talks only to that
 session. A second `barnowl` process may be sitting on another tty. Do not type into it.
+
+**Since 2026-11-02 `bo-a` runs BarnOwl confined by `kjail`** (Landlock and seccomp,
+[djbclark/kerberos-jail](https://forgejo.mit.edu/djbclark/kerberos-jail); copies in `~/src/barnowl/bin`), with a
+ticket cache holding only `zephyr/zephyr@ATHENA.MIT.EDU` in `~/.local/state/bo-a/jail/krb/cc`. Inside it BarnOwl reads a copy
+of `~/.owl` (made at each `bo-a` start) and can write only its jail `HOME`, regular files in `~/zlog/people` and
+`~/zlog/class`, and `bo`'s answer files in `~/.local/state/bo`; it cannot run programs, so `:goose`, `zcrypt` and
+`:exec` fail there. Logs stay in `~/zlog`, so `bo log` is unchanged. `BO_A_JAIL=0 bo-a` runs it unconfined.
 
 **From the Mac, always `ssh pastebin-bo bo <subcommand> ...`.** `pastebin-bo` is an SSH
 alias for a key whose only power is `scripts/bo-ssh`: it can run `bo log|screen|capture|subs|file|run|perl|locate|help`
