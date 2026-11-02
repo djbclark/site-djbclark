@@ -74,7 +74,7 @@ def run_bg(repo, tmp_path_factory, *argv):
     (fake / "pytest").chmod(0o755)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     env = {**os.environ, "HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}",
-           "BG_LOAD_WAIT": "0", "BG_MAX_WAIT": "30", "BG_PING_CMD": "/usr/bin/true"}
+           "BG_LOAD_WAIT": "0", "BG_MAX_WAIT": "30", "BG_PING_CMD": "/usr/bin/true", "BG_NO_DEADLINE": "1"}
     return subprocess.run([str(BG), *argv], cwd=repo, env=env, capture_output=True, text=True, timeout=120)
 
 

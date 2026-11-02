@@ -197,7 +197,7 @@ class Setup:
     def bg(self, *argv, cwd=None, **env):
         e = {**os.environ, "HOME": str(self.home), "BASH_ENV": str(self.state / "sleep-shim.sh"),
              "BG_OFFLOAD_TESTING": "1", "BG_GH": str(self.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "5",
-             "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1",
+             "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_WATCH_POLL": "1", "BG_NO_DEADLINE": "1",
              # fakebin is a $PATH directory, like a real tool's: its build-app is not "another tree" (F6)
              "PATH": f"{self.home / 'fakebin'}:{os.environ['PATH']}", "BG_OFFLOAD_URL_ALIAS": self.alias, **env}
         e = {k: v for k, v in e.items() if v is not None}
@@ -441,7 +441,8 @@ def test_killing_bg_stops_the_offload_poller(s):
     (s.state / "runs.json").write_text(json.dumps([run(24, status="in_progress", conclusion=None)]))
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"),
          "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "60",
-         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_WAIT": "120", "BG_OFFLOAD_URL_ALIAS": s.alias}
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_WAIT": "120", "BG_OFFLOAD_URL_ALIAS": s.alias,
+         "BG_NO_DEADLINE": "1"}
     e.pop("BG_LOAD_WAIT", None)
     tdir = s.root / "tmpdir"
     tdir.mkdir()
@@ -482,7 +483,7 @@ def test_a_failed_greadlink_never_runs_a_helper_from_the_cwd(s):
     wrapper.write_text(f'greadlink() {{ return 1; }}\nexport -f greadlink\nexec {shlex.quote(str(BG))} "$@"\n')
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"),
          "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "4",
-         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true"}
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_NO_DEADLINE": "1"}
     e.pop("BG_LOAD_WAIT", None)
     r = subprocess.run(["bash", str(wrapper), str(s.home / "fakebin" / "pytest"), "tests/test_a.py"], cwd=s.work,
                        env=e, capture_output=True, text=True, timeout=60)
@@ -504,7 +505,7 @@ def test_killing_bg_stops_an_in_flight_push(s):
     (s.state / "runner.slow").write_text("")
     e = {**os.environ, "HOME": str(s.home), "BASH_ENV": str(s.state / "sleep-shim.sh"), "BG_OFFLOAD_TESTING": "1",
          "BG_GH": str(s.home / "fakebin" / "gh"), "BG_MAX_LOAD_PER_CORE": "1000", "BG_MAX_WAIT": "60",
-         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_URL_ALIAS": s.alias}
+         "BG_OFFLOAD_AFTER": "1", "BG_PING_CMD": "/usr/bin/true", "BG_OFFLOAD_URL_ALIAS": s.alias, "BG_NO_DEADLINE": "1"}
     e.pop("BG_LOAD_WAIT", None)
     p = subprocess.Popen([str(BG), str(s.home / "fakebin" / "pytest"), "tests/test_a.py"], cwd=s.work, env=e,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

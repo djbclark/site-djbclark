@@ -43,6 +43,16 @@
 # BG_RUN_PING_MIN, default 1800 s), or BG_RUN_PING_DEFAULT (3600 s) with no history, and one when
 # the wait passes BG_PING_WAIT (3600 s). BG_PING_CMD replaces hermes-ping (tests).
 #
+# Deadline (djbclark 2026-11-01, "bg registers deadlines, alert-only first"; ~/src/djbclark-ade/docs/deadline.md): bg registers
+# two records with `deadline start ... --on-expire notify`, which tells the owner (PASEO_AGENT_ID, when set) and Hermes and NEVER
+# kills anything: `bg-wait-PID-T` (first real wait, load gate or slot: budget = the rest of BG_MAX_WAIT, heartbeat from the wait
+# loop, `done` on every exit path through an EXIT trap) and `bg-run-PID-T` (the run, registered and beaten every poll by the
+# detached watcher above, `done` when the process ends; budget 30m, BG_DEADLINE=45m for a known long run). Neither record has
+# a --pid: `deadline start` refuses a pid that is its own caller's ancestor, and bg is that ancestor. BG_NO_DEADLINE=1 opts out;
+# under `deadline run` (DEADLINE_NAME set) bg registers nothing. `deadline` missing or failing: one warning on stderr (the
+# watcher's, which has no stderr, goes to ~/.local/state/bg/deadline.log), and bg goes on; its output and exit status are
+# unchanged. Tests: DEADLINE_STATE_DIR to a temp dir (never ~/.local/state/deadlines), BG_DEADLINE_CMD for a stand-in.
+#
 # Gradle slots: a command that runs gradle or gradlew (also behind `env VAR=… ./gradlew`) takes
 # one of BG_GRADLE_SLOTS machine-wide slots (default 1) for its whole run, waiting up to
 # up to the wait budget (BG_MAX_WAIT) for one. On 2026-10-06 eight agents
@@ -469,6 +479,69 @@ bg_k=$(bg_key "$@")
 waited_s() { echo $(( $(gdate +%s) - bg_t0 )); }
 # dur <seconds>: "6 h" / "45 min" / "20 s" for messages.
 dur() { if [ "$1" -ge 3600 ]; then echo "$(($1 / 3600)) h"; elif [ "$1" -ge 60 ]; then echo "$(($1 / 60)) min"; else echo "$1 s"; fi; }
+
+# Deadlines (header, "Deadline"): alert-only. A missing or failing `deadline` only costs a warning, never the run.
+bg_deadline_cmd="${BG_DEADLINE_CMD:-$HOME/src/djbclark-ade/bin/deadline}"
+bg_dl_owner="${PASEO_AGENT_ID:--}"
+bg_dl_on=1
+bg_dl_warned=0
+bg_dl_log=       # set in the detached watcher, whose stderr is /dev/null: warnings go to this file instead
+bg_wait_name=
+bg_wait_live=0
+bg_wait_beat=0
+bg_dl_to=()
+command -v gtimeout >/dev/null 2>&1 && bg_dl_to=(gtimeout 10)
+bg_dl_warn() {
+  [ "$bg_dl_warned" = 1 ] && return 0
+  bg_dl_warned=1
+  if [ -n "$bg_dl_log" ]; then
+    printf '%s bg: deadline: %s\n' "$(gdate -Is)" "$1" >> "$bg_dl_log" 2>/dev/null
+  else
+    echo "bg: deadline: $1 (continuing without it; BG_NO_DEADLINE=1 silences this)" >&2
+  fi
+  return 0
+}
+# bg_dl SUBCOMMAND ARGS...: run `deadline`, output discarded (bg's own output stays as it was), stdin untouched,
+# never longer than 10 s; its failure warns once and is returned, never fatal.
+bg_dl() {
+  local err rc=0
+  err=$("${bg_dl_to[@]}" "$bg_deadline_cmd" "$@" 2>&1 >/dev/null </dev/null) || rc=$?
+  if [ "$rc" != 0 ]; then
+    err=${err##*$'\n'}
+    bg_dl_warn "deadline $1 failed (exit $rc${err:+: $err})"
+  fi
+  return "$rc"
+}
+if [ "${BG_NO_DEADLINE:-0}" = 1 ] || [ -n "${DEADLINE_NAME:-}" ]; then
+  bg_dl_on=0   # opted out, or already under `deadline run`
+elif [ ! -x "$bg_deadline_cmd" ]; then
+  bg_dl_warn "$bg_deadline_cmd is not executable"
+  bg_dl_on=0
+fi
+# bg_wait_rec <seconds waited>: first call (the first real wait, load gate or slot) registers the wait deadline with the
+# rest of BG_MAX_WAIT as its budget; later calls beat it at most once a minute. Never registered when nothing waits.
+bg_wait_rec() {
+  [ "$bg_dl_on" = 1 ] || return 0
+  local n; n=$(gdate +%s)
+  if [ -z "$bg_wait_name" ]; then
+    bg_wait_name="bg-wait-$$-$bg_t0"
+    if bg_dl start "$bg_wait_name" --budget "$((max_wait - $1))s" --heartbeat 10m --owner "$bg_dl_owner" --on-expire notify; then
+      bg_wait_live=1
+      bg_wait_beat=$n
+      trap bg_wait_end EXIT
+    fi
+  elif [ "$bg_wait_live" = 1 ] && [ $((n - bg_wait_beat)) -ge 60 ]; then
+    bg_wait_beat=$n
+    bg_dl beat "$bg_wait_name" || bg_wait_live=0
+  fi
+}
+# bg_wait_end: deregister the wait deadline; the EXIT trap runs it on every exit path, and it runs before the exec.
+bg_wait_end() {
+  [ "$bg_wait_live" = 1 ] || return 0
+  bg_wait_live=0
+  bg_dl done "$bg_wait_name"
+  return 0
+}
 wait_pinged=0
 # wait_tick <what>: give up past the budget; ping djbclark once past BG_PING_WAIT.
 wait_tick() {
@@ -477,6 +550,7 @@ wait_tick() {
     echo "bg: still waiting for $1 after ${w}s (BG_MAX_WAIT=$max_wait); giving up without running it" >&2
     exit 75
   fi
+  bg_wait_rec "$w"
   if [ "$wait_pinged" = 0 ] && [ "$w" -ge "${BG_PING_WAIT:-3600}" ]; then
     wait_pinged=1
     "$bg_ping" "${bg_repo##*/}: bg job \"$bg_k\" has waited $(dur "$w") for $1; it gives up at $(dur "$max_wait")" >/dev/null 2>&1 &
@@ -569,8 +643,16 @@ fi
 bg_hist="$HOME/.local/state/bg/history.tsv"
 mkdir -p "${bg_hist%/*}"
 bg_watch() {
-  local pid="$1" t0 lstart now el med limit pinged=0 poll="${BG_WATCH_POLL:-30}"
+  local pid="$1" t0 lstart now el med limit pinged=0 poll="${BG_WATCH_POLL:-30}" dl="" hb dl_beat=1
   t0=$(gdate +%s)
+  # Run deadline (header): registered here, in the detached watcher, so bg never waits for it. Its stderr is /dev/null,
+  # so a failure is logged to bg_dl_log instead of printed.
+  if [ "$bg_dl_on" = 1 ]; then
+    bg_dl_log="$HOME/.local/state/bg/deadline.log"
+    case "$poll" in *[!0-9]*|"") hb=600 ;; *) hb=$((4 * poll)); [ "$hb" -lt 600 ] && hb=600 ;; esac
+    dl="bg-run-$pid-$t0"
+    bg_dl start "$dl" --budget "${BG_DEADLINE:-30m}" --heartbeat "${hb}s" --owner "$bg_dl_owner" --on-expire notify || dl=""
+  fi
   lstart=$(ps -o lstart= -p "$pid" 2>/dev/null)
   med=$(gawk -F'\t' -v r="$bg_repo" -v k="$bg_k" '$3 == r && $4 == k { d[n++] = $2 }
     END { if (!n) exit; s = (n > 10) ? n - 10 : 0; m = 0
@@ -583,6 +665,8 @@ bg_watch() {
   fi
   while [ -n "$lstart" ] && [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" = "$lstart" ]; do
     sleep "$poll"
+    # Heartbeat. After expiry the beat is refused by design: that stops the beats and is not worth a warning.
+    if [ -n "$dl" ] && [ "$dl_beat" = 1 ]; then "${bg_dl_to[@]}" "$bg_deadline_cmd" beat "$dl" >/dev/null 2>&1 </dev/null || dl_beat=0; fi
     now=$(gdate +%s); el=$((now - t0))
     if [ "$pinged" = 0 ] && [ "$el" -ge "$limit" ]; then
       pinged=1
@@ -590,7 +674,11 @@ bg_watch() {
     fi
   done
   printf '%s\t%s\t%s\t%s\n' "$(gdate +%s)" "$(( $(gdate +%s) - t0 ))" "$bg_repo" "$bg_k" >> "$bg_hist"
+  [ -z "$dl" ] || bg_dl done "$dl"
 }
+# The wait record ends here; the run's record belongs to the watcher below (header, "Deadline").
+bg_wait_end
+trap - EXIT
 bg_watch $$ </dev/null >/dev/null 2>&1 &
 
 cpus="${BG_CPUS:-3}"

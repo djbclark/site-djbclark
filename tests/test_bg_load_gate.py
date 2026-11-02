@@ -63,6 +63,7 @@ def run_bg(tmp_path, admit_codes, max_wait, max_per_core="1000"):
         "BG_MAX_LOAD_PER_CORE": max_per_core,
         "BG_MAX_WAIT": str(max_wait),
         "BG_PING_CMD": "/usr/bin/true",
+        "BG_NO_DEADLINE": "1",
         "BG_WATCH_POLL": "1",
     }
     env.pop("BG_LOAD_WAIT", None)  # 0 would skip the gate under test
