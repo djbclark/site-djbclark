@@ -173,6 +173,49 @@ and in the Mac's `~/.ssh/config`: `Host pastebin-bo`, `HostName pastebin.xvm.mit
 that cannot use the operator's main key (not loaded in the agent socket without a prompt,
 or not readable by the agent).
 
+## Snipe on pastebin (a second client, not `bo`)
+
+Snipe, the curses client for roost (Zephyr over HTTP), IRCCloud and Zulip, was installed on
+pastebin on 2026-11-02 at djbclark's request. `bo` does not drive it and never talks to it; the human runs it only in its
+own tmux session, never in the `barnowl` one.
+
+**Everything in this section is human-only.** It needs an unrestricted login shell on pastebin,
+which an agent must not use: the forced-command key and the human-confirmation boundary in the
+restricted-access rule above stay the only agent route, and that route cannot reach snipe. An agent
+describes these steps to the human and never runs them, and never opens another key or a remote
+shell for them.
+
+1. **Source and launcher.** `~/src/snipe` is a clone of
+   [asedeno/snipe](https://github.com/asedeno/snipe) (the maintained fork, 39 commits ahead
+   of `1ts-org/snipe`, which has been dormant since 2020). The checkout is on branch
+   `latest` of [djbclark/snipe](https://github.com/djbclark/snipe): asedeno's `master` plus two
+   open PRs, merged: [#2](https://github.com/asedeno/snipe/pull/2) (runs on Python 3.12+, see
+   item 2) and [#3](https://github.com/asedeno/snipe/pull/3) (roost retries with a 10 s to 5
+   minute backoff when `roost-api` is unreachable; without it the roost task dies on the first
+   connection error and posts a traceback). The human updates it
+   with `git fetch fork latest` and `git checkout -B latest fork/latest`, and starts it with
+   `ssh pastebin.xvm.mit.edu`, then `tmux new -As snipe snipe`; `~/.local/bin/snipe` runs the
+   venv and is not on PATH for non-login ssh.
+2. **Python and Markdown.** The venv is `~/src/snipe/venv` on the system Python 3.13.5 with
+   current Markdown (3.11.2 on 2026-11-02). That works only because `latest` carries
+   [asedeno/snipe#2](https://github.com/asedeno/snipe/pull/2) (`Markdown>=3.4.1`; 3.4.0 itself
+   crashes at import). asedeno's `master` still pins `Markdown<3.3`, which crashes at import on
+   Python 3.12 and newer: after checking out `master` the human rebuilds the venv with
+   `uv venv --python 3.11 --clear venv`. 382 of 382 tests pass on 3.11 and 3.13 on `latest`.
+3. **Subscriptions.** Roost keeps them on its server. Snipe reads the same `~/.zephyr.subs` as
+   BarnOwl; `R l` (accept the default file) pushes it. Not done as of 2026-11-02:
+   `roost-api.mit.edu` (18.25.132.160) was unreachable from pastebin and from the Mac (the web page
+   `roost.mit.edu` was up), so account state and the subscription load are unverified. The human re-checks
+   with `curl -4 -m 10 -I https://roost-api.mit.edu/` from pastebin before anything else (an
+   agent may run the same `curl` from the Mac, which needs no pastebin access). While
+   it is down snipe stays up, shows `[roost DISCONNECTED]` and one "cannot reach ... retrying in
+   Ns" message (checked by hand 2026-11-02). Recovery once the API returns is expected from the
+   retry loop but not yet observed; `R R` forces a reconnect.
+4. **Signup is the human's.** A first roost signup asks the user to accept that the server stores
+   their messages permanently. An agent explains it and never answers it.
+5. **Auth** is the user's Kerberos ticket through `libgssapi_krb5`. Read from the code; untested
+   while the API was down.
+
 ## Answer
 
 Print the command result, not a retelling of the procedure. For a subscription
