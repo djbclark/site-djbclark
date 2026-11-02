@@ -1,0 +1,36 @@
+# Relaunch Finder when it and mds are both pinned.
+# 2026-11-01: Finder re-listing /private/tmp kept Finder and mds busy for
+# hours (load 20-160); `killall Finder` cured it, Quicksilver and Default
+# Folder X were innocent, and no rule covered Finder or mds (apple-daemons
+# only freezes spotlightknowledged*). djbclark: keep mds ON with indexing off,
+# build this. The probe (bin/finder_mds_probe.py) averages `top` over ~12 s and
+# is unhealthy only while Finder AND mds are each at or over 20 percent CPU;
+# two unhealthy passes in a row (~4 min) relaunch Finder (launchd restarts it
+# at once; open Finder windows reopen). At most one relaunch per 30 min and
+# three per 6 h of health, then one BUDGET EXHAUSTED alert (hermes-ping).
+# Rendered by roles/watchdogd; edit the role.
+name = "finder-mds"
+interval_s = 120
+
+[probe]
+# Exit 0 healthy, 1 Finder and mds both pinned, 75 top unusable (skip).
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/finder_mds_probe.py"]
+skip_exit_codes = [75]
+timeout_s = 60
+
+[policy]
+down_before_action = 2
+grace_s = 120
+action = "command"
+command = ["/usr/bin/killall", "Finder"]
+timeout_s = 20
+min_action_interval_s = 1800
+max_restarts = 3
+healthy_reset_s = 21600
+# The load this heals is the stress that would otherwise defer it.
+ignore_stress = true
+
+[notify]
+down = "{name} DOWN: Finder and mds pinned ({detail}); relaunching Finder"
+recovered = "{name} RECOVERED: {detail}"
