@@ -6,7 +6,7 @@
 """Check a bottom (btm) config file against bottom's JSON schema, strictly.
 
 bottom ignores unknown keys in release builds, so a typo like
-`truncate_cmd_midle = true` is silently dropped. The published schema does not
+`split_comand = true` is silently dropped. The published schema does not
 forbid unknown keys either, so this script adds additionalProperties=false to
 every object that lists properties and suggests the nearest real key.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 from jsonschema.validators import validator_for
 
 DEFAULT_CONFIG = Path.home() / ".config/bottom/bottom.toml"
-# The fork's schema: it knows processes.truncate_cmd_middle, upstream's does not.
+# The fork's schema: it knows processes.split_command, upstream's does not.
 DEFAULT_SCHEMA = Path.home() / "src/bottom/schema/nightly/bottom.json"
 
 
