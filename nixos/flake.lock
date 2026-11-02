@@ -95,11 +95,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793560966,
-        "narHash": "sha256-mbpUHB40m/UQJGS7PQ8aejoBWb/iYtErFmyt9Ct9Rek=",
+        "lastModified": 1793598538,
+        "narHash": "sha256-RnoiF+ySANlFHAFnNhPkgZ7QVuwHtOSkw7ZtbfeN4/s=",
         "owner": "frdminc",
         "repo": "sudo-secretspec",
-        "rev": "0d008348ada4d116e5036b360e5adedc70f7296f",
+        "rev": "f2462b220cb3292f975a62c8a202a96638290de4",
         "type": "github"
       },
       "original": {
