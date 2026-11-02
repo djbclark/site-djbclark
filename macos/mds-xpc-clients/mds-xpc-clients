@@ -1,0 +1,20 @@
+#!/bin/sh
+# mds-xpc-clients: print "COUNT PID NAME" for each process holding a Mach send right to Spotlight's mds, busiest
+# first, nothing else. Root half of the load-watch mds probe (djbclark-ade bin/load-watch, 2026-11-01).
+# Install root:wheel 0755 as /usr/local/libexec/djbclark/mds-xpc-clients with macos/mds-xpc-clients/mds-xpc-clients-setup.sh;
+# sudoers names this exact path with no arguments. Read-only: one lsmp call, no signals, no files, no network.
+# Process names are attacker-controlled: only [A-Za-z0-9 ._+-] survives, and no name reaches a shell or eval.
+PATH=/usr/bin:/bin; export PATH
+[ "$#" -eq 0 ] || { echo "mds-xpc-clients: takes no arguments" >&2; exit 2; }
+pid=$(/usr/bin/pgrep -u 0 -x mds | /usr/bin/head -n 1)
+case "$pid" in ''|*[!0-9]*) echo "mds-xpc-clients: no root mds" >&2; exit 3;; esac
+# lsmp can hang on a stalled task: bound it to 15 s
+/usr/bin/perl -e 'alarm 15; exec @ARGV or exit 4' /usr/bin/lsmp -p "$pid" 2>/dev/null |
+  /usr/bin/awk -v self="$pid" '
+    match($0, /\([0-9]+\) [A-Za-z0-9][A-Za-z0-9 ._+-]*$/) {
+      s = substr($0, RSTART + 1, RLENGTH - 1); sub(/\) /, " ", s)
+      p = s; sub(/ .*/, "", p); n = s; sub(/^[0-9]+ /, "", n)
+      if (p != self) { c[p]++; name[p] = n }
+    }
+    END { for (p in c) print c[p], p, name[p] }' |
+  /usr/bin/sort -k1,1nr -k2,2n | /usr/bin/head -n 60
