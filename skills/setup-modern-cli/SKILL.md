@@ -24,9 +24,11 @@ is the full, versioned installer for a new machine or repo.
 
 ## Search policy: `rg` by default, `ig` as an opt-in first line
 
-1. **Default to `rg`.** It is exhaustive and always correct, and it already does
-   the `find … | grep …` pipeline in one command (`rg -n -g '*.py' PAT PATH`;
-   `-l` for files, `-c` for counts). Always pass a path.
+1. **For content discovery without a usable code graph, default to `rg`.** It
+   is exhaustive within the selected paths, globs and ignore rules, and does the
+   `find … | grep …` pipeline in one command (`rg -n -g '*.py' PAT PATH`;
+   `-l` for files, `-c` for counts). Always pass a path. Inspecting a known span
+   is a read, not another search; graph-first discovery is covered below.
 2. **First line, when justified: `ig`** (instant-grep, `~/.cargo/bin/ig`, index
    in `~/.cache/ig`). Use it for one thing you already know — an exact literal
    symbol or string you expect in a handful of files — in a repo whose index is
@@ -54,15 +56,20 @@ Adapted from the public agent skills for ripgrep and ast-grep
 which carries the same "ranked-first, raw-sweep-second" split). The point is to
 pick the *cheapest tool that can actually answer*, not to always reach for `rg`.
 
-1. **You already know the file** → Read it (or `bat -n --line-range`). Do not
-   search to re-find something you have the path for.
+1. **You already know the file/range** → Use the host's native `read` / `Read`
+   with a bounded line range (`bat -n --line-range` only without a read tool).
+   Once the task's graph context is acquired, do not rediscover that span with
+   `graft ask`, `graft skeleton`, or `rg -A` just to inspect it. A missing exact
+   signature or edit match is better resolved by reading the source than by
+   guessing from a summary (operator clarification, 2026-11-03).
 2. **A filename, and today's index is enough** → `plocate -i NAME`. The db is
    `/opt/homebrew/var/lib/plocate/plocate.db`, rebuilt nightly at 03:30 by
    `com.djbclark.plocate-updatedb`. It does not search file contents. If the
    path may have appeared since that rebuild, use `fd` in a scoped directory.
-3. **The repo has a code graph** (a `graft/` directory, or the harness's own
-   index) → ask it first; `graft ask` / `graft grep` return ranked `file:line`
-   spans without a filesystem sweep.
+3. **Discovering unknown code in a repo with a graph** (a `graft/` directory,
+   or the harness's own index) → graph first; `graft ask` / `graft grep` locate
+   `file:line` spans without a filesystem sweep. A known location needing more
+   detail goes back to step 1, not a mandatory second graph query.
 4. **Exact literal, few expected hits, index current** → `ig search -l '<lit>' .`.
 5. **Default: `rg`.** One command for the whole `find | grep` shape, exhaustive:
    `rg -n -g '*.py' '<pat>' <path>`. Add `-F` when the literal contains regex
@@ -148,8 +155,10 @@ scheduled `brew-fast-upgrade` job owns updating.
    tools' expectations; instruct agents and use hooks (rtk) instead.
 5. **`sd` is retired for edits** (2026-10-09): without `-A` it matches line by
    line and exits 0 when nothing matched. Use `srgn` with `--fail-none`.
-6. **Prefer the host's own tools** when they exist (Claude Code Read/Grep/Glob/
-   Edit; this list is for *shell* work). The two rules from site-djbclark
+6. **Prefer the host's own tools** when they exist (Pi `read`/`edit`, Claude
+   Code Read/Grep/Glob/Edit; this list is for *shell* work). Use a bounded native
+   read for known file contents, not `cat`, `sed`, or contextual grep as a reader.
+   Native grep still suits actual searches. The two rules from site-djbclark
    `docs/tooling-policy.md` still apply.
 7. **BSD vs GNU flags are the trap, not age.** `sort -h`, `sed -i`, `date -d`,
    `readlink -f`, `grep -P`, `xargs -r` and `stat -c` differ or do not exist in
