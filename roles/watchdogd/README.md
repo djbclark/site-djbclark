@@ -61,7 +61,12 @@ campo (Siri AI.app), visualintelligenced, siriknowledged and intelligenceplatfor
 the frozen set (operator: disable everything in that family; header of the sip script);
 then BiomeAgent and chronod (frozen) and coreduetd (system half, TERMed; the installed
 root helper must be re-copied when its list changes); then homeenergyd (frozen, 2026-11-02;
-gui half only, so the root helper needs no re-copy).
+gui half only, so the root helper needs no re-copy); then 15 more gui telemetry/ads/utility
+daemons frozen (geoanalyticsd, analyticsagent, inputanalyticsd, proactiveeventtrackerd, feedbackd,
+adprivacyd, promotedcontentd, tipsd, UsageTrackingAgent, knowledge-agent, weatherd, financed,
+studentd, businessservicesd, betaenrollmentagent) and 6 system ones flag-only (audioanalyticsd,
+betaenrollmentd, liquiddetectiond, PerfPowerTelemetryClientRegistrationService, rtcreportingd,
+osanalyticshelper; no kill loop, so no root-helper re-copy), 2026-11-02.
 triald/helpd/sirittsd/knowledgeconstructiond (short one-shots) and the system-domain half (cloudd, triald.system, spindump,
 tailspind run as root; modelmanagerd and modelcatalogd are flag-only, never killed) are TERMed. The five Apple Intelligence daemons (generativeexperiencesd,
 intelligencecontextd, intelligenceflowd, modelmanagerd, modelcatalogd) are flag-only:

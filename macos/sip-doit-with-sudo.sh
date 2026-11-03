@@ -133,6 +133,17 @@
 #     14-hour sync on power and network) is frozen, at the operator's request.
 #     Only the Home app's energy features depend on it; no downside found in
 #     a web search. Undo with --revert.
+#   - 2026-11-02, operator: the rest of the telemetry/ads/utility daemons from the
+#     RemoveMacAI comparison ("section C"). gui, frozen: geoanalyticsd,
+#     analyticsagent, inputanalyticsd, proactiveeventtrackerd, feedbackd,
+#     ap.adprivacyd, ap.promotedcontentd, tipsd, UsageTrackingAgent (Screen Time
+#     usage feed), knowledge-agent, weatherd, financed, studentd,
+#     businessservicesd, betaenrollmentagent. system, FLAG-ONLY (no kill loop,
+#     so the root helper is unchanged): audioanalyticsd, betaenrollmentd,
+#     liquiddetectiond, PerfPowerTelemetryClientRegistrationService,
+#     rtcreportingd, osanalytics.osanalyticshelper (persistent clients such as
+#     coreaudiod would respawn them, as with modelmanagerd). Costs: Screen Time
+#     stats, Weather/Stocks/Tips/Feedback Assistant, Apple-side diagnostics.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
@@ -222,6 +233,21 @@ GUI_DAEMONS=(
   "com.apple.BiomeAgent"
   "com.apple.chronod"
   "com.apple.homeenergyd"
+  "com.apple.geoanalyticsd"
+  "com.apple.analyticsagent"
+  "com.apple.inputanalyticsd"
+  "com.apple.proactiveeventtrackerd"
+  "com.apple.feedbackd"
+  "com.apple.ap.adprivacyd"
+  "com.apple.ap.promotedcontentd"
+  "com.apple.tipsd"
+  "com.apple.UsageTrackingAgent"
+  "com.apple.knowledge-agent"
+  "com.apple.weatherd"
+  "com.apple.financed"
+  "com.apple.studentd"
+  "com.apple.businessservicesd"
+  "com.apple.betaenrollmentagent"
   "com.apple.generativeexperiencesd"
   "com.apple.intelligencecontextd"
   "com.apple.intelligenceflowd"
@@ -253,12 +279,18 @@ SYSTEM_DAEMONS=(
   "com.apple.tailspind"
   "com.apple.modelmanagerd"
   "com.apple.modelcatalogd"
+  "com.apple.audioanalyticsd"
+  "com.apple.betaenrollmentd"
+  "com.apple.liquiddetectiond"
+  "com.apple.PerfPowerTelemetryClientRegistrationService"
+  "com.apple.rtcreportingd"
+  "com.apple.osanalytics.osanalyticshelper"
 )
 
 # Daemons (gui or system domain) that get the disable flag but are NOT killed or
 # checked for running: persistent clients (assistantd, coreaudiod, Siri AI)
 # reactivate them within ~1 s of a kill, so enforcing them only churns.
-FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd com.apple.generativeexperiencesd com.apple.intelligencecontextd com.apple.intelligenceflowd "
+FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd com.apple.generativeexperiencesd com.apple.intelligencecontextd com.apple.intelligenceflowd com.apple.audioanalyticsd com.apple.betaenrollmentd com.apple.liquiddetectiond com.apple.PerfPowerTelemetryClientRegistrationService com.apple.rtcreportingd com.apple.osanalytics.osanalyticshelper "
 is_flag_only() { case "$FLAG_ONLY_DAEMONS" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # CoreSpotlight semantic-search stores (embeddings, journals). Safe to delete;
