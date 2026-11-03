@@ -524,6 +524,11 @@ elif [ ! -x "$bg_deadline_cmd" ]; then
   bg_dl_warn "$bg_deadline_cmd is not executable"
   bg_dl_on=0
 fi
+# --holder only when the installed `deadline` knows it: bg deploys on its own (site-public master) while `deadline` arrives with a
+# djbclark-ade merge, so an older deadline must not turn every run into "unrecognized arguments" (2026-11-02, Dann 7).
+bg_dl_h=0
+[ "$bg_dl_on" = 1 ] && grep -q -e "--holder" "$bg_deadline_cmd" 2>/dev/null && bg_dl_h=1
+bg_holder() { [ "$bg_dl_h" = 1 ] && printf -- "--holder\n%s\n" "$1"; return 0; }
 # bg_wait_rec <seconds waited>: first call (the first real wait, load gate or slot) registers the wait deadline with the
 # rest of BG_MAX_WAIT as its budget; later calls beat it at most once a minute. Never registered when nothing waits.
 bg_wait_rec() {
@@ -531,7 +536,7 @@ bg_wait_rec() {
   local n; n=$(gdate +%s)
   if [ -z "$bg_wait_name" ]; then
     bg_wait_name="bg-wait-$$-$bg_t0"
-    if bg_dl start "$bg_wait_name" --budget "$((max_wait - $1))s" --heartbeat 10m --owner "$bg_dl_owner" --on-expire notify --holder "$$"; then
+    if bg_dl start "$bg_wait_name" --budget "$((max_wait - $1))s" --heartbeat 10m --owner "$bg_dl_owner" --on-expire notify $(bg_holder "$$"); then
       bg_wait_live=1
       bg_wait_beat=$n
       trap bg_wait_end EXIT
@@ -669,7 +674,7 @@ bg_watch() {
     bg_dl_log="$HOME/.local/state/bg/deadline.log"
     case "$poll" in *[!0-9]*|"") hb=600 ;; *) hb=$((4 * poll)); [ "$hb" -lt 600 ] && hb=600 ;; esac
     dl="bg-run-$pid-$t0"
-    bg_dl start "$dl" --budget "${BG_DEADLINE:-30m}" --heartbeat "${hb}s" --owner "$bg_dl_owner" --on-expire notify --holder "${BASHPID:-$$}" || dl=""
+    bg_dl start "$dl" --budget "${BG_DEADLINE:-30m}" --heartbeat "${hb}s" --owner "$bg_dl_owner" --on-expire notify $(bg_holder "${BASHPID:-$$}") || dl=""
   fi
   lstart=$(ps -o lstart= -p "$pid" 2>/dev/null)
   med=$(gawk -F'\t' -v r="$bg_repo" -v k="$bg_k" '$3 == r && $4 == k { d[n++] = $2 }
