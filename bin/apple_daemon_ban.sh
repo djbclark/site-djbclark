@@ -107,6 +107,7 @@ FREEZE_LABELS=(
   "com.apple.intelligenceplatformd"   # knowledgeconstructiond's parent (2026-10-15)
   "com.apple.BiomeAgent"     # Biome event streams, the feed under suggestd/duetexpertd (2026-10-15)
   "com.apple.chronod"        # widgets; KeepAlive only on crash (2026-10-15)
+  "com.apple.homeenergyd"    # Home energy/grid-forecast sync (HomeEnergyDaemon.framework); operator: disable (2026-11-02)
 )
 # Per-user background domain (user/<uid>), where launchd keeps these; gui/<uid> cannot see them.
 USER_FREEZE_LABELS=(

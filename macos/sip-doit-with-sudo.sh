@@ -128,6 +128,11 @@
 #     knowledge and people stores, proactive SuggestionRequest endpoints; no
 #     KeepAlive) is TERMed by the root helper like triald.system. Expect
 #     widgets to stop updating.
+#   - 2026-11-02: homeenergyd (Home energy and grid-forecast sync, a gui
+#     LaunchAgent in /System/iOSSupport/.../HomeEnergyDaemon.framework; runs a
+#     14-hour sync on power and network) is frozen, at the operator's request.
+#     Only the Home app's energy features depend on it; no downside found in
+#     a web search. Undo with --revert.
 #   - 2026-10-13: Apple Intelligence runtime daemons added at the operator's
 #     request: gui generativeexperiencesd, intelligencecontextd,
 #     intelligenceflowd (TERMed, not frozen: on-demand XPC services, and a
@@ -216,6 +221,7 @@ GUI_DAEMONS=(
   "com.apple.intelligenceplatformd"
   "com.apple.BiomeAgent"
   "com.apple.chronod"
+  "com.apple.homeenergyd"
   "com.apple.generativeexperiencesd"
   "com.apple.intelligencecontextd"
   "com.apple.intelligenceflowd"
