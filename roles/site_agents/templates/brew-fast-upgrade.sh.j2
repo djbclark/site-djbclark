@@ -4,9 +4,11 @@ set -euo pipefail
 # site-djbclark — brew-fast-upgrade maintenance script
 # Upgrades every Homebrew formula and cask (--greedy: auto_updates casks too),
 # globally-installed npm packages (both the user ~/.local npm tree and
-# Homebrew's own) and uv tools, under the
-# exclusive site advisory lock (Phase F4); zcode-app-cli is always pulled
-# to @latest each run (it ships several builds a day). Nothing is pinned
+# Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
+# ~/.dsh/profiles/<name> plugin tree), and uv tools, under the
+# exclusive site advisory lock (Phase F4); zcode-app-cli and
+# @deepseek-ai/dsh are always pulled to @latest each run (they ship builds
+# often). Nothing is pinned
 # (djbclark 2026-10-24: current beats stable); a pinned formula counts as
 # outdated and fails verification. Retries a bounded number of times until
 # everything verifies as up to date, or gives up loudly for manual
@@ -48,6 +50,7 @@ trap 'rc=$?; echo "[$(gdate -u +%Y-%m-%dT%H:%M:%SZ)] finished rc=$rc"; exit "$rc
 echo "[$STARTED_AT] started; scheduled/manual Jobber invocation"
 
 LOCK_BIN="{{ site_agents_home }}/ops/site-public-djbclark/bin/brew_flock.py"
+DSH_REPAIR_BIN="{{ site_agents_home }}/ops/site-public-djbclark/bin/dsh_repair_native_binding.py"
 {% raw %}
 MAX_ATTEMPTS="${BREW_FAST_UPGRADE_MAX_ATTEMPTS:-3}"
 RETRY_DELAY_SECS=10
@@ -320,6 +323,22 @@ run_uv_pass() {
   uv tool upgrade --all
 }
 
+# VeniceCode (georgeglarson/venicecode): git pull + bun build when ~/src/venicecode
+# exists or venicecode-upgrade is on PATH. Skipped until first install.
+run_venicecode_pass() {
+  local script="${VENICECODE_UPGRADE:-$HOME/ops/site-private-djbclark/bin/venicecode-upgrade}"
+  if [ ! -x "$script" ]; then
+    [ -d "$HOME/src/venicecode/.git" ] || return 0
+    echo "[brew-fast-upgrade] venicecode: $script missing; skipping." >&2
+    return 0
+  fi
+  if [ ! -d "$HOME/src/venicecode/.git" ] && [ -z "${VENICECODE_SRC:-}" ]; then
+    return 0
+  fi
+  echo "[brew-fast-upgrade] venicecode: running $script"
+  "$script"
+}
+
 # Outdated uv tools, one "name vX [required: …] [latest: Y]" line each (empty
 # when clean). An exact `==` pin shows up here on purpose (nothing may be
 # pinned). Tools installed from a local path or git (e.g. pytgcli from
@@ -404,22 +423,115 @@ run_npm_pass() {
   return "$rc"
 }
 
+# pnpm globals. @deepseek-ai/dsh must stay on pnpm (its packageManager /
+# devEngines declare pnpm); an npm -g install either fails EBADDEVENGINES or
+# leaves the optional darwin-arm64 native binding unlinked under pnpm's
+# global store, which makes `dsh web` dump a multi-KB fatal attempts[] stack.
+# After every dsh bump we run dsh_repair_native_binding.py so the loader can
+# require its platform package. Profile plugin trees under ~/.dsh/profiles
+# are updated via `dsh plugin --profile <name> update`.
+run_dsh_profile_plugin_pass() {
+  local profiles_root profile name rc=0
+  command -v dsh >/dev/null 2>&1 || return 0
+  profiles_root="${DSH_HOME:-$HOME/.dsh}/profiles"
+  [ -d "$profiles_root" ] || return 0
+  for profile in "$profiles_root"/*/; do
+    [ -d "$profile" ] || continue
+    name="$(basename "$profile")"
+    [ "$name" = "node_modules" ] && continue
+    [ -f "${profile}package.json" ] || continue
+    echo "[brew-fast-upgrade] dsh plugin --profile $name update"
+    if ! dsh plugin --profile "$name" update; then
+      echo "[brew-fast-upgrade] dsh plugin --profile $name update failed"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
+# Empty when dsh is absent or already at the npm "latest" dist-tag; otherwise
+# one "@deepseek-ai/dsh@INSTALLED (latest X)" line for verify_clean.
+dsh_outdated() {
+  local installed latest
+  command -v pnpm >/dev/null 2>&1 || return 0
+  command -v npm >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  installed="$(
+    pnpm list -g --depth 0 --json 2>/dev/null |
+      jq -r '.[]?.dependencies["@deepseek-ai/dsh"].version // empty' |
+      gsed -n '1p'
+  )"
+  [ -n "$installed" ] || return 0
+  latest="$(npm view @deepseek-ai/dsh version 2>/dev/null)" || return 0
+  [ -n "$latest" ] || return 0
+  if [ "$installed" != "$latest" ]; then
+    echo "@deepseek-ai/dsh@${installed} (latest ${latest})"
+  fi
+}
+
+run_pnpm_pass() {
+  local rc=0 pkg
+
+  command -v pnpm >/dev/null 2>&1 || {
+    echo "[brew-fast-upgrade] pnpm not installed; skipping pnpm globals / dsh."
+    return 0
+  }
+
+  # Always pin dsh@latest when present (same rationale as zcode-app-cli).
+  if pnpm list -g --depth 0 2>/dev/null | ggrep -q '@deepseek-ai/dsh'; then
+    echo "[brew-fast-upgrade] pnpm globals: upgrading @deepseek-ai/dsh@latest"
+    if ! pnpm add -g "@deepseek-ai/dsh@latest"; then
+      echo "[brew-fast-upgrade] pnpm add -g @deepseek-ai/dsh@latest failed"
+      rc=1
+    fi
+    if [ -x "$DSH_REPAIR_BIN" ]; then
+      if ! "$DSH_REPAIR_BIN"; then
+        echo "[brew-fast-upgrade] dsh native binding repair failed"
+        rc=1
+      fi
+    else
+      echo "[brew-fast-upgrade] $DSH_REPAIR_BIN missing; skipping native binding repair." >&2
+    fi
+  fi
+
+  # Other outdated pnpm globals (never chase pnpm itself from inside pnpm).
+  if command -v jq >/dev/null 2>&1; then
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      [ "$pkg" = "pnpm" ] && continue
+      [ "$pkg" = "@deepseek-ai/dsh" ] && continue
+      echo "[brew-fast-upgrade] pnpm globals: upgrading ${pkg}@latest"
+      if ! pnpm add -g "${pkg}@latest"; then
+        echo "[brew-fast-upgrade] pnpm add -g ${pkg}@latest failed"
+        rc=1
+      fi
+    done < <(pnpm outdated -g --json 2>/dev/null | jq -r 'keys[]?')
+  fi
+
+  if ! run_dsh_profile_plugin_pass; then
+    rc=1
+  fi
+  return "$rc"
+}
+
 # A successful brew/npm/uv invocation is not enough: confirm nothing is still
 # outdated. Prints what remains when verification fails.
 verify_clean() {
-  local brew_remaining npm_remaining uv_remaining prefix
+  local brew_remaining npm_remaining uv_remaining dsh_remaining prefix
   brew_remaining="$(brew_outdated_upgradable)"
   npm_remaining=""
   while IFS= read -r prefix; do
     npm_remaining+="$(npm_outdated_globals "$prefix")"
   done < <(npm_global_prefixes)
   uv_remaining="$(uv_outdated_tools)"
+  dsh_remaining="$(dsh_outdated)"
 
-  if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ] || [ -n "$uv_remaining" ]; then
+  if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ] || [ -n "$uv_remaining" ] || [ -n "$dsh_remaining" ]; then
     echo "[brew-fast-upgrade] outdated items remain:"
     [ -n "$brew_remaining" ] && printf 'brew: %s\n' $brew_remaining
     [ -n "$npm_remaining" ] && printf 'npm:  %s\n' "$npm_remaining"
     [ -n "$uv_remaining" ] && printf 'uv:   %s\n' "$uv_remaining"
+    [ -n "$dsh_remaining" ] && printf 'pnpm: %s\n' "$dsh_remaining"
     return 1
   fi
   return 0
@@ -446,8 +558,14 @@ run_upgrade_and_restart_apps() {
     if ! run_npm_pass; then
       echo "[brew-fast-upgrade] npm pass failed on attempt $attempt"
     fi
+    if ! run_pnpm_pass; then
+      echo "[brew-fast-upgrade] pnpm/dsh pass failed on attempt $attempt"
+    fi
     if ! run_uv_pass; then
       echo "[brew-fast-upgrade] uv tool pass failed on attempt $attempt"
+    fi
+    if ! run_venicecode_pass; then
+      echo "[brew-fast-upgrade] venicecode pass failed on attempt $attempt"
     fi
 
     if verify_clean; then
@@ -467,7 +585,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps

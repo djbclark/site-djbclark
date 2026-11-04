@@ -6,15 +6,15 @@ install to `~/.local/bin`; plists render to
 
 ## What it manages
 
-| Agent | Label | Schedule | Output |
-| ----- | ----- | -------- | ------ |
-| system-state-backup | `com.{{ site_ns }}.system-state-backup` | Daily 12:00 + RunAtLoad | `{{ homebrew_prefix }}/var/system-state` + mirror `~/system-state` |
-| hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad | macOS notification when `/` free GB < threshold (default 25) |
-| cswap-auto | `com.{{ site_ns }}.cswap-auto` | KeepAlive (long-running) | Auto-switches Claude Code accounts near rate limits |
-| aiuse | `com.{{ site_ns }}.aiuse` | Every 180s + RunAtLoad | `aiuse sample`: collects hourly when idle, every 15 min when quota moved, every 3 min in a burst; snapshots under `~/.cache/aiuse/snapshots`, token ledger under `~/.cache/aiuse/ledger` |
-| jobber | `homebrew.mxcl.jobber` | RunAtLoad (daemon) | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:10 with `onError: Continue` — `brew upgrade --greedy` of everything (nothing may be pinned; casks needing sudo wait for a run from a terminal; the `paseo` cask is held, and so is any cask whose .app was moved off disk without `brew uninstall --cask`, see the script's `held_casks`/`missing_app_casks`), npm globals and uv tools, then restarts any `brew services` daemon or user launchd job left running a deleted binary; `mac-dns-apply` nightly at 03:30, `landing-health` hourly, `chrome-cache-trim` 4×/day on a pass with Chrome quit) |
-| hermes-dashboard | `com.{{ site_ns }}.hermes-dashboard` | KeepAlive | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md) |
-| s1-ingest | `com.{{ site_ns }}.s1-ingest` | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed |
+| Agent                | Label                                    | Schedule                                                                                                                                          | Output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| system-state-backup  | `com.{{ site_ns }}.system-state-backup`  | Daily 12:00 + RunAtLoad                                                                                                                           | `{{ homebrew_prefix }}/var/system-state` + mirror `~/system-state`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| hibernate-disk-check | `com.{{ site_ns }}.hibernate-disk-check` | Every 1800s + RunAtLoad                                                                                                                           | macOS notification when `/` free GB < threshold (default 25)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| cswap-auto           | `com.{{ site_ns }}.cswap-auto`           | KeepAlive (long-running)                                                                                                                          | Auto-switches Claude Code accounts near rate limits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| aiuse                | `com.{{ site_ns }}.aiuse`                | Every 180s + RunAtLoad                                                                                                                            | `aiuse sample`: collects hourly when idle, every 15 min when quota moved, every 3 min in a burst; snapshots under `~/.cache/aiuse/snapshots`, token ledger under `~/.cache/aiuse/ledger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| jobber               | `homebrew.mxcl.jobber`                   | RunAtLoad (daemon)                                                                                                                                | Jobber daemon executing `~/.jobber` jobs (e.g. `brew-fast-upgrade` nightly at 03:10 with `onError: Continue` — `brew upgrade --greedy` of everything (nothing may be pinned; casks needing sudo wait for a run from a terminal; the `paseo` cask is held, and so is any cask whose .app was moved off disk without `brew uninstall --cask`, see the script's `held_casks`/`missing_app_casks`), npm globals, pnpm globals (`@deepseek-ai/dsh@latest` plus each `~/.dsh/profiles/<name>` plugin tree, with a native-binding repair after the dsh bump), and uv tools, then restarts any `brew services` daemon or user launchd job left running a deleted binary; `mac-dns-apply` nightly at 03:30, `landing-health` hourly, `chrome-cache-trim` 4×/day on a pass with Chrome quit) |
+| hermes-dashboard     | `com.{{ site_ns }}.hermes-dashboard`     | KeepAlive                                                                                                                                         | Hermes web dashboard on Tailscale `:9119` (Android app). See [docs/reference/hermes-dashboard.md](../../docs/reference/hermes-dashboard.md)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| s1-ingest            | `com.{{ site_ns }}.s1-ingest`            | Every 900s + RunAtLoad, background priority; **off unless `site_agents_s1_ingest_enabled: true`** (false removes the plist and boots the job out) | `bin/s1_cycle.py`: `s1_claude.py scan`, `s1_hermes.py sink`, `s1_search.py index` into the S1 store, one line per step in `~/.local/share/s1-evidence/cycle.log`; skips while `maintenance.lock` exists. `fleet-watch` pages when a producer goes 6 h stale while this plist is installed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Fleet-watch acknowledgement escalation
 
@@ -103,12 +103,12 @@ Two complementary halves, both macOS-only (the `chrome-cache` tasks):
    `DiskCacheSize` (512 MiB) and `MediaCacheSize` (256 MiB) into the
    `com.google.Chrome` user defaults — the documented macOS policy route
    (Chromium "Mac Quick Start"; no MDM needed). This bounds the HTTP/media disk
-   cache under `~/Library/Caches/Google/Chrome`. It is a *hint*, not a hard cap,
+   cache under `~/Library/Caches/Google/Chrome`. It is a _hint_, not a hard cap,
    and Chrome must be restarted to pick it up (`chrome://policy` shows the
    effective values). Google's rule of thumb is one order of magnitude between
    free disk and cache; 512 MiB is deliberately below that.
 2. **Profile caches (Jobber).** `chrome-cache-trim` clears the caches the policy
-   does *not* cover — `Service Worker/CacheStorage`, `Service Worker/ScriptCache`,
+   does _not_ cover — `Service Worker/CacheStorage`, `Service Worker/ScriptCache`,
    `Code Cache`, `GPUCache`, `GrShaderCache`, `ShaderCache`, `DawnCache` — under
    `~/Library/Application Support/Google/Chrome/<profile>/` and the same
    subdirs under `~/Library/Caches/Google/Chrome/<profile>/` (where the V8
@@ -126,8 +126,6 @@ Job failures in Jobber trigger `~/.local/bin/jobber-notify`, which implements th
 
 **What 'red' means for landing-health:**
 `landing-health` is Jobber → `~/.local/bin/landing-health` → `stayturgid/control/landing/discover.py --health-check`. It fails only when a **must-be-up** Mac listener (or a `dashboard: true` launchd job) is not accepting TCP. Offline phones (`group: devices`/`android`), unmanaged apps, and `must_be_up: false` registry rows are **expected-offline** and must not page. Jobber's notify snippet is stderr-only: the wrapper merges stdout+stderr and strips the `site directory` announce so the page shows `Summary:` / `Expected-offline:`. Diagnose with `landing-health` or `python3 control/landing/discover.py --health-check` from `~/ops/stayturgid` (do not treat a hang on SSH to p7a/hd8 as an outage). Set `must_be_up: false` on ephemeral or deliberately disabled site-owned ports instead of leaving them as default-up.
-
-
 
 Homebrew prefix follows the LiteLLM / stayturgid pattern: Apple Silicon
 `/opt/homebrew`, Intel `/usr/local` (from `ansible_facts.architecture`).
@@ -228,7 +226,7 @@ site_agents_my_plist: >-
   {{ site_agents_launchagents_dir }}/{{ site_agents_my_label }}.plist
 site_agents_my_log: "{{ site_agents_state_dir }}/my-agent.log"
 site_agents_my_error_log: "{{ site_agents_state_dir }}/my-agent.error.log"
-site_agents_my_some_config: 60       # configurable knob
+site_agents_my_some_config: 60 # configurable knob
 ```
 
 Reuse the shared variables: `site_agents_home`, `site_agents_bin_dir`,
@@ -239,6 +237,7 @@ Reuse the shared variables: `site_agents_home`, `site_agents_bin_dir`,
 Two common patterns:
 
 **KeepAlive server** (long-running daemon, e.g., cswap-auto):
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -264,6 +263,7 @@ Two common patterns:
 ```
 
 **Scheduled interval** (periodic cron-like job, e.g., hibernate-disk-check):
+
 ```xml
     <key>StartInterval</key>
     <integer>1800</integer>
@@ -296,6 +296,7 @@ Two steps — render the plist then bootstrap it:
 ```
 
 The `launchagent.yml` sub-task handles:
+
 - Probing current launchd state
 - Booting out when the plist changed (to pick up new config)
 - Bootstrapping when unloaded
