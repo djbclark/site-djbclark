@@ -5,7 +5,7 @@ This directory is a skill root again. It holds the skills that moved here from
 about this site, its machines or the operator's own services rather than
 about running agents:
 
-`aws-rules`, `barnowl`, `book-to-kb`, `bottom-config`, `coderabbit-feeder`,
+`aws-rules`, `barnowl`, `bottom-config`, `coderabbit-feeder`,
 `diskfree`, `firecrawl`, `gmail-search`, `greptile`, `ovhcloud-api`,
 `report`, `setup-modern-cli`, `teach`, `terminus-kira`, `todo`.
 
@@ -31,13 +31,7 @@ README is `~/src/djbclark-ade/docs/skill-everywhere.md`. Run
 `skill-everywhere <name>` (or `--all`) after adding a skill here. Never copy a
 skill into an agent's directory: copies drift.
 
-**Two `book-to-kb` versions (2026-11-06, operator to pick one; neither is deleted):**
-`skills/book-to-kb/` here is the skill moved from djbclark-ade, and
-`tools/book-to-kb/skills/book-to-kb/` is the packaged tool's own skill, a different text
-(`diff` reports about 215 lines). `tools/book-to-kb/install.sh` links
-`<agent skills dir>/book-to-kb` at the tools copy, the same link name `skill-everywhere`
-would make for this one; whichever ran last wins, and `skill-everywhere` leaves a link to the
-other copy alone ("other link") and exits 1.
+**`book-to-kb` (2026-11-06):** the copy moved from djbclark-ade was deleted on the operator's choice ("keep the better one"); the skill is `tools/book-to-kb/skills/book-to-kb/`, the packaged tool's own, linked by its `install.sh`. `skill-everywhere` does not link a `book-to-kb` from this root.
 
 History: until 2026-10-14 the agents linked through this directory as a hub
 (`site-private/skills/<name>` -> `site-djbclark/skills/<name>` ->
