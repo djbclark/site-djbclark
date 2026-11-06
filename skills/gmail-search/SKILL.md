@@ -9,7 +9,7 @@ description: >-
 
 # High-speed local Gmail search
 
-Canonical source: `skills/gmail-search/SKILL.md` in the djbclark-ade repo;
+Canonical source: `skills/gmail-search/SKILL.md` in the site-djbclark repo (moved from djbclark-ade 2026-11-06);
 deployed live copy at `~/.claude/skills/gmail-search/`. Snapshot facts dated
 **2026-08-23** — re-probe with the `stats` command below.
 

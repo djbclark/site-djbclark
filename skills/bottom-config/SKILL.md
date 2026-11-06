@@ -26,8 +26,8 @@ bottom ignores unknown config keys in release builds (checked 2026-11-01: a conf
 schema does not forbid them either. So after EVERY edit run the strict validator:
 
 ```sh
-~/src/djbclark-ade/skills/bottom-config/scripts/validate.py            # the live config
-~/src/djbclark-ade/skills/bottom-config/scripts/validate.py FILE       # another file
+~/ops/site-djbclark/skills/bottom-config/scripts/validate.py            # the live config
+~/ops/site-djbclark/skills/bottom-config/scripts/validate.py FILE       # another file
 ```
 
 It adds `additionalProperties: false` to the fork's `schema/nightly/bottom.json`, names the

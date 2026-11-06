@@ -1,22 +1,38 @@
-# Skills: retired hub layer (2026-10-14)
+# Skills: the third `skill-everywhere` root (since 2026-11-06)
 
-This directory is no longer part of the skill path. Every skill now lives in
-exactly one place and every agent TUI links it **directly** — no hub, no
-chained symlinks:
+This directory is a skill root again. It holds the skills that moved here from
+`djbclark-ade` in its slim-down (slice E1, 2026-11-06), because they are
+about this site, its machines or the operator's own services rather than
+about running agents:
 
-- **Public skills** (the default): `~/src/djbclark-ade/skills/<name>/`
-  (git: github.com/djbclark/djbclark-ade). Create, edit and commit them there.
-- **Private skills**: `~/ops/site-private-djbclark/skills/<name>/` (real directory,
-  listed in `.githooks/private-paths` there). Only `1password` today.
+`aws-rules`, `barnowl`, `book-to-kb`, `bottom-config`, `coderabbit-feeder`,
+`diskfree`, `firecrawl`, `gmail-search`, `greptile`, `ovhcloud-api`,
+`report`, `setup-modern-cli`, `teach`, `terminus-kira`, `todo`.
 
-`~/src/djbclark-ade/bin/skill-everywhere <name>` links a skill into every
-TUI (Claude Code, Codex, Copilot, opencode, zcode, Qwen, Grok, agy, Devin,
-Cline, Muse, Antigravity, Hermes, omp); its README is
-`~/src/djbclark-ade/docs/skill-everywhere.md`. Never copy a skill into a
-TUI's dir — copies drift.
+They came with their history (`git filter-repo`, same paths) together with
+`bench/`, `bin/app-tamer-ab`, `bin/heavy-shim`, `bin/codium-ai`,
+`bin/change-hermes`, `bin/change-hermes-ssh-gate`, `claude/commands/teach.md`
+and their tests (`tests/test_barnowl_skill.py` with `tests/fixtures/barnowl-*`,
+`tests/test_bigteam_prune.py`, `tests/test_change_hermes_*.py`). PR numbers
+in the imported commit messages refer to djbclark/djbclark-ade.
 
-History: until 2026-10-14 the TUIs linked through this repo
-(`site-private/skills/<name>` → `site-djbclark/skills/<name>` →
-djbclark-ade), so git churn here could break skill loading machine-wide;
-that chain was collapsed to direct links. The symlinks under this path were
-removed; nothing should link here any more.
+The three roots, each skill in exactly one of them:
+
+- **Agent skills**: `~/src/djbclark-ade/skills/<name>/`
+  (github.com/djbclark/djbclark-ade).
+- **Site skills** (this directory): `~/ops/site-djbclark/skills/<name>/`.
+- **Private skills**: `~/ops/site-private/skills/<name>/` (real directory,
+  listed in `.githooks/private-paths` there).
+
+`~/src/djbclark-ade/bin/skill-everywhere` reads all three roots (this one via
+`SKILL_EVERYWHERE_SITE`, default `${OPS_ROOT:-~/ops}/site-djbclark/skills`)
+and links each skill **directly** into every agent's skills directory; its
+README is `~/src/djbclark-ade/docs/skill-everywhere.md`. Run
+`skill-everywhere <name>` (or `--all`) after adding a skill here. Never copy a
+skill into an agent's directory: copies drift.
+
+History: until 2026-10-14 the agents linked through this directory as a hub
+(`site-private/skills/<name>` -> `site-djbclark/skills/<name>` ->
+djbclark-ade), and git churn here could break skill loading machine-wide.
+That chain stays retired: nothing links *through* this directory. A link
+points straight at the skill that lives here.

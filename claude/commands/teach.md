@@ -3,7 +3,7 @@ description: Today's one or two Claude Code things to install or start using, on
 ---
 
 Follow the mounted `teach` skill exactly. Canonical copy:
-`~/src/djbclark-ade/skills/teach/SKILL.md`.
+`~/ops/site-djbclark/skills/teach/SKILL.md`.
 
 Arguments: none = today's day as `scripts/next_item.py` picks it (the day
 already done today if any, else the next unticked one; missed days never skip a

@@ -12,8 +12,8 @@ description: >-
 
 # teach — today's install-or-use items, one prompt at a time
 
-Canonical copy: `~/src/djbclark-ade/skills/teach/` (git: `~/src/djbclark-ade`,
-github.com/djbclark/djbclark-ade); linked everywhere by `skill-everywhere teach`.
+Canonical copy: `~/ops/site-djbclark/skills/teach/` (git: github.com/djbclark/site-djbclark,
+moved from djbclark-ade 2026-11-06); linked everywhere by `skill-everywhere teach`.
 Claude Code slash command: `~/.claude/commands/teach.md` → `claude/commands/teach.md` here.
 
 Checklist: `~/ops/site-private/memory/project_claude_code_mods_rollout.md`

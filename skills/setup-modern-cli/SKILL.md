@@ -17,8 +17,8 @@ The standing instruction to prefer the modern tools, plus the traps. The full
 classic→modern tables live in the reference files below; this file is the part
 to read first.
 
-Canonical source: `skills/setup-modern-cli/SKILL.md` in `~/src/djbclark-ade`.
-Every other TUI reaches it through the skill-everywhere symlink chain, so there
+Canonical source: `skills/setup-modern-cli/SKILL.md` in `~/ops/site-djbclark` (moved from djbclark-ade 2026-11-06).
+Every other TUI reaches it through a direct skill-everywhere link, so there
 is nothing to keep in sync. `djbclark-ade/docs/apply-toolchain-prompt.md` §1.2
 is the full, versioned installer for a new machine or repo.
 

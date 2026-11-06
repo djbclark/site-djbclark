@@ -17,7 +17,7 @@ description: >-
 
 # Firecrawl on this machine
 
-The canonical source lives at `skills/firecrawl/` in `~/src/djbclark-ade`. Every
+The canonical source lives at `skills/firecrawl/` in `~/ops/site-djbclark` (moved from djbclark-ade 2026-11-06). Every
 TUI links it through `skill-everywhere`; edit only here.
 
 ## What you get
