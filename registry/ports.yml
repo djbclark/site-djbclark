@@ -97,6 +97,9 @@ hosts:
       - {port: 18806, bind: "127.0.0.1", owner: unmanaged, service: paseo-dev-daemon, status: default-claim,
          must_be_up: false,  # on-demand dev daemon, started by agents working in ~/src/paseo
          note: "2026-10-24: Paseo checkout dev daemon (`PASEO_LISTEN=127.0.0.1:18806 scripts/dev-daemon.sh` in ~/src/paseo, home .dev/paseo-home). The repo default is 6768, which this registry gives to orca-app, so agents set PASEO_LISTEN; never use the repo's `npm run dev`, whose cross-env hard-codes 6768. Distinct from the production daemon on 7263 and from Paseo's own 6767. Its node worker (process title `Paseo Daemon`) also opens ephemeral inspector and helper ports: see ephemeral_processes."}
+      - {port: 18809, bind: "127.0.0.1", owner: unmanaged, service: paseo-acceptance-isolated, status: default-claim,
+         must_be_up: false,  # on-demand: D1 acceptance probes start a second, isolated Paseo daemon (lib/common.sh isolated_up ACC_TCP_PORT)
+         note: "2026-11-06: djbclark-ade D1 Paseo-only acceptance (tests/paseo-acceptance, d1-04 and other MCP probes): the isolated test daemon's loopback TCP listener, needed because agent MCP is not injected on a Unix-socket listener. Started and stopped by the probe (isolated_up/isolated_down); never the live daemon. Claimed by the djbclark-ade lead (1e61c979); not 18806, which is the ~/src/paseo dev daemon's."}
       - {port: 18807, bind: "*",         owner: unmanaged, service: paseo-dev-metro, status: default-claim,
          must_be_up: false,  # on-demand Expo/Metro for the dev app, started by agents working in ~/src/paseo
          note: "2026-10-24: Paseo checkout Expo web app (`EXPO_PORT=18807 PASEO_LISTEN=127.0.0.1:18806 scripts/dev-app.sh`). The repo default 8081 is the React Native/Expo default and unregistered. Metro listens on all interfaces; dev only."}
