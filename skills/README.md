@@ -20,16 +20,24 @@ The three roots, each skill in exactly one of them:
 
 - **Agent skills**: `~/src/djbclark-ade/skills/<name>/`
   (github.com/djbclark/djbclark-ade).
-- **Site skills** (this directory): `~/ops/site-djbclark/skills/<name>/`.
+- **Site skills** (this directory): `~/ops/site-public-djbclark/skills/<name>/`.
 - **Private skills**: `~/ops/site-private/skills/<name>/` (real directory,
   listed in `.githooks/private-paths` there).
 
 `~/src/djbclark-ade/bin/skill-everywhere` reads all three roots (this one via
-`SKILL_EVERYWHERE_SITE`, default `${OPS_ROOT:-~/ops}/site-djbclark/skills`)
+`SKILL_EVERYWHERE_SITE`, default `${OPS_ROOT:-~/ops}/site-public-djbclark/skills`)
 and links each skill **directly** into every agent's skills directory; its
 README is `~/src/djbclark-ade/docs/skill-everywhere.md`. Run
 `skill-everywhere <name>` (or `--all`) after adding a skill here. Never copy a
 skill into an agent's directory: copies drift.
+
+**Two `book-to-kb` versions (2026-11-06, operator to pick one; neither is deleted):**
+`skills/book-to-kb/` here is the skill moved from djbclark-ade, and
+`tools/book-to-kb/skills/book-to-kb/` is the packaged tool's own skill, a different text
+(`diff` reports about 215 lines). `tools/book-to-kb/install.sh` links
+`<agent skills dir>/book-to-kb` at the tools copy, the same link name `skill-everywhere`
+would make for this one; whichever ran last wins, and `skill-everywhere` leaves a link to the
+other copy alone ("other link") and exits 1.
 
 History: until 2026-10-14 the agents linked through this directory as a hub
 (`site-private/skills/<name>` -> `site-djbclark/skills/<name>` ->

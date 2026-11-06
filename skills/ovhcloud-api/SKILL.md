@@ -18,7 +18,7 @@ tags: ovhcloud, api, credentials, provisioning, vps
 
 # OVHcloud API — credentials, requests, and VPS provisioning
 
-Canonical source: `skills/ovhcloud-api/` in `~/ops/site-djbclark`
+Canonical source: `skills/ovhcloud-api/` in `~/ops/site-public-djbclark`
 (https://github.com/djbclark/site-djbclark) (written 2026-10-25 in djbclark-ade, moved here 2026-11-06).
 
 OVHcloud has **two credential models** and they are not interchangeable. Pick deliberately before

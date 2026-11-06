@@ -5,8 +5,8 @@ description: Format a long Markdown report (research paper, spec, review) so it 
 
 # report — make a long Markdown document readable in Marked 2
 
-Canonical copy: `~/ops/site-djbclark/skills/report/` (git: github.com/djbclark/site-djbclark; moved from djbclark-ade 2026-11-06);
-every TUI reaches it via a direct skill-everywhere link `~/ops/site-djbclark/skills/report`.
+Canonical copy: `~/ops/site-public-djbclark/skills/report/` (git: github.com/djbclark/site-djbclark; moved from djbclark-ade 2026-11-06);
+every TUI reaches it via a direct skill-everywhere link `~/ops/site-public-djbclark/skills/report`.
 Born 2026-10-10 from the `hiwymi/research/ai-heaven` delivery, where the operator
 rejected three formats in a row (see "Why", below). Apply it before the first
 `open -a "Marked 2"`, not after a complaint.

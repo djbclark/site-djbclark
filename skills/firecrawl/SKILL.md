@@ -17,7 +17,7 @@ description: >-
 
 # Firecrawl on this machine
 
-The canonical source lives at `skills/firecrawl/` in `~/ops/site-djbclark` (moved from djbclark-ade 2026-11-06). Every
+The canonical source lives at `skills/firecrawl/` in `~/ops/site-public-djbclark` (moved from djbclark-ade 2026-11-06). Every
 TUI links it through `skill-everywhere`; edit only here.
 
 ## What you get
@@ -147,7 +147,7 @@ working around it. The usual failures, in the order to check:
 2. **The whole MCP is down.** `launchctl list | rg firecrawl-mcp` should show
    PID `884` or another number, exit `0`. If absent: `launchctl load
    ~/Library/LaunchAgents/com.djbclark.firecrawl-mcp.plist`. If the plist is
-   missing or 0600 secrets drifted: `cd ~/ops/site-djbclark && just
+   missing or 0600 secrets drifted: `cd ~/ops/site-public-djbclark && just
    shared-mcp-apply-secrets`, then reload.
 3. **Self-hosted is unhealthy.** `curl -i
    https://djbclark-firecrawl.sipb.cloud/health` — 401 is correct (gate is

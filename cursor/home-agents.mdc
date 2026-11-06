@@ -123,14 +123,15 @@ in**, naming anything private. `site-private-djbclark` is private-only (hook-enf
 rest is public `site-public-djbclark`. **Exception, no question: a new agent skill goes in
 `~/src/djbclark-ade/skills/<name>/`** (link it with
 `~/src/djbclark-ade/bin/skill-everywhere <name>`); only a private skill (`1password`) goes in
-`site-private-djbclark/skills/`. (`memory/feedback_ask_where_new_things_go.md`)
+`site-private-djbclark/skills/`. Site skills moved out of djbclark-ade on 2026-11-06 live in
+`site-public-djbclark/skills/`, the third `skill-everywhere` root. (`memory/feedback_ask_where_new_things_go.md`)
 
 ## MIT / SIPB / Athena work lives on forgejo.mit.edu
 
 **MIT-, SIPB- or Athena-related work is a public repo on forgejo.mit.edu under `djbclark/`, with a
 README for other SIPB members, listed in `djbclark/mit` (`~/src/mit`)**; never a directory in an ops
 repo; a path moved out of GitHub keeps a stub README (`memory/feedback_mit_things_live_on_forgejo.md`).
-**Push with `~/src/djbclark-ade/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE BRANCH`**; plain
+**Push with `~/src/sipb-agent-skills/skills/forgejo/scripts/git-forgejo -C DIR push REMOTE BRANCH`**; plain
 `git push` fails there. **No agent posts on `SIPB/*`**: AI issue + human-draft
 as a **fork comment** (never clipboard); end with those `djbclark/*` links
 (`memory/feedback_sipb_two_tier_issues.md`; `forgejo` skill); djbclark files upstream himself.

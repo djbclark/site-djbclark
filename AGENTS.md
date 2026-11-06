@@ -202,7 +202,9 @@ in `site-private` (which keeps a symlink there): `home-agents.md`, `codex/`,
 
 Skills do not route through the ops repos. Every agent TUI links its skills dir
 directly at `~/src/djbclark-ade/skills/<name>` (public) or
-`~/ops/site-private-djbclark/skills/<name>` (private: `1password`). Claude Code
+`~/ops/site-private-djbclark/skills/<name>` (private: `1password`), and since
+2026-11-06 at this repo's `skills/<name>` (`~/ops/site-public-djbclark/skills/`,
+the site skills moved out of djbclark-ade; see `skills/README.md`). Claude Code
 agents, commands and hooks and `zcode/commands` live in
 `~/src/djbclark-ade/claude/` and `~/src/djbclark-ade/zcode/`. Only
 `claude/local-marketplace` (the local-lsp Claude Code plugin marketplace,

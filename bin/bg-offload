@@ -178,8 +178,9 @@
 export PATH="/opt/homebrew/bin:$PATH"
 export GIT_NO_REPLACE_OBJECTS=1  # header: the real history, for the checks and the runner's push
 ade="$HOME/src/djbclark-ade"
-git_forgejo_default="$ade/skills/forgejo/scripts/git-forgejo"
-fj_api_default="$ade/skills/forgejo/scripts/forgejo-api"
+forgejo_skill="$HOME/src/sipb-agent-skills/skills/forgejo"  # the skill's home; djbclark-ade unlinked its copy 2026-11-06
+git_forgejo_default="$forgejo_skill/scripts/git-forgejo"
+fj_api_default="$forgejo_skill/scripts/forgejo-api"
 generic_default="$ade/scripts/github-ci-run"
 if [ "${BG_OFFLOAD_TESTING:-0}" = 1 ]; then
   gh_bin="${BG_GH:-gh}"; runner_override="${BG_OFFLOAD_RUNNER:-}"

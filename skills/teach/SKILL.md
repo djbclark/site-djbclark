@@ -12,7 +12,7 @@ description: >-
 
 # teach — today's install-or-use items, one prompt at a time
 
-Canonical copy: `~/ops/site-djbclark/skills/teach/` (git: github.com/djbclark/site-djbclark,
+Canonical copy: `~/ops/site-public-djbclark/skills/teach/` (git: github.com/djbclark/site-djbclark,
 moved from djbclark-ade 2026-11-06); linked everywhere by `skill-everywhere teach`.
 Claude Code slash command: `~/.claude/commands/teach.md` → `claude/commands/teach.md` here.
 
@@ -114,7 +114,7 @@ item at a time: a few paragraphs about that item, then its picklist (step 3).
 - Two marketplaces both named `claude-code-mods` (hamzafer's is registered;
   Ray Amjad's `ray-amjad/awesome-claude-code-function-hooks` clashes): add Ray's
   by git URL or copy the one plugin into the local marketplace
-  (`~/ops/site-djbclark/claude/local-marketplace`), never replace hamzafer's.
+  (`~/ops/site-public-djbclark/claude/local-marketplace`), never replace hamzafer's.
 - `aiuse watch --all-providers`, omp, and anything that spends credits stay out
   of demos ([[feedback_never_use_credits_without_asking]]).
 - All days ticked: say so, offer `/plugin discover` for a fresh batch, and

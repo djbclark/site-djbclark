@@ -40,7 +40,7 @@ in place.
 Read a PR's review without the CLI (any repository; prints status, review id and the `Confidence Score` when completed):
 
 ```bash
-sudo-secretspec run --reason "greptile status" -- python3 -I ~/ops/site-djbclark/skills/greptile/scripts/greptile-gate.py status 229
+sudo-secretspec run --reason "greptile status" -- python3 -I ~/ops/site-public-djbclark/skills/greptile/scripts/greptile-gate.py status 229
 # a third and fourth argument select another repository and its default branch: ... status 12 frdminc/nix2cf main
 ```
 

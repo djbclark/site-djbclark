@@ -16,7 +16,7 @@ interval_s = 900
 
 [probe]
 kind = "command"
-command = ["/Users/djbclark/src/djbclark-ade/bin/change-hermes", "--check", "--skip-window", "0458-0510"]
+command = ["/Users/djbclark/ops/site-public-djbclark/bin/change-hermes", "--check", "--skip-window", "0458-0510"]
 skip_exit_codes = [73, 75]
 timeout_s = 180
 
@@ -25,7 +25,7 @@ slow_before_action = 2
 down_before_action = 1
 grace_s = 1800
 action = "command"
-command = ["/Users/djbclark/src/djbclark-ade/bin/change-hermes", "--auto", "--skip-window", "0458-0510"]
+command = ["/Users/djbclark/ops/site-public-djbclark/bin/change-hermes", "--auto", "--skip-window", "0458-0510"]
 timeout_s = 900
 min_action_interval_s = 1800
 max_restarts = 4

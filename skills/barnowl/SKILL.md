@@ -11,7 +11,7 @@ argument-hint: list my subs
 # BarnOwl, in plain English
 
 Turn the request into the smallest real BarnOwl or Zephyr operation and run it.
-The helper is `scripts/bo` in this skill (`~/ops/site-djbclark/skills/barnowl/scripts/bo`).
+The helper is `scripts/bo` in this skill (`~/ops/site-public-djbclark/skills/barnowl/scripts/bo`).
 The command list is `bo run 'show commands'`; a command's flags are in
 `bo run 'help COMMAND'`, or in `commands.c` of
 [github.com/barnowl/barnowl](https://github.com/barnowl/barnowl) (the `OWLCMD_*`
@@ -178,7 +178,7 @@ with `~/src/djbclark-ade/bin/skill-everywhere barnowl`. Setting up or repairing 
 restricted key (an operator step, once per machine pair):
 `ssh-keygen -t ed25519 -N '' -f ~/.ssh/pastebin-bo`, then one line in pastebin's
 `~/.ssh/authorized_keys`:
-`restrict,command="$HOME/ops/site-djbclark/skills/barnowl/scripts/bo-ssh" <the .pub contents>`
+`restrict,command="$HOME/ops/site-public-djbclark/skills/barnowl/scripts/bo-ssh" <the .pub contents>`
 and in the Mac's `~/.ssh/config`: `Host pastebin-bo`, `HostName pastebin.xvm.mit.edu`,
 `IdentityFile ~/.ssh/pastebin-bo`, `IdentitiesOnly yes`. It is a boundary only for an agent
 that cannot use the operator's main key (not loaded in the agent socket without a prompt,
