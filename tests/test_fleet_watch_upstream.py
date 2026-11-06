@@ -383,15 +383,15 @@ class PaseoWatch(Harness):
         self.assertEqual(self.pings(), [])
 
     def test_a_registered_watcher_gets_the_event_without_the_third_partys_words(self) -> None:
-        self.assertEqual(self.fw("--relay-to", "sess-1", "paseowatch session").returncode, 0)
-        self.assertEqual((self.state / "upstream-paseo.relay").read_text().splitlines()[0], "sess-1")
+        self.assertEqual(self.fw("--relay-to", "5e55a1", "paseowatch session").returncode, 0)
+        self.assertEqual((self.state / "upstream-paseo.relay").read_text().splitlines()[0], "5e55a1")
         self.assertFalse((self.state / "upstream-pr.relay").exists())
         self.seed()
         self.maintainer_replies()
         self.assertEqual(self.fw().returncode, 0)
         (line,) = self.relays()
         self.assertTrue(line.startswith(
-            "sess-1 fleet-watch upstream: https://github.com/getpaseo/paseo/discussions/7828 comment by maintainer. Brief: "), line)
+            "5e55a1 fleet-watch upstream: https://github.com/getpaseo/paseo/discussions/7828 comment by maintainer. Brief: "), line)
         self.assertNotIn("feature request", line)
         brief = next(self.state.glob("upstream-paseo-paseo-7828-*-relay.md")).read_text()
         for text in ("untrusted data", "feature request", "fleet-watch upstream --profile paseo --relay-to",
@@ -401,26 +401,32 @@ class PaseoWatch(Harness):
         self.assertEqual((self.pstate()["pending"], self.dispatches()), ([], []))
 
     def test_relays_declare_a_sender_label_because_relay_py_refuses_without_one(self) -> None:
-        self.assertEqual(self.fw("--relay-to", "sess-1", "paseowatch session").returncode, 0)
+        self.assertEqual(self.fw("--relay-to", "5e55a1", "paseowatch session").returncode, 0)
         self.seed()
         self.maintainer_replies()
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual((self.home / "relay.sender").read_text().split(), ["fleet-watch"])
 
-    def test_every_relay_turns_the_delivery_watch_off(self) -> None:
-        # relay.py watches delivery by default for an agent sender (djbclark-ade PR 81) and then exits 3 for a
-        # merely queued line, which upr_send_line and upr_relay would read as a failure (and upr_relay would dispatch).
-        self.assertEqual(self.fw("--relay-to", "sess-1", "paseowatch session").returncode, 0)
+    def test_no_relay_passes_the_retired_no_ack_flag(self) -> None:
+        # The E3 relay.py shim (2026-11-06) exits 64 on --no-ack; rc 0 is delivered, rc 2 not delivered.
+        self.assertEqual(self.fw("--relay-to", "5e55a1", "paseowatch session").returncode, 0)
         self.assertEqual(self.fw("--relay-test").returncode, 0)
         self.seed()
         self.maintainer_replies()
         self.assertEqual(self.fw().returncode, 0)
         lines = self.relays()
         self.assertGreaterEqual(len(lines), 2)
-        self.assertTrue(all(line.split()[-1] == "--no-ack" for line in lines), lines)
+        self.assertFalse(any("--no-ack" in line for line in lines), lines)
+
+    def test_a_non_paseo_relay_target_is_skipped_and_never_sent(self) -> None:
+        self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
+        self.seed()
+        self.maintainer_replies()
+        self.assertEqual(self.fw().returncode, 0)
+        self.assertEqual(self.relays(), [])
 
     def test_a_refused_relay_keeps_the_event_pending_pings_once_and_never_dispatches(self) -> None:
-        self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
+        self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.maintainer_replies()
         (self.home / "relay_rc").write_text("1")
@@ -435,7 +441,7 @@ class PaseoWatch(Harness):
         self.assertEqual((len(self.relays()), self.pstate()["pending"]), (3, []))
 
     def test_a_close_is_relayed_but_not_queued(self) -> None:
-        self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
+        self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.dthread("2026-10-16T12:00:00Z")
         self.discussion(closed=True)

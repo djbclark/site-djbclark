@@ -24,13 +24,9 @@
 # helm: agent sessions blocked on the operator, from the helm skill's no-model collector
 # (`helm.py brief`). A notice goes out only when a session starts waiting or asks a new
 # question, never when one is answered. Added 2026-10-06.
-# Each scheduled check also runs relay.py --sweep (FLEET_WATCH_RELAY overrides
-# its path). The sweep only resolves acks; each open, overdue expectation row in
-# --pending --json pages once (text built from its row; no parsed pending list, no page).
-# A ledger key is pruned when its row is no longer open (or gone twice running), so a reused
-# ID pages again; a ping killed by its timeout is recorded "uncertain" and never retried.
-# State: $STATE_DIR/ack-overdue.json. The step has one 90 s deadline and a non-blocking
-# lock. Missing or failed relay calls are logged and never stop the other checks.
+# Ack-overdue paging was removed 2026-11-06 (slim-down C3): it read relay.py --sweep and --pending --json,
+# and the E3 relay.py shim has no outbox, so there is nothing to sweep or list (it exits 64 on both). A
+# pending Paseo permission is `paseo permit ls`. $STATE_DIR/ack-overdue.json and .lock are no longer read.
 #
 # Phones: FLEET_WATCH_HOSTS (default "s24 p7a t2e hd8"; ssh aliases). hd8 was left
 # out until 2026-10-05, when the operator asked for it back in.
@@ -95,8 +91,8 @@
 # also refuses, exit 5). A dispatch that fails 3 times, or an event pending over 24 h, is dropped
 # with a ping. Relay (2026-10-23, djbclark: "start work on that immediately, using /bigteam"): when
 # a session has registered with `fleet-watch upstream --relay-to <session>` ($STATE_DIR/
-# upstream-pr.relay, one line: anything relay.py takes, a Paseo agent id, session id or herdr
-# pane), each pending event is first handed to that session instead: a brief file
+# upstream-pr.relay, one line: a Paseo agent id or a hex shortId prefix; since 2026-11-06 a herdr
+# pane or session id is logged and skipped), each pending event is first handed to that session instead: a brief file
 # ($STATE_DIR/<name>-relay.md: what to do, then the event, its text fenced as untrusted data) and
 # one relay.py line naming the brief. The relayed line carries the item, event and login only,
 # never the third party's text, since it lands in the session as a typed message. A merge or a
@@ -208,7 +204,7 @@ UPSTREAM_TIMEOUT="${FLEET_WATCH_UPSTREAM_TIMEOUT:-3600}"
 UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
 UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
 # Per-profile fields (repos, ignore list, dir, prompt, chain, state/lock/relay files) are set by upr_profile.
-UPSTREAM_RELAY="${FLEET_WATCH_RELAY:-$HOME/src/djbclark-ade/skills/session-finder/relay.py}"
+UPSTREAM_RELAY="${FLEET_WATCH_RELAY:-$HOME/src/djbclark-ade/skills/session-finder/relay.py}"    # the E3 shim over `paseo send` (slim-down, 2026-11-06)
 # relay.py refuses to send without a sender id (exit 4, 2026-10-25): a launchd job has none, so declare the label.
 export RELAY_SENDER_NAME="${RELAY_SENDER_NAME:-fleet-watch}"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
@@ -1017,20 +1013,31 @@ upr_event() {
     "~~~~"' <<<"$1"
 }
 
+upr_paseo_target() {
+  # 0 when $1 can name a Paseo agent: a uuid or a hex shortId prefix of 4+ characters (what relay.py accepts).
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ || "$1" =~ ^[0-9a-f]{4,32}$ ]]
+}
+
 upr_send_line() {
   # $1 target, $2 text: one line into a session that is NOT this process. A Paseo agent id (a uuid)
   # goes through `paseo send --behavior steer` with this process's own agent id scrubbed (relay.py
   # refuses a caller that is the target, which a self-test from the registered session always is);
-  # anything else through relay.py. 0 only when the channel says it delivered or queued it.
-  local target=$1 text=$2 cli
+  # a shortId prefix through relay.py (the Paseo-only shim); anything else is skipped. 0 only when the send is delivered.
+  local target=$1 text=$2 cli rc
   if [[ "$target" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
     cli=${PASEO_CLI:-$(command -v paseo || true)}
     [[ -n "$cli" ]] || return 1
     runb 60 env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD "$cli" send "$target" --no-wait --behavior steer "$text" >/dev/null 2>&1
+  elif upr_paseo_target "$target"; then
+    # relay.py is the E3 shim over `paseo send` (2026-11-06): exit 0 delivered, 2 not delivered (queued,
+    # timeout, permission, error), 1 paseo failed, 3 unresolvable target, 64 usage. Only 0 is success.
+    runb 60 "$UPSTREAM_RELAY" "$target" "$text" >/dev/null 2>&1
+    rc=$?
+    ((rc == 0)) || ulog "relay to $target: not delivered (relay.py rc=$rc)"
+    return "$rc"
   else
-    # --no-ack: relay's default delivery watch (djbclark-ade PR 81) would exit 3 on a queued line
-    # when an agent session runs this; 0 here means "delivered or queued", the legacy contract.
-    runb 60 "$UPSTREAM_RELAY" "$target" "$text" --no-ack >/dev/null 2>&1
+    ulog "relay target $target is not a Paseo agent id or shortId prefix (herdr panes and session ids retired), skipped"
+    return 1
   fi
 }
 
@@ -1057,14 +1064,14 @@ EOF
 
 upr_relay() {
   # $1 = event JSON (a pending entry's shape): hand it to the session registered in
-  # UPSTREAM_RELAY_FILE. 0 when relay.py delivered or queued it (--dry-run: would try); 1 when no
+  # UPSTREAM_RELAY_FILE. 0 when relay.py delivered it, rc 0 (--dry-run: would try); 1 when no
   # session is registered or the relay was refused. The relayed line names the item, the event
   # and the login, never the event text: that is third-party words, kept fenced in the brief.
   local ev=$1 target repo n type event login url name brief msg out rc
   [[ -s "$UPSTREAM_RELAY_FILE" ]] || return 1
   target=$(ghead -n 1 "$UPSTREAM_RELAY_FILE")
-  if ! [[ "$target" =~ ^[A-Za-z0-9:._-]+$ ]]; then
-    ulog "relay target in $UPSTREAM_RELAY_FILE is not a session id, not relaying"
+  if ! upr_paseo_target "$target"; then
+    ulog "relay target in $UPSTREAM_RELAY_FILE is not a Paseo agent id or shortId prefix (herdr panes and session ids retired 2026-11-06), skipped"
     return 1
   fi
   IFS=$'\t' read -r repo n type event login <<<"$(jq -r '[.repo, .n, .type, .event, .login] | @tsv' <<<"$ev")"
@@ -1077,8 +1084,9 @@ upr_relay() {
     return 0
   fi
   upr_relay_brief "$ev" "$(upr_draft "$repo" "$n")" >"$brief"
-  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" --no-ack 2>&1)    # --no-ack: see upr_send_line
+  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" 2>&1)    # rc 0 delivered, 2 not delivered: see upr_send_line
   rc=$?
+  ((rc == 0)) || ulog "relay $name to $target: not delivered"
   ulog "relay $name to $target rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
   ((rc == 0))
 }
@@ -1299,202 +1307,6 @@ upstream_watch() {
   upr_pass
   rm -rf "$run"
   return 0
-}
-
-ack_watch() {
-  # No agent send: only the sweep, a read-only pending list, and hermes-ping.
-  "$PY3" - "$UPSTREAM_RELAY" "$STATE_DIR" "$HERMES" "$HERMES_TO" <<'PY' || true
-import fcntl
-import json
-import math
-import os
-from pathlib import Path
-import re
-import subprocess
-import sys
-import tempfile
-import time
-
-relay, directory, hermes, target = sys.argv[1:]
-root = Path(directory)
-state = root / "ack-overdue.json"
-# One deadline for the whole step, so a hung Hermes cannot stall the other checks.
-# The environment overrides are for tests.
-CMD_TIMEOUT = float(os.environ.get("FLEET_WATCH_ACK_CMD_TIMEOUT", "60"))
-DEADLINE = float(os.environ.get("FLEET_WATCH_ACK_DEADLINE", "90"))
-deadline = time.monotonic() + DEADLINE
-LINE = re.compile(r"^OVERDUE ack (\S{1,200}?): .+$")
-MAX_SKIP_LOGS = 5
-# A ping starts only with this much of the step left: a ping cut short by the deadline would be
-# "maybe sent" and never retried (see ping()). Overridable for tests.
-PING_FLOOR = float(os.environ.get("FLEET_WATCH_ACK_PING_FLOOR", "20"))
-
-class DeadlineExceeded(RuntimeError):
-    pass
-
-def clean(text, limit):
-    """Peer-controlled text: collapse whitespace, drop non-printable characters, clip."""
-    text = " ".join(str(text)[:limit * 4].split())
-    return "".join(c for c in text if c.isprintable())[:limit]
-
-def log(message):
-    # Never raises: the state directory may be unwritable, and the step must still end.
-    try:
-        with (root / "fleet-watch.log").open("a") as stream:
-            stream.write(f"{time.strftime('%F %T')} ack-sweep: {message}\n")
-    except OSError as error:
-        print(f"ack-sweep: {message} (log unwritable: {clean(error, 120)})", file=sys.stderr)
-
-def left():
-    return deadline - time.monotonic()
-
-def run(args, label):
-    if left() <= 0:
-        raise DeadlineExceeded(f"{label}: step deadline of {DEADLINE:g} seconds reached")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=min(CMD_TIMEOUT, left()))
-    if result.returncode:
-        raise RuntimeError(f"{label} exited {result.returncode}: {clean(result.stderr, 240)}")
-    return result.stdout
-
-def ping(message):
-    """(reason, maybe_sent): (None, False) sent; (reason, False) not sent, retry; (reason, True) a timeout
-    may have delivered the page, so it is never retried. The reason never repeats the message."""
-    try:
-        result = subprocess.run([str(Path.home() / ".local/bin/hermes-ping"), message], capture_output=True,
-                                timeout=min(CMD_TIMEOUT, max(left(), 0.1)),
-                                env=dict(os.environ, HERMES_BIN=hermes, HERMES_PING_TARGET=target))
-    except subprocess.TimeoutExpired:
-        return "timed out", True
-    except OSError as error:
-        return f"OS error {error.errno}", False
-    return (f"exit {result.returncode}" if result.returncode else None), False
-
-def save(seen):
-    fd, name = tempfile.mkstemp(prefix=".ack-overdue-", dir=root)
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(seen, stream)
-        os.replace(name, state)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
-
-def load():
-    try:
-        seen = json.loads(state.read_text())
-        if not isinstance(seen, dict):
-            raise ValueError("not an object")
-    except FileNotFoundError:
-        return {}
-    except (ValueError, OSError) as error:    # corrupt JSON (incl. UnicodeDecodeError), or not a readable file
-        try:
-            os.replace(state, root / "ack-overdue.json.bad")
-            log(f"unusable ledger moved to ack-overdue.json.bad ({clean(error, 120)}); starting empty")
-        except OSError as move_error:
-            log(f"unusable ledger ({clean(error, 120)}) could not be moved aside ({clean(move_error, 120)}); starting empty")
-        return {}
-    return seen
-
-def describe(row):
-    """The ping text, built from the validated pending row, not from the sweep line."""
-    tgt = row.get("target")
-    tgt = (tgt.get("name") or tgt.get("id")) if isinstance(tgt, dict) else tgt
-    tgt = tgt or "?"
-    age = row.get("age_s")
-    minutes = int(age) // 60 if isinstance(age, (int, float)) and not isinstance(age, bool) and math.isfinite(age) else "?"
-    return clean(f"fleet-watch: OVERDUE ack {clean(row['id'], 80)}: {clean(tgt, 80)} has not answered "
-                 f"[{clean(row.get('sender') or '?', 80)}] in {minutes}m; tell the operator, never assume it was read", 500)
-
-def main():
-    # Serialize the sweep and ping ledger; a second overlapping run gives way at once.
-    with (root / "ack-overdue.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            log("ack sweep already running")
-            return
-        seen = load()
-        output = run([relay, "--sweep"], "--sweep")
-        if not output.strip():
-            log("relay --sweep printed nothing")
-        # The sweep only resolves acks. What gets paged is read from the --pending rows, so a
-        # reworded or forged sweep line can neither page nor silence anything.
-        try:
-            rows = json.loads(run([relay, "--pending", "--json"], "--pending"))
-            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-                raise ValueError("invalid pending list")
-        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-            # No parsed pending list: page nothing and keep the ledger as it is.
-            log(f"pending unavailable; paging deferred: {clean(error, 240)}")
-            return
-        expects = {row["id"]: row for row in rows if row.get("kind") == "expect" and isinstance(row.get("id"), str)}
-        # Once per expectation: a key is dropped when its row is present and no longer open (acked,
-        # reserved for reuse), or when its row was absent on two consecutive successful runs, so
-        # one missing row (a transient listing gap) cannot make a still-open expectation page again.
-        kept = {}
-        for key, value in seen.items():
-            entry = dict(value) if isinstance(value, dict) else {}
-            current = expects.get(key)
-            if current is not None:
-                if current.get("state") != "open":
-                    continue
-                entry.pop("missing", None)
-            else:
-                missing = entry.get("missing", 0)
-                missing = missing + 1 if isinstance(missing, int) and not isinstance(missing, bool) else 1
-                if missing >= 2:
-                    continue
-                entry["missing"] = missing
-            kept[key] = entry
-        seen = kept
-        due = {ident: current for ident, current in expects.items()
-               if current.get("state") == "open" and current.get("overdue") is True}
-        listed, skipped = set(), 0
-        for line in output.splitlines():
-            match = LINE.match(line)
-            if not match:
-                continue
-            listed.add(match[1])
-            if match[1] not in due:
-                skipped += 1
-                if skipped <= MAX_SKIP_LOGS:
-                    log(f"ignored OVERDUE line for {clean(match[1], 80)!r}: not an open overdue expectation in --pending")
-        if skipped > MAX_SKIP_LOGS:
-            log(f"ignored {skipped} OVERDUE lines in all")
-        unlisted = sum(ident not in listed for ident in due)
-        if unlisted:
-            log(f"{unlisted} open overdue expectation(s) in --pending had no OVERDUE line")
-        todo = {ident: describe(current) for ident, current in due.items() if ident not in seen}
-        # Persist the prune, and prove the ledger is writable, BEFORE any page: a ping whose record
-        # cannot be stored would repeat on every run.
-        try:
-            save(seen)
-        except OSError as error:
-            log(f"ledger not writable ({clean(error, 240)}); paging skipped this run")
-            return
-        for number, (ident, message) in enumerate(todo.items()):
-            if left() < PING_FLOOR:
-                log(f"less than {PING_FLOOR:g} seconds left; {len(todo) - number} overdue notice(s) retry next run")
-                break
-            reason, maybe_sent = ping(message)
-            if reason and not maybe_sent:
-                log(f"hermes-ping failed for {clean(ident, 80)}: {reason}")
-                continue
-            seen[ident] = {"notified": time.time(), **({"uncertain": True} if maybe_sent else {})}
-            if maybe_sent:
-                log(f"hermes-ping for {clean(ident, 80)}: {reason}, not retried (the page may have been lost)")
-            # Save after every notice so a later failure cannot replay it.
-            try:
-                save(seen)
-            except OSError as error:
-                log(f"ledger not writable after paging {clean(ident, 80)} ({clean(error, 240)}); paging stopped")
-                break
-
-try:
-    main()
-except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-    log(f"unavailable: {clean(error, 240)}")
-PY
 }
 
 # Phantom "running" Paseo agents (2026-11-02, RCA ~/.local/state/bigteam/lead-2026-11-02/phantom-running-rca.md E):
@@ -1792,7 +1604,7 @@ def send_ping(text, limit):
 
 def send_relay(seat, text, limit):
     """RELAY_BUSY_ALERT_S=0: relay.py's own 30-minute 'target still working' ping and notice would be a second alert for one episode."""
-    result = subprocess.run([relay, seat, text, "--no-ack"], capture_output=True, text=True, timeout=limit,
+    result = subprocess.run([relay, seat, text], capture_output=True, text=True, timeout=limit,
                             env=dict(os.environ, RELAY_SENDER_NAME="fleet-watch-phantom", RELAY_BUSY_ALERT_S="0"))
     return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
 
@@ -1976,7 +1788,6 @@ PY
 }
 
 check() {
-  ack_watch
   local agents builds deploys parts=() h sshdk=""
   # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
   agents=$(count 'bin/python[0-9.]* [^ ]*/site-private(-djbclark)?/bin/acp-run ')
