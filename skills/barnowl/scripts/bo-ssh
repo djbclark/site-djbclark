@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Forced command for the agent's restricted SSH key to the machine that runs BarnOwl.
+#
+# In ~/.ssh/authorized_keys there (one line, key made for agents only):
+#   restrict,command="/ABS/PATH/skills/barnowl/scripts/bo-ssh" ssh-ed25519 AAAA... bo-agent
+# `restrict` turns off pty, port/agent/X11 forwarding and ~/.ssh/rc. This script then
+# allows exactly `bo <subcommand> ...` and nothing else: no shell, no tmux, no cat of
+# the key files. The words are split on whitespace and never reach a shell, so quoting
+# and metacharacters are inert (a quoted argument with a space is split: use a pattern
+# without spaces for `bo log --grep`).
+#
+# This, not the prose in SKILL.md, is what makes the confirmation in `bo` a boundary:
+# an agent holding only this key cannot type into the live client to answer for the human.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+read -r -a argv <<<"${SSH_ORIGINAL_COMMAND:-}"
+
+if [[ ${#argv[@]} -lt 2 || ${argv[0]} != bo ]]; then
+  echo "bo-ssh: only 'bo <subcommand> ...' is allowed" >&2
+  exit 2
+fi
+case "${argv[1]}" in
+  log|screen|capture|subs|file|run|perl|locate|help) ;;
+  *) echo "bo-ssh: refused subcommand" >&2; exit 2 ;;
+esac
+
+exec env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 TERM=dumb \
+  "$here/bo" "${argv[@]:1}"

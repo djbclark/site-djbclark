@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# heavy-shim — PATH shim for `swift` and `xcodebuild` (linked as ~/.local/bin/swift and
+# ~/.local/bin/xcodebuild, which come before /usr/bin on PATH).
+#
+# Why (2026-10-13): an agy session ran a bare `swift test --filter X` in ~/src/CodexBar. SwiftPM
+# started one swift-frontend per core (8 on 8 cores, up to 3.5 GB each) and, with a Gradle daemon,
+# took the 16 GB Mac to load 180 with 10.6 of 11.3 GB of swap. The Claude hook (bg_test_gate.py)
+# denies this, but agy, codex, cursor and the rest have no hooks. A shim on PATH covers every TUI
+# that runs the command by name.
+#
+# What: `swift build|test|run` and any `xcodebuild` re-exec through ~/ops/site-private/bin/bg, which
+# takes a machine-wide test slot, waits for low load and adds -j/-jobs BG_CPUS. Everything else
+# (`swift package`, `--version`, `--help`, xcodebuild -version/-help) goes straight to /usr/bin.
+# BG_SHIM=1 is set before calling bg so the `swift` bg launches does not loop back here.
+name="$(basename "$0")"
+real="/usr/bin/$name"
+bg="$HOME/ops/site-private/bin/bg"
+
+heavy=0
+if [ -z "${BG_SHIM:-}" ] && [ -x "$bg" ]; then
+  case "$name" in
+    swift)
+      for a in "$@"; do
+        case "$a" in
+          --version|-version|--help|-h|-help) heavy=0; break ;;
+          -*) continue ;;
+          build|test|run) heavy=1 ;;
+        esac
+        break
+      done
+      ;;
+    xcodebuild)
+      heavy=1
+      for a in "$@"; do
+        case "$a" in
+          -version|-help|-usage|-showsdks|-list|-showBuildSettings|-showdestinations) heavy=0; break ;;
+        esac
+      done
+      ;;
+  esac
+fi
+
+if [ "$heavy" = 1 ]; then
+  BG_SHIM=1 exec "$bg" "$real" "$@"
+fi
+exec "$real" "$@"

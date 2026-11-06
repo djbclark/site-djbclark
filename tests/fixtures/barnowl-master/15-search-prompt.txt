@@ -1,0 +1,40 @@
+-> OWL ADMIN
+       -----------------------------------------------------------------------
+       Welcome to BarnOwl version 1.11~git20250813.1f65aee-1.
+       To see a quick introduction, type ':show quickstart'.
+       Press 'h' for on-line help.
+
+       BarnOwl is free software. Type ':show license' for more
+       information.                                                     ^ ^                                                 
+                                                                        OvO                                                 
+       Please report any bugs or suggestions to bug-barnowl@mit.edu    (   )                                                
+       -----------------------------------------------------------------m-m---                                              
+   sipb / inst1 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 1 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst2 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 2 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst3 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 3 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst4 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 4 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst5 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 5 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst6 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 6 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst7 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 7 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   sipb / inst8 / UNAUTH: eve  01:52  (Eve)                                                                                 
+       message number 8 with a fairly long line of ordinary text so that rows beside a popup edge are not blank lorem ipsum lorem ipsum lore
+   OWL ADMIN                                                                                                                
+       Could not send message to eve: not logged in or subscribing to messages.                                             
+
+
+
+
+
+
+
+
+── (1/10/10)  all ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+command: search 

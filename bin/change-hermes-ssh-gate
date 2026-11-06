@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# change-hermes-ssh-gate: forced command for the box's key in the Mac's authorized_keys.
+# Allows only: --check | --list | --auto [--dry-run]. Anything else is refused (exit 2).
+#   from="100.106.43.66",restrict,command="/Users/djbclark/src/djbclark-ade/bin/change-hermes-ssh-gate" ssh-ed25519 ...
+export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+set -u
+SELF="$(greadlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink -f "${BASH_SOURCE[0]}")"
+CH="$(dirname "$SELF")/change-hermes"
+read -r -a a <<< "${SSH_ORIGINAL_COMMAND:-}"
+[ "${a[0]:-}" = "--" ] && a=("${a[@]:1}")
+case "${a[*]:-}" in
+  --check | --list | --auto | "--auto --dry-run") exec "$CH" "${a[@]}" ;;
+  *) echo "change-hermes-ssh-gate: refused: ${a[*]:-<empty>}" >&2; exit 2 ;;
+esac

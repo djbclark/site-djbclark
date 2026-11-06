@@ -1,0 +1,23 @@
+{
+  "target": "commercial-pdf",
+  "base_url": "https://api.firecrawl.dev",
+  "started": "2026-10-14T23:06:59+00:00",
+  "credits_before": 993,
+  "scrape": [
+    {
+      "id": "pdf",
+      "category": "PDF (4 pages)",
+      "url": "https://www.irs.gov/pub/irs-pdf/fw4.pdf",
+      "ok": true,
+      "http": 200,
+      "page_status": 200,
+      "secs": 0.99,
+      "retries_429": 0,
+      "md_chars": 25054,
+      "markers": "2/2",
+      "error": null
+    }
+  ],
+  "credits_after": 988,
+  "finished": "2026-10-14T23:07:01+00:00"
+}

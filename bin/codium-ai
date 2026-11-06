@@ -1,0 +1,59 @@
+#!/bin/sh
+# codium-ai [--restart] [codium args...]: start VSCodium with Continue's Claude API key
+# in its environment as CONTINUE_ANTHROPIC_API_KEY. ~/.continue/config.yaml refers to it
+# as ${{ secrets.CONTINUE_ANTHROPIC_API_KEY }}; the value is never written to disk.
+#
+# - Not ANTHROPIC_API_KEY: under that name the Claude Code extension would switch from
+#   the Claude subscription to paid API use.
+# - `sudo-secretspec get`, not `run` (AGENTS.md rule 3 exception): `run` would hand every
+#   declared secret to VSCodium and everything it starts. This passes one value.
+# - Exposure: every extension can read VSCodium's environment, and so can processes
+#   extensions start (the Claude Code CLI, Continue tools). Integrated terminals and tasks
+#   do not: settings.json must set terminal.integrated.env.osx to drop it, and this
+#   refuses to start without that entry. A folder's own .continue/ blocks (and, once
+#   trusted, its .vscode/settings.json) can reach the key too, so open untrusted folders
+#   with plain `codium`, not this.
+# - A running VSCodium cannot be given a new environment variable. Without --restart this
+#   refuses; with it, VSCodium is quit (its terminals, tasks, debug and agent sessions
+#   stop; unsaved files come back through hot exit) and started again. To open a file
+#   in a window that already has the key, use plain `codium FILE`.
+# - Never run it under `sh -x`: the trace prints the key.
+set -eu
+restart=0
+if [ "${1:-}" = "--restart" ]; then
+  restart=1
+  shift
+fi
+running() { pgrep -U "$(id -u)" -x VSCodium >/dev/null; }
+settings="$HOME/Library/Application Support/VSCodium/User/settings.json"
+if ! grep -q 'CONTINUE_ANTHROPIC_API_KEY' "$settings" 2>/dev/null; then
+  echo "codium-ai: $settings does not keep the key out of terminals; add:" >&2
+  echo '  "terminal.integrated.env.osx": { "CONTINUE_ANTHROPIC_API_KEY": null }' >&2
+  exit 2
+fi
+if running && [ "$restart" -ne 1 ]; then
+  echo "codium-ai: VSCodium is already running, and a running VSCodium cannot be given the key." >&2
+  echo "codium-ai: run 'codium-ai --restart' to quit it (stopping its terminals and agent sessions) and start it with the key." >&2
+  exit 2
+fi
+key=$(sudo-secretspec get ANTHROPIC_API_KEY --reason "VSCodium Continue extension (codium-ai)")
+if [ -z "$key" ]; then
+  echo "codium-ai: ANTHROPIC_API_KEY is empty in sudo-secretspec" >&2
+  exit 1
+fi
+if running; then
+  osascript -e 'tell application "VSCodium" to quit'
+  i=0
+  while running; do
+    i=$((i + 1))
+    if [ "$i" -gt 80 ]; then
+      echo "codium-ai: VSCodium did not quit within 20 s; quit it and run codium-ai again" >&2
+      exit 1
+    fi
+    sleep 0.25
+  done
+fi
+CONTINUE_ANTHROPIC_API_KEY=$key
+export CONTINUE_ANTHROPIC_API_KEY
+unset key
+exec /opt/homebrew/bin/codium "$@"

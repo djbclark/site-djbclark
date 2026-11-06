@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# Talk to the running BarnOwl in the tmux session named "barnowl".
+# The live client is the one that holds Zephyr subscriptions. zctl retrieve
+# on this machine fails looking for a WindowGram port; do not use it.
+#
+# Everything that prints Zephyr text goes through bo-log.py: sanitized, framed
+# JSON lines. `perl` and every `run` that is not a plain read first ask the human at
+# the live client ([y/N], showing the whole command) and type nothing until they
+# answer y; this script cannot answer for them, and the restricted ssh key cannot
+# type into the client. See SKILL.md, "Reading Zephyr text".
+set -euo pipefail
+umask 077
+
+argv_str="$*"
+session=${BO_SESSION:-barnowl}
+out=${BO_OUT:-}
+ans=
+pending_question=
+pane=
+state=${BO_STATE:-$HOME/.local/state/bo}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+confirm_wait=${BO_CONFIRM_WAIT:-120}
+confirm_max=${BO_CONFIRM_MAX:-}
+
+finish() {
+  local rc=$?
+  # A question left open at the client would swallow the next caller's keys. C-g closes it, but
+  # only while OUR question is still the last row of the screen (the type row): if the human has
+  # dismissed it and started a compose or a command line, a C-g would discard what they typed.
+  if [[ -n $pending_question ]] && tmux capture-pane -p -J -t "$pane" 2>/dev/null | tail -n 1 | grep -q '^bo asks: allow '; then
+    tmux send-keys -t "$pane" C-g 2>/dev/null || true
+  fi
+  [[ -z $out ]] || rm -f "$out"
+  [[ -z $ans ]] || rm -f "$ans"
+  if mkdir -p -m 700 "$state" 2>/dev/null; then
+    printf '%s exit=%s bo %s\n' "$(date +%FT%T)" "$rc" \
+      "$(printf '%s' "$argv_str" | tr -c '[:print:]' '?' | cut -c1-200)" >>"$state/audit.log" 2>/dev/null || true
+  fi
+}
+trap finish EXIT
+trap 'exit 143' TERM HUP INT
+
+blog() { python3 -I "$here/bo-log.py" "$@"; }
+
+# Private scratch files, made here and never removed and re-created by name, so
+# nobody else can swap in a file of their own between the two steps.
+scratch() { mkdir -p -m 700 "$state" && mktemp "$state/$1.XXXXXX"; }
+
+usage() {
+  cat <<'EOF'
+usage: bo log (--user U | --class C) [--instance I] [--from P] [--grep TEXT]
+              [--since today|yesterday|Nh|Nd|YYYY-MM-DD[ HH:MM]] [--until W]
+              [--last N] [--new] [--mark] [--bodies | --bodies-all]
+       bo screen
+       bo subs
+       bo file
+       bo run <barnowl command>
+       bo perl <expression>
+       bo locate <user>
+
+log     read ~/zlog: fields only unless --bodies; JSON lines, sanitized, untrusted
+screen  the visible BarnOwl pane (capture is an alias): sanitized, framed
+subs    subscriptions the running BarnOwl has with the Zephyr server
+file    subscriptions saved in ~/.zephyr.subs (zctl list)
+run     type a BarnOwl command into the live client and print what came back
+perl    evaluate one Perl expression inside BarnOwl and print its value
+locate  zlocate a user
+
+bo asks the human at the live client first, always, for perl and for run of anything but a
+plain read (show|help|getvar|getsubs|getview), and refuses a command too long to show in
+one line at the pane width (pane_width - 25).
+Exit codes: 2 refused argument, 3 client busy, 4 human declined or absent, 5 output cut by a cap.
+EOF
+}
+
+is_bo_cmd() { [[ $1 =~ ${BO_PANE_CMD:-^barnowl$} ]]; }
+
+# Pin the one pane that runs BarnOwl, once, as a tmux pane id (%N): the session's
+# "current" window can change under us, and keys typed into the operator's shell
+# window would run as shell commands. The window is named barnowl (bo-a makes it);
+# a pane running anything else is refused. BO_PANE_CMD only loosens that for
+# scratch sessions, and bo-ssh scrubs BO_* from the restricted key's environment.
+need_session() {
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    echo "no tmux session named $session" >&2
+    exit 1
+  fi
+  [[ -z $pane ]] || return 0
+  local line cmd pat=${BO_PANE_CMD:-^barnowl$}
+  line=$(tmux list-panes -t "$session:barnowl" -F '#{pane_id} #{pane_current_command}' 2>/dev/null | awk -v p="$pat" '$2 ~ p { print; exit }') || true
+  [[ -n $line ]] || line=$(tmux list-panes -t "$session" -F '#{pane_id} #{pane_current_command}' 2>/dev/null | awk -v p="$pat" '$2 ~ p { print; exit }') || true
+  cmd=${line#* }
+  if [[ ! ${line%% *} =~ ^%[0-9]+$ ]] || ! is_bo_cmd "$cmd"; then
+    echo "no pane running barnowl in tmux session $session; not typing anywhere" >&2
+    exit 1
+  fi
+  pane=${line%% *}
+}
+
+# One bo call at a time per session: two callers would interleave keystrokes
+# in the one live client. flock is on Linux, where the live client runs; where
+# it is missing there is no session to talk to anyway.
+lock_client() {
+  command -v flock >/dev/null 2>&1 || return 0
+  exec 9>"${BO_LOCK:-${TMPDIR:-/tmp}/bo-$session.lock}"
+  flock -w 120 9 || { echo "another bo call is using $session; gave up after 120 s" >&2; exit 1; }
+}
+
+capture() { tmux capture-pane -p -J -t "$pane"; }
+
+# "window_active pane_active session_attached pane_width pane_current_command" for the pinned pane.
+view_info() { tmux display-message -p -t "$pane" '#{window_active} #{pane_active} #{session_attached} #{pane_width} #{pane_current_command}' 2>/dev/null || true; }
+
+# What BarnOwl 1.10 draws (screens captured from a 1.10 client: tests/fixtures/barnowl-1.10/):
+#   the message list, then the status bar `── (1/9/9)  all ───` on row R, then ONE message
+#   line (row R+1: the last thing a command or message said; untrusted, and bo's own
+#   `q{ok}` leaves "ok" there), then the type window to the bottom (row R+2 on).
+# Idle = the type window is blank. A command line shows `command: `, a compose `----> zwrite x`,
+# bo's question `bo asks: ...`, a search `command: search`. A popup (":show commands", help)
+# keeps the status bar and draws a box (┌─┐ │ └─┘, or +---+ without fancylines) over the list,
+# whose text can sit beside the box's edge; its footer reads `--More--` or `--End--`.
+# `(─)+`, not `─+`: in a byte-mode awk or grep (mawk, busybox, a locale that failed to load) `+` would
+# repeat only the last byte of the multibyte `─` and a real popup edge would not match.
+has_edge() { LC_ALL=C.UTF-8 grep -Eq '└(─)+┘|┌(─)+┐|\+-----+\+' <<<"$1"; }
+has_pager_footer() { grep -Eq "to quit|--More--|\\(END\\)" <<<"$1"; }
+
+# screen_idle: 0 idle; 2 no status bar in the bottom rows (a full-screen page, or a screen we do
+# not recognise); 3 something is in the type window; 4 a popup box is drawn. Leaves the screen it
+# judged in $last_screen. A message body can draw a box or a `── ` line: that only refuses.
+last_screen=
+screen_idle() {
+  # A pane in a tmux mode (copy mode, clock) swallows the typed text: not idle.
+  [[ $(tmux display-message -p -t "$pane" '#{pane_in_mode}' 2>/dev/null || echo 1) == 0 ]] || return 5
+  # $(...) would drop the trailing blank rows, which are the type window: keep them.
+  last_screen=$(capture; printf x)
+  last_screen=${last_screen%x}
+  printf '%s' "$last_screen" | LC_ALL=C.UTF-8 awk '
+    { l[NR] = $0 }
+    /└(─)+┘|┌(─)+┐|\+-----+\+/ { edge = 1 }
+    /^── / { r = NR }
+    END {
+      if (edge) exit 4
+      if (!r) exit 2
+      for (i = r + 2; i <= NR; i++) if (l[i] ~ /[^[:space:]]/) exit 3   # command line, compose (it grows the window), question
+      if (NR - r != 2) exit 2   # status bar, one message line, ONE type row (typewinsize 1, as in the live config)
+      exit 0
+    }'
+}
+
+idle_refusal() {
+  case $1 in
+    4) echo "BarnOwl is showing a popup, or a message on screen draws a box (scroll it off); not sending keys." >&2 ;;
+    3) echo "BarnOwl has a command line, a compose box or a question open; not sending keys." >&2 ;;
+    5) echo "the BarnOwl pane is in a tmux mode (copy mode?); not sending keys." >&2 ;;
+    *) echo "BarnOwl is showing a pager (or an unrecognised screen); not sending keys." >&2 ;;
+  esac
+  exit 3
+}
+
+guard_idle() {
+  need_session
+  lock_client
+  check_idle
+}
+
+# Refuse (exit 3) unless the screen is idle now.
+check_idle() {
+  local rc=0
+  screen_idle || rc=$?
+  [[ $rc -eq 0 ]] || idle_refusal "$rc"
+}
+
+# The same after a human's [y/N], which can take minutes: a pager, compose box or command line
+# that opened meanwhile would receive the keys the answer releases. BarnOwl needs a moment to
+# clear the question it just asked, so a busy type window is retried for about 2.5 s; a pager
+# or popup is refused at once.
+check_idle_after_answer() {
+  local rc i
+  for ((i = 0; i < 10; i++)); do
+    rc=0
+    screen_idle || rc=$?
+    [[ $rc -eq 0 ]] && return 0
+    [[ $rc -eq 3 ]] || idle_refusal "$rc"
+    sleep 0.25
+  done
+  idle_refusal 3
+}
+
+send_line() {
+  local line=$1
+  # tmux send-keys -l types every byte: a newline would submit the line early
+  # and run whatever follows it as a second BarnOwl command. Refuse control
+  # characters (newline, CR, ESC, tab) outright instead of trying to escape.
+  if [[ $line == *[[:cntrl:]]* ]]; then
+    echo "refusing to type a line with a control character (newline, tab, ESC); send single-line text only" >&2
+    exit 2
+  fi
+  # tmux reads an argument that ends in ";" as a command separator and drops it, so the line
+  # the human approved would be typed without its last character.
+  if [[ $line == *\; ]]; then
+    echo "refusing to type a line that ends in ';' (tmux would drop it)" >&2
+    exit 2
+  fi
+  # One tmux call for the text and the Enter: tmux runs the two as one queue item, so a key the
+  # human types cannot land between them.
+  tmux send-keys -t "$pane" -l "$line" \; send-keys -t "$pane" Enter
+}
+
+# Commands that only look. They need no confirmation.
+read_only_command() { [[ $1 =~ ^(show|help|getvar|getsubs|getview)([[:space:]]|$) ]]; }
+
+# Ask the human at the live client and wait. The question shows the WHOLE command:
+# a command too long to show, or with a control character, or with `{`, `}` or `\`
+# (the characters that could end the Perl string the question sits in), is refused
+# (exit 2) instead of approved in part or shown altered. The answer comes back through
+# a file BarnOwl writes from the question's callback. No answer, or anything but y/yes,
+# is exit 4 and nothing more is typed.
+confirm() {
+  local what=$1 reply i cols max wa pa att cmd need
+  # The human can only answer a question they can see: BarnOwl's pane must be the active
+  # window of a session with a client attached.
+  read -r wa pa att cols cmd <<<"$(view_info)"
+  if [[ ${wa:-} != 1 || ${pa:-} != 1 || ${att:-0} -lt 1 || ! ${cols:-} =~ ^[0-9]+$ ]] || ! is_bo_cmd "${cmd:-}"; then
+    echo "the BarnOwl pane is not the one a human is looking at (not the active window of an attached tmux client); nothing was run" >&2
+    exit 4
+  fi
+  # BarnOwl 1.10 wraps a question longer than the pane and, with a one-line type window,
+  # shows only its LAST line (measured at 80 columns: a 100-character prompt showed only
+  # "...ENDMARK? [y/N]:", an 86-character one only "[y/N]:"; 79 characters showed whole, 80 did
+  # not). So the whole prompt must fit in pane_width - 1: `bo asks: allow ` (15) plus
+  # `? [y/N]: ` (9) leave pane_width - 25 for the command.
+  max=$((cols - 25))
+  [[ -z $confirm_max || $confirm_max -ge $max ]] || max=$confirm_max
+  # Only printable ASCII is shown faithfully: no control, bidi or zero-width
+  # character, no brace or backslash (they could end the Perl string).
+  if [[ ${#what} -gt $max ]] || (export LC_ALL=C; [[ $what == *[!\ -~]* || $what == *[\{\}\\]* ]]); then
+    echo "after reading Zephyr text this command must be confirmed by the human: it is longer than the $max columns the question can show, or has a character other than printable ASCII, or has { } \\ : shorten it" >&2
+    exit 2
+  fi
+  ans=$(scratch ans)
+  send_line ":perl BarnOwl::start_question(q{bo asks: allow ${what}? [y/N]: }, sub { open my \$f, q{>}, q{${ans}}; print \$f qq{ans:\$_[0]\\n}; close \$f }); q{ok}"
+  pending_question=1
+  for ((i = 0; i < confirm_wait * 2; i++)); do
+    if [[ -s $ans ]]; then
+      sleep 0.2
+      reply=$(<"$ans")
+      pending_question=
+      need=$((${#what} + 25))
+      read -r wa pa att cols cmd <<<"$(view_info)"
+      if [[ ${wa:-} != 1 || ${pa:-} != 1 || ! ${cols:-} =~ ^[0-9]+$ || $cols -lt $need ]] || ! is_bo_cmd "${cmd:-}"; then
+        echo "the BarnOwl pane was resized or hidden while the question was open; the answer is not accepted" >&2
+        exit 4
+      fi
+      if [[ $reply =~ ^ans:[[:space:]]*[yY]([eE][sS])?[[:space:]]*$ ]]; then
+        sleep 0.3
+        return 0
+      fi
+      echo "the human at the live client declined; nothing was run" >&2
+      exit 4
+    fi
+    sleep 0.5
+  done
+  echo "no answer from the human at the live client in ${confirm_wait}s; nothing was run" >&2
+  exit 4  # finish() cancels the open question with C-g
+}
+
+wait_marker() {
+  local i
+  for i in $(seq 1 20); do
+    if [[ -f $out ]] && grep -Eq "^BO_(OK|ERR)_${nonce}\$" "$out"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "BarnOwl did not finish writing its answer; last screen lines follow (untrusted):" >&2
+  capture | tail -n 12 | blog frame screen >&2 || true
+  exit 1
+}
+
+print_marked() {
+  local kind=$1
+  if grep -q "^BO_ERR_${nonce}\$" "$out"; then
+    sed "/^BO_ERR_${nonce}\$/d" "$out" | blog frame error >&2 || true
+    exit 1
+  fi
+  sed "/^BO_OK_${nonce}\$/d" "$out" | blog frame "$kind"
+}
+
+# perl_eval EXPR KIND GATED: GATED=1 asks the human first, always: arbitrary Perl runs as the
+# operator inside the client. Only `subs` runs ungated, a fixed expression of ours.
+perl_eval() {
+  local expr=$1 kind=$2 gated=$3 line
+  need_session
+  lock_client
+  # A private output file and marker per call: concurrent callers, and text on
+  # the screen, can neither see nor forge each other's.
+  [[ -n $out ]] || out=$(scratch out)
+  nonce=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  # The expression is one Perl value. It is wrapped so a failure is visible.
+  line=":perl do { my \$v = eval { ${expr} }; my \$err = \$@; open my \$fh, q{>}, q{${out}} or die \$!; if (\$err) { print \$fh \"BO_ERR_${nonce}\\n\$err\"; } else { print \$fh (defined \$v ? \$v : q{}); print \$fh \"\\n\" if !defined(\$v) || \$v !~ /\\n\\z/; print \$fh \"BO_OK_${nonce}\\n\"; } close \$fh; q{ok} }"
+  # Everything above is done before the screen is judged, so the check is the last step before
+  # the keys (the window between them is the one tmux call, not scratch files and a pipeline).
+  check_idle   # do not even ask the human while the client is busy
+  if [[ $gated -ne 0 ]]; then
+    confirm "perl: $expr"
+    check_idle_after_answer
+  fi
+  send_line "$line"
+  wait_marker
+  print_marked "$kind"
+}
+
+cmd_run() {
+  local cmd=$1 before after rc=0
+  guard_idle
+  if ! read_only_command "$cmd"; then
+    confirm "run: $cmd"
+    check_idle_after_answer
+  fi
+  before=$last_screen   # the screen just judged idle, no second capture between check and keys
+  send_line ":${cmd}"
+  sleep 0.5
+  after=$(capture)
+  # A pager (no status bar), or a popup that was not there before and says how
+  # to close it: print it and close it so the next call finds the message list.
+  # A box without a pager footer (a message body that drew one) is left alone.
+  if ! grep -q '^── ' <<<"$after"; then
+    printf '%s\n' "$after" | blog frame run || rc=$?
+    tmux send-keys -t "$pane" q
+  elif has_edge "$after" && ! has_edge "$before"; then
+    printf '%s\n' "$after" | blog frame run || rc=$?
+    if has_pager_footer "$after"; then
+      tmux send-keys -t "$pane" q
+    else
+      echo "a popup is open without a pager footer; close it by hand" >&2
+    fi
+  else
+    printf '%s\n' "$after" | awk '
+      /^── / { hit = 1; n = 0; next }
+      hit { lines[++n] = $0 }
+      END { for (i = 1; i <= n; i++) print lines[i] }
+    ' | blog frame run || rc=$?
+  fi
+  return "$rc"
+}
+
+# Run an external command, frame its output, and keep ITS exit status (a missing or
+# failing zctl/zlocate must not look like a successful empty read).
+external_framed() {
+  local kind=$1 o rc=0 fr=0
+  shift
+  o=$("$@" 2>&1) || rc=$?
+  printf '%s\n' "$o" | blog frame "$kind" || fr=$?
+  [[ $rc -eq 0 ]] || return "$rc"
+  return "$fr"
+}
+
+# A user name for zlocate: no leading dash, no shell or option surprises.
+valid_user() { [[ $1 =~ ^[A-Za-z0-9._@+][A-Za-z0-9._@+-]{0,79}$ ]]; }
+
+case "${1:-}" in
+  log)
+    shift
+    lock_client
+    blog log "$@"
+    ;;
+  screen|capture)
+    need_session
+    lock_client
+    capture | blog frame screen
+    ;;
+  subs)
+    perl_eval 'BarnOwl::zephyr_getsubs()' subs 0
+    ;;
+  file)
+    external_framed file zctl list
+    ;;
+  run)
+    shift
+    [[ $# -ge 1 ]] || { usage >&2; exit 2; }
+    cmd_run "$*"
+    ;;
+  perl)
+    shift
+    [[ $# -ge 1 ]] || { usage >&2; exit 2; }
+    perl_eval "$*" perl 1
+    ;;
+  locate)
+    shift
+    [[ $# -ge 1 && $# -le 5 ]] || { usage >&2; exit 2; }
+    for u in "$@"; do valid_user "$u" || { echo "refused user name" >&2; exit 2; }; done
+    lock_client
+    external_framed locate zlocate "$@"
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

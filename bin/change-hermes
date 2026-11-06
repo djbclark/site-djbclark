@@ -1,0 +1,675 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["ruamel.yaml>=0.18"]
+# ///
+"""change-hermes: point every Hermes side-model slot at one chosen model.
+
+Shows a numbered list of vendor / model / version / effort / context-size options.
+An option is listed only if quota is confirmed right now:
+  * API-key routes (cline, cline2): one real chat call with that key and model id
+    (a 402/404/401/empty reply hides the option);
+  * subscription routes (xai-oauth): `aiuse --available --json` must list the pool
+    with usable_now and >= 15% headroom.
+Type a number; the script rewrites ~/.hermes/config.yaml (comments kept, timestamped
+backup first) and verifies the result by re-reading it.
+
+Slots changed ("everywhere" = every side-model slot, not the main chat model):
+  fallback_providers[0], auxiliary.compression, moa.aggregator + moa.reference_models,
+  moa.presets.<each>.aggregator + .reference_models.
+Per option: reasoning_effort on the compression and MoA slots, plus
+agent.reasoning_overrides[<model>]; context size as providers.<p>.models.<id>.context_length
+(a cap; removed again when the option is the model's native window).
+Not touched: model.* (main chat model), cron.*, per-channel overrides, fallback_providers[1:].
+Restart the Hermes gateway/CLI sessions afterwards; running ones keep the old config.
+
+Usage: change-hermes [--list] [--dry-run] [N] [--no-probe] [--config PATH]
+       change-hermes --auto [--dry-run]     pick the first working route in AUTO_ORDER
+       change-hermes --check                is the current fallback_providers[0] route usable?
+  --list      print the options and exit
+  N           choose option N without the prompt (numbers are those of the current list)
+  --dry-run   show what would change, write nothing
+  --auto      probe AUTO_ORDER one route at a time (one tiny real request each, stop at the
+              first that answers) and apply it at effort medium, native context. A no-op when
+              that route is already current. Exit 0 ok, 3 nothing works.
+  --check     probe only the route in fallback_providers[0]. Exit 0 usable, 10 not usable
+              (quota/credits/model gone: run --auto), 2 config not readable.
+  --skip-window HHMM-HHMM  exit 75 (skip) when the local time is inside the window (watchdogs:
+              0458-0510, the home network's nightly reboot).
+
+Concurrency (every run, the box's included, executes on the Mac): --auto and any config-writing
+run take an exclusive lock, the directory ~/.hermes/state/change-hermes.lock (mkdir is atomic on
+every filesystem; flock(1) is not on macOS). owner.json inside records pid, host and start time;
+the lock is stale, and is broken, when that pid is gone or the lock is older than 20 min (longer
+than any run). A run that finds it held waits up to CHANGE_HERMES_LOCK_WAIT_S (default 30 s),
+then exits 73 (busy): watchdogs treat 73 as a skip. --check and --list take no lock (they only
+read; the config is replaced atomically, so a reader never sees half a file).
+Cooldown: a successful non-dry-run --auto writes ~/.hermes/state/change-hermes-auto.json; another
+--auto within CHANGE_HERMES_AUTO_COOLDOWN_S (default 1800 s) only re-checks the current route
+(exit 0 usable / 10 not) instead of switching again.
+
+Remote use (off macOS without --config/HERMES_HOME, or --remote; e.g. the Grok Bot box): the script runs
+itself on the Mac over ssh (host alias CHANGE_HERMES_SSH, default `hermes-mac`), whose
+authorized_keys entry forces bin/change-hermes-ssh-gate (allows --check, --list, --auto
+[--dry-run] only). Exit 73 = busy (another run holds the Mac's lock). Exit 75 = Mac unreachable (laptop asleep/off): callers treat it as a skip.
+"""
+from __future__ import annotations
+
+import argparse
+import concurrent.futures as cf
+import datetime as dt
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+HERMES = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+CONFIG = HERMES / "config.yaml"
+STATE = HERMES / "state" / "change-hermes.json"
+MIN_HEADROOM = 15.0  # aiuse "tight" threshold: below this a pool is not offered
+CAP_CTX = 256_000  # the one context cap offered next to a model's native window
+
+
+@dataclass(frozen=True)
+class Model:
+    vendor: str
+    name: str
+    version: str
+    provider: str  # key under providers: in config.yaml / built-in Hermes provider id
+    model_id: str  # id sent to that provider
+    native_ctx: int
+    efforts: tuple[str, ...] = ("low", "medium", "high")
+    aiuse_provider: str | None = None  # None: probe with a real call instead
+
+
+# Only routes Hermes can reach today (providers in config.yaml, built-in xai-oauth).
+CATALOG: tuple[Model, ...] = (
+    Model("DeepSeek", "flash", "v4", "cline2", "cline2-pass/deepseek-v4-flash", 1_000_000),
+    Model("DeepSeek", "pro", "v4", "cline2", "cline2-pass/deepseek-v4-pro", 1_000_000),
+    Model("Moonshot", "kimi", "k3", "cline2", "cline2-pass/kimi-k3", 1_048_576),
+    Model("Z.ai", "glm", "5.2", "cline2", "cline2-pass/glm-5.2", 1_000_000),
+    Model("MiniMax", "minimax", "m3", "cline2", "cline2-pass/minimax-m3", 1_048_576),
+    Model("Alibaba", "qwen max", "3.7", "cline2", "cline2-pass/qwen3.7-max", 1_000_000),
+    Model("DeepSeek", "flash", "v4", "cline", "cline-pass/deepseek-v4-flash", 1_000_000),
+    Model("DeepSeek", "pro", "v4", "cline", "cline-pass/deepseek-v4-pro", 1_000_000),
+    Model("xAI", "grok", "4.7", "xai-oauth", "grok-4.7", 500_000, aiuse_provider="grok"),
+)
+
+
+# --auto preference (model-routing skill: Flash-primary chain with same-model provider
+# failover first; cheap pools before reserve pools; the xai-oauth subscription last so a
+# depleted grok pool is not also the side-model route the main model falls back to).
+AUTO_ORDER: tuple[str, ...] = (
+    "cline2:cline2-pass/deepseek-v4-flash",
+    "cline:cline-pass/deepseek-v4-flash",
+    "cline2:cline2-pass/deepseek-v4-pro",
+    "cline:cline-pass/deepseek-v4-pro",
+    "cline2:cline2-pass/kimi-k3",
+    "cline2:cline2-pass/glm-5.2",
+    "cline2:cline2-pass/minimax-m3",
+    "cline2:cline2-pass/qwen3.7-max",
+    "xai-oauth:grok-4.7",
+)
+EXIT_UNHEALTHY = 10
+EXIT_UNREACHABLE = 75  # EX_TEMPFAIL
+EXIT_BUSY = 73  # another change-hermes holds the lock (EX_CANTCREAT): callers skip
+LOCK = HERMES / "state" / "change-hermes.lock"
+LOCK_STALE_S = 1200
+AUTO_STAMP = HERMES / "state" / "change-hermes-auto.json"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+class Busy(Exception):
+    pass
+
+
+class Lock:
+    """Exclusive cross-process lock: an atomic mkdir, with stale detection by pid and age."""
+
+    def __init__(self, path: Path = None, wait_s: float | None = None, stale_s: float = LOCK_STALE_S):
+        self.path = Path(path or LOCK)
+        self.wait_s = float(os.environ.get("CHANGE_HERMES_LOCK_WAIT_S", 30)) if wait_s is None else wait_s
+        self.stale_s = stale_s
+        self.held = False
+
+    def _stale(self) -> str | None:
+        try:
+            info = json.loads((self.path / "owner.json").read_text())
+            pid, at, host = int(info["pid"]), float(info["at"]), info.get("host")
+        except FileNotFoundError:
+            # mkdir done, owner.json not written yet: judge by the directory's age
+            try:
+                age = time.time() - self.path.stat().st_mtime
+            except FileNotFoundError:
+                return None
+            return f"no owner, {age:.0f}s old" if age > 10 else None
+        except Exception:
+            return "unreadable owner.json"
+        if time.time() - at > self.stale_s:
+            return f"pid {pid} held it {time.time() - at:.0f}s"
+        if host == os.uname().nodename and not _pid_alive(pid):
+            return f"pid {pid} is gone"
+        return None
+
+    def _break(self, why: str) -> None:
+        grave = self.path.with_name(f"{self.path.name}.stale-{os.getpid()}-{time.time_ns()}")
+        try:
+            os.rename(self.path, grave)  # atomic: only one breaker wins
+        except OSError:
+            return
+        shutil.rmtree(grave, ignore_errors=True)
+        print(f"change-hermes: broke stale lock ({why})", file=sys.stderr)
+
+    def acquire(self) -> "Lock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        t0 = time.monotonic()
+        said = False
+        while True:
+            try:
+                os.mkdir(self.path)
+            except FileExistsError:
+                why = self._stale()
+                if why:
+                    self._break(why)
+                    continue
+                if time.monotonic() - t0 >= self.wait_s:
+                    raise Busy(self._owner())
+                if not said:
+                    print(f"change-hermes: waiting for lock ({self._owner()})", file=sys.stderr)
+                    said = True
+                time.sleep(0.5)
+                continue
+            tmp = self.path / f".owner.{os.getpid()}"
+            tmp.write_text(json.dumps({"pid": os.getpid(), "host": os.uname().nodename, "at": time.time()}))
+            os.replace(tmp, self.path / "owner.json")
+            self.held = True
+            if said:
+                print(f"change-hermes: lock acquired after {time.monotonic() - t0:.1f}s", file=sys.stderr)
+            return self
+
+    def _owner(self) -> str:
+        try:
+            i = json.loads((self.path / "owner.json").read_text())
+            return f"held by pid {i['pid']} on {i.get('host')} for {time.time() - float(i['at']):.0f}s"
+        except Exception:
+            return "held"
+
+    def release(self) -> None:
+        if self.held:
+            shutil.rmtree(self.path, ignore_errors=True)
+            self.held = False
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+def write_json_atomic(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def auto_cooldown_left(now: float | None = None) -> float:
+    """Seconds left in the --auto cooldown (0 = none)."""
+    cool = float(os.environ.get("CHANGE_HERMES_AUTO_COOLDOWN_S", 1800))
+    try:
+        at = float(json.loads(AUTO_STAMP.read_text())["at"])
+    except Exception:
+        return 0.0
+    left = at + cool - (time.time() if now is None else now)
+    return max(0.0, left)
+
+
+def in_window(spec: str, now: dt.datetime | None = None) -> bool:
+    a, _, b = spec.partition("-")
+    hm = int((now or dt.datetime.now()).strftime("%H%M"))
+    return int(a) <= hm <= int(b) if int(a) <= int(b) else (hm >= int(a) or hm <= int(b))
+
+
+@dataclass(frozen=True)
+class Option:
+    model: Model
+    effort: str
+    ctx: int
+    quota: str  # human-readable evidence shown in the list
+
+    @property
+    def route(self) -> str:
+        return f"{self.model.provider}:{self.model.model_id}"
+
+
+def yaml_rt() -> YAML:
+    y = YAML()
+    y.preserve_quotes = True
+    y.width = 4096
+    y.indent(mapping=2, sequence=4, offset=2)
+    return y
+
+
+def load_env() -> dict[str, str]:
+    env = dict(os.environ)
+    p = HERMES / ".env"
+    if p.exists():
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.removeprefix("export ").strip()
+            env.setdefault(k, v.strip().strip("\"'"))
+    return env
+
+
+def fmt_ctx(n: int) -> str:
+    return f"{round(n / 1_000_000, 1):g}M" if n >= 1_000_000 else f"{n // 1000}k"
+
+
+def probe_api(cfg: dict, env: dict[str, str], m: Model) -> tuple[bool, str]:
+    """One real chat call with the route's own key; True only on HTTP 200 and non-empty content."""
+    prov = (cfg.get("providers") or {}).get(m.provider)
+    if not prov or prov.get("enabled") is False:
+        return False, "provider not configured"
+    key_env = prov.get("key_env")
+    key = env.get(key_env or "")
+    if not key:
+        return False, f"{key_env} not set"
+    url = str(prov.get("api") or prov.get("base_url") or "").rstrip("/") + "/chat/completions"
+    body = json.dumps({
+        "model": m.model_id,
+        "messages": [{"role": "user", "content": "What is 17*23? Answer with just the number."}],
+        "max_tokens": 1000,  # reasoning models spend a small budget before answering
+    }).encode()
+    req = urllib.request.Request(url, body, {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.load(e).get("error")
+            msg = msg.get("code") or msg.get("message") if isinstance(msg, dict) else msg
+        except Exception:
+            msg = ""
+        return False, f"HTTP {e.code} {str(msg)[:60]}".strip()
+    except Exception as e:  # network, timeout, bad JSON
+        return False, f"{type(e).__name__}: {str(e)[:60]}"
+    data = data.get("data", data)  # Cline wraps the OpenAI body in {"data": ...}
+    try:
+        content = data["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError):
+        return False, "no choices in reply"
+    if "391" not in content:
+        return False, f"bad answer {content[:30]!r}"
+    return True, f"live call ok ({time.monotonic() - t0:.1f}s)"
+
+
+def aiuse_pools() -> dict[str, dict] | None:
+    try:
+        out = subprocess.run(["aiuse", "--available", "--json"], capture_output=True, text=True, timeout=120)
+        rows = json.loads(out.stdout)["available"]
+    except Exception:
+        return None
+    pools: dict[str, dict] = {}
+    for r in rows:
+        if r.get("usable_now") is False:
+            continue
+        pools.setdefault(r["provider"], r)
+    return pools
+
+
+def check_quota(cfg: dict, env: dict[str, str], probe: bool) -> dict[Model, tuple[bool, str]]:
+    result: dict[Model, tuple[bool, str]] = {}
+    api = [m for m in CATALOG if m.aiuse_provider is None]
+    sub = [m for m in CATALOG if m.aiuse_provider]
+    if probe:
+        with cf.ThreadPoolExecutor(max_workers=8) as ex:
+            for m, res in zip(api, ex.map(lambda m: probe_api(cfg, env, m), api)):
+                result[m] = res
+    else:
+        for m in api:
+            result[m] = (False, "probe skipped (--no-probe)")
+    if sub:
+        pools = aiuse_pools()
+        for m in sub:
+            if pools is None:
+                result[m] = (False, "aiuse unreadable")
+                continue
+            row = pools.get(m.aiuse_provider)
+            if row is None:
+                result[m] = (False, "no usable aiuse pool")
+            elif float(row.get("headroom_percent") or 0) < MIN_HEADROOM:
+                result[m] = (False, f"aiuse {row.get('headroom_percent')}% left")
+            else:
+                result[m] = (True, f"aiuse {float(row['headroom_percent']):.0f}% left")
+    return result
+
+
+def by_route(route: str) -> Model | None:
+    return next((m for m in CATALOG if f"{m.provider}:{m.model_id}" == route), None)
+
+
+def probe_one(cfg: dict, env: dict[str, str], m: Model) -> tuple[bool, str]:
+    if m.aiuse_provider is None:
+        return probe_api(cfg, env, m)
+    pools = aiuse_pools()
+    if pools is None:
+        return False, "aiuse unreadable"
+    row = pools.get(m.aiuse_provider)
+    if row is None:
+        return False, "no usable aiuse pool"
+    left = float(row.get("headroom_percent") or 0)
+    return (left >= MIN_HEADROOM), f"aiuse {left:.0f}% left"
+
+
+def auto_pick(cfg: dict, env: dict[str, str]) -> Option | None:
+    """Walk AUTO_ORDER sequentially; stop at the first route that answers."""
+    for route in AUTO_ORDER:
+        m = by_route(route)
+        if m is None:
+            continue
+        ok, why = probe_one(cfg, env, m)
+        print(f"  {'ok  ' if ok else 'FAIL'} {route}: {why}", file=sys.stderr)
+        if ok:
+            return Option(m, "medium", m.native_ctx, why)
+    return None
+
+
+def remote(argv: list[str]) -> int:
+    """Run on the Mac over ssh (forced-command gate there). 75 = unreachable."""
+    host = os.environ.get("CHANGE_HERMES_SSH", "hermes-mac")
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, "--", *argv],
+                           timeout=900)
+    except subprocess.TimeoutExpired:
+        print("change-hermes: remote run timed out", file=sys.stderr)
+        return EXIT_UNREACHABLE
+    if r.returncode == 255:
+        print(f"change-hermes: {host} unreachable (ssh 255): skipped", file=sys.stderr)
+        return EXIT_UNREACHABLE
+    return r.returncode
+
+
+def build_options(quota: dict[Model, tuple[bool, str]]) -> list[Option]:
+    opts: list[Option] = []
+    for m in CATALOG:
+        ok, why = quota[m]
+        if not ok:
+            continue
+        for e in m.efforts:
+            opts.append(Option(m, e, m.native_ctx, why))
+        if m.native_ctx > CAP_CTX:
+            opts.append(Option(m, "medium", CAP_CTX, why))
+    return opts
+
+
+def print_options(opts: list[Option], quota: dict[Model, tuple[bool, str]], current: dict | None) -> None:
+    print(f"{'#':>3}  {'vendor':<9} {'model':<9} {'ver':<4} {'effort':<7} {'ctx':>5}  {'route':<42} quota")
+    for i, o in enumerate(opts, 1):
+        m = o.model
+        cur = ""
+        if current and current.get("route") == o.route and current.get("effort") == o.effort and current.get("ctx") == o.ctx:
+            cur = "  <- current"
+        print(f"{i:>3}  {m.vendor:<9} {m.name:<9} {m.version:<4} {o.effort:<7} {fmt_ctx(o.ctx):>5}  {o.route:<42} {o.quota}{cur}")
+    hidden = [f"{m.provider}:{m.model_id} ({why})" for m, (ok, why) in quota.items() if not ok]
+    if hidden:
+        print("\nhidden (no quota / unreachable): " + "; ".join(hidden), file=sys.stderr)
+
+
+def set_slot(slot: CommentedMap, o: Option) -> None:
+    slot["provider"] = o.model.provider
+    slot["model"] = o.model.model_id
+    slot["reasoning_effort"] = o.effort
+
+
+def apply(cfg: CommentedMap, o: Option, prev: dict | None) -> list[str]:
+    """Mutate cfg in place; return a human-readable change log."""
+    log: list[str] = []
+    m = o.model
+
+    fb = cfg.get("fallback_providers")
+    if not isinstance(fb, CommentedSeq) or not len(fb):
+        fb = CommentedSeq()
+        cfg["fallback_providers"] = fb
+        fb.append(CommentedMap())
+    fb[0] = CommentedMap([("provider", m.provider), ("model", m.model_id)])
+    log.append("fallback_providers[0]")
+
+    aux = cfg.setdefault("auxiliary", CommentedMap())
+    set_slot(aux.setdefault("compression", CommentedMap()), o)
+    log.append("auxiliary.compression")
+
+    moa = cfg.get("moa")
+    if isinstance(moa, CommentedMap):
+        holders = [("moa", moa)]
+        for name, preset in (moa.get("presets") or {}).items():
+            holders.append((f"moa.presets.{name}", preset))
+        for label, h in holders:
+            if "aggregator" in h:
+                set_slot(h["aggregator"], o)
+                log.append(f"{label}.aggregator")
+            for i, slot in enumerate(h.get("reference_models") or []):
+                set_slot(slot, o)
+                log.append(f"{label}.reference_models[{i}]")
+
+    agent = cfg.setdefault("agent", CommentedMap())
+    ov = agent.get("reasoning_overrides")
+    if not isinstance(ov, CommentedMap):
+        ov = CommentedMap()
+        agent["reasoning_overrides"] = ov
+    if prev and prev.get("model_id") and prev["model_id"] != m.model_id:
+        ov.pop(prev["model_id"], None)
+    ov[m.model_id] = o.effort
+    log.append(f"agent.reasoning_overrides[{m.model_id}]")
+
+    # Context: providers.<p>.models is a list today; context_length needs the dict form.
+    prov = (cfg.get("providers") or {}).get(m.provider)
+    if prov is not None:
+        models = prov.get("models")
+        capped = o.ctx < m.native_ctx
+        if prev and prev.get("route") and prev["route"] != o.route:
+            _drop_cap(cfg, prev["route"])
+        if capped:
+            if not isinstance(models, CommentedMap):
+                new = CommentedMap()
+                for item in models or []:
+                    new[item] = CommentedMap()
+                prov["models"] = models = new
+            entry = models.get(m.model_id)
+            if not isinstance(entry, CommentedMap):
+                models[m.model_id] = entry = CommentedMap()
+            entry["context_length"] = o.ctx
+            log.append(f"providers.{m.provider}.models.{m.model_id}.context_length={o.ctx}")
+        else:
+            _drop_cap(cfg, o.route)
+    return log
+
+
+def _drop_cap(cfg: CommentedMap, route: str) -> None:
+    provider, _, model_id = route.partition(":")
+    prov = (cfg.get("providers") or {}).get(provider)
+    models = prov.get("models") if prov else None
+    if isinstance(models, CommentedMap) and isinstance(models.get(model_id), CommentedMap):
+        models[model_id].pop("context_length", None)
+
+
+def verify(path: Path, o: Option) -> None:
+    cfg = yaml_rt().load(path.read_text())
+    want = (o.model.provider, o.model.model_id)
+    assert (cfg["fallback_providers"][0]["provider"], cfg["fallback_providers"][0]["model"]) == want, "fallback"
+    comp = cfg["auxiliary"]["compression"]
+    assert (comp["provider"], comp["model"], comp["reasoning_effort"]) == (*want, o.effort), "compression"
+    assert cfg["agent"]["reasoning_overrides"][o.model.model_id] == o.effort, "reasoning_overrides"
+    moa = cfg.get("moa") or {}
+    slots = [moa["aggregator"]] if "aggregator" in moa else []
+    slots += list(moa.get("reference_models") or [])
+    for p in (moa.get("presets") or {}).values():
+        slots += ([p["aggregator"]] if "aggregator" in p else []) + list(p.get("reference_models") or [])
+    for s in slots:
+        assert (s["provider"], s["model"], s["reasoning_effort"]) == (*want, o.effort), f"moa slot {s}"
+    models = cfg["providers"][o.model.provider].get("models")
+    got = models.get(o.model.model_id, {}).get("context_length") if isinstance(models, dict) else None
+    assert got == (o.ctx if o.ctx < o.model.native_ctx else None), f"context_length {got}"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Point every Hermes side-model slot at one model.")
+    ap.add_argument("choice", nargs="?", type=int, help="option number (skips the prompt)")
+    ap.add_argument("--list", action="store_true", help="print options and exit")
+    ap.add_argument("--dry-run", action="store_true", help="show changes, write nothing")
+    ap.add_argument("--no-probe", action="store_true", help="skip live API calls (hides API-key routes)")
+    ap.add_argument("--config", type=Path, default=CONFIG)
+    ap.add_argument("--auto", action="store_true", help="apply the first working route in AUTO_ORDER")
+    ap.add_argument("--check", action="store_true", help="probe the current fallback route only")
+    ap.add_argument("--remote", action="store_true", help="run on the Mac over ssh (default when no local config)")
+    ap.add_argument("--skip-window", metavar="HHMM-HHMM", help="exit 75 (skip) inside this local-time window")
+    args = ap.parse_args()
+
+    # Hermes lives on the Mac: off macOS, without an explicit --config/HERMES_HOME, run there.
+    local = sys.platform == "darwin" or "HERMES_HOME" in os.environ or "--config" in sys.argv
+    if args.remote or not local:
+        fwd = [a for a in sys.argv[1:] if a != "--remote"]
+        return remote(fwd)
+
+    if args.skip_window and in_window(args.skip_window):
+        print(f"skip: inside window {args.skip_window}")
+        return EXIT_UNREACHABLE
+    if args.check:
+        return check(args)
+    try:
+        if args.auto:
+            with Lock():
+                left = auto_cooldown_left()
+                if left > 0:
+                    print(f"auto: cooldown ({left:.0f}s left after the last successful --auto); re-checking only")
+                    return check(args)
+                rc = run_auto(args)
+                if rc == 0 and not args.dry_run:
+                    write_json_atomic(AUTO_STAMP, {"at": time.time(), "pid": os.getpid()})
+                return rc
+        return interactive(args)
+    except Busy as e:
+        print(f"change-hermes: busy, another run is in progress ({e}); skipped", file=sys.stderr)
+        return EXIT_BUSY
+
+
+def check(args) -> int:
+    try:
+        cfg = yaml_rt().load(args.config.read_text())
+        fb = cfg["fallback_providers"][0]
+        route = f"{fb['provider']}:{fb['model']}"
+    except Exception as e:
+        print(f"config unreadable: {type(e).__name__}", file=sys.stderr)
+        return 2
+    m = by_route(route)
+    if m is None:
+        print(f"{route}: not in CATALOG; cannot probe", file=sys.stderr)
+        return EXIT_UNHEALTHY
+    ok, why = probe_one(cfg, load_env(), m)
+    print(f"{'ok' if ok else 'UNHEALTHY'} {route}: {why}")
+    return 0 if ok else EXIT_UNHEALTHY
+
+
+def run_auto(args) -> int:
+    y = yaml_rt()
+    cfg = y.load(args.config.read_text())
+    env = load_env()
+    prev = json.loads(STATE.read_text()) if STATE.exists() else None
+    print("auto: probing in preference order ...", file=sys.stderr)
+    o = auto_pick(cfg, env)
+    if o is None:
+        print("auto: no route works right now", file=sys.stderr)
+        return 3
+    if prev and prev.get("route") == o.route and prev.get("effort") == o.effort and prev.get("ctx") == o.ctx \
+            and (cfg.get("fallback_providers") or [{}])[0].get("model") == o.model.model_id:
+        print(f"auto: {o.route} already current; nothing to do")
+        return 0
+    return write(args, y, cfg, o, prev)
+
+
+def interactive(args) -> int:
+    y = yaml_rt()
+    cfg = y.load(args.config.read_text())
+    env = load_env()
+    prev = json.loads(STATE.read_text()) if STATE.exists() else None
+    print("checking quota ...", file=sys.stderr)
+    quota = check_quota(cfg, env, probe=not args.no_probe)
+    opts = build_options(quota)
+    if not opts:
+        print("no option has quota right now", file=sys.stderr)
+        return 3
+    print_options(opts, quota, prev)
+    if args.list:
+        return 0
+
+    choice = args.choice
+    if choice is None:
+        if not sys.stdin.isatty():
+            print("not a terminal: pass the option number", file=sys.stderr)
+            return 2
+        try:
+            choice = int(input(f"\nchoose 1-{len(opts)}: ").strip())
+        except (ValueError, EOFError):
+            print("not a number", file=sys.stderr)
+            return 2
+    if not 1 <= choice <= len(opts):
+        print(f"choose 1-{len(opts)}", file=sys.stderr)
+        return 2
+    o = opts[choice - 1]
+    if args.dry_run:
+        return write(args, y, cfg, o, prev)
+    with Lock():  # re-read under the lock: another run may have written meanwhile
+        cfg = y.load(args.config.read_text())
+        prev = json.loads(STATE.read_text()) if STATE.exists() else None
+        return write(args, y, cfg, o, prev)
+
+
+def write(args, y: YAML, cfg: CommentedMap, o: Option, prev: dict | None) -> int:
+    log = apply(cfg, o, prev)
+    print(f"\n{o.route}  effort={o.effort}  ctx={fmt_ctx(o.ctx)}  ->  " + ", ".join(log))
+    if args.dry_run:
+        print("dry run: nothing written")
+        return 0
+
+    backup = args.config.with_name(f"{args.config.name}.bak-{dt.datetime.now():%Y%m%d-%H%M%S}-change-hermes")
+    shutil.copy2(args.config, backup)
+    fd, tmp = tempfile.mkstemp(dir=args.config.parent, prefix=".config.yaml.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            y.dump(cfg, f)
+        os.chmod(tmp, args.config.stat().st_mode & 0o777)
+        verify(Path(tmp), o)
+        os.replace(tmp, args.config)  # atomic: a running Hermes never reads a half-written file
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    write_json_atomic(STATE, {"route": o.route, "model_id": o.model.model_id, "effort": o.effort, "ctx": o.ctx})
+    print(f"written (backup: {backup.name}); restart running Hermes gateway/CLI sessions to pick it up")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
