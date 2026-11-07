@@ -12,7 +12,7 @@
 #   fleet-watch phantom [--dry-run]  only the phantom-running check: Paseo agents stuck "running" (see Phantom "running" Paseo agents)
 #   fleet-watch upstream [--profile cfengine|paseo] [--dry-run] [--once]  only the upstream watcher (see Upstream PR watcher)
 #   fleet-watch upstream [--profile P] --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
-#   fleet-watch install   write the launchd agent (every 5 min) and load it
+#   fleet-watch install   write the launchd agent (every 5 min) and load it; a FLEET_WATCH_UPSTREAM set at install time (e.g. off) is baked into the job's environment
 #   fleet-watch uninstall  unload and remove the launchd agent
 #
 # Replaces a model-driven "status report every N minutes", which re-sent the whole
@@ -2009,6 +2009,7 @@ case "${1:-check}" in
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+${FLEET_WATCH_UPSTREAM:+    <key>FLEET_WATCH_UPSTREAM</key><string>$FLEET_WATCH_UPSTREAM</string>}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>$INTERVAL</integer>
