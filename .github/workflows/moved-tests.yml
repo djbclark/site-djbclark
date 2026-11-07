@@ -1,0 +1,31 @@
+# The four tests that moved here from djbclark-ade with their skills and tools (slim-down E1, 2026-11-06):
+# nothing ran them in CI after the move (operator batch A16, approved 2026-11-07).
+name: moved-tests
+
+on:
+  push:
+    paths:
+      - "tests/test_barnowl_skill.py"
+      - "tests/test_bigteam_prune.py"
+      - "tests/test_change_hermes_*.py"
+      - "skills/barnowl/**"
+      - "skills/diskfree/**"
+      - "bin/change-hermes*"
+      - ".github/workflows/moved-tests.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the moved tests
+        run: |
+          python3 -m pip install --quiet pytest pyyaml
+          PYTHONPATH=. python3 -m pytest -q tests/test_barnowl_skill.py tests/test_bigteam_prune.py \
+            tests/test_change_hermes_auto.py tests/test_change_hermes_lock.py
