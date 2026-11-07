@@ -117,7 +117,7 @@
 #             Discussion threads; state $STATE_DIR/upstream-paseo.*; ping prefix "paseo"; fallback "ping":
 #             no worker and no model spend. The event stays pending (24 h) for a watcher and the one
 #             detection ping is all the operator gets, since what goes on a public Paseo thread is his call.
-#             Skill: /paseowatch.
+#             (The /paseowatch skill that registered a watcher was retired with the djbclark-ade slim-down, 2026-11-06.)
 # Discussions: their comments are not in the REST API, so a Discussion thread is enriched with one GraphQL
 # query (repository.discussion: the post, the last 100 comments and the last 100 replies of each). Events:
 # the post, a comment or a reply by someone other than the operator (not a Bot, not the profile's ignore
