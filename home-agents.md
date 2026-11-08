@@ -4,7 +4,7 @@
 
 **Only Claude Opus 5.5+ edits this file or `cursor/home-agents.mdc`**, item-11 fixes too;
 others dispatch: `acp-dispatch claude --model opus --kind judgment` (quota tight: wait for the window or ask djbclark; no other Anthropic route).
-**Loaded every session: under 200 lines, 14,000 bytes** (`memory/reference_instruction_file_size.md`). Rule
+**Both files load every session: each under 200 lines, 14,000 bytes** (`memory/reference_instruction_file_size.md`). Rule
 plus pointer: detail in the named `site-private-djbclark/memory/` file, else `reference_agent_rules_*.md`.
 **Agents keep both files in step, unasked.** A condense keeps every active rule and needed `memory/*.md` pointer
 and `[[link]]`: diff before and after. Item numbers: unique, stable.
@@ -58,7 +58,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 ## Quota, context, memory, slow commands
 
-29. **`used_percent` is the share CONSUMED; 100 = exhausted.** Decide from `remaining_percent`; run **`aiuse --available --json 2>/dev/null`, read per `aiuse schema`** before each batch. **agy: only via `acp-run agy`, never `agy -p`** ([[reference_agent_rules_aiuse_quota_and_agy]]).
+29. **`used_percent` is the share CONSUMED; 100 = exhausted.** Decide from `remaining_percent`; run **`aiuse --available --json 2>/dev/null`, read per `aiuse schema`** before each batch. **Google AI Pro: Paseo's `antigravity` provider (agy retired 2026-11-06)** ([[reference_agent_rules_aiuse_quota_and_agy]]).
 30. **Keep context small: separable tasks go to `fan-out` by default, cheapest model × effort × context doing it well, unasked; delegate when `context_size_nudge.py` says so. Compaction is automatic, never a question** (`memory/feedback_self_compact.md`; `self-slash` retired 2026-11-06); **never compact over a draft** (`memory/feedback_context_prompts_early.md`).
 31. Basic Memory: one shared MCP server (`127.0.0.1:18796/mcp`); no per-client stdio `basic-memory mcp`. **If down, fix it**, then `/mcp` reconnect. Default project: **`main`. A semantic search result is not a match**: use `find` or an exact `read_note` ([[reference_agent_rules_basic_memory_pools]]).
 32. **Routing: minimise cost, maximise code quality, not tokens. Judgment is Opus `high`; codex `gpt-6-astra` and Fable `high` only via `frontier`; codex otherwise: ample quota and top router rank; Fable `xhigh` almost never; claude codes on Sonnet 5.5, never Fable**; climb tiers on evidence. **`acp-dispatch` needs `--kind`; `frontier` advises, never edits; cheapest eligible tier first.** One copy: `skills/model-routing/SKILL.md` (`memory/feedback_routing_policy_cost_quality.md`).
