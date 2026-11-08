@@ -5,7 +5,9 @@ set -euo pipefail
 # Upgrades every Homebrew formula and cask (--greedy: auto_updates casks too),
 # globally-installed npm packages (both the user ~/.local npm tree and
 # Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
-# ~/.dsh/profiles/<name> plugin tree), and uv tools, under the
+# ~/.dsh/profiles/<name> plugin tree), configured Paseo plugins
+# (`paseo plugin update --all --yes`; registry/git/npm installs only — `local`
+# directory dev checkouts stay on `paseo plugin reload`), and uv tools, under the
 # exclusive site advisory lock (Phase F4); zcode-app-cli and
 # @deepseek-ai/dsh are always pulled to @latest each run (they ship builds
 # often). Nothing is pinned
@@ -514,10 +516,48 @@ run_pnpm_pass() {
   return "$rc"
 }
 
+# Paseo plugins: same check Cafe uses (`paseo plugin update --all --check`).
+# Only outcome `update` counts as outdated; `local` directory installs are
+# skipped by the CLI and never fail verification here. Opt out:
+#   BREW_FAST_UPGRADE_SKIP_PASEO_PLUGINS=1
+paseo_plugins_outdated() {
+  command -v paseo >/dev/null 2>&1 || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[brew-fast-upgrade] jq not found; skipping paseo plugin update check." >&2
+    return 0
+  fi
+  paseo plugin update --all --check --json 2>/dev/null |
+    jq -r '.[]? | select(.outcome == "update") | .id' || true
+}
+
+run_paseo_plugins_pass() {
+  local rc=0 outdated
+
+  if [ "${BREW_FAST_UPGRADE_SKIP_PASEO_PLUGINS:-0}" = "1" ]; then
+    echo "[brew-fast-upgrade] paseo plugins: skipped (BREW_FAST_UPGRADE_SKIP_PASEO_PLUGINS=1)."
+    return 0
+  fi
+  command -v paseo >/dev/null 2>&1 || {
+    echo "[brew-fast-upgrade] paseo not on PATH; skipping paseo plugins."
+    return 0
+  }
+  outdated="$(paseo_plugins_outdated)"
+  if [ -z "$outdated" ]; then
+    echo "[brew-fast-upgrade] paseo plugins: nothing to upgrade."
+    return 0
+  fi
+  echo "[brew-fast-upgrade] paseo plugins: upgrading $(printf '%s ' $outdated)"
+  if ! paseo plugin update --all --yes; then
+    echo "[brew-fast-upgrade] paseo plugin update --all --yes failed"
+    rc=1
+  fi
+  return "$rc"
+}
+
 # A successful brew/npm/uv invocation is not enough: confirm nothing is still
 # outdated. Prints what remains when verification fails.
 verify_clean() {
-  local brew_remaining npm_remaining uv_remaining dsh_remaining prefix
+  local brew_remaining npm_remaining uv_remaining dsh_remaining paseo_remaining prefix
   brew_remaining="$(brew_outdated_upgradable)"
   npm_remaining=""
   while IFS= read -r prefix; do
@@ -525,13 +565,16 @@ verify_clean() {
   done < <(npm_global_prefixes)
   uv_remaining="$(uv_outdated_tools)"
   dsh_remaining="$(dsh_outdated)"
+  paseo_remaining="$(paseo_plugins_outdated)"
 
-  if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ] || [ -n "$uv_remaining" ] || [ -n "$dsh_remaining" ]; then
+  if [ -n "$brew_remaining" ] || [ -n "$npm_remaining" ] || [ -n "$uv_remaining" ] || \
+     [ -n "$dsh_remaining" ] || [ -n "$paseo_remaining" ]; then
     echo "[brew-fast-upgrade] outdated items remain:"
     [ -n "$brew_remaining" ] && printf 'brew: %s\n' $brew_remaining
     [ -n "$npm_remaining" ] && printf 'npm:  %s\n' "$npm_remaining"
     [ -n "$uv_remaining" ] && printf 'uv:   %s\n' "$uv_remaining"
     [ -n "$dsh_remaining" ] && printf 'pnpm: %s\n' "$dsh_remaining"
+    [ -n "$paseo_remaining" ] && printf 'paseo plugins: %s\n' "$paseo_remaining"
     return 1
   fi
   return 0
@@ -567,6 +610,9 @@ run_upgrade_and_restart_apps() {
     if ! run_venicecode_pass; then
       echo "[brew-fast-upgrade] venicecode pass failed on attempt $attempt"
     fi
+    if ! run_paseo_plugins_pass; then
+      echo "[brew-fast-upgrade] paseo plugins pass failed on attempt $attempt"
+    fi
 
     if verify_clean; then
       echo "[brew-fast-upgrade] Verification passed: nothing outdated remains (attempt $attempt)."
@@ -585,7 +631,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass paseo_plugins_outdated run_paseo_plugins_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
