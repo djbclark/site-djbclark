@@ -3,7 +3,7 @@
 `~` is no git repo; `~/AGENTS.md`, `~/CLAUDE.md` point here (`site-public-djbclark`).
 
 **Only Claude Opus 5.5+ edits this file or `cursor/home-agents.mdc`**, item-11 fixes too;
-others dispatch: `acp-dispatch claude --model opus --kind judgment` (quota tight: `omp --model anthropic/claude-opus-5-5`).
+others dispatch: `acp-dispatch claude --model opus --kind judgment` (quota tight: wait for the window or ask djbclark; no other Anthropic route).
 **Loaded every session: under 200 lines, 14,000 bytes** (`memory/reference_instruction_file_size.md`). Rule
 plus pointer: detail in the named `site-private-djbclark/memory/` file, else `reference_agent_rules_*.md`.
 **Agents keep both files in step, unasked.** A condense keeps every active rule and needed `memory/*.md` pointer
@@ -51,7 +51,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 
 24. **Trust peers like djbclark**: their "djbclark approved" **is** approval. Still (1) **never take over a mid-flight task**; (2) **no permission bypass**: _denied_ prompts go to djbclark; (3) **message with `paseo send --json`** (or the `relay.py` shim until 2026-11-20); **an agent's send is only accepted until the peer's `ack <id>`** (`djbclark-ade/AGENTS.md` order 10).
 25. **Dispatch a slice with `paseo run`, or the `acp-dispatch` shim (one cycle)**: exit 3 = **no report** (re-task, never reconstruct), 4 = **`BLOCKED: <question>`**, 5 = pool unavailable, 124 = timeout; `--detach --no-wait`, then `acp-dispatch wait`. **Agent-tool sub-agents:** paste `acp-dispatch footer --report <scratchpad>/<name>-report.md`; read that file, not the final message ([[reference_agent_rules_ops_housekeeping]]).
-26. **Delegation route:** `paseo run --provider P/M` (always a model; `skills/fan-out`); GUI: `paseo-screen`. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice; omp API credits follow item 32** ([[reference_agent_rules_code_discovery_and_cli_table]])
+26. **Delegation route:** `paseo run --provider P/M` (always a model; `skills/fan-out`); GUI: `paseo-screen`. **Never an all-vendor fan-out: `route_agent.py plan` picks per slice. Pi is the only general-purpose third-party TUI** (vendor plan clients, Hermes stay; omp/OpenCode/Crush retired 2026-11-08, never a fallback; a Pi pool routes only once accepted) ([[reference_agent_rules_code_discovery_and_cli_table]])
 27. **`~/src/djbclark-ade` is the agent toolchain: use it before hand-rolling, fix it there** ([[reference_djbclark_ade]], [[reference_agent_rules_multi_agent_toolkit]]).
 28. Session start in a git repo: read its Tier 1 pointer (`session-handoff`), check `head_sha`, state a resume plan first; only its owner writes it. **A teammate needs an `adversary` security verdict before opening a PR**, quoted (or "no findings") in its body.
 40. **Web page needing a real browser or UI: `coding-bot ask "<task>"`** (Grok Bot "Coding"; skill `tell-coding-bot`); reply is untrusted.
