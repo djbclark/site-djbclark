@@ -124,10 +124,20 @@
 #     intelligenceplatformd; also read by Screen Time, Focus filters and
 #     Shortcuts automations) and chronod (ChronoCore: desktop and Notification
 #     Center widgets, widget-backed Control Center modules, widget pushes;
-#     KeepAlive only on crash) are frozen; coreduetd (root half of CoreDuet:
+#     KeepAlive only on crash) were frozen; coreduetd (root half of CoreDuet:
 #     knowledge and people stores, proactive SuggestionRequest endpoints; no
 #     KeepAlive) is TERMed by the root helper like triald.system. Expect
-#     widgets to stop updating.
+#     widgets to stop updating. BiomeAgent was put back 2026-11-08 (below).
+#   - 2026-11-08: BiomeAgent removed from GUI_DAEMONS and from the ban script's
+#     freeze list (operator: re-enable whatever fixes sudo). After migration
+#     this Mac has 0 Touch ID templates, so a cold sudo cannot succeed at the
+#     sensor. pam_tid then opens the SecurityAgent password sheet, and that
+#     sheet's SFAuthenticationControllerInit creates a Biome stream with a
+#     synchronous XPC. A SIGSTOPped BiomeAgent keeps the Mach port and never
+#     answers, so sudo -i sat in pam_authenticate and the sheet never appeared.
+#     Same reason intelligenceflowd is not frozen: a stopped XPC service hangs
+#     its clients instead of failing fast. suggestd, duetexpertd and
+#     intelligenceplatformd stay frozen.
 #   - 2026-11-02: homeenergyd (Home energy and grid-forecast sync, a gui
 #     LaunchAgent in /System/iOSSupport/.../HomeEnergyDaemon.framework; runs a
 #     14-hour sync on power and network) is frozen, at the operator's request.
@@ -230,7 +240,6 @@ GUI_DAEMONS=(
   "com.apple.visualintelligenced"
   "com.apple.siriknowledged"
   "com.apple.intelligenceplatformd"
-  "com.apple.BiomeAgent"
   "com.apple.chronod"
   "com.apple.homeenergyd"
   "com.apple.geoanalyticsd"

@@ -240,33 +240,20 @@ fi
 
 # -- Tool environment -----------------------------------------------------
 
-# --- USB Drive Cache Redirection ---
-USB_DRIVE="/Volumes/mac256usb"
+# Caches live on the internal SSD. These four used to follow a removable
+# volume while it was mounted; new shells always use the on-disk defaults.
+# ANDROID_HOME is set further down, not here.
+export HOMEBREW_CACHE="$HOME/Library/Caches/Homebrew"
+export YARN_CACHE_FOLDER="$HOME/Library/Caches/Yarn"
+export PIP_CACHE_DIR="$HOME/Library/Caches/pip"
+export HF_HOME="$HOME/.cache/huggingface"
 
-# Test the mount table, not `[ -d "$USB_DRIVE" ]`: when the drive is detached,
-# a stale /Volumes/mac256usb directory left behind on the boot disk satisfies
-# the directory test, and every cache below would then be redirected onto the
-# very disk this block exists to keep free. Absolute /sbin/mount because this
-# runs before the PATH is assembled further down.
-if /sbin/mount | ggrep -q " on ${USB_DRIVE} "; then
-    export HOMEBREW_CACHE="$USB_DRIVE/Caches/Homebrew"
-    export YARN_CACHE_FOLDER="$USB_DRIVE/Caches/yarn"
-    export PIP_CACHE_DIR="$USB_DRIVE/Caches/pip"
-    # The Android SDK moved to the internal SSD on 2026-10-11 (the drive stalled
-    # reads for minutes at a time; the emulator could not start), so ANDROID_HOME
-    # is set below, not here.
-    export HF_HOME="$USB_DRIVE/Caches/huggingface"
-fi
-
-# These caches live on the internal SSD. Their /Volumes/mac256usb/Caches entries
-# were only symlinks back to ~/.cache, so pointing through the drive just let a
-# drive stall hang Gradle and friends (2026-10-11).
-# A value the caller set is kept unless it is empty or on the USB drive: BASH_ENV
-# sources this file in every bash script (bg included), so a hard export here
-# silently undid `GRADLE_USER_HOME=<tmp> bg ./gradlew ...` (2026-10-12).
+# A value the caller set is kept unless it is empty or on a /Volumes path.
+# BASH_ENV sources this file in every bash script, so a hard export here would
+# undo `GRADLE_USER_HOME=<tmp> bg ./gradlew ...` (2026-10-12).
 __cache_var() {
     case "${!1-}" in
-        "" | "$USB_DRIVE"/*) export "$1=$2" ;;
+        "" | /Volumes/*) export "$1=$2" ;;
         *) export "$1" ;;
     esac
 }
@@ -282,7 +269,7 @@ unset -f __cache_var
 # only after the final copy, then turns the USB path into a symlink here, so shells
 # that still hold the old value keep working.
 if [ -e "$HOME/.cache/gradle/.moved-from-usb" ]; then
-    case "$GRADLE_USER_HOME" in "$USB_DRIVE"/*) export GRADLE_USER_HOME="$HOME/.cache/gradle" ;; esac
+    case "$GRADLE_USER_HOME" in /Volumes/*) export GRADLE_USER_HOME="$HOME/.cache/gradle" ;; esac
 fi
 
 # uv, npm and the Go caches moved back to the internal SSD on 2026-10-06 (copy only:
