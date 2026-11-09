@@ -1,5 +1,8 @@
 # Shared Gradle remote build cache (vps-primary)
 
+> **2026-11-09: moved to vps-hub.** The cache now runs on vps-hub (`nixos/vps-hub/gradle-cache.nix`), bound to
+> `100.82.208.87:5071`; the Mac init script defaults to `http://100.82.208.87:5071/cache/`. vps-primary below is history.
+
 Set up 2026-10-13. Every Gradle build on the Mac reads from and writes to one cache node
 on `vps-primary`, over the tailnet only. If the node is unreachable the build uses the local
 disk cache and carries on.

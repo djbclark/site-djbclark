@@ -1,5 +1,9 @@
 # SearXNG egress proxy on vps-primary (Hyades shared IP)
 
+> **2026-11-09: the vps leg is now vps-hub.** `nixos/modules/google-proxy.nix` takes `services.google-proxy.publicInterface`
+> / `proxyIp` (vps-hub: `ens18`, `91.90.82.78`). Hyades' SearXNG uses `http://91.90.82.78:443` + pastebin `:26370`
+> (verified: CONNECTs from 18.4.60.84 on vps-hub). vps-primary's `tinyproxy-google` is stopped (runtime-masked).
+
 Decided by djbclark 2026-10-16 (Google-only); widened 2026-10-22 to every engine the
 firecrawl-searxng image enables. Every Hyades microVM leaves through one shared address
 (`hyades.mit.edu`, 18.4.60.84). Module: `nixos/modules/google-proxy.nix` (unit still named

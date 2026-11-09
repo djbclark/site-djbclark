@@ -6,7 +6,7 @@
 #   fleet-watch s1         only the S1 evidence freshness check (see below)
 #   fleet-watch load       only the machine-overload check (see Machine overload)
 #   fleet-watch test-notify  send a test notice to Hermes (Telegram Inbox)
-#   fleet-watch vps       only the vps-primary check (tailnet ssh: nixos-upgrade result, failed units)
+#   fleet-watch vps       only the vps-hub check (tailnet ssh: nixos-upgrade result, failed units)
 #   fleet-watch dann      only the dann.dclark.us check (ssh: last pool verification, gateway, units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch phantom [--dry-run]  only the phantom-running check: Paseo agents stuck "running" (see Phantom "running" Paseo agents)
@@ -157,12 +157,12 @@ S1_PLIST="$HOME/Library/LaunchAgents/com.djbclark.s1-ingest.plist"
 LOAD_MULT="${FLEET_WATCH_LOAD_MULT:-4}"
 SWAP_PCT="${FLEET_WATCH_SWAP_PCT:-90}"
 LOAD_COOLDOWN="${FLEET_WATCH_LOAD_COOLDOWN:-1800}"
-# vps-primary (NixOS, unattended upgrades; added 2026-10-13): probed over the tailnet,
+# vps-hub (NixOS, unattended upgrades; vps-primary until 2026-11-09, added 2026-10-13): probed over the tailnet,
 # with the public address as a second route to tell "tailnet down" from "host down".
 VPS="${FLEET_WATCH_VPS:-on}"
-VPS_TS="${FLEET_WATCH_VPS_TS:-100.125.249.107}"
-VPS_PUBLIC="${FLEET_WATCH_VPS_PUBLIC:-2.28.231.104}"   # swapped 2026-10-24 (docs/google-proxy-vps-primary.md section 5); the old 178.105.34.223 was released
-VPS_KEY="${FLEET_WATCH_VPS_KEY:-$HOME/.ssh/vps_primary_key}"
+VPS_TS="${FLEET_WATCH_VPS_TS:-100.82.208.87}"   # vps-hub (vps-primary was 100.125.249.107)
+VPS_PUBLIC="${FLEET_WATCH_VPS_PUBLIC:-91.90.82.78}"   # vps-hub, Contabo (2026-11-09; vps-primary was 2.28.231.104)
+VPS_KEY="${FLEET_WATCH_VPS_KEY:-$HOME/.ssh/vps_primary_key}"   # also authorized on vps-hub (checked 2026-11-09)
 VPS_TIMEOUT="${FLEET_WATCH_VPS_TIMEOUT:-25}"
 # Consecutive failed probes before "down" is announced. 3 x 5 min covers the
 # unattended 03:00-05:00 UTC reboot (about a minute) with room to spare.
@@ -623,25 +623,25 @@ vps_watch() {
     VPS_STATE="unreachable($fails)"
     ((fails >= VPS_DOWN_AFTER)) || return 0
     state=down
-    detail="vps-primary unreachable on the tailnet and on the public address for $fails checks (unattended reboot window is 03:00-05:00 UTC; a failed boot needs the Hetzner console: pick the previous generation in GRUB)"
+    detail="vps-hub unreachable on the tailnet and on the public address for $fails checks (unattended reboot window is 03:00-05:00 UTC; a failed boot needs the Contabo console: pick the previous generation in GRUB)"
   else
     echo 0 >"$cf"
     local res act nfail prox
     read -r res act nfail prox <<<"$out"
     if [[ "$res" != success && "$act" == inactive ]] || [[ "$act" == failed ]]; then
       state=upgrade-failed
-      detail="vps-primary: nixos-upgrade failed (Result=$res); run: ssh vps journalctl -u nixos-upgrade -n 50"
+      detail="vps-hub: nixos-upgrade failed (Result=$res); run: ssh vps-hub journalctl -u nixos-upgrade -n 50"
     elif [[ "$via" == public ]]; then
       state=tailnet-down
-      detail="vps-primary answers on the public address but not on the tailnet (check tailscaled on the VPS)"
+      detail="vps-hub answers on the public address but not on the tailnet (check tailscaled on the VPS)"
     elif [[ "$prox" != active ]]; then
       # Restart=on-failure with a 10 s RestartSec never trips the start limit, so a crash
       # loop shows as "activating", not as a failed unit (docs/google-proxy-vps-primary.md).
       state=proxy-down
-      detail="vps-primary: tinyproxy-google is $prox (SearXNG egress leg A fails); run: ssh vps journalctl -u tinyproxy-google -n 30"
+      detail="vps-hub: tinyproxy-google is $prox (SearXNG egress leg A fails); run: ssh vps-hub journalctl -u tinyproxy-google -n 30"
     elif ((nfail > 0)); then
       state=units-failed
-      detail="vps-primary: $nfail failed systemd unit(s); run: ssh vps systemctl --failed"
+      detail="vps-hub: $nfail failed systemd unit(s); run: ssh vps-hub systemctl --failed"
     else
       state=ok
     fi
@@ -649,9 +649,9 @@ vps_watch() {
   fi
   [[ "$state" == "$prev" ]] && return 0
   if [[ "$state" == ok ]]; then
-    notify "vps-primary" "recovered, healthy again (was: $prev)" && echo ok >"$sf"
+    notify "vps-hub" "recovered, healthy again (was: $prev)" && echo ok >"$sf"
   else
-    notify "vps-primary" "$detail" && echo "$state" >"$sf"
+    notify "vps-hub" "$detail" && echo "$state" >"$sf"
   fi
   return 0
 }
