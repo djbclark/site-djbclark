@@ -1,8 +1,8 @@
 // Machine-wide Gradle remote build cache (2026-10-13).
 //
-// Every build on this Mac pulls from and pushes to the shared cache on vps-primary
+// Every build on this Mac pulls from and pushes to the shared cache on vps-hub (moved from vps-primary 2026-11-09)
 // (FosterStack cache in Podman, reachable only on the tailnet; see
-// nixos/vps-primary/configuration.nix and docs/gradle-remote-cache.md). Linked into every
+// nixos/vps-hub/gradle-cache.nix and docs/gradle-remote-cache.md). Linked into every
 // Gradle home's init.d by `gradle-limits link`, like machine-slot.gradle.
 //
 // It must never break a build. Everything below runs inside try/catch, and the remote cache
@@ -17,7 +17,7 @@
 // that build and carries on.
 //
 // Switches: GRADLE_REMOTE_CACHE=off skips all of this; GRADLE_REMOTE_CACHE_URL points
-// elsewhere (default http://100.125.249.107:5071/cache/, the VPS's tailnet address);
+// elsewhere (default http://100.82.208.87:5071/cache/, the VPS's tailnet address);
 // GRADLE_REMOTE_CACHE_PUSH=false makes this machine read-only. Plain HTTP is deliberate:
 // the transport is the encrypted tailnet.
 import java.net.InetSocketAddress
@@ -63,7 +63,7 @@ if (gradle.parent == null && System.getenv("GRADLE_REMOTE_CACHE") != "off") {
     }
     gradle.settingsEvaluated {
         try {
-            val cacheUrl = uri(System.getenv("GRADLE_REMOTE_CACHE_URL") ?: "http://100.125.249.107:5071/cache/")
+            val cacheUrl = uri(System.getenv("GRADLE_REMOTE_CACHE_URL") ?: "http://100.82.208.87:5071/cache/")
             if (!nodeReachable(cacheUrl)) {
                 logger.info("global-remote-cache: $cacheUrl not reachable, using the local cache only")
             } else {
