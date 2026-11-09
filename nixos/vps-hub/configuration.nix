@@ -15,6 +15,8 @@
     ./rustdesk.nix
     ./gradle-cache.nix
     ./sudo-secretspec.nix
+    ./briefs.nix
+    ../modules/google-proxy.nix
   ];
 
   # Athena/AFS come from the athena-nixos flake input (nixos/flake.nix); the values below are
@@ -31,9 +33,9 @@
 
   # vps-hub (Contabo 203736421): a clone of vps-primary/configuration.nix. Differences: hostname, disk/boot
   # (disko, BIOS + UEFI grub), static Contabo network, extra root keys, and everything that needs a secret
-  # or vps-primary's identity is left out (google-proxy, the Hetzner home volume, auto-upgrade).
+  # or vps-primary's identity is left out (the Hetzner home volume).
   # Added back 2026-11-09 for vps-primary's retirement: sudo-secretspec (./sudo-secretspec.nix), the Gradle cache
-  # (./gradle-cache.nix); also new here: RustDesk (./rustdesk.nix). Tailscale is installed but not joined.
+  # (./gradle-cache.nix), Briefs (./briefs.nix), the Hyades egress proxy and auto-upgrade; also new: RustDesk (./rustdesk.nix). Tailscale joined 2026-11-08 (tag:server).
   boot.loader.grub = {
     enable = true;
     efiSupport = true;
@@ -218,7 +220,32 @@
     "flakes"
   ];
 
-  # Follow-up: auto-upgrade from a deploy-vps-hub branch, once one exists.
+  # Builds from git like vps-primary (2026-11-09): github:djbclark/site-djbclark, branch deploy-vps-hub, flake in
+  # nixos/. Deploy = `git push origin master:deploy-vps-hub`, then `systemctl start nixos-upgrade` on the host (or wait
+  # for the 04:00 run). nixpkgs and bot-briefs are exactly nixos/flake.lock. Kernel/initrd changes reboot only inside
+  # the 03:00-05:00 window. The private runtime config stays on the host (services.briefs.configFile).
+  system.autoUpgrade = {
+    enable = true;
+    operation = "switch";
+    flake = "github:djbclark/site-djbclark/deploy-vps-hub?dir=nixos#vps-hub";
+    upgrade = false;
+    dates = "04:00";
+    randomizedDelaySec = "45min";
+    fixedRandomDelay = true;
+    persistent = true;
+    allowReboot = true;
+    rebootWindow = {
+      lower = "03:00";
+      upper = "05:00";
+    };
+  };
+
+  # SearXNG/Hyades egress proxy, vps-hub leg (2026-11-09; ../modules/google-proxy.nix). Secret: /etc/tinyproxy-google.auth
+  # (root 0600, copied by hand). Hyades must be pointed at 91.90.82.78 for this leg to carry traffic.
+  services.google-proxy = {
+    publicInterface = "ens18";
+    proxyIp = "91.90.82.78";
+  };
 
   # Keep rollbacks (14 days of generations) but bound disk use.
   nix.gc = {

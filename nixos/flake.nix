@@ -44,6 +44,12 @@
   # branch). Nothing here referenced them except that one output, so this flake builds
   # exactly what it built before (proven by an identical vps-primary toplevel drv path).
 
+  # bot-briefs: the Bot Briefs dashboard (package, overlay, services.briefs), used by vps-hub/briefs.nix (2026-11-09).
+  inputs.bot-briefs = {
+    url = "github:djbclark/bot-briefs";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   # disko: vps-hub's declarative disk layout, used by nixos-anywhere (2026-11-08).
   inputs.disko = {
     url = "github:nix-community/disko";
@@ -58,6 +64,7 @@
       paseo-nix,
       sudo-secretspec,
       disko,
+      bot-briefs,
       ...
     }:
     {
@@ -85,7 +92,7 @@
       # vps-hub (Contabo, 2026-11-08): a clone of vps-primary minus its secrets and identity; installed
       # with nixos-anywhere. sudo-secretspec added 2026-11-09 (vps-hub/sudo-secretspec.nix).
       nixosConfigurations.vps-hub = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit paseo-nix; };
+        specialArgs = { inherit paseo-nix bot-briefs; };
         modules = [
           athena-nixos.nixosModules.default
           paseo-nix.nixosModules.default
