@@ -12,6 +12,7 @@
     ../modules/packages.nix
     ../modules/terminals.nix
     ../modules/users.nix
+    ./rustdesk.nix
   ];
 
   # Athena/AFS come from the athena-nixos flake input (nixos/flake.nix); the values below are
