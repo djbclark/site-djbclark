@@ -23,6 +23,65 @@
         "url": "https://forgejo.mit.edu/djbclark/athena-nixos"
       }
     },
+    "bot-briefs": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794236056,
+        "narHash": "sha256-mjoNj2D97S9TI3hfYZC+3ivdr2Q2FxwWEAuByL4h+GY=",
+        "owner": "djbclark",
+        "repo": "bot-briefs",
+        "rev": "95ae023d74f56b1be31844aba77fb0b42d0bc8bb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "djbclark",
+        "repo": "bot-briefs",
+        "type": "github"
+      }
+    },
+    "disko": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792526520,
+        "narHash": "sha256-3hSJlv8mUVnZPMWK2+CM7a9O+nR6Z4mCh27NfLCmTPc=",
+        "owner": "nix-community",
+        "repo": "disko",
+        "rev": "cedd626e11b635470fa6f9fdb8ad79b0075dd7f9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "disko",
+        "type": "github"
+      }
+    },
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1791914995,
+        "narHash": "sha256-Zf/xfQEAasnwnmEfHqW/4hjDE/s44yn2hD4RuVIZRjA=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "b7a79d3fea1e214f6d668d521cecec0c01e26544",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
     "nixathena": {
       "inputs": {
         "nixpkgs": [
@@ -82,6 +141,8 @@
     "root": {
       "inputs": {
         "athena-nixos": "athena-nixos",
+        "bot-briefs": "bot-briefs",
+        "disko": "disko",
         "nixathena": "nixathena",
         "nixpkgs": "nixpkgs",
         "paseo-nix": "paseo-nix",
@@ -106,6 +167,21 @@
         "owner": "frdminc",
         "ref": "sudo-main",
         "repo": "sudo-secretspec",
+        "type": "github"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
         "type": "github"
       }
     }

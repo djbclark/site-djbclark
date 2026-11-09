@@ -26,8 +26,9 @@
 # cannot reach MIT at all (it is only a Tailscale exit node). The tailnet reaches
 # 18.0.0.0/8 via the subnet route on pastebin.xvm.mit.edu (100.104.212.89). The table-100
 # rule stays as a cheap guard in case an 18/8 route ever returns.
-{ pkgs, lib, ... }:
+{ config, pkgs, lib, ... }:
 let
+  cfg = config.services.google-proxy;
   port = 26369;
   # hyades.mit.edu; every Hyades microVM leaves through this one address.
   hyadesEgress = "18.4.60.84";
@@ -37,7 +38,7 @@ let
   # off and every Floating IP detached) and the old primary and the Floating IP were released. Hyades connects to
   # proxyIp directly (firecrawl-hyades docs/rendezvous-plan.md). If MIT blocks this address too: rotation recipe in that file.
   # The address comes from DHCP; this constant only names it for the redirect below.
-  proxyIp = "2.28.231.104";
+  proxyIp = cfg.proxyIp;
   # Ports on proxyIp that Hyades may use as well as the proxy port (redirected to it, see the firewall below).
   wellKnownPorts = [ 443 80 ];
   # The pastebin relay (firecrawl-hyades scripts/install-pastebin-egress-proxy; a spare since the address swap):
@@ -48,7 +49,7 @@ let
   # (should allow only this peer to tcp/26369), tinyproxy's `Allow` below and the basic-auth credential.
   relayPeer = "100.104.212.89";
   tailnetInterface = "tailscale0";
-  publicInterface = "enp1s0";
+  publicInterface = cfg.publicInterface;
   # Separate routing table so "from $publicIp" never follows an 18/8 route (was GP tun0).
   returnPathTable = 100;
   returnPathPriority = 100;
@@ -151,117 +152,134 @@ let
   '';
 in
 {
-  systemd.services.tinyproxy-google = {
-    description = "Allowlisted CONNECT proxy for Hyades SearXNG engine egress (vps-primary leg)";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
-    wants = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
-    # A crash loop stops: 5 failed starts in 15 minutes leave the unit `failed` instead of retrying every 10 s for ever.
-    # hyades-watch sees `failed`, alerts (Hermes Watch topic) and restarts it at most twice an hour (after reset-failed).
-    unitConfig = {
-      StartLimitIntervalSec = 900;
-      StartLimitBurst = 5;
+  # Per-host values (2026-11-09, for the vps-hub leg). The defaults are vps-primary's, so importing this module there
+  # behaves exactly as before.
+  options.services.google-proxy = {
+    publicInterface = lib.mkOption {
+      type = lib.types.str;
+      default = "enp1s0";
+      description = "Interface carrying the public IPv4 Hyades connects to.";
     };
-    serviceConfig = {
-      ExecStart = start;
-      Restart = "on-failure";
-      RestartSec = "10s";
-      DynamicUser = true;
-      RuntimeDirectory = "tinyproxy-google";
-      RuntimeDirectoryMode = "0700";
-      LoadCredential = "proxyauth:/etc/tinyproxy-google.auth";
-      MemoryMax = "128M";
-      NoNewPrivileges = true;
-      CapabilityBoundingSet = "";
-      ProtectSystem = "strict";
-      ProtectHome = true;
-      PrivateTmp = true;
-      PrivateDevices = true;
-      ProtectKernelTunables = true;
-      ProtectControlGroups = true;
-      RestrictAddressFamilies = [
-        "AF_INET"
-        "AF_UNIX"
-        "AF_NETLINK" # `ip addr` in the start script
-      ];
-      SystemCallFilter = [ "@system-service" ];
+    proxyIp = lib.mkOption {
+      type = lib.types.str;
+      default = "2.28.231.104";
+      description = "Public IPv4 Hyades connects to (only used for the :443/:80 redirect; the listener reads the interface).";
     };
   };
 
-  # The firewall is the iptables backend (nftables is off), so extraInputRules does not
-  # apply; extraCommands runs after the allowed-port rules and before the final refuse.
-  networking.firewall.extraCommands = ''
-    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
-      -m connlimit --connlimit-above 80 --connlimit-mask 32 -j DROP
-    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
-      -m conntrack --ctstate NEW \
-      -m hashlimit --hashlimit-name gproxy --hashlimit-mode srcip \
-      --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
-    iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
+  config = {
+    systemd.services.tinyproxy-google = {
+      description = "Allowlisted CONNECT proxy for Hyades SearXNG engine egress (${config.networking.hostName} leg)";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
+      wants = [ "network-online.target" "tailscaled.service" "hyades-public-return-path.service" ];
+      # A crash loop stops: 5 failed starts in 15 minutes leave the unit `failed` instead of retrying every 10 s for ever.
+      # hyades-watch sees `failed`, alerts (Hermes Watch topic) and restarts it at most twice an hour (after reset-failed).
+      unitConfig = {
+        StartLimitIntervalSec = 900;
+        StartLimitBurst = 5;
+      };
+      serviceConfig = {
+        ExecStart = start;
+        Restart = "on-failure";
+        RestartSec = "10s";
+        DynamicUser = true;
+        RuntimeDirectory = "tinyproxy-google";
+        RuntimeDirectoryMode = "0700";
+        LoadCredential = "proxyauth:/etc/tinyproxy-google.auth";
+        MemoryMax = "128M";
+        NoNewPrivileges = true;
+        CapabilityBoundingSet = "";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectKernelTunables = true;
+        ProtectControlGroups = true;
+        RestrictAddressFamilies = [
+          "AF_INET"
+          "AF_UNIX"
+          "AF_NETLINK" # `ip addr` in the start script
+        ];
+        SystemCallFilter = [ "@system-service" ];
+      };
+    };
 
-    # Well-known ports on proxyIp (2026-10-24): Hyades may also connect to proxyIp:443 or :80, which land on the proxy port,
-    # so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still meets the
-    # final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
-    # nat rules survive a firewall reload and a changed generation's rules would stay (a removed port, a changed proxyIp), so
-    # they live in their own chain, flushed and rebuilt on every start. The two deletes below remove the single-rule form an
-    # earlier generation used (harmless once they are gone).
-    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
-      iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
-        -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
-    done
-    iptables -t nat -N hyades-dnat 2>/dev/null || true
-    iptables -t nat -F hyades-dnat
-    for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
-      iptables -t nat -A hyades-dnat -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
-        -j DNAT --to-destination ${proxyIp}:${toString port}
-    done
-    iptables -t nat -C PREROUTING -j hyades-dnat 2>/dev/null || iptables -t nat -A PREROUTING -j hyades-dnat
-  '';
-  networking.firewall.extraStopCommands = ''
-    iptables -t nat -D PREROUTING -j hyades-dnat 2>/dev/null || true
-    iptables -t nat -F hyades-dnat 2>/dev/null || true
-    iptables -t nat -X hyades-dnat 2>/dev/null || true
-  '';
+    # The firewall is the iptables backend (nftables is off), so extraInputRules does not
+    # apply; extraCommands runs after the allowed-port rules and before the final refuse.
+    networking.firewall.extraCommands = ''
+      iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
+        -m connlimit --connlimit-above 80 --connlimit-mask 32 -j DROP
+      iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} \
+        -m conntrack --ctstate NEW \
+        -m hashlimit --hashlimit-name gproxy --hashlimit-mode srcip \
+        --hashlimit-above 40/second --hashlimit-burst 80 -j DROP
+      iptables -A nixos-fw -i ${publicInterface} -p tcp -s ${hyadesEgress} --dport ${toString port} -j nixos-fw-accept
 
-  # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
-  # owns 18/8.
-  systemd.services.hyades-public-return-path = {
-    description = "Policy-route replies from public IP via ${publicInterface} (not MIT VPN tun0)";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    # Re-run after DHCP renews the public address / default via.
-    partOf = [ "network-online.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      ExecStart = pkgs.writeShellScript "hyades-public-return-path-up" ''
-        set -eu
-        IF=${publicInterface}
-        TABLE=${toString returnPathTable}
-        PRIO=${toString returnPathPriority}
-        IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
-        GW=$(${pkgs.iproute2}/bin/ip -4 route show default dev "$IF" \
-          | ${pkgs.gawk}/bin/awk '{ print $3; exit }')
-        [ -n "$IP" ] || { echo "hyades-public-return-path: no IPv4 on $IF" >&2; exit 1; }
-        [ -n "$GW" ] || { echo "hyades-public-return-path: no default via on $IF" >&2; exit 1; }
-        ${pkgs.iproute2}/bin/ip route replace default via "$GW" dev "$IF" table "$TABLE"
-        ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
-        ${pkgs.iproute2}/bin/ip rule add from "$IP" table "$TABLE" priority "$PRIO"
-        echo "hyades-public-return-path: from $IP via $GW dev $IF table $TABLE"
-      '';
-      ExecStop = pkgs.writeShellScript "hyades-public-return-path-down" ''
-        set -eu
-        IF=${publicInterface}
-        TABLE=${toString returnPathTable}
-        IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
-          | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
-        if [ -n "''${IP:-}" ]; then
+      # Well-known ports on proxyIp (2026-10-24): Hyades may also connect to proxyIp:443 or :80, which land on the proxy port,
+      # so nothing about this leg needs an unusual port. Only Hyades' address is translated; everyone else still meets the
+      # final refuse. The filter rules above (source address, connlimit, rate limit) see the translated port.
+      # nat rules survive a firewall reload and a changed generation's rules would stay (a removed port, a changed proxyIp), so
+      # they live in their own chain, flushed and rebuilt on every start. The two deletes below remove the single-rule form an
+      # earlier generation used (harmless once they are gone).
+      for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
+        iptables -t nat -D PREROUTING -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+          -j DNAT --to-destination ${proxyIp}:${toString port} 2>/dev/null || true
+      done
+      iptables -t nat -N hyades-dnat 2>/dev/null || true
+      iptables -t nat -F hyades-dnat
+      for p in ${lib.concatMapStringsSep " " toString wellKnownPorts}; do
+        iptables -t nat -A hyades-dnat -i ${publicInterface} -p tcp -s ${hyadesEgress} -d ${proxyIp} --dport $p \
+          -j DNAT --to-destination ${proxyIp}:${toString port}
+      done
+      iptables -t nat -C PREROUTING -j hyades-dnat 2>/dev/null || iptables -t nat -A PREROUTING -j hyades-dnat
+    '';
+    networking.firewall.extraStopCommands = ''
+      iptables -t nat -D PREROUTING -j hyades-dnat 2>/dev/null || true
+      iptables -t nat -F hyades-dnat 2>/dev/null || true
+      iptables -t nat -X hyades-dnat 2>/dev/null || true
+    '';
+
+    # Keep Hyades→public-IP replies on enp1s0 even if something (formerly GlobalProtect)
+    # owns 18/8.
+    systemd.services.hyades-public-return-path = {
+      description = "Policy-route replies from public IP via ${publicInterface} (not MIT VPN tun0)";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      # Re-run after DHCP renews the public address / default via.
+      partOf = [ "network-online.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = pkgs.writeShellScript "hyades-public-return-path-up" ''
+          set -eu
+          IF=${publicInterface}
+          TABLE=${toString returnPathTable}
+          PRIO=${toString returnPathPriority}
+          IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
+            | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }')
+          GW=$(${pkgs.iproute2}/bin/ip -4 route show default dev "$IF" \
+            | ${pkgs.gawk}/bin/awk '{ print $3; exit }')
+          [ -n "$IP" ] || { echo "hyades-public-return-path: no IPv4 on $IF" >&2; exit 1; }
+          [ -n "$GW" ] || { echo "hyades-public-return-path: no default via on $IF" >&2; exit 1; }
+          ${pkgs.iproute2}/bin/ip route replace default via "$GW" dev "$IF" table "$TABLE"
           ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
-        fi
-        ${pkgs.iproute2}/bin/ip route flush table "$TABLE" 2>/dev/null || true
-      '';
+          ${pkgs.iproute2}/bin/ip rule add from "$IP" table "$TABLE" priority "$PRIO"
+          echo "hyades-public-return-path: from $IP via $GW dev $IF table $TABLE"
+        '';
+        ExecStop = pkgs.writeShellScript "hyades-public-return-path-down" ''
+          set -eu
+          IF=${publicInterface}
+          TABLE=${toString returnPathTable}
+          IP=$(${pkgs.iproute2}/bin/ip -4 -o addr show dev "$IF" scope global \
+            | ${pkgs.gawk}/bin/awk '{ sub(/\/.*/, "", $4); print $4; exit }' || true)
+          if [ -n "''${IP:-}" ]; then
+            ${pkgs.iproute2}/bin/ip rule del from "$IP" table "$TABLE" 2>/dev/null || true
+          fi
+          ${pkgs.iproute2}/bin/ip route flush table "$TABLE" 2>/dev/null || true
+        '';
+      };
     };
   };
 }

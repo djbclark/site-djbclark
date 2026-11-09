@@ -1,5 +1,5 @@
 {
-  description = "djbclark site NixOS hosts (currently vps-primary)";
+  description = "djbclark site NixOS hosts (vps-primary, vps-hub)";
 
   # The stable branch is the same stream the old `nixos` channel followed. Which commit a
   # host builds is decided by flake.lock alone; the weekly workflow
@@ -44,6 +44,18 @@
   # branch). Nothing here referenced them except that one output, so this flake builds
   # exactly what it built before (proven by an identical vps-primary toplevel drv path).
 
+  # bot-briefs: the Bot Briefs dashboard (package, overlay, services.briefs), used by vps-hub/briefs.nix (2026-11-09).
+  inputs.bot-briefs = {
+    url = "github:djbclark/bot-briefs";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  # disko: vps-hub's declarative disk layout, used by nixos-anywhere (2026-11-08).
+  inputs.disko = {
+    url = "github:nix-community/disko";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   outputs =
     {
       self,
@@ -51,6 +63,8 @@
       athena-nixos,
       paseo-nix,
       sudo-secretspec,
+      disko,
+      bot-briefs,
       ...
     }:
     {
@@ -71,6 +85,21 @@
           self.nixosModules.cfengine-tendcf # enabled by the host; cf-execd remains disabled
           ./vps-primary/configuration.nix
           # `nixos-version --configuration-revision` on the host then names the git commit.
+          { system.configurationRevision = self.rev or self.dirtyRev or null; }
+        ];
+      };
+
+      # vps-hub (Contabo, 2026-11-08): a clone of vps-primary minus its secrets and identity; installed
+      # with nixos-anywhere. sudo-secretspec added 2026-11-09 (vps-hub/sudo-secretspec.nix).
+      nixosConfigurations.vps-hub = nixpkgs.lib.nixosSystem {
+        specialArgs = { inherit paseo-nix bot-briefs; };
+        modules = [
+          athena-nixos.nixosModules.default
+          paseo-nix.nixosModules.default
+          disko.nixosModules.disko
+          sudo-secretspec.nixosModules.default # services.sudo-secretspec, enabled in vps-hub/sudo-secretspec.nix
+          self.nixosModules.cfengine-tendcf
+          ./vps-hub/configuration.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }
         ];
       };
