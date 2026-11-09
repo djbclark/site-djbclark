@@ -83,13 +83,14 @@
       };
 
       # vps-hub (Contabo, 2026-11-08): a clone of vps-primary minus its secrets and identity; installed
-      # with nixos-anywhere. No sudo-secretspec (no broker secrets on this host yet).
+      # with nixos-anywhere. sudo-secretspec added 2026-11-09 (vps-hub/sudo-secretspec.nix).
       nixosConfigurations.vps-hub = nixpkgs.lib.nixosSystem {
         specialArgs = { inherit paseo-nix; };
         modules = [
           athena-nixos.nixosModules.default
           paseo-nix.nixosModules.default
           disko.nixosModules.disko
+          sudo-secretspec.nixosModules.default # services.sudo-secretspec, enabled in vps-hub/sudo-secretspec.nix
           self.nixosModules.cfengine-tendcf
           ./vps-hub/configuration.nix
           { system.configurationRevision = self.rev or self.dirtyRev or null; }

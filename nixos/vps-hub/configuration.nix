@@ -13,6 +13,8 @@
     ../modules/terminals.nix
     ../modules/users.nix
     ./rustdesk.nix
+    ./gradle-cache.nix
+    ./sudo-secretspec.nix
   ];
 
   # Athena/AFS come from the athena-nixos flake input (nixos/flake.nix); the values below are
@@ -29,8 +31,9 @@
 
   # vps-hub (Contabo 203736421): a clone of vps-primary/configuration.nix. Differences: hostname, disk/boot
   # (disko, BIOS + UEFI grub), static Contabo network, extra root keys, and everything that needs a secret
-  # or vps-primary's identity is left out (sudo-secretspec, google-proxy, Gradle cache, the Hetzner home
-  # volume, auto-upgrade). Tailscale is installed but not joined.
+  # or vps-primary's identity is left out (google-proxy, the Hetzner home volume, auto-upgrade).
+  # Added back 2026-11-09 for vps-primary's retirement: sudo-secretspec (./sudo-secretspec.nix), the Gradle cache
+  # (./gradle-cache.nix); also new here: RustDesk (./rustdesk.nix). Tailscale is installed but not joined.
   boot.loader.grub = {
     enable = true;
     efiSupport = true;
