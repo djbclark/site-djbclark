@@ -59,7 +59,7 @@ operator's request, and knowledgeconstructiond (nightly Apple Intelligence pipel
 four CPU-limit diagnostics Oct 9-12) joined the TERM set, and duetexpertd, mediaanalysisd,
 campo (Siri AI.app), visualintelligenced, siriknowledged and intelligenceplatformd joined
 the frozen set (operator: disable everything in that family; header of the sip script);
-then BiomeAgent and chronod (frozen) and coreduetd (system half, TERMed; the installed
+then BiomeAgent (frozen 2026-10-15, put back 2026-11-08 so sudo can prompt) and chronod (frozen) and coreduetd (system half, TERMed; the installed
 root helper must be re-copied when its list changes); then homeenergyd (frozen, 2026-11-02;
 gui half only, so the root helper needs no re-copy); then 15 more gui telemetry/ads/utility
 daemons frozen (geoanalyticsd, analyticsagent, inputanalyticsd, proactiveeventtrackerd, feedbackd,
