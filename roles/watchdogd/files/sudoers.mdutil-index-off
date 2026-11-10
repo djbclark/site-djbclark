@@ -1,0 +1,3 @@
+# Managed by site-djbclark (roles/watchdogd, macos/neofinder)
+# Allows disabling Spotlight indexing across all volumes without a password prompt.
+djbclark ALL=(root) NOPASSWD: /usr/bin/mdutil -a -i off

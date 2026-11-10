@@ -84,12 +84,19 @@ sudo install -o root -g wheel -m 0755 \
 sudo install -o root -g wheel -m 0440 \
   ~/ops/site-public-djbclark/roles/watchdogd/files/sudoers.apple-daemon-ban \
   /etc/sudoers.d/apple-daemon-ban
+sudo install -o root -g wheel -m 0440 \
+  ~/ops/site-public-djbclark/roles/watchdogd/files/sudoers.mdutil-index-off \
+  /etc/sudoers.d/mdutil-index-off
 sudo visudo -cf /etc/sudoers.d/apple-daemon-ban
+sudo visudo -cf /etc/sudoers.d/mdutil-index-off
 ```
 
 The helper must stay root-owned (a user-writable copy at that path would
 make the sudoers grant a root shell), and re-run both `install` lines after
-editing `files/apple_daemon_ban_root.sh`. Label lists live in three places
+editing `files/apple_daemon_ban_root.sh`. `bin/apple_daemon_ban.sh` also
+enforces Spotlight volume indexing is disabled (`mdutil -a -i off`, allowed
+NOPASSWD by `sudoers.mdutil-index-off`) outside the 01:00-05:45 nightly window
+and when no NeoFinder nightly job is running. Label lists live in three places
 that must stay in step: `macos/sip-doit-with-sudo.sh` (the flags),
 `bin/apple_daemon_ban.sh` (gui half) and the root helper (system half).
 

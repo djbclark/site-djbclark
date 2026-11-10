@@ -28,7 +28,7 @@ cat > "$tmp/sudoers" <<SUDO
 # Managed by site-djbclark macos/neofinder (installed by \`just setup\`).
 # Lets the 01:15 Jobber job index the NeoFinder batch volume through ONE
 # root-owned script that takes no paths (on|off|status only).
-$operator ALL=(root) NOPASSWD: $bin on, $bin off, $bin status
+$operator ALL=(root) NOPASSWD: $bin on, $bin off, $bin status, /usr/bin/mdutil -a -i off
 SUDO
 printf 'image=%s\n' "$image" > "$tmp/conf"
 

@@ -170,9 +170,57 @@ while read -r line; do
   esac
 done <<<"$ROOT_OUT"
 
+# Check if Spotlight indexing has re-enabled on the primary volume.
+# Policy (home-agents.md): Spotlight volume indexing is deliberately OFF.
+# Guard against interfering with nightly maintenance:
+#   1. NeoFinder stub export nightly holds nightly.lock (flock).
+#   2. NeoFinder batch scripts or catalog updates actively running.
+#   3. Scheduled nightly window (01:00 - 05:45 local time).
+nightly_indexing_active() {
+  local lock_file="$HOME/Library/Application Support/neofinder-stub-export/nightly.lock"
+  if [ -f "$lock_file" ]; then
+    if lsof -t "$lock_file" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  local pid
+  for name in "neofinder-stub-export.py" "neofinder-spotlight-batch.sh" "neofinder-catalog-update"; do
+    pid=$(pgrep -f "$name" 2>/dev/null | ghead -n 1 || true)
+    if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
+      return 0
+    fi
+  done
+
+  local cur_hour cur_min cur_mins
+  cur_hour=$(gdate '+%H' 2>/dev/null || date '+%H')
+  cur_min=$(gdate '+%M' 2>/dev/null || date '+%M')
+  cur_mins=$(( 10#$cur_hour * 60 + 10#$cur_min ))
+  # 01:00 = 60 mins; 05:45 = 345 mins
+  if [ "$cur_mins" -ge 60 ] && [ "$cur_mins" -le 345 ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+DISABLED_INDEXING=""
+if mdutil -s / 2>/dev/null | ggrep -q 'Indexing enabled' || \
+   mdutil -s /System/Volumes/Data 2>/dev/null | ggrep -q 'Indexing enabled'; then
+  if nightly_indexing_active; then
+    say "MDUTIL indexing enabled, but nightly job/window is active; leaving alone"
+  elif sudo -n /usr/bin/mdutil -a -i off >/dev/null 2>&1; then
+    say "MDUTIL indexing was enabled; turned off with mdutil -a -i off"
+    DISABLED_INDEXING="mdutil:off"
+  else
+    say "MDUTIL indexing enabled but sudo -n mdutil -a -i off failed"
+  fi
+fi
+
 out=""
 [ -n "$FROZEN" ] && out="frozen:$FROZEN"
 [ -n "$KILLED" ] && out="$out${out:+ }killed:$KILLED"
+[ -n "$DISABLED_INDEXING" ] && out="$out${out:+ }$DISABLED_INDEXING"
 if [ -n "$out" ]; then
   echo "$out"
 else

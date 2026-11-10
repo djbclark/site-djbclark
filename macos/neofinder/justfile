@@ -104,8 +104,12 @@ stop:
       echo "stop: {{mount}} not attached"
     fi
     if mdutil -s -a 2>/dev/null | ggrep -q 'Indexing enabled'; then
-      echo "stop: a volume still has Spotlight on; turning it off everywhere (Touch ID)"
-      sudo-ask mdutil -a -i off
+      echo "stop: a volume still has Spotlight on; turning it off everywhere"
+      if sudo -n /usr/bin/mdutil -a -i off 2>/dev/null; then
+        echo "stop: indexing off via sudo -n"
+      else
+        sudo-ask mdutil -a -i off
+      fi
     else
       echo "stop: Spotlight indexing off on every volume"
     fi
