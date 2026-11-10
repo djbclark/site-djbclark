@@ -15,7 +15,7 @@ Upstream: [tailscale#22119](https://github.com/tailscale/tailscale/issues/22119)
 
 | Piece | What it does |
 |---|---|
-| `files/container-route-setup.sh` | One-time privileged install (Touch ID via `sudo-ask`) of `/etc/sudoers.d/container-route`. Idempotent. No root-owned script: the rule names `/sbin/route` and the full argv. |
+| `files/container-route-setup.sh` | One-time privileged install (Touch ID via `sudo-ask`) of `/etc/sudoers.d/container-route`. Idempotent. The dialog shows the rule text; root writes, `visudo -c`-checks and renames it in one step, absolute paths only. No root-owned script: the rule names `/sbin/route` and the full argv. |
 | `~/src/cfengine-all/linuxgate/fix-route.sh` | The unprivileged caller. Runs `sudo -n` with exactly those argvs, and only when `netstat` shows the en0 variant. |
 
 The rule (exact argv, no wildcards):
@@ -29,7 +29,7 @@ The rule (exact argv, no wildcards):
 
 ```
 just container-route-setup     # once
-sudo -k -n /sbin/route -n delete ...   # test a rule (never plain sudo -n: a cached ticket hides a missing rule)
+sudo -k -n /sbin/route -n delete ...   # test a rule: this really runs it; sudo -l cannot tell NOPASSWD from (ALL) ALL
 ~/src/cfengine-all/linuxgate/fix-route.sh   # after starting a networked container
 ```
 
