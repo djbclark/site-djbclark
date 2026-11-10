@@ -24,6 +24,9 @@ if [ -f "$sudoers" ] && /usr/bin/printf '%s\n' "$content" \
 fi
 
 install_body='umask 077; t=/etc/sudoers.d/.container-route.new; /usr/bin/printf "%s\n" "$1" >"$t" && /usr/sbin/visudo -cqf "$t" && /usr/sbin/chown root:wheel "$t" && /bin/chmod 0440 "$t" && /bin/mv -f "$t" /etc/sudoers.d/container-route || { /bin/rm -f "$t"; exit 1; }'
+# sudo-ask cuts its dialog at 700 chars, and the rule line is the tail.
+shown=$(printf '%q ' /bin/sh -c "$install_body" sh "$content")
+[ ${#shown} -le 700 ] || { echo "container-route-setup: dialog text is ${#shown} chars (>700); sudo-ask would hide the rule" >&2; exit 1; }
 if command -v sudo-ask >/dev/null 2>&1; then
   sudo-ask /bin/sh -c "$install_body" sh "$content"
 else
