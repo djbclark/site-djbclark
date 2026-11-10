@@ -407,6 +407,37 @@ and delete its line from the config.
    race window, so it is answered normally and sticks. Current script:
    `bin/stagger-login` in this repo.
 
+### Keeping the apps list current (stagger-login-sync)
+
+The apps file is machine-local and used to be hand-edited after each
+tccd sweep. `bin/stagger-login-sync` now rebuilds it from evidence:
+
+1. **Cull** any `app` / `launchd` row whose bundle or plist is gone.
+2. **Keep** every remaining `app` row even when this boot logged no
+   refusals for it — silence means the stagger worked, not that the app
+   should leave the list.
+3. **Add** an `/Applications` (or `~/Applications`) app only when this
+   boot's tccd log shows `Failed to get code reference` for it **and**
+   System Events still lists a login item we can delete. Embedded
+   SMAppService helpers under `Contents/Library/LoginItems/` (TalonLauncher,
+   DriveDxLoginItemHelper, …) are skipped; the script cannot toggle them.
+4. **Re-schedule** with `STAGGER_BASE` / `STAGGER_GAP` (defaults 150 / 12);
+   `Bartender*` stays last among apps so it sees every item. Launchd rows
+   keep their preferred delays.
+
+A KeepAlive LaunchAgent (`com.djbclark.stagger-login-sync`, same shape as
+`shutdown-thaw`) runs the sync when logout/restart/shutdown SIGTERMs the
+gui session, and every 12 h for long uptimes. Plist template:
+`macos/stagger-login/com.djbclark.stagger-login-sync.plist`. Manual:
+
+```sh
+bin/stagger-login-sync --dry-run
+bin/stagger-login-sync                 # rewrite + delete staggered login items
+launchctl kill TERM gui/$(id -u)/com.djbclark.stagger-login-sync   # test the hook
+```
+
+Log: `~/Library/Logs/stagger-login-sync.log`.
+
 ## Caveats and watch items
 
 1. The Logi updater may re-enable its agent on update; the heal pass
@@ -419,9 +450,12 @@ and delete its line from the config.
    their login item when the stagger launches them; the script's
    running-check prevents double processes, but that app would return to
    launching early. DFX did exactly that on the first real boot; the heal
-   pass now deletes the item each run.
+   pass now deletes the item each run. The shutdown sync also deletes
+   login items for every staggered app.
 4. System-extension-based tools (Karabiner-Elements class) cannot be
-   delayed this way and were not attempted.
+   delayed this way and were not attempted. SMAppService login items
+   that System Events cannot see are likewise out of reach (Talon,
+   DriveDx's helper).
 5. When Apple ships the fix (watch point releases; 27.0.1 was current and
    affected at diagnosis time), delete the config lines and let everything
    boot normally again — the script with an empty config is a no-op.

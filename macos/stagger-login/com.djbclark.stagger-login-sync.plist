@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.djbclark.stagger-login-sync</string>
+    <!-- Persistent: must be alive when launchd SIGTERMs the gui session at
+         logout/restart/shutdown so stagger-login-sync can cull/add from this
+         boot's tccd log before the session dies (mirrors shutdown-thaw). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/djbclark/ops/site-public-djbclark/bin/stagger-login-sync-agent</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <!-- log show --last boot ≈ 25–45 s + write; leave headroom past STAGGER_LOG_TIMEOUT. -->
+    <key>ExitTimeOut</key>
+    <integer>90</integer>
+    <key>StandardErrorPath</key>
+    <string>/Users/djbclark/Library/Logs/stagger-login-sync.launchd.log</string>
+    <key>StandardOutPath</key>
+    <string>/Users/djbclark/Library/Logs/stagger-login-sync.launchd.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/djbclark</string>
+        <key>PATH</key>
+        <string>/Users/djbclark/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>STAGGER_BASE</key>
+        <string>150</string>
+        <key>STAGGER_GAP</key>
+        <string>12</string>
+        <key>STAGGER_SYNC_INTERVAL</key>
+        <string>43200</string>
+    </dict>
+</dict>
+</plist>

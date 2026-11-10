@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# stagger-login-sync-agent — KeepAlive sleeper that runs stagger-login-sync when
+# logout/restart/shutdown begins (launchd SIGTERMs the gui session), and every
+# STAGGER_SYNC_INTERVAL seconds (default 12 h) so long uptimes still cull
+# uninstalled apps.
+#
+# Same shape as bin/shutdown-thaw.sh: must be alive at shutdown; a StartInterval
+# job would already be gone. ExitTimeOut on the LaunchAgent must cover one
+# `log show --last boot` (about 25–45 s) plus the config write.
+#
+# Log: ~/Library/Logs/stagger-login-sync.log (the sync script's own log).
+# Test without rebooting:
+#   launchctl kill TERM gui/$(id -u)/com.djbclark.stagger-login-sync
+
+export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SYNC="${STAGGER_SYNC_BIN:-$SCRIPT_DIR/stagger-login-sync}"
+LOG="${STAGGER_SYNC_LOG:-$HOME/Library/Logs/stagger-login-sync.log}"
+INTERVAL="${STAGGER_SYNC_INTERVAL:-43200}"
+mkdir -p "$(dirname "$LOG")"
+say() { echo "$(gdate '+%F %T') agent: $*" >>"$LOG"; }
+
+SLEEP_PID=""
+
+run_sync() {
+  local reason=$1
+  say "sync on $reason (pid $$)"
+  if [ -x "$SYNC" ]; then
+    "$SYNC" >>"$LOG" 2>&1 || say "sync FAILED rc=$?"
+  else
+    say "missing sync binary: $SYNC"
+  fi
+}
+
+on_signal() {
+  local sig=$1
+  run_sync "$sig"
+  [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
+  say "$sig: exiting"
+  exit 0
+}
+
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
+trap 'on_signal INT' INT
+
+say "started pid $$ interval=${INTERVAL}s sync=$SYNC"
+while :; do
+  sleep "$INTERVAL" &
+  SLEEP_PID=$!
+  wait "$SLEEP_PID"
+  SLEEP_PID=""
+  run_sync "interval/${INTERVAL}s"
+done

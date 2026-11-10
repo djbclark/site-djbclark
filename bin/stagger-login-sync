@@ -1,0 +1,534 @@
+#!/usr/bin/env python3
+"""Refresh ~/.config/stagger-login/apps from this boot's tccd refusals.
+
+Culls targets that are gone; adds apps that tccd refused and that still have
+a System Events login item we can delete. Keeps existing app rows even when
+this boot logged no refusals for them (silence means the stagger worked).
+Embedded SMAppService helpers under Contents/Library/LoginItems/ are skipped.
+
+Usage:
+  stagger-login-sync              # rewrite config from evidence
+  stagger-login-sync --dry-run    # print the plan, write nothing
+  stagger-login-sync --agent      # KeepAlive sleeper; sync on SIGTERM/HUP
+
+Prefer the bash KeepAlive wrapper (stagger-login-sync-agent + LaunchAgent
+com.djbclark.stagger-login-sync) for shutdown; --agent is the same loop in-process.
+
+Env: STAGGER_CONF, STAGGER_BASE (default 150), STAGGER_GAP (default 12),
+STAGGER_SYNC_LOG, STAGGER_LOG_TIMEOUT (default 45 s for `log show`).
+Log: ~/Library/Logs/stagger-login-sync.log
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path.home()
+DEFAULT_CONF = HOME / ".config" / "stagger-login" / "apps"
+DEFAULT_LOG = HOME / "Library" / "Logs" / "stagger-login-sync.log"
+BASE_DEFAULT = 150
+GAP_DEFAULT = 12
+LOG_TIMEOUT_DEFAULT = 45
+
+REFUSAL_RE = re.compile(
+    r"Failed to get code reference.*?identifier=([^,\s]+).*?binary_path=(\S+)",
+    re.DOTALL,
+)
+
+
+@dataclass(frozen=True)
+class Entry:
+    kind: str  # "app" | "launchd"
+    parts: tuple[str, ...]  # app: (path,); launchd: (svc, plist)
+    delay: int | None = None  # preferred delay from previous config
+
+
+def ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log(path: Path, msg: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{ts()}] {msg}\n")
+
+
+def parse_conf(text: str) -> list[Entry]:
+    out: list[Entry] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        cols = line.split("\t")
+        if len(cols) < 3:
+            continue
+        try:
+            delay = int(cols[0])
+        except ValueError:
+            continue
+        kind = cols[1]
+        if kind == "app" and len(cols) >= 3:
+            out.append(Entry("app", (cols[2],), delay))
+        elif kind == "launchd" and len(cols) >= 4:
+            out.append(Entry("launchd", (cols[2], cols[3]), delay))
+    return out
+
+
+def outer_app_from_binary(binary_path: str) -> Path | None:
+    """Map a tccd binary_path to the staggerable .app, or None if embedded."""
+    cleaned = binary_path.rstrip(".")
+    path = Path(cleaned)
+    parts = path.parts
+    if "LoginItems" in parts:
+        return None
+    for i, part in enumerate(parts):
+        if part.endswith(".app"):
+            return Path(*parts[: i + 1])
+    return None
+
+
+def parse_refusals(log_text: str) -> dict[Path, int]:
+    """path -> refusal count for staggerable top-level apps."""
+    counts: dict[Path, int] = {}
+    for m in REFUSAL_RE.finditer(log_text):
+        app = outer_app_from_binary(m.group(2))
+        if app is None:
+            continue
+        counts[app] = counts.get(app, 0) + 1
+    return counts
+
+
+def login_items() -> tuple[dict[str, Path | None], bool]:
+    """name -> path (path may be None). ok=False if osascript failed."""
+    try:
+        names_out = subprocess.run(
+            [
+                "osascript",
+                "-e",
+                'tell application "System Events" to get the name of every login item',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        paths_out = subprocess.run(
+            [
+                "osascript",
+                "-e",
+                'tell application "System Events" to get the path of every login item',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {}, False
+    if names_out.returncode != 0:
+        return {}, False
+
+    def split_as_list(s: str) -> list[str]:
+        s = s.strip()
+        if not s:
+            return []
+        return [p.strip() for p in s.split(",")]
+
+    names = split_as_list(names_out.stdout)
+    paths = split_as_list(paths_out.stdout) if paths_out.returncode == 0 else []
+    items: dict[str, Path | None] = {}
+    for i, name in enumerate(names):
+        raw = paths[i] if i < len(paths) else ""
+        if not raw or raw == "missing value":
+            items[name] = None
+        else:
+            items[name] = Path(raw)
+    return items, True
+
+
+def delete_login_item(name: str) -> bool:
+    r = subprocess.run(
+        [
+            "osascript",
+            "-e",
+            f'tell application "System Events" to delete login item "{name}"',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return r.returncode == 0
+
+
+def fetch_tccd_boot_log(timeout: int) -> str:
+    # Prefer external timeout(1): Python's subprocess timeout can leave
+    # `/usr/bin/log` stuck as an orphan, and shutdown ExitTimeOut is tight.
+    timeout_bin = None
+    for candidate in ("/opt/homebrew/bin/gtimeout", "/usr/bin/timeout", "timeout"):
+        if candidate.startswith("/") and Path(candidate).is_file():
+            timeout_bin = candidate
+            break
+        if not candidate.startswith("/"):
+            timeout_bin = candidate
+            break
+    argv = [
+        "/usr/bin/log",
+        "show",
+        "--last",
+        "boot",
+        "--style",
+        "compact",
+        "--predicate",
+        'process == "tccd" AND eventMessage CONTAINS "Failed to get code reference"',
+    ]
+    if timeout_bin:
+        argv = [timeout_bin, str(timeout), *argv]
+    try:
+        r = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout or b""
+        if isinstance(out, bytes):
+            return out.decode("utf-8", "replace")
+        return out
+    return r.stdout or ""
+
+
+def is_bartender(path: Path) -> bool:
+    return path.name.startswith("Bartender")
+
+
+def schedule(
+    entries: list[Entry], *, base: int, gap: int
+) -> list[tuple[int, Entry]]:
+    """Assign absolute delays. Launchd keep preferred delays; apps fill base+gap…"""
+    launchd = [e for e in entries if e.kind == "launchd"]
+    apps = [e for e in entries if e.kind == "app"]
+
+    def app_key(e: Entry) -> tuple[int, int, str]:
+        path = Path(e.parts[0])
+        return (1 if is_bartender(path) else 0, e.delay if e.delay is not None else 10**9, path.name)
+
+    apps.sort(key=app_key)
+
+    used: set[int] = set()
+    placed: list[tuple[int, Entry]] = []
+
+    for i, e in enumerate(launchd):
+        d = e.delay if e.delay is not None else base
+        if i == 0 and e.delay is None:
+            d = base
+        while d in used:
+            d += 1
+        used.add(d)
+        placed.append((d, e))
+
+    d = base + gap
+    for e in apps:
+        while d in used:
+            d += 1
+        used.add(d)
+        placed.append((d, e))
+        d += gap
+
+    placed.sort(key=lambda x: x[0])
+    return placed
+
+
+def cull_and_discover(
+    existing: list[Entry],
+    refusals: dict[Path, int],
+    items: dict[str, Path | None],
+    *,
+    apps_roots: tuple[str, ...] | None = None,
+) -> tuple[list[Entry], list[Path], list[Path], list[str]]:
+    """Return (kept+new, culled_paths, added_paths, skip_notes)."""
+    kept: list[Entry] = []
+    culled: list[Path] = []
+    notes: list[str] = []
+    kept_apps: set[Path] = set()
+    if apps_roots is None:
+        apps_roots = ("/Applications/", str(Path.home() / "Applications") + "/")
+
+    for e in existing:
+        if e.kind == "app":
+            path = Path(e.parts[0])
+            if path.is_dir():
+                kept.append(e)
+                kept_apps.add(path.resolve())
+            else:
+                culled.append(path)
+        elif e.kind == "launchd":
+            plist = Path(e.parts[1]).expanduser()
+            if plist.is_file():
+                kept.append(e)
+            else:
+                culled.append(plist)
+
+    # Login-item paths and names we can act on.
+    item_paths = {p.resolve() for p in items.values() if p is not None}
+    item_names_by_stem = {Path(n).stem if n.endswith(".app") else n: n for n in items}
+
+    added: list[Path] = []
+    for app_path, count in sorted(refusals.items(), key=lambda kv: (-kv[1], str(kv[0]))):
+        if not app_path.is_dir():
+            notes.append(f"skip (missing): {app_path} ({count} refusals)")
+            continue
+        as_str = str(app_path)
+        if not as_str.startswith(apps_roots):
+            notes.append(f"skip (not under /Applications): {app_path} ({count} refusals)")
+            continue
+        resolved = app_path.resolve()
+        if resolved in kept_apps:
+            continue
+        name = app_path.name[: -len(".app")] if app_path.name.endswith(".app") else app_path.name
+        # Must be a System Events login item (by path or by name) so we can delete it.
+        by_path = resolved in item_paths
+        by_name = name in items or name in item_names_by_stem
+        if not (by_path or by_name):
+            notes.append(
+                f"skip (no System Events login item; likely SMAppService): "
+                f"{app_path} ({count} refusals)"
+            )
+            continue
+        kept.append(Entry("app", (str(app_path),), None))
+        kept_apps.add(resolved)
+        added.append(app_path)
+
+    return kept, culled, added, notes
+
+
+def render(placed: list[tuple[int, Entry]], *, culled: list[Path], added: list[Path]) -> str:
+    today = datetime.now().strftime("%Y-%m-%d")
+    lines = [
+        "# stagger-login config — TAB-separated. delay = seconds after login.",
+        "# kinds: app <bundle-path> | launchd <gui/uid/label> <plist-path>",
+        "# macOS 27.0.1 TCC boot race: keep delays >= 150 unless the race is fixed.",
+        f"# {today}: rewritten by stagger-login-sync "
+        f"(culled {len(culled)}, added {len(added)}; Bartender last among apps).",
+    ]
+    for delay, e in placed:
+        if e.kind == "app":
+            lines.append(f"{delay}\tapp\t{e.parts[0]}")
+        else:
+            lines.append(f"{delay}\tlaunchd\t{e.parts[0]}\t{e.parts[1]}")
+    return "\n".join(lines) + "\n"
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="apps.", dir=str(path.parent), text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def sync(
+    *,
+    conf: Path,
+    log_path: Path,
+    base: int,
+    gap: int,
+    log_timeout: int,
+    dry_run: bool,
+    touch_login_items: bool,
+) -> int:
+    log(log_path, f"=== sync start (dry={int(dry_run)}, conf={conf})")
+    existing: list[Entry] = []
+    if conf.is_file():
+        existing = parse_conf(conf.read_text(encoding="utf-8"))
+    else:
+        log(log_path, f"no existing config at {conf}")
+
+    tccd = fetch_tccd_boot_log(log_timeout)
+    refusals = parse_refusals(tccd)
+    log(log_path, f"tccd refusals: {len(refusals)} staggerable app(s), {sum(refusals.values())} hits")
+
+    items, items_ok = login_items()
+    if not items_ok:
+        log(log_path, "login items unreadable; will cull/keep but not add or delete")
+        items = {}
+
+    kept, culled, added, notes = cull_and_discover(existing, refusals, items)
+    for n in notes:
+        log(log_path, n)
+    for p in culled:
+        log(log_path, f"cull: {p}")
+    for p in added:
+        log(log_path, f"add: {p} ({refusals.get(p, 0)} refusals)")
+
+    placed = schedule(kept, base=base, gap=gap)
+    text = render(placed, culled=culled, added=added)
+
+    if dry_run:
+        log(log_path, "dry-run: not writing")
+        sys.stdout.write(text)
+        log(log_path, "=== sync done (dry-run)")
+        return 0
+
+    if not culled and not added:
+        # Still rewrite if schedule/header would change? Only when content body differs.
+        old_body = ""
+        if conf.is_file():
+            old_body = "\n".join(
+                ln for ln in conf.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")
+            )
+        new_body = "\n".join(ln for ln in text.splitlines() if ln and not ln.startswith("#"))
+        if old_body == new_body:
+            log(log_path, "unchanged: no write")
+            log(log_path, "=== sync done")
+            return 0
+
+    atomic_write(conf, text)
+    log(log_path, f"wrote {conf} ({len(placed)} entries)")
+
+    if touch_login_items and items_ok:
+        # Delete login items for every app we stagger (sticky + newly added).
+        staggered_names = {
+            Path(e.parts[0]).name[: -len(".app")]
+            if Path(e.parts[0]).name.endswith(".app")
+            else Path(e.parts[0]).name
+            for _, e in placed
+            if e.kind == "app"
+        }
+        for name in list(items):
+            if name in staggered_names:
+                if delete_login_item(name):
+                    log(log_path, f"deleted login item: {name}")
+                else:
+                    log(log_path, f"FAILED to delete login item: {name}")
+
+    log(log_path, "=== sync done")
+    return 0
+
+
+def agent_loop(
+    *,
+    conf: Path,
+    log_path: Path,
+    base: int,
+    gap: int,
+    log_timeout: int,
+    interval: int,
+) -> int:
+    """KeepAlive sleeper: sync on SIGTERM/HUP (shutdown) and on interval wake."""
+    state = {"sleep_pid": None}
+
+    def run(reason: str) -> None:
+        log(log_path, f"agent: sync on {reason}")
+        try:
+            sync(
+                conf=conf,
+                log_path=log_path,
+                base=base,
+                gap=gap,
+                log_timeout=log_timeout,
+                dry_run=False,
+                touch_login_items=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — must not die without logging
+            log(log_path, f"agent: sync FAILED: {exc!r}")
+
+    def on_signal(signum: int, _frame: object) -> None:
+        name = signal.Signals(signum).name
+        run(name)
+        sp = state["sleep_pid"]
+        if sp is not None:
+            try:
+                os.kill(sp, signal.SIGTERM)
+            except OSError:
+                pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGHUP, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    log(log_path, f"agent started pid {os.getpid()} interval={interval}s")
+    while True:
+        # sleep in a child so signals interrupt promptly (same pattern as shutdown-thaw).
+        sp = os.fork()
+        if sp == 0:
+            time.sleep(interval)
+            os._exit(0)
+        state["sleep_pid"] = sp
+        _pid, status = os.waitpid(sp, 0)
+        state["sleep_pid"] = None
+        if os.WIFSIGNALED(status):
+            continue
+        run(f"interval/{interval}s")
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--dry-run", action="store_true", help="print plan, write nothing")
+    p.add_argument("--agent", action="store_true", help="KeepAlive: sync on shutdown signal")
+    p.add_argument(
+        "--no-login-items",
+        action="store_true",
+        help="do not delete System Events login items for staggered apps",
+    )
+    p.add_argument(
+        "--conf",
+        default=os.environ.get("STAGGER_CONF", str(DEFAULT_CONF)),
+        help="config path (default: ~/.config/stagger-login/apps)",
+    )
+    p.add_argument(
+        "--interval",
+        type=int,
+        default=int(os.environ.get("STAGGER_SYNC_INTERVAL", str(12 * 3600))),
+        help="agent wake interval seconds (default 12h; shutdown still syncs on TERM)",
+    )
+    args = p.parse_args(argv)
+
+    conf = Path(args.conf).expanduser()
+    log_path = Path(os.environ.get("STAGGER_SYNC_LOG", str(DEFAULT_LOG))).expanduser()
+    base = int(os.environ.get("STAGGER_BASE", str(BASE_DEFAULT)))
+    gap = int(os.environ.get("STAGGER_GAP", str(GAP_DEFAULT)))
+    log_timeout = int(os.environ.get("STAGGER_LOG_TIMEOUT", str(LOG_TIMEOUT_DEFAULT)))
+
+    if args.agent:
+        return agent_loop(
+            conf=conf,
+            log_path=log_path,
+            base=base,
+            gap=gap,
+            log_timeout=log_timeout,
+            interval=args.interval,
+        ) or 0
+
+    return sync(
+        conf=conf,
+        log_path=log_path,
+        base=base,
+        gap=gap,
+        log_timeout=log_timeout,
+        dry_run=args.dry_run,
+        touch_login_items=not args.no_login_items,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

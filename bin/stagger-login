@@ -43,6 +43,11 @@
 # STAGGER_HEAL (default 120) seconds from last target to the heal pass.
 # Log: ~/Library/Logs/stagger-login.log
 #
+# Config refresh: bin/stagger-login-sync (+ KeepAlive agent
+# com.djbclark.stagger-login-sync) rewrites the apps list on shutdown and
+# every 12 h — culls missing bundles, adds apps this boot's tccd refused
+# that still have a System Events login item. See research/mac-tcc-boot-race.
+#
 # Installed 2026-10-05 by zcode; LaunchAgent com.djbclark.stagger-login.
 
 set -u
