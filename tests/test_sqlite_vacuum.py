@@ -3,6 +3,8 @@
 import importlib.machinery
 import importlib.util
 import os
+import sys
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -37,6 +39,10 @@ def make_db(path: Path, *, keep_every: int = 100, rows: int = 4000, wal: bool = 
     conn.close()
 
 
+@unittest.skipUnless(
+    shutil.which("lsof"),
+    "sqlite-vacuum uses lsof to skip open databases",
+)
 class TestSqliteVacuum(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -51,6 +57,10 @@ class TestSqliteVacuum(unittest.TestCase):
         kw.setdefault("dry_run", False)
         return sv.process(path, **kw)
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "sqlite-vacuum clones with macOS cp -c",
+    )
     def test_vacuum_shrinks_and_keeps_rows(self):
         db = self.dir / "a.db"
         make_db(db)
@@ -63,6 +73,10 @@ class TestSqliteVacuum(unittest.TestCase):
         self.assertEqual(sv.row_counts(db), counts)
         self.assertEqual(list(self.dir.glob("*clone*")), [])
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "sqlite-vacuum clones with macOS cp -c",
+    )
     def test_wal_database(self):
         db = self.dir / "w.db"
         make_db(db, wal=True)
@@ -128,6 +142,10 @@ class TestSqliteVacuum(unittest.TestCase):
         got = sv.expand(["backups/*.sqlite", "backups/x.sqlite"], self.dir)
         self.assertEqual(got, [sub / "x.sqlite"])
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "sqlite-vacuum clones with macOS cp -c",
+    )
     def test_main_exit_code(self):
         db = self.dir / "m.db"
         make_db(db)

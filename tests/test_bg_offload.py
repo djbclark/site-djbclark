@@ -38,7 +38,14 @@ BG = BIN / "bg"
 OFFLOAD = BIN / "bg-offload"
 COMMIT = "a" * 40
 
-pytestmark = pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq")
+_GNU_OFFLOAD_TOOLS = ("gdate", "gawk", "gtimeout", "gsed", "ghead", "gmktemp")
+pytestmark = [
+    pytest.mark.skipif(shutil.which("jq") is None, reason="the gh stub applies bg-offload's --jq with jq"),
+    pytest.mark.skipif(
+        any(shutil.which(t) is None for t in _GNU_OFFLOAD_TOOLS),
+        reason="bg-offload requires Homebrew GNU tools (gdate, gawk, gtimeout, ...)",
+    ),
+]
 
 LW_STUB = """#!/bin/bash
 d={state}

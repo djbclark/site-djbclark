@@ -10,6 +10,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# deploy_release runs `git rebase`, which needs a committer identity. Tests must
+# not depend on the host having user.name / user.email configured.
+for _k, _v in {
+    "GIT_AUTHOR_NAME": "Release Test",
+    "GIT_AUTHOR_EMAIL": "release-test@example.invalid",
+    "GIT_COMMITTER_NAME": "Release Test",
+    "GIT_COMMITTER_EMAIL": "release-test@example.invalid",
+}.items():
+    os.environ.setdefault(_k, _v)
+
+
 SCRIPT = Path(__file__).resolve().parents[1] / "bin" / "deploy_ops_release.py"
 SPEC = importlib.util.spec_from_file_location("deploy_ops_release", SCRIPT)
 assert SPEC and SPEC.loader
@@ -149,7 +160,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             real_apply = release.apply_release_plan
 
             def fail_last(plan):
-                if plan.name == "site-private":
+                if plan.name == "site-private-djbclark":
                     raise release.ReleaseError("injected staging failure")
                 real_apply(plan)
 
@@ -171,7 +182,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             ops_root.mkdir()
             for name in release.REPOSITORIES:
                 make_repo(ops_root / name)
-            commit_file(ops_root / "site-private", "memory/fact.md", "fact\n", "memory")
+            commit_file(ops_root / "site-private-djbclark", "memory/fact.md", "fact\n", "memory")
 
             release.status(ops_root, fetch=False, verify_github=False)
 
@@ -182,7 +193,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             for name in release.REPOSITORIES:
                 make_repo(ops_root / name)
             commit_file(
-                ops_root / "site-djbclark",
+                ops_root / "site-public-djbclark",
                 "research/autonomy/notes.md",
                 "notes\n",
                 "research",
@@ -216,7 +227,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             for name in release.REPOSITORIES:
                 targets[name] = make_repo(ops_root / name)
             memory_commit = commit_file(
-                ops_root / "site-private",
+                ops_root / "site-private-djbclark",
                 "memory/fact.md",
                 "fact\n",
                 "memory",
@@ -238,12 +249,12 @@ class DeployOpsReleaseTest(unittest.TestCase):
             )
 
             self.assertTrue(
-                next(plan for plan in plans if plan.name == "site-private").data_ahead
+                next(plan for plan in plans if plan.name == "site-private-djbclark").data_ahead
             )
             self.assertEqual(
-                git(ops_root / "site-private", "rev-parse", "HEAD"), memory_commit
+                git(ops_root / "site-private-djbclark", "rev-parse", "HEAD"), memory_commit
             )
-            for name in ("stayturgid", "site-djbclark"):
+            for name in ("stayturgid", "site-public-djbclark"):
                 self.assertEqual(
                     git(ops_root / name, "rev-parse", "HEAD"), targets[name]
                 )
@@ -269,7 +280,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 git(path, "update-ref", "refs/remotes/origin/master", targets[name])
                 git(path, "reset", "--hard", "ops-v1.0.0")
             memory_commit = commit_file(
-                ops_root / "site-private",
+                ops_root / "site-private-djbclark",
                 "memory/fact.md",
                 "fact\n",
                 "memory",
@@ -283,20 +294,20 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 verify_github=False,
             )
 
-            private_plan = next(plan for plan in plans if plan.name == "site-private")
+            private_plan = next(plan for plan in plans if plan.name == "site-private-djbclark")
             self.assertEqual(private_plan.data_rebase_from, "ops-v1.0.0")
-            private_head = git(ops_root / "site-private", "rev-parse", "HEAD")
+            private_head = git(ops_root / "site-private-djbclark", "rev-parse", "HEAD")
             self.assertNotEqual(private_head, memory_commit)
             self.assertTrue(
                 release.is_ancestor(
-                    ops_root / "site-private",
-                    targets["site-private"],
+                    ops_root / "site-private-djbclark",
+                    targets["site-private-djbclark"],
                     private_head,
                 )
             )
             self.assertEqual(
                 release.changed_paths(
-                    ops_root / "site-private",
+                    ops_root / "site-private-djbclark",
                     "ops-v1.1.0",
                     "HEAD",
                 ),
@@ -311,13 +322,13 @@ class DeployOpsReleaseTest(unittest.TestCase):
             originals: dict[str, str] = {}
             for name in release.REPOSITORIES:
                 path = ops_root / name
-                make_repo(path, tracked_codex_config=name == "site-private")
+                make_repo(path, tracked_codex_config=name == "site-private-djbclark")
                 manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
                 (path / "ops-release.json").write_text(
                     json.dumps(manifest),
                     encoding="utf-8",
                 )
-                if name == "site-private":
+                if name == "site-private-djbclark":
                     (path / release.LOCAL_CODEX_CONFIG).unlink()
                     (path / ".gitignore").write_text(
                         f"/{release.LOCAL_CODEX_CONFIG}\n",
@@ -332,7 +343,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 git(path, "reset", "--hard", "ops-v1.0.0")
                 originals[name] = git(path, "rev-parse", "HEAD")
 
-            private_path = ops_root / "site-private"
+            private_path = ops_root / "site-private-djbclark"
             local_config = private_path / release.LOCAL_CODEX_CONFIG
             local_config.write_text('model = "local-choice"\n', encoding="utf-8")
             local_config.chmod(0o600)
@@ -345,7 +356,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 verify_github=False,
             )
 
-            private_plan = next(plan for plan in plans if plan.name == "site-private")
+            private_plan = next(plan for plan in plans if plan.name == "site-private-djbclark")
             self.assertIsNotNone(private_plan.local_file_migration)
             self.assertEqual(
                 local_config.read_text(encoding="utf-8"), 'model = "local-choice"\n'
@@ -400,7 +411,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             )
 
             later_private_plan = next(
-                plan for plan in later_plans if plan.name == "site-private"
+                plan for plan in later_plans if plan.name == "site-private-djbclark"
             )
             self.assertIsNone(later_private_plan.local_file_migration)
             self.assertEqual(
@@ -418,7 +429,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             for name in release.REPOSITORIES:
                 make_repo(
                     ops_root / name,
-                    tracked_codex_config=name == "site-private",
+                    tracked_codex_config=name == "site-private-djbclark",
                 )
                 git(
                     ops_root / name,
@@ -426,7 +437,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                     "refs/remotes/origin/master",
                     git(ops_root / name, "rev-parse", "HEAD"),
                 )
-            (ops_root / "site-private" / release.LOCAL_CODEX_CONFIG).write_text(
+            (ops_root / "site-private-djbclark" / release.LOCAL_CODEX_CONFIG).write_text(
                 'model = "local-choice"\n',
                 encoding="utf-8",
             )
@@ -446,13 +457,13 @@ class DeployOpsReleaseTest(unittest.TestCase):
             ops_root.mkdir()
             for name in release.REPOSITORIES:
                 path = ops_root / name
-                make_repo(path, tracked_codex_config=name == "site-private")
+                make_repo(path, tracked_codex_config=name == "site-private-djbclark")
                 manifest = {"schema": 1, "suite": "djbclark-ops", "version": "1.1.0"}
                 (path / "ops-release.json").write_text(
                     json.dumps(manifest),
                     encoding="utf-8",
                 )
-                if name == "site-private":
+                if name == "site-private-djbclark":
                     (path / release.LOCAL_CODEX_CONFIG).unlink()
                     (path / ".gitignore").write_text(
                         f"/{release.LOCAL_CODEX_CONFIG}\n",
@@ -465,7 +476,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 tag_release(path, "1.1.0")
                 git(path, "update-ref", "refs/remotes/origin/master", target)
                 git(path, "reset", "--hard", "ops-v1.0.0")
-            private_path = ops_root / "site-private"
+            private_path = ops_root / "site-private-djbclark"
             (private_path / release.LOCAL_CODEX_CONFIG).write_text(
                 'model = "local-choice"\n',
                 encoding="utf-8",
@@ -486,7 +497,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
 
     def test_codex_config_migration_requires_target_gitignore(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site-private"
+            path = Path(directory) / "site-private-djbclark"
             make_repo(path, tracked_codex_config=True)
             (path / release.LOCAL_CODEX_CONFIG).unlink()
             example = path / release.LOCAL_CODEX_CONFIG_EXAMPLE
@@ -499,7 +510,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
                 "target removes codex/config.toml without ignoring it",
             ):
                 release.inspect_local_file_migration(
-                    "site-private",
+                    "site-private-djbclark",
                     path,
                     "ops-v1.0.0",
                     target,
@@ -507,7 +518,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
 
     def test_interrupted_codex_config_migration_recovers_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site-private"
+            path = Path(directory) / "site-private-djbclark"
             make_repo(path, tracked_codex_config=True)
             local_config = path / release.LOCAL_CODEX_CONFIG
             local_config.write_text('model = "local-choice"\n', encoding="utf-8")
@@ -623,7 +634,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
             self.make_data_sync_repos(ops_root)
-            path = ops_root / "site-private"
+            path = ops_root / "site-private-djbclark"
             released = git(path, "rev-parse", "HEAD")
             code_commit = commit_file(path, "AGENTS.md", "changed\n", "code")
             git(path, "update-ref", "refs/remotes/origin/master", code_commit)
@@ -639,7 +650,7 @@ class DeployOpsReleaseTest(unittest.TestCase):
             ops_root = Path(directory) / "ops"
             ops_root.mkdir()
             self.make_data_sync_repos(ops_root)
-            (ops_root / "site-private" / "AGENTS.md").write_text("dirty\n")
+            (ops_root / "site-private-djbclark" / "AGENTS.md").write_text("dirty\n")
 
             with self.assertRaises(release.ReleaseError):
                 release.memory_sync(ops_root, fetch=False, verify_github=False)
