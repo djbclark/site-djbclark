@@ -313,6 +313,12 @@ launchd-path-check *args:
 launchd-path-status:
     bin/launchd-path-sync status
 
+# NOPASSWD rule for two exact `route` commands that repair Apple container
+# networking when Tailscale replaces the bridge100 route (roles/container_route).
+# One privileged step (Touch ID).
+container-route-setup:
+    roles/container_route/files/container-route-setup.sh
+
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
 site-agents-apply *args:
