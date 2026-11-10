@@ -77,6 +77,25 @@ EXIT_DEADLINE = 124
 # events wait for the next cycle; build() is resumable.
 INDEX_LIMIT = 4000
 
+# Default quiet hours during which heavy indexing is paused: 7am to 11pm local time.
+# Ingest adapters still run every 15 min to keep the store fresh.
+QUIET_HOURS_START = 7
+QUIET_HOURS_END = 23
+
+
+def in_quiet_hours(
+    now: datetime | None = None,
+    start: int = QUIET_HOURS_START,
+    end: int = QUIET_HOURS_END,
+) -> bool:
+    """Return True if local time is between start and end hour (7am to 11pm)."""
+    if start == end:
+        return False
+    current = (now or datetime.now()).astimezone()
+    if start < end:
+        return start <= current.hour < end
+    return current.hour >= start or current.hour < end
+
 STEPS: list[tuple[str, str, list[str]]] = [
     ("claude-scan", "s1_claude.py", ["scan", "--quiet"]),
     ("hermes-sink", "s1_hermes.py", ["sink"]),
@@ -217,6 +236,9 @@ class Cycle:
         self.lock = IngestLock(self.data_dir / "ingest.lock")
         self.child: subprocess.Popen[bytes] | None = None
         self.terminated = False
+        self.quiet_hours = getattr(args, "quiet_hours", True)
+        self.quiet_hours_start = getattr(args, "quiet_hours_start", QUIET_HOURS_START)
+        self.quiet_hours_end = getattr(args, "quiet_hours_end", QUIET_HOURS_END)
 
     # -- process control --------------------------------------------------
 
@@ -328,6 +350,19 @@ class Cycle:
                 if self.maintenance.exists():
                     self.log.line(f"skipped: maintenance (before step={name})")
                     return EXIT_FAILED if "failed" in statuses.values() else 0
+                if (
+                    name == "search-index"
+                    and self.quiet_hours
+                    and in_quiet_hours(
+                        start=self.quiet_hours_start, end=self.quiet_hours_end
+                    )
+                ):
+                    statuses[name] = "skipped"
+                    self.log.line(
+                        f"step={name} status=skipped reason=quiet-hours"
+                        f" ({self.quiet_hours_start:02d}:00-{self.quiet_hours_end:02d}:00)"
+                    )
+                    continue
                 statuses[name] = self.run_step(name, script, argv, Path(tmp))
         failed = [n for n, s in statuses.items() if s in ("failed", "deadline")]
         secs = f"{time.monotonic() - started:.1f}"
@@ -374,6 +409,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cas", default=None, help="passed to every step")
     parser.add_argument("--deadline", type=int, default=DEADLINE_S,
                         help="wedge guard: seconds before the running step is killed")
+    parser.add_argument(
+        "--quiet-hours",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="pause search-index step between 7am and 11pm local time (default: true)",
+    )
+    parser.add_argument(
+        "--quiet-hours-start",
+        type=int,
+        default=QUIET_HOURS_START,
+        help=f"quiet hours start hour (default: {QUIET_HOURS_START})",
+    )
+    parser.add_argument(
+        "--quiet-hours-end",
+        type=int,
+        default=QUIET_HOURS_END,
+        help=f"quiet hours end hour (default: {QUIET_HOURS_END})",
+    )
     parser.add_argument("--timeout", type=int, default=DEADLINE_S + 60,
                         help="wait-idle: seconds to wait")
     args = parser.parse_args(argv)

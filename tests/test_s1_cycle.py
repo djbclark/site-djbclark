@@ -73,7 +73,7 @@ class CycleTestCase(unittest.TestCase):
         self._tmp.cleanup()
 
     def argv(self, *extra: str) -> list[str]:
-        return [sys.executable, "-I", str(CYCLE), *extra, "--data-dir", str(self.data),
+        return [sys.executable, "-I", str(CYCLE), "--no-quiet-hours", *extra, "--data-dir", str(self.data),
                 "--bin-dir", str(self.bin), "--db", "/nonexistent/s1.sqlite3"]
 
     def run_cycle(self, *extra: str, **stub_modes: str) -> subprocess.CompletedProcess[str]:
@@ -199,6 +199,15 @@ class TestCycle(CycleTestCase):
         self.assertEqual(self.run_cycle().returncode, 0)
         self.assertTrue((self.data / "cycle.log.1").exists())
         self.assertLess((self.data / "cycle.log").stat().st_size, 4096)
+
+    def test_quiet_hours_skips_search_index(self) -> None:
+        result = self.run_cycle("--quiet-hours", "--quiet-hours-start", "0", "--quiet-hours-end", "24")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(self.ran("s1_search"))
+        self.assertTrue(self.ran("s1_claude"))
+        log = self.log()
+        self.assertIn("step=search-index status=skipped reason=quiet-hours", log)
+        self.assertIn("cycle end status=ok", log)
 
 
 class TestWaitIdle(CycleTestCase):

@@ -631,6 +631,17 @@ class TestCompressedLayout(SearchTestCase):
         self.assertNotIn("s1_text_dict", names)
         self.assertTrue(self.index.stats(check=True)["healthy"])
 
+    def test_quiet_hours_skips_indexing(self) -> None:
+        self.add("event during quiet hours")
+        r = self.index.build(check_quiet_hours=True, quiet_hours_start=0, quiet_hours_end=24)
+        self.assertEqual(r["indexed"], 0)
+        self.assertEqual(r["skipped"], "quiet_hours")
+        self.assertEqual(self.index.pending(), 1)
+
+        r = self.index.build(check_quiet_hours=True, quiet_hours_start=1, quiet_hours_end=1)
+        self.assertEqual(r["indexed"], 1)
+        self.assertEqual(self.index.pending(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

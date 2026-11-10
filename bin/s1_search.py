@@ -68,6 +68,7 @@ the way of the rest of the machine.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import re
@@ -103,6 +104,24 @@ _TEXT_SAMPLE_ROWS = 1000
 _INDEX_FETCH_BATCH = 500
 _INDEX_COMMIT_EVERY = 500
 _INDEX_PACE_MS = 50
+
+# Default quiet hours during which heavy indexing is paused: 7am to 11pm local time.
+QUIET_HOURS_START = 7
+QUIET_HOURS_END = 23
+
+
+def in_quiet_hours(
+    now: datetime | None = None,
+    start: int = QUIET_HOURS_START,
+    end: int = QUIET_HOURS_END,
+) -> bool:
+    """Return True if local time is between start and end hour (7am to 11pm)."""
+    if start == end:
+        return False
+    current = (now or datetime.now()).astimezone()
+    if start < end:
+        return start <= current.hour < end
+    return current.hour >= start or current.hour < end
 _LOW_CACHE_KIB = 1024  # PRAGMA cache_size = -N → N KiB
 # SQLite up to 3.53 decodes the noncharacters U+FFFE and U+FFFF as U+FFFD;
 # 3.54.0 (2026-10-09) keeps them. The same text then tokenizes differently
@@ -694,6 +713,9 @@ class SearchIndex:
         progress: int = _INDEX_COMMIT_EVERY,
         fetch_batch: int = _INDEX_FETCH_BATCH,
         pace_ms: int = _INDEX_PACE_MS,
+        check_quiet_hours: bool = False,
+        quiet_hours_start: int = QUIET_HOURS_START,
+        quiet_hours_end: int = QUIET_HOURS_END,
     ) -> dict[str, Any]:
         """Index events that have no current-version entry. Resumable by design.
 
@@ -709,9 +731,18 @@ class SearchIndex:
         if pace_ms < 0:
             raise ValueError("pace_ms must be non-negative")
 
+        if check_quiet_hours and in_quiet_hours(start=quiet_hours_start, end=quiet_hours_end):
+            return {
+                "indexed": 0,
+                "cas_missing": 0,
+                "remaining": self.pending(),
+                "skipped": "quiet_hours",
+            }
+
         done = missing = considered = 0
         last_lsn: int | None = None
         drained = False
+        stopped_quiet_hours = False
         target = limit  # None = drain; int = hard cap on rows considered
         while target is None or considered < target:
             room = fetch_batch if target is None else min(fetch_batch, target - considered)
@@ -737,14 +768,26 @@ class SearchIndex:
                 if done % progress == 0:
                     self.db.commit()
                     print(f"  indexed {done}", flush=True)
+                    if check_quiet_hours and in_quiet_hours(start=quiet_hours_start, end=quiet_hours_end):
+                        stopped_quiet_hours = True
+                        break
                     if pace_ms:
                         time.sleep(pace_ms / 1000.0)
                 if target is not None and considered >= target:
                     break
+            if stopped_quiet_hours:
+                break
             if len(rows) < room:
                 drained = target is None
                 break
         self.db.commit()
+        if stopped_quiet_hours:
+            return {
+                "indexed": done,
+                "cas_missing": missing,
+                "remaining": self.pending(),
+                "stopped": "quiet_hours",
+            }
         # pending() is a full-table anti-join (~seconds on the live store).
         # After a clean drain with no CAS misses, remaining is zero by construction.
         if drained and missing == 0:
@@ -982,6 +1025,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip nice(19), keep SQLite's normal caches, and set --pace-ms 0",
     )
+    b.add_argument(
+        "--quiet-hours",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="pause indexing between 7am and 11pm local time (default: true; --no-quiet-hours to disable)",
+    )
+    b.add_argument(
+        "--quiet-hours-start",
+        type=int,
+        default=QUIET_HOURS_START,
+        help=f"quiet hours start hour (default: {QUIET_HOURS_START})",
+    )
+    b.add_argument(
+        "--quiet-hours-end",
+        type=int,
+        default=QUIET_HOURS_END,
+        help=f"quiet hours end hour (default: {QUIET_HOURS_END})",
+    )
+    b.add_argument(
+        "--force",
+        action="store_true",
+        help="alias for --no-quiet-hours: index even during quiet hours (07:00-23:00)",
+    )
     q = sub.add_parser("search")
     q.add_argument("query")
     q.add_argument("--mode", choices=("fts", "trigram", "exact"), default="fts")
@@ -1053,11 +1119,15 @@ def _run(args: argparse.Namespace, store: EvidenceStore) -> int:
     index = SearchIndex(store)
     if args.command == "index":
         pace_ms = 0 if args.fast else args.pace_ms
+        enforce_quiet = args.quiet_hours and not getattr(args, "force", False)
         print(json.dumps(index.build(
             limit=args.limit,
             progress=args.commit_every,
             fetch_batch=args.fetch_batch,
             pace_ms=pace_ms,
+            check_quiet_hours=enforce_quiet,
+            quiet_hours_start=args.quiet_hours_start,
+            quiet_hours_end=args.quiet_hours_end,
         ), indent=2))
     elif args.command == "search":
         _print(index.search(args.query, mode=args.mode, limit=args.limit))
