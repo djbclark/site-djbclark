@@ -101,7 +101,7 @@ class TestIndexing(SearchTestCase):
     def test_limit_leaves_remainder_pending(self) -> None:
         for i in range(5):
             self.add(f"item{i}")
-        r = self.index.build(limit=2)
+        r = self.index.build(limit=2, pace_ms=0)
         self.assertEqual(r["indexed"], 2)
         self.assertEqual(r["remaining"], 3)
 
@@ -112,9 +112,48 @@ class TestIndexing(SearchTestCase):
             "DELETE FROM obj WHERE sha=?", (bytes.fromhex(digest),)
         )
         self.store.pack_db.commit()
-        r = self.index.build()
+        r = self.index.build(pace_ms=0)
         self.assertEqual(r["cas_missing"], 1)
         self.assertEqual(r["indexed"], 0)
+
+    def test_build_streams_small_batches_and_paces(self) -> None:
+        for i in range(5):
+            self.add(f"batch{i}")
+        sleeps: list[float] = []
+
+        def record_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        with mock.patch.object(search.time, "sleep", side_effect=record_sleep):
+            r = self.index.build(
+                progress=2, fetch_batch=2, pace_ms=25,
+            )
+        self.assertEqual(r["indexed"], 5)
+        self.assertEqual(r["remaining"], 0)
+        # Commits after the 2nd and 4th indexed events each sleep; the final
+        # commit after the loop does not.
+        self.assertEqual(sleeps, [0.025, 0.025])
+
+    def test_missing_cas_does_not_block_later_pending(self) -> None:
+        gone = self.add("gone")
+        self.add("keptneedle")
+        digest = self.store.get_event(gone)["raw_sha256"]
+        self.store.pack_db.execute(
+            "DELETE FROM obj WHERE sha=?", (bytes.fromhex(digest),)
+        )
+        self.store.pack_db.commit()
+        r = self.index.build(fetch_batch=1, progress=1, pace_ms=0)
+        self.assertEqual(r["cas_missing"], 1)
+        self.assertEqual(r["indexed"], 1)
+        hits = self.index.search("keptneedle", mode="fts")
+        self.assertEqual(len(hits), 1)
+
+    def test_low_resource_pragmas_shrink_cache(self) -> None:
+        search._apply_low_resource_pragmas(self.store.db)
+        cache = self.store.db.execute("PRAGMA cache_size").fetchone()[0]
+        mmap = self.store.db.execute("PRAGMA mmap_size").fetchone()[0]
+        self.assertEqual(cache, -search._LOW_CACHE_KIB)
+        self.assertEqual(mmap, 0)
 
 
 class TestSearchModes(SearchTestCase):

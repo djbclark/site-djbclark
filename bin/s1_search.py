@@ -58,11 +58,18 @@ implemented with the same stdlib-only libzstd binding used by `s1_evidence.py`
 
 The index is derived state — it can be dropped and rebuilt from the CAS at
 any time, and never carries information the evidence does not.
+
+**Heavy commands are low-impact by default.** `index`, `migrate`, `vacuum`,
+and `stats --check` call `nice(19)`, shrink SQLite's page cache, disable
+mmap, and (for `index`) commit in small batches with a short pause between
+them. Prefer `--fast` only when catching up matters more than staying out of
+the way of the rest of the machine.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -86,11 +93,50 @@ INDEX_TABLES = ("event_fts", "event_trigram")
 _TEXT_SIZE_BYTES = 4
 _TEXT_COPY_BATCH = 5000
 _TEXT_SAMPLE_ROWS = 1000
+# Indexing defaults trade speed for a light footprint: small SQLite caches,
+# short write transactions (so a cycle deadline kill loses little work), and
+# a pause between batches so the rest of the machine keeps the disks/CPU.
+_INDEX_FETCH_BATCH = 500
+_INDEX_COMMIT_EVERY = 500
+_INDEX_PACE_MS = 50
+_LOW_CACHE_KIB = 1024  # PRAGMA cache_size = -N → N KiB
 # SQLite up to 3.53 decodes the noncharacters U+FFFE and U+FFFF as U+FFFD;
 # 3.54.0 (2026-10-09) keeps them. The same text then tokenizes differently
 # under the two, and an FTS5 integrity-check written by one fails under the
 # other. Indexed text stores them as U+FFFD, the way the older builds read it.
 _NONCHARACTERS = str.maketrans({0xFFFE: 0xFFFD, 0xFFFF: 0xFFFD})
+
+
+def _lower_process_priority() -> int | None:
+    """Drop to the lowest nice level this process may take. Best-effort."""
+    try:
+        return os.nice(19)
+    except OSError:
+        return None
+
+
+def _apply_low_resource_pragmas(*dbs: sqlite3.Connection) -> None:
+    """Shrink per-connection RAM and keep SQLite single-threaded.
+
+    mmap_size=0 avoids mapping the multi-GB store into the address space;
+    a 1 MiB page cache (and the same on the CAS pack DB) keeps the working
+    set small at the cost of more disk reads. threads=1 stops SQLite from
+    spawning helpers for sorts/checks.
+    """
+    for db in dbs:
+        db.execute(f"PRAGMA cache_size={-_LOW_CACHE_KIB}")
+        db.execute("PRAGMA mmap_size=0")
+        db.execute("PRAGMA temp_store=FILE")
+        try:
+            db.execute("PRAGMA threads=1")
+        except sqlite3.Error:
+            pass
+
+
+def _heavy_command(args: argparse.Namespace) -> bool:
+    return args.command in ("index", "migrate", "vacuum") or (
+        args.command == "stats" and getattr(args, "check", False)
+    )
 
 _LAYOUT_DDL = """
 CREATE TABLE IF NOT EXISTS event_text (
@@ -576,6 +622,7 @@ class SearchIndex:
         self.db = store.db
         self.db.create_function("s1_contains", 2, _contains, deterministic=True)
         self._text_codec, self._text_dictionary = _register_unzstd(self.db)
+        self._dict_id: int | None = None
         self._migrate()
 
     def _migrate(self) -> None:
@@ -592,41 +639,113 @@ class SearchIndex:
                 "COMMIT;")
         self.layout = store_layout(self.db)
 
+    def _search_dict_id(self) -> int:
+        if self._dict_id is None:
+            row = self.db.execute(
+                "SELECT value FROM s1_meta WHERE key='search_dict_id'"
+            ).fetchone()
+            if row is None:
+                raise LayoutError(f"{self.store.path}: missing search_dict_id for layout 3")
+            self._dict_id = int(row[0])
+        return self._dict_id
+
     # -- indexing ---------------------------------------------------------
 
     def pending(self) -> int:
+        # NOT EXISTS lets SQLite stop at the first matching search_indexed
+        # row per event; the old LEFT JOIN + IS NULL plan scanned both sides.
         return self.db.execute(
-            "SELECT COUNT(*) FROM event e LEFT JOIN search_indexed s"
-            " ON s.event_id = e.event_id AND s.version = ?"
-            " WHERE s.event_id IS NULL", (INDEX_VERSION,)
+            "SELECT COUNT(*) FROM event e WHERE NOT EXISTS ("
+            " SELECT 1 FROM search_indexed s"
+            " WHERE s.event_id = e.event_id AND s.version = ?)",
+            (INDEX_VERSION,),
         ).fetchone()[0]
 
-    def build(self, *, limit: int | None = None, progress: int = 20000) -> dict[str, Any]:
-        """Index events that have no current-version entry. Resumable by design."""
-        query = ("SELECT e.event_id, e.raw_sha256 FROM event e"
-                 " LEFT JOIN search_indexed s ON s.event_id = e.event_id AND s.version = ?"
-                 " WHERE s.event_id IS NULL ORDER BY e.ingest_lsn")
-        if limit:
-            query += f" LIMIT {int(limit)}"
-        rows = self.db.execute(query, (INDEX_VERSION,)).fetchall()
+    def _pending_batch(
+        self, *, limit: int, after_lsn: int | None = None
+    ) -> list[sqlite3.Row]:
+        """Next pending rows after ``after_lsn`` (exclusive), by ingest order.
 
-        done = missing = 0
-        for row in rows:
-            try:
-                payload = self.store.get_bytes(row["raw_sha256"])
-            except FileNotFoundError:
-                missing += 1
-                continue
-            self._put_text(row["event_id"], project(payload))
-            self.db.execute(
-                "INSERT OR REPLACE INTO search_indexed (event_id, indexed_at, version)"
-                " VALUES (?,?,?)", (row["event_id"], now_iso(), INDEX_VERSION))
-            done += 1
-            if done % progress == 0:
-                self.db.commit()
-                print(f"  indexed {done}/{len(rows)}", flush=True)
+        Walking by ``ingest_lsn`` means a CAS miss advances the cursor instead
+        of being re-fetched forever at the head of the queue.
+        """
+        sql = (
+            "SELECT e.event_id, e.raw_sha256, e.ingest_lsn FROM event e"
+            " WHERE NOT EXISTS ("
+            " SELECT 1 FROM search_indexed s"
+            " WHERE s.event_id = e.event_id AND s.version = ?)"
+        )
+        params: list[Any] = [INDEX_VERSION]
+        if after_lsn is not None:
+            sql += " AND e.ingest_lsn > ?"
+            params.append(after_lsn)
+        sql += " ORDER BY e.ingest_lsn LIMIT ?"
+        params.append(int(limit))
+        return self.db.execute(sql, params).fetchall()
+
+    def build(
+        self,
+        *,
+        limit: int | None = None,
+        progress: int = _INDEX_COMMIT_EVERY,
+        fetch_batch: int = _INDEX_FETCH_BATCH,
+        pace_ms: int = _INDEX_PACE_MS,
+    ) -> dict[str, Any]:
+        """Index events that have no current-version entry. Resumable by design.
+
+        Pulls pending rows in small LIMIT batches (never the whole backlog at
+        once), commits every ``progress`` events so a SIGTERM from the cycle
+        deadline keeps most work, and sleeps ``pace_ms`` after each commit so
+        indexing yields the disks and CPU to everything else.
+        """
+        if progress < 1:
+            raise ValueError("progress must be positive")
+        if fetch_batch < 1:
+            raise ValueError("fetch_batch must be positive")
+        if pace_ms < 0:
+            raise ValueError("pace_ms must be non-negative")
+
+        done = missing = considered = 0
+        last_lsn: int | None = None
+        drained = False
+        target = limit  # None = drain; int = hard cap on rows considered
+        while target is None or considered < target:
+            room = fetch_batch if target is None else min(fetch_batch, target - considered)
+            rows = self._pending_batch(limit=room, after_lsn=last_lsn)
+            if not rows:
+                drained = target is None
+                break
+            for row in rows:
+                last_lsn = int(row["ingest_lsn"])
+                considered += 1
+                try:
+                    payload = self.store.get_bytes(row["raw_sha256"])
+                except FileNotFoundError:
+                    missing += 1
+                    continue
+                self._put_text(row["event_id"], project(payload))
+                self.db.execute(
+                    "INSERT OR REPLACE INTO search_indexed (event_id, indexed_at, version)"
+                    " VALUES (?,?,?)", (row["event_id"], now_iso(), INDEX_VERSION))
+                done += 1
+                if done % progress == 0:
+                    self.db.commit()
+                    print(f"  indexed {done}", flush=True)
+                    if pace_ms:
+                        time.sleep(pace_ms / 1000.0)
+                if target is not None and considered >= target:
+                    break
+            if len(rows) < room:
+                drained = target is None
+                break
         self.db.commit()
-        return {"indexed": done, "cas_missing": missing, "remaining": self.pending()}
+        # pending() is a full-table anti-join (~seconds on the live store).
+        # After a clean drain with no CAS misses, remaining is zero by construction.
+        if drained and missing == 0:
+            remaining = 0
+        else:
+            remaining = self.pending()
+        return {"indexed": done, "cas_missing": missing, "remaining": remaining}
 
     def _put_text(self, event_id: str, body: str) -> None:
         """Write one event's text to event_text and both indexes, in step.
@@ -659,9 +778,7 @@ class SearchIndex:
                             (rowid, event_id, body))
 
     def _put_compressed_row(self, event_id: str, body: str) -> int:
-        dict_id = int(self.db.execute(
-            "SELECT value FROM s1_meta WHERE key='search_dict_id'"
-        ).fetchone()[0])
+        dict_id = self._search_dict_id()
         dictionary = self._text_dictionary(dict_id)
         zbody, used_dict = _pack_text(body, dict_id, dictionary, self._text_codec())
         cursor = self.db.execute(
@@ -671,9 +788,7 @@ class SearchIndex:
         return int(cursor.lastrowid)
 
     def _update_compressed_row(self, rowid: int, body: str) -> None:
-        dict_id = int(self.db.execute(
-            "SELECT value FROM s1_meta WHERE key='search_dict_id'"
-        ).fetchone()[0])
+        dict_id = self._search_dict_id()
         dictionary = self._text_dictionary(dict_id)
         zbody, used_dict = _pack_text(body, dict_id, dictionary, self._text_codec())
         self.db.execute(
@@ -831,8 +946,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=None)
     parser.add_argument("--cas", default=None)
     sub = parser.add_subparsers(dest="command", required=True)
-    b = sub.add_parser("index", help="build/extend the search index (resumable)")
+    b = sub.add_parser(
+        "index",
+        help="build/extend the search index (resumable; low-priority by default)",
+    )
     b.add_argument("--limit", type=int, default=None)
+    b.add_argument(
+        "--commit-every",
+        type=int,
+        default=_INDEX_COMMIT_EVERY,
+        help=f"commit after this many indexed events (default {_INDEX_COMMIT_EVERY}; "
+             "smaller loses less work if the cycle deadline kills the step)",
+    )
+    b.add_argument(
+        "--fetch-batch",
+        type=int,
+        default=_INDEX_FETCH_BATCH,
+        help=f"pending-row SELECT batch size (default {_INDEX_FETCH_BATCH})",
+    )
+    b.add_argument(
+        "--pace-ms",
+        type=int,
+        default=_INDEX_PACE_MS,
+        help=f"sleep this many ms after each commit (default {_INDEX_PACE_MS}; "
+             "0 disables pacing)",
+    )
+    b.add_argument(
+        "--fast",
+        action="store_true",
+        help="skip nice(19), keep SQLite's normal caches, and set --pace-ms 0",
+    )
     q = sub.add_parser("search")
     q.add_argument("query")
     q.add_argument("--mode", choices=("fts", "trigram", "exact"), default="fts")
@@ -848,8 +991,18 @@ def main(argv: list[str] | None = None) -> int:
                    help="target layout (default: 2); use 3 to stage/resume zstd compression")
     m.add_argument("--ignore-old-index-errors", action="store_true",
                    help="proceed when quick_check blames only the indexes being replaced")
+    m.add_argument(
+        "--fast",
+        action="store_true",
+        help="skip nice(19) and keep SQLite's normal caches",
+    )
     v = sub.add_parser("vacuum", help="return free pages after migrate (explicit, slow)")
     v.add_argument("--into", default=None, help="write a compacted copy here instead")
+    v.add_argument(
+        "--fast",
+        action="store_true",
+        help="skip nice(19) and keep SQLite's normal caches",
+    )
 
     args = parser.parse_args(argv)
     kwargs: dict[str, Any] = {}
@@ -863,8 +1016,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"refusing to {args.command}: another writer may be live: "
                   + ", ".join(map(str, busy)), file=sys.stderr)
             return 2
+    heavy = _heavy_command(args)
+    fast = bool(getattr(args, "fast", False))
+    if heavy and not fast:
+        _lower_process_priority()
     store = EvidenceStore(**kwargs)
     try:
+        if heavy and not fast:
+            _apply_low_resource_pragmas(store.db, store.pack_db)
         _register_unzstd(store.db)
         return _run(args, store)
     except (LayoutError, FileExistsError) as exc:
@@ -887,7 +1046,13 @@ def _run(args: argparse.Namespace, store: EvidenceStore) -> int:
         return 0
     index = SearchIndex(store)
     if args.command == "index":
-        print(json.dumps(index.build(limit=args.limit), indent=2))
+        pace_ms = 0 if args.fast else args.pace_ms
+        print(json.dumps(index.build(
+            limit=args.limit,
+            progress=args.commit_every,
+            fetch_batch=args.fetch_batch,
+            pace_ms=pace_ms,
+        ), indent=2))
     elif args.command == "search":
         _print(index.search(args.query, mode=args.mode, limit=args.limit))
     elif args.command == "neighbours":
