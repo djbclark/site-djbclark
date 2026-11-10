@@ -161,6 +161,13 @@ class _Zstd:
             ctypes.c_void_p,
             ctypes.c_size_t,
         ]
+        lib.ZSTD_decompressStream.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        ]
+        lib.ZSTD_decompressStream.restype = ctypes.c_size_t
+        lib.ZSTD_DCtx_reset.argtypes = [ctypes.c_void_p, ctypes.c_int]
         lib.ZSTD_isError.argtypes = [ctypes.c_size_t]
         lib.ZSTD_isError.restype = ctypes.c_uint
         lib.ZSTD_getErrorName.argtypes = [ctypes.c_size_t]
@@ -250,6 +257,60 @@ class _Zstd:
             if size != raw_size:
                 raise ValueError(f"zstd size mismatch: expected {raw_size}, got {size}")
             return output.raw[:size]
+
+    def decompress_prefix(
+        self,
+        payload: bytes,
+        raw_size: int,
+        dictionary_id: int,
+        dictionary: bytes | None,
+        max_bytes: int,
+    ) -> bytes:
+        """Decompress only the first ``max_bytes`` of a packed object.
+
+        Stops the streaming decoder once the prefix is filled, so a multi-MB
+        payload used only for search projection does not allocate or fill its
+        full output buffer. ``max_bytes >= raw_size`` falls through to a full
+        decompress (and still checks the stored size).
+        """
+        if max_bytes < 0:
+            raise ValueError("max_bytes must be non-negative")
+        if max_bytes == 0:
+            return b""
+        if max_bytes >= raw_size:
+            return self.decompress(payload, raw_size, dictionary_id, dictionary)
+
+        class _InBuffer(ctypes.Structure):
+            _fields_ = [
+                ("src", ctypes.c_void_p),
+                ("size", ctypes.c_size_t),
+                ("pos", ctypes.c_size_t),
+            ]
+
+        class _OutBuffer(ctypes.Structure):
+            _fields_ = [
+                ("dst", ctypes.c_void_p),
+                ("size", ctypes.c_size_t),
+                ("pos", ctypes.c_size_t),
+            ]
+
+        with self._lock:
+            ctx = self._context(dictionary_id, dictionary, compress=False)
+            # ZSTD_reset_session_only = 1: reuse the loaded dictionary.
+            self._check(self.lib.ZSTD_DCtx_reset(ctx, 1))
+            out_buf = ctypes.create_string_buffer(max(max_bytes, 1))
+            src_buf = ctypes.create_string_buffer(payload)
+            incoming = _InBuffer(ctypes.cast(src_buf, ctypes.c_void_p), len(payload), 0)
+            outgoing = _OutBuffer(ctypes.cast(out_buf, ctypes.c_void_p), max_bytes, 0)
+            while outgoing.pos < max_bytes and incoming.pos < incoming.size:
+                self._check(
+                    self.lib.ZSTD_decompressStream(
+                        ctx, ctypes.byref(outgoing), ctypes.byref(incoming)
+                    )
+                )
+                if outgoing.pos == 0 and incoming.pos == incoming.size:
+                    break
+            return out_buf.raw[: outgoing.pos]
 
     def train(self, samples: list[bytes], max_size: int = DICT_MAX_SIZE) -> bytes:
         if len(samples) < 100:
@@ -519,6 +580,34 @@ class EvidenceStore:
             bytes(data), int(raw_size), int(dictionary_id), dictionary
         )
 
+    def _unpack_prefix(self, row: sqlite3.Row | tuple, max_bytes: int) -> bytes:
+        data, raw_size, codec, dictionary_id = row
+        raw_size = int(raw_size)
+        if max_bytes >= raw_size:
+            return self._unpack(row)
+        if codec == 0:
+            payload = bytes(data)
+            if len(payload) != raw_size:
+                raise ValueError(
+                    f"raw pack size mismatch: expected {raw_size}, got {len(payload)}"
+                )
+            return payload[:max_bytes]
+        if codec != 1:
+            raise ValueError(f"unknown CAS pack codec {codec}")
+        dictionary = None
+        if dictionary_id:
+            found = self.pack_db.execute(
+                "SELECT data FROM dictionary WHERE id=?", (dictionary_id,)
+            ).fetchone()
+            if found is None:
+                raise ValueError(
+                    f"CAS object refers to missing dictionary {dictionary_id}"
+                )
+            dictionary = bytes(found[0])
+        return self._codec().decompress_prefix(
+            bytes(data), raw_size, int(dictionary_id), dictionary, max_bytes
+        )
+
     def put_bytes(
         self,
         payload: bytes,
@@ -587,6 +676,33 @@ class EvidenceStore:
                     f"packed CAS object {digest} is corrupt: {exc}"
                 ) from exc
         return self.cas_path(digest).read_bytes()
+
+    def get_bytes_prefix(self, digest: str, max_bytes: int) -> bytes:
+        """First ``max_bytes`` of a CAS object, without materialising the rest.
+
+        Search projection only needs the head of each event. Packed zstd
+        objects stream-decompress until the prefix is full; loose files are
+        read with a bounded ``read``. ``max_bytes <= 0`` returns ``b""``.
+        """
+        if max_bytes <= 0:
+            return b""
+        try:
+            sha = bytes.fromhex(digest)
+        except ValueError:
+            raise ValueError(f"invalid CAS sha256: {digest!r}") from None
+        row = self.pack_db.execute(
+            "SELECT data, raw_size, codec, dict_id FROM obj WHERE sha=?", (sha,)
+        ).fetchone()
+        if row is not None:
+            try:
+                return self._unpack_prefix(row, max_bytes)
+            except (ValueError, RuntimeError) as exc:
+                raise SourceMutated(
+                    f"packed CAS object {digest} is corrupt: {exc}"
+                ) from exc
+        path = self.cas_path(digest)
+        with path.open("rb") as fh:
+            return fh.read(max_bytes)
 
     def _loose_files(self) -> Iterator[tuple[Path, str]]:
         """Yield valid digest-named files in deterministic directory order."""

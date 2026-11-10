@@ -105,7 +105,7 @@ class TestCycle(CycleTestCase):
         self.assertEqual((self.stubs / "s1_hermes.ran").read_text(),
                          "--db /nonexistent/s1.sqlite3 sink")
         self.assertEqual((self.stubs / "s1_search.ran").read_text(),
-                         "--db /nonexistent/s1.sqlite3 index")
+                         "--db /nonexistent/s1.sqlite3 index --limit 4000")
         # The lock is released and no longer names a pid.
         self.assertEqual((self.data / "ingest.lock").read_text(), "")
 

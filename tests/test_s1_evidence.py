@@ -297,6 +297,29 @@ class TestCasPack(S1TestCase):
         self.assertEqual(row["codec"], 1)
         self.assertEqual(self.store.raw_for(event_id), payload)
 
+    def test_get_bytes_prefix_matches_full_head_for_zstd(self) -> None:
+        payload = b'{"role":"assistant","content":"prefix-read evidence payload"}' * 400
+        event_id, _ = self.ingest(raw=payload, locator="prefix-zstd")
+        digest = self.store.get_event(event_id)["raw_sha256"]
+        row = self.store.pack_db.execute(
+            "SELECT codec, raw_size FROM obj WHERE sha=?", (bytes.fromhex(digest),)
+        ).fetchone()
+        self.assertEqual(row["codec"], 1)
+        self.assertGreater(row["raw_size"], 1024)
+        prefix = self.store.get_bytes_prefix(digest, 1024)
+        self.assertEqual(prefix, payload[:1024])
+        self.assertEqual(self.store.get_bytes_prefix(digest, 0), b"")
+        self.assertEqual(self.store.get_bytes_prefix(digest, row["raw_size"]), payload)
+
+    def test_get_bytes_prefix_reads_only_head_of_loose_file(self) -> None:
+        payload = b"L" * 50_000
+        digest = self.add_loose(payload)
+        self.store.pack_db.execute(
+            "DELETE FROM obj WHERE sha=?", (bytes.fromhex(digest),)
+        )
+        self.store.pack_db.commit()
+        self.assertEqual(self.store.get_bytes_prefix(digest, 128), payload[:128])
+
     def test_reads_packed_and_loose_objects_during_half_migration(self) -> None:
         packed_event, _ = self.ingest(raw=b"packed object", locator="packed")
         loose_payload = b"legacy loose object"

@@ -6,9 +6,9 @@
     <key>Label</key>
     <string>{{ site_agents_s1_ingest_label }}</string>
 
-    <!-- One cycle: s1_claude scan, s1_hermes sink, s1_search index, under
-         ingest.lock; skips while maintenance.lock exists. See the header of
-         s1_cycle.py. launchd never starts a second instance of a running job. -->
+    <!-- One cycle: producer adapters then s1_search index, under ingest.lock;
+         skips while maintenance.lock exists. See the header of s1_cycle.py.
+         launchd never starts a second instance of a running job. -->
     <key>ProgramArguments</key>
     <array>
         <string>{{ site_agents_s1_ingest_python }}</string>
@@ -19,8 +19,18 @@
         <string>{{ site_agents_s1_ingest_deadline_seconds }}</string>
     </array>
 
-    <key>StartInterval</key>
-    <integer>{{ site_agents_s1_ingest_interval_seconds }}</integer>
+    <!-- Clock-aligned every 15 minutes, phase starting at 00:07 (then :22,
+         :37, :52). Replaces StartInterval so kickoff is not "whenever the
+         agent was bootstrapped". -->
+    <key>StartCalendarInterval</key>
+    <array>
+{% for minute in site_agents_s1_ingest_calendar_minutes %}
+        <dict>
+            <key>Minute</key>
+            <integer>{{ minute }}</integer>
+        </dict>
+{% endfor %}
+    </array>
 
     <key>RunAtLoad</key>
     <true/>

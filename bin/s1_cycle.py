@@ -11,13 +11,15 @@ Steps, in order, each in its own process group with its exit status checked:
 
     claude-scan    s1_claude.py scan --quiet
     hermes-sink    s1_hermes.py sink
-    search-index   s1_search.py index
+    …              (producer adapters)
+    search-index   s1_search.py index --limit INDEX_LIMIT
 
 No step depends on another succeeding (the index covers whatever is in the
 store), so a failed step never skips the later ones; the cycle exits 1 if any
-failed. Each step appends one line with its counts (the numbers in its closing
-JSON) to `cycle.log` in the data directory, which is capped at 1 MiB with one
-rotated generation (`cycle.log.1`).
+failed. ``search-index`` is capped per cycle so a backlog cannot consume the
+whole deadline; the next cycle continues. Each step appends one line with its
+counts (the numbers in its closing JSON) to `cycle.log` in the data directory,
+which is capped at 1 MiB with one rotated generation (`cycle.log.1`).
 
 Lock protocol (everything that writes the store honours it):
 
@@ -70,6 +72,10 @@ KILL_GRACE_S = 10
 LOG_CAP_BYTES = 1 << 20
 EXIT_FAILED = 1
 EXIT_DEADLINE = 124
+# Cap per-cycle indexing so a backlog cannot burn the whole deadline (and so
+# catch-up spreads across the 15-minute calendar slots). Remaining pending
+# events wait for the next cycle; build() is resumable.
+INDEX_LIMIT = 4000
 
 STEPS: list[tuple[str, str, list[str]]] = [
     ("claude-scan", "s1_claude.py", ["scan", "--quiet"]),
@@ -87,7 +93,7 @@ STEPS: list[tuple[str, str, list[str]]] = [
     ("qwen-scan", "s1_qwen.py", ["scan"]),
     ("cursor-ide-scan", "s1_cursor_ide.py", ["scan"]),
     ("cursor-transcripts-scan", "s1_cursor_transcripts.py", ["scan"]),
-    ("search-index", "s1_search.py", ["index"]),
+    ("search-index", "s1_search.py", ["index", "--limit", str(INDEX_LIMIT)]),
 ]
 
 

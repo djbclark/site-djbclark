@@ -83,6 +83,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from s1_evidence import DEFAULT_DB, EvidenceStore, _Zstd, now_iso
 
 PROJECTION_CHARS = 8192
+# Bytes read from CAS when indexing. Generic JSON walk uses 2× the projection
+# window; ``_s1_search_text`` envelopes are already truncated at ingest but may
+# JSON-escape to ~6×, so fetch enough that project() rarely needs a full object.
+_PROJECTION_READ_BYTES = PROJECTION_CHARS * 6 + 64
 # Version of project(): bump it and build() re-indexes every event.
 INDEX_VERSION = 1
 # Version of the table layout (module docstring), stored in s1_meta.
@@ -719,7 +723,9 @@ class SearchIndex:
                 last_lsn = int(row["ingest_lsn"])
                 considered += 1
                 try:
-                    payload = self.store.get_bytes(row["raw_sha256"])
+                    payload = self.store.get_bytes_prefix(
+                        row["raw_sha256"], _PROJECTION_READ_BYTES
+                    )
                 except FileNotFoundError:
                     missing += 1
                     continue

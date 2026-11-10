@@ -70,11 +70,12 @@ site_agents_aiuse_config_toml: "{{ site_agents_aiuse_config_dir }}/config.toml"
 site_agents_aiuse_legacy_services_yaml: "{{ site_agents_aiuse_config_dir }}/services.yaml"
 
 # --- s1-ingest (S1 evidence store ingest cycle) ------------------------------
-# bin/s1_cycle.py every 15 minutes: s1_claude scan, s1_hermes sink, s1_search
-# index, under ~/.local/share/s1-evidence/ingest.lock, skipping while
-# maintenance.lock exists, killing its own steps after the deadline. Nothing
-# scheduled these one-shot adapters until 2026-10-12 and the store sat seven
-# weeks stale; fleet-watch pages on staleness while this plist is installed.
+# bin/s1_cycle.py on a 15-minute calendar phase starting at 00:07 (then :22,
+# :37, :52): producer adapters then s1_search index --limit, under
+# ~/.local/share/s1-evidence/ingest.lock, skipping while maintenance.lock
+# exists, killing its own steps after the deadline. Nothing scheduled these
+# one-shot adapters until 2026-10-12 and the store sat seven weeks stale;
+# fleet-watch pages on staleness while this plist is installed.
 # Off by default: false keeps the plist absent (and boots out a loaded job).
 site_agents_s1_ingest_enabled: false
 site_agents_s1_ingest_label: "com.{{ site_ns }}.s1-ingest"
@@ -85,7 +86,11 @@ site_agents_s1_ingest_bin_dir: "{{ role_path | dirname | dirname }}/bin"
 site_agents_s1_ingest_python: "{{ site_agents_homebrew_prefix }}/bin/python3"
 site_agents_s1_ingest_log: "{{ site_agents_state_dir }}/s1-ingest.log"
 site_agents_s1_ingest_error_log: "{{ site_agents_state_dir }}/s1-ingest.error.log"
+# Kept for docs/compat; the plist uses StartCalendarInterval (below), not
+# StartInterval.
 site_agents_s1_ingest_interval_seconds: 900
+# Minutes past each hour; 7 is the 12:07am phase anchor.
+site_agents_s1_ingest_calendar_minutes: [7, 22, 37, 52]
 site_agents_s1_ingest_deadline_seconds: 3000
 site_agents_s1_ingest_nice: 10
 
