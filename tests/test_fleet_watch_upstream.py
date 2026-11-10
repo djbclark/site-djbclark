@@ -422,19 +422,21 @@ class PaseoWatch(Harness):
             self.assertIn(text, brief)
         self.assertEqual((self.pstate()["pending"], self.dispatches()), ([], []))
 
-    def test_queued_or_accepted_receipts_keep_the_event_pending(self) -> None:
+    def test_queued_receipt_holds_pending_without_resending(self) -> None:
         self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.maintainer_replies()
-        for status in ("queued", "accepted", "timeout", "permission", "error"):
-            with self.subTest(status=status):
-                (self.home / "send_status").write_text(status)
-                self.assertEqual(self.fw().returncode, 0)
-                self.assertEqual(len(self.pstate()["pending"]), 1)
-                self.assertEqual(self.fw("--relay-test").returncode, 1)
+        (self.home / "send_status").write_text("queued")
+        self.assertEqual(self.fw(PASEO_AGENT_ID="source-id").returncode, 0)
+        self.assertEqual(len(self.pstate()["pending"]), 1)
+        self.assertIn("Please reply: ack source-id", "\n".join(self.relays()))
+        count = len(self.relays())
+        # Even a later sent receipt stub must not cause the original to be replayed.
         (self.home / "send_status").write_text("completed")
         self.assertEqual(self.fw().returncode, 0)
-        self.assertEqual(self.pstate()["pending"], [])
+        self.assertEqual(len(self.pstate()["pending"]), 1)
+        self.assertEqual(len(self.relays()), count)
+        self.assertEqual(self.dispatches(), [])
 
     def test_a_non_paseo_relay_target_is_skipped_and_never_sent(self) -> None:
         self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
@@ -447,14 +449,14 @@ class PaseoWatch(Harness):
         self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.maintainer_replies()
-        (self.home / "relay_rc").write_text("1")
+        (self.home / "send_status").write_text("permission")
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual(len(self.pings()), 2)
         self.assertIn("refused", self.pings()[1])
         self.assertEqual((self.dispatches(), len(self.pstate()["pending"])), ([], 1))
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual(len(self.pings()), 2)  # one ping per cause
-        (self.home / "relay_rc").write_text("0")
+        (self.home / "send_status").write_text("sent")
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual((len(self.relays()), self.pstate()["pending"]), (3, []))
 

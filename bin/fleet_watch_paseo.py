@@ -11,6 +11,19 @@ import tempfile
 from pathlib import Path
 
 TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{4,32})\Z")
+class PendingDelivery(ValueError):
+    """Send was accepted or its outcome is unknown; never automatically resend."""
+
+
+def save_receipt(path, status):
+    if path:
+        record = Path(path)
+        with tempfile.NamedTemporaryFile(mode="w", dir=record.parent, delete=False) as stream:
+            json.dump({"status": status}, stream)
+            temporary = stream.name
+        os.replace(temporary, record)
+
+
 STEER_PROVIDERS = {"claude", "codex", "opencode", "omp", "pi"}
 
 
@@ -21,12 +34,23 @@ def call(cli, *args, timeout=20):
     return json.loads(result.stdout)
 
 
-def send(target, text, label="fleet-watch"):
+def send(target, text, label="fleet-watch", receipt_file=None):
     """Return zero only for a successful CLI call with a sent/completed receipt.
 
     Keep agent identity when called manually: queued agent sends require a peer
     ack and must never clear fleet-watch's pending work as delivered.
     """
+    if receipt_file and Path(receipt_file).exists():
+        try:
+            previous = json.loads(Path(receipt_file).read_text())
+        except (OSError, ValueError) as error:
+            raise PendingDelivery("unreadable send receipt; reconciliation required") from error
+        if not isinstance(previous, dict):
+            raise PendingDelivery("invalid send receipt; reconciliation required")
+        if previous.get("status") in {"sent", "completed"}:
+            return 0
+        if previous.get("status") != "failed":
+            raise PendingDelivery("existing send pending; inspect receipt/peer ack before resolving")
     if not TARGET.fullmatch(target):
         raise ValueError("target must be a Paseo id or unique shortId prefix")
     cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
@@ -52,16 +76,36 @@ def send(target, text, label="fleet-watch"):
         provider = str(info.get("Provider") or "").split("/")[0]
         if not (steer[0] is True if steer else provider in STEER_PROVIDERS):
             raise ValueError("target's running provider cannot safely steer")
+    source = os.environ.get("PASEO_AGENT_ID", "").strip()
+    if source:
+        text += f"\n\nPlease reply: ack {source}"
     # A file keeps notice text out of process listings and option parsing.
     with tempfile.TemporaryDirectory(prefix="fleet-watch-send-") as directory:
         prompt = Path(directory) / "notice.txt"
         prompt.write_text(f"[{label}] {text}", encoding="utf-8")
-        receipt = call(cli, "send", aid, "--prompt-file", str(prompt), "--behavior", "steer",
-                       "--no-wait", "--json", timeout=60)
+        # Write ahead before handing a prompt to Paseo. A crash leaves sending,
+        # which requires manual receipt/ack reconciliation and is never replayed.
+        save_receipt(receipt_file, "sending")
+        try:
+            receipt = call(cli, "send", aid, "--prompt-file", str(prompt), "--behavior", "steer",
+                           "--no-wait", "--json", timeout=60)
+        except (subprocess.TimeoutExpired, OSError, ValueError) as error:
+            raise PendingDelivery(f"send outcome unknown: {error}") from error
     status = receipt.get("status") if isinstance(receipt, dict) else None
-    if status not in {"sent", "completed"}:
-        raise ValueError(f"not delivered: Paseo receipt status {status!r}; queued/accepted requires peer ack")
-    return 0
+    if status in {"sent", "completed"}:
+        try:
+            save_receipt(receipt_file, status)
+        except OSError as error:
+            raise PendingDelivery("delivery receipt could not be persisted; do not replay") from error
+        return 0
+    if status in {"permission", "error"}:
+        save_receipt(receipt_file, "failed")
+        raise ValueError(f"not delivered: Paseo receipt status {status!r}")
+    try:
+        save_receipt(receipt_file, "accepted" if status in {"queued", "accepted"} else "unknown")
+    except OSError as error:
+        raise PendingDelivery("pending receipt could not be persisted; do not replay") from error
+    raise PendingDelivery(f"not delivered: Paseo receipt status {status!r}; hold pending for receipt/peer ack")
 
 
 def main():
@@ -69,9 +113,13 @@ def main():
     parser.add_argument("target")
     parser.add_argument("text")
     parser.add_argument("--label", default="fleet-watch", choices=("fleet-watch", "fleet-watch-phantom"))
+    parser.add_argument("--receipt-file", help="per-event write-ahead record; pending outcomes require manual reconciliation")
     args = parser.parse_args()
     try:
-        return send(args.target, args.text, args.label)
+        return send(args.target, args.text, args.label, args.receipt_file)
+    except PendingDelivery as error:
+        print(f"fleet-watch Paseo send pending: {error}", file=sys.stderr)
+        return 5
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"fleet-watch Paseo send: {error}", file=sys.stderr)
         return 1

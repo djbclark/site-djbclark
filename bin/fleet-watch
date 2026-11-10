@@ -208,6 +208,8 @@ UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
 # the CLI with FLEET_WATCH_PASEO (PASEO_CLI remains a fallback). Delivery means
 # JSON status sent/completed; queued/accepted never clears pending work. Manual
 # agent calls retain PASEO_AGENT_ID and need a peer ack for queued messages.
+# Per-event receipt JSON holds accepted/unknown sends for manual reconciliation;
+# those events stay pending without resend or worker fallback.
 # Existing .relay registrations, logs and phantom write-ahead records stay valid.
 FLEET_PASEO_SEND="$REPO_ROOT/bin/fleet_watch_paseo.py"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
@@ -1025,7 +1027,9 @@ upr_send_line() {
   # Native Paseo for UUIDs and unique shortId prefixes alike. CLI exit zero is
   # not delivery: the helper requires a sent/completed JSON receipt.
   local target=$1 text=$2 out rc
-  out=$(runb 120 "$PY3" "$FLEET_PASEO_SEND" "$target" "$text" 2>&1)
+  local receipt_args=()
+  [[ -z "${3:-}" ]] || receipt_args=(--receipt-file "$3")
+  out=$(runb 120 "$PY3" "$FLEET_PASEO_SEND" "$target" "$text" "${receipt_args[@]}" 2>&1)
   rc=$?
   ((rc == 0)) || ulog "relay to $target: not delivered: $out"
   return "$rc"
@@ -1074,11 +1078,11 @@ upr_relay() {
     return 0
   fi
   upr_relay_brief "$ev" "$(upr_draft "$repo" "$n")" >"$brief"
-  out=$(upr_send_line "$target" "$msg" 2>&1)
+  out=$(upr_send_line "$target" "$msg" "$STATE_DIR/$UPR_BASE-send-$(jq -r '.key | @uri' <<<"$ev").json" 2>&1)
   rc=$?
   ((rc == 0)) || ulog "relay $name to $target: not delivered"
   ulog "relay $name to $target rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
-  ((rc == 0))
+  return "$rc"
 }
 
 upr_dispatch() {
@@ -1105,6 +1109,12 @@ upr_dispatch() {
     # The session reads every comment on the item, as a worker would: one relay covers them all.
     STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
     return 0
+  else
+    rc=$?
+    if ((rc == 5 || rc == 124 || rc == 137)); then
+      ulog "$line: send pending/unknown; held without resend or worker fallback; reconcile receipt/peer ack"
+      return 0
+    fi
   fi
   if [[ "$UPR_FALLBACK" == ping ]]; then
     # No worker for this profile: the detection ping already told the operator; the event stays
@@ -1596,6 +1606,8 @@ def send_relay(seat, text, limit):
     """Only sent/completed receipts count; keep the episode retry bookkeeping."""
     result = subprocess.run([sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"],
                             capture_output=True, text=True, timeout=limit)
+    if result.returncode == 5:
+        return "pending"
     return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
 
 
@@ -1655,11 +1667,14 @@ def attempt(state, note, channel, send, label):
         return
     except OSError as error:
         reason = clean(error, 80)
+    if reason == "pending":
+        log(f"{label}: {channel} accepted/unknown, held pending without resend; reconcile receipt/peer ack")
+        return    # retain the persisted write-ahead sending state
     note[channel] = reason is None
     if reason:
         note[f"{channel}_fails"] = note.get(f"{channel}_fails", 0) + 1
         log(f"{label}: {channel} failed: {reason}")
-    persist(state)    # "sending" alone already counts as sent, so a failed save here replays nothing
+    persist(state)    # "sending" alone already suppresses replay, so a failed save here replays nothing
 
 
 def would(agent_id, sid, name, provider, updated, signals, ping_text, holders, by_id):
