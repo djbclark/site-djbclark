@@ -31,6 +31,12 @@ def run(text: str, *args: str) -> int:
         return probe.main(["mobileassetd", *args])
 
 
+def top_named(name: str, *cpus: float) -> str:
+    return "\n".join(
+        f"PID    COMMAND          %CPU\n100  {name}  {c:.1f} " for c in cpus
+    ) + "\n"
+
+
 class ProcProbeTests(unittest.TestCase):
     def test_under_limit_is_healthy_and_first_sample_ignored(self) -> None:
         self.assertEqual(run(top(99.0, 10.0, 20.0)), 0)
@@ -43,6 +49,21 @@ class ProcProbeTests(unittest.TestCase):
 
     def test_absent_process_counts_as_zero(self) -> None:
         self.assertEqual(run("PID    COMMAND          %CPU\n" * 3), 0)
+
+    def test_truncated_top_command_matches_full_name(self) -> None:
+        text = top_named("ImageThumbnailEx", 0.0, 80.0, 90.0)
+        done = subprocess.CompletedProcess([], 0, stdout=text)
+        with mock.patch.object(probe.subprocess, "run", return_value=done):
+            self.assertEqual(
+                probe.main(["ImageThumbnailExtension", "--max", "50"]), 1
+            )
+
+    def test_short_name_is_not_a_prefix_of_longer_top_key(self) -> None:
+        # "mds" must not pick up "mds_stores" via the truncation rule.
+        text = top_named("mds_stores", 0.0, 90.0, 90.0)
+        done = subprocess.CompletedProcess([], 0, stdout=text)
+        with mock.patch.object(probe.subprocess, "run", return_value=done):
+            self.assertEqual(probe.main(["mds", "--max", "50"]), 0)
 
 
 if __name__ == "__main__":

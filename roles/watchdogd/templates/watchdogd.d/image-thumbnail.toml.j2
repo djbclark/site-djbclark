@@ -1,0 +1,37 @@
+# Force-quit ImageThumbnailExtension when it stays busy.
+# 2026-11-10: djbclark saw a long high-CPU run and asked to automate recovery
+# when a spike lasts longer than is reasonable. Web reports (CR3 HDR PQ, some
+# DNGs, corrupt/huge images, Finder icon-preview on a bad folder) show the
+# appex looping for hours; a normal folder browse settles in well under a
+# minute. Probe averages top over ~12 s; three busy passes in a row (~3 min
+# at interval 60) force-quits it (launchd/XPC respawns on the next thumbnail
+# request). At most one kill per 10 min and six per 6 h of health, then one
+# BUDGET EXHAUSTED alert. Not banned/frozen: brief spikes while browsing
+# images are normal. Rendered by roles/watchdogd; edit the role.
+name = "image-thumbnail"
+interval_s = 60
+
+[probe]
+# Exit 0 under the limit, 1 at or over it, 75 top unusable (skip).
+# NAME may be the full process name; proc_cpu_probe matches top's truncated
+# COMMAND (ImageThumbnailEx).
+kind = "command"
+command = ["{{ watchdogd_repo_bin }}/proc_cpu_probe.py", "ImageThumbnailExtension", "--max", "50"]
+skip_exit_codes = [75]
+timeout_s = 60
+
+[policy]
+down_before_action = 3
+grace_s = 0
+action = "command"
+command = ["/usr/bin/killall", "ImageThumbnailExtension"]
+timeout_s = 20
+min_action_interval_s = 600
+max_restarts = 6
+healthy_reset_s = 21600
+# The load this heals is the stress that would otherwise defer it.
+ignore_stress = true
+
+[notify]
+down = "{name} DOWN: ImageThumbnailExtension busy ({detail}); force-quitting"
+recovered = "{name} RECOVERED: {detail}"
