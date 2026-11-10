@@ -588,7 +588,28 @@ __opencode_tui() {
 }
 agy()          { __agent_default_flag agy          --dangerously-skip-permissions "$@"; }
 claude()       { __agent_default_flag claude       --dangerously-skip-permissions "$@"; }
-cursor-agent() { __agent_default_flag cursor-agent --yolo                         "$@"; }
+# cursor-agent: YOLO for sessions, and always start on Auto unless the caller
+# already picked a model or is resuming (last /model choice persists in
+# ~/.cursor/cli-config.json and would otherwise stick across launches).
+cursor-agent() {
+  case "${1:-}" in
+    help|--help|-h|--version|-v|login|logout|mcp|plugin|worker|status|whoami|models|team|bedrock|about|update|create-chat|generate-rule|rule|install-shell-integration|uninstall-shell-integration|ls|persist)
+      command cursor-agent "$@" ;;
+    *)
+      local -a args=("$@")
+      local a have_yolo=0 have_model=0
+      for a in "$@"; do
+        case $a in
+          --yolo|--force|--auto-review) have_yolo=1 ;;
+          --model|--model=*|--resume|--resume=*|--continue) have_model=1 ;;
+        esac
+      done
+      (( have_yolo )) || args=(--yolo "${args[@]}")
+      (( have_model )) || args=(--model auto "${args[@]}")
+      command cursor-agent "${args[@]}"
+      ;;
+  esac
+}
 # OpenCode v2 (npm @opencode/cli, ~/.local/bin; 2026-10-13): --auto is a root
 # flag for the TUI and a `run` flag, and must follow `run` -- before any
 # subcommand it makes the CLI exit 1. `mini` takes no --auto.
