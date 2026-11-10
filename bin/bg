@@ -133,6 +133,62 @@
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
 export PATH="/opt/homebrew/bin:$PATH"
+
+# Linux fallbacks for the macOS/Homebrew names this script calls. When the g-names
+# and shlock are on PATH (the Mac), these functions are not defined and behaviour
+# is unchanged. Without them, a slot wait used to loop forever: gseq/shlock failed
+# and gdate never advanced the wait budget.
+if ! command -v gdate >/dev/null 2>&1; then gdate() { date "$@"; }; fi
+if ! command -v gseq >/dev/null 2>&1; then gseq() { seq "$@"; }; fi
+if ! command -v gawk >/dev/null 2>&1; then gawk() { awk "$@"; }; fi
+if ! command -v gtr >/dev/null 2>&1; then gtr() { tr "$@"; }; fi
+if ! command -v greadlink >/dev/null 2>&1; then greadlink() { readlink "$@"; }; fi
+if ! command -v ghead >/dev/null 2>&1; then ghead() { head "$@"; }; fi
+if ! command -v gtimeout >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  gtimeout() { timeout "$@"; }
+fi
+if ! command -v sysctl >/dev/null 2>&1; then
+  sysctl() {
+    [ "$1" = "-n" ] || return 1
+    case "$2" in
+      hw.ncpu)
+        nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1\n'
+        ;;
+      vm.loadavg)
+        # macOS prints "{ 1.23 1.23 1.23 }"; bg's gawk uses field 2 as the 1-minute load.
+        set -- $(cat /proc/loadavg 2>/dev/null)
+        printf '{ %s %s %s }\n' "${1:-0}" "${2:-0}" "${3:-0}"
+        ;;
+      *) return 1 ;;
+    esac
+  }
+fi
+if ! command -v shlock >/dev/null 2>&1; then
+  bg_lock_fd=8
+  # shlock -f FILE -p PID: lock FILE, writing PID into it (for "held by pid" messages).
+  # flock is held on a inherited fd so a killed command still frees the slot.
+  shlock() {
+    local file="" pid="" fd
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -f) file=$2; shift 2 ;;
+        -p) pid=$2; shift 2 ;;
+        *) return 1 ;;
+      esac
+    done
+    [ -n "$file" ] && [ -n "$pid" ] || return 1
+    command -v flock >/dev/null 2>&1 || return 1
+    fd=$bg_lock_fd
+    bg_lock_fd=$((bg_lock_fd + 1))
+    eval "exec $fd>>\"$file\"" || return 1
+    if flock -n "$fd" 2>/dev/null; then
+      printf '%s\n' "$pid" > "$file"
+      return 0
+    fi
+    eval "exec $fd>&-"
+    return 1
+  }
+fi
 # bg has no flags of its own: everything after the name is the command. Agents
 # sometimes invent `--name`/`--log`/`--` (from other wrappers); those become
 # `taskpolicy -c utility --name …` and macOS taskpolicy errors with
@@ -714,4 +770,8 @@ for v in OMP_NUM_THREADS OPENBLAS_NUM_THREADS MKL_NUM_THREADS NUMEXPR_NUM_THREAD
 done
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 : > "$bg_mark" 2>/dev/null   # the run starts now (see the header): the watcher registers its deadline on seeing this
-exec taskpolicy -c utility "$@"
+if command -v taskpolicy >/dev/null 2>&1; then
+  exec taskpolicy -c utility "$@"
+else
+  exec "$@"
+fi

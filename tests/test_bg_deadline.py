@@ -8,12 +8,20 @@ BASH_ENV file makes `sleep` cost 0.2 s at most.
 """
 
 import os
+import sys
 import shlex
 import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="deadline --holder records are asserted against macOS bg/deadline wiring",
+)
 
 LOAD_WATCH = """#!/bin/bash
 case "$1" in

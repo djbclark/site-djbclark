@@ -13,6 +13,28 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "skills/diskfree/scripts/bigteam-prune.py"
 
+def _dns_is_blackholed() -> bool:
+    """True when public names resolve into 198.18.0.0/15 (this box's stub DNS) or fail.
+
+    Those cases cannot tell a genuine network remote from a resolution failure.
+    """
+    try:
+        infos = socket.getaddrinfo("example.org", 80, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return True
+    return any(
+        host.startswith("198.18.") or host.startswith("198.19.")
+        for info in infos
+        for host in (info[4][0],)
+    )
+
+
+_SKIP_BLACKHOLED_DNS = pytest.mark.skipif(
+    _dns_is_blackholed(),
+    reason="public DNS is blackholed (198.18.0.0/15); cannot tell a network remote from a resolution failure",
+)
+
+
 
 def _env():
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -468,6 +490,7 @@ def test_file_url_with_foreign_host_or_helper_transport_cannot_be_resolved_and_i
 
 
 @pytest.mark.parametrize("url", ["https://github.com/o/r.git", "git@github.com:o/r.git", "ssh://git@github.com/o/r.git"])
+@_SKIP_BLACKHOLED_DNS
 def test_ordinary_network_remotes_do_not_keep_a_clone(prune, tmp_path, world, url, monkeypatch):
     c = make_clone(tmp_path, world)
     monkeypatch.setattr(prune, "ssh_real_host", lambda h, *a, **k: h)
@@ -865,6 +888,7 @@ def test_git_ssh_env_override_keeps_an_ssh_remote(prune, tmp_path, world, monkey
     assert prune.local_remote_inside_root(c)
 
 
+@_SKIP_BLACKHOLED_DNS
 def test_https_remote_is_not_affected_by_the_ssh_override(prune, tmp_path, world, monkeypatch):
     c = make_clone(tmp_path, world)
     monkeypatch.setattr(prune, "resolve_addrs", lambda h: [(socket.AF_INET, ("203.0.113.9", 0))])
@@ -968,6 +992,7 @@ def test_tag_of_a_tag_on_an_unpushed_commit_keeps_the_clone(prune, tmp_path, wor
     ("remote.web.proxy", "http://127.0.0.1:3128"),
     ("core.gitProxy", "nc"),
 ])
+@_SKIP_BLACKHOLED_DNS
 def test_http_address_or_proxy_override_keeps_a_network_remote(prune, tmp_path, world, monkeypatch, key, val):
     c = make_clone(tmp_path, world)
     monkeypatch.setattr(prune, "resolve_addrs", lambda h: [(socket.AF_INET, ("203.0.113.9", 0))])
@@ -987,6 +1012,7 @@ def test_proxy_environment_keeps_a_network_remote(prune, tmp_path, world, monkey
     assert prune.local_remote_inside_root(c)
 
 
+@_SKIP_BLACKHOLED_DNS
 def test_unrelated_http_config_does_not_keep_a_network_remote(prune, tmp_path, world, monkeypatch):
     c = make_clone(tmp_path, world)
     monkeypatch.setattr(prune, "resolve_addrs", lambda h: [(socket.AF_INET, ("203.0.113.9", 0))])

@@ -1595,6 +1595,7 @@ def test_curl_transport_failures_map_to_what_sent_then_dropped_expects(deco, tmp
 # ---------------------------------------------------------------- install copies the repo's plist
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="LaunchAgent install uses launchctl")
 def test_install_copies_the_repo_plist_whose_program_is_this_sites_net_watch_tick(nw, tmp_path, monkeypatch):
     import plistlib
 

@@ -2,5 +2,8 @@
 
 ## Unreleased
 
+- `bin/bg`: when `gdate`, `gseq` and `shlock` are missing, fall back to `date`, `seq` and `flock` (and to `awk`/`tr`/`readlink`/`timeout`, `sysctl`-compatible load/CPU reads, and a plain `exec` when `taskpolicy` is absent) so a slot wait no longer hangs on Linux. macOS behaviour is unchanged when the Homebrew names are on PATH. (2026-11-10)
+- tests: skip macOS-only cases off Darwin (TCC cleanup scripts that call `/opt/homebrew/bin/gmktemp`, litellm's kqueue SIGKILL reaper tests, and the net-watch LaunchAgent install); skip `sqlite-vacuum` tests when `lsof` is missing; skip bigteam-prune network-remote cases when public DNS is a 198.18.0.0/15 blackhole; skip fleet-watch s1 tests when `gdate` is missing; update `deploy_ops_release` fixtures to the current `site-*-djbclark` repository names.
+
 - Added the skills, tools and tests moved here with their history from djbclark-ade's slim-down (E1, 2026-11-06): 14 skills under `skills/` (aws-rules, barnowl, bottom-config, coderabbit-feeder, diskfree, firecrawl, gmail-search, greptile, ovhcloud-api, report, setup-modern-cli, teach, terminus-kira, todo), `bench/`, `bin/app-tamer-ab`, `bin/heavy-shim`, `bin/codium-ai`, `bin/change-hermes`, `bin/change-hermes-ssh-gate`, `claude/commands/teach.md` and four test files; `skills/` is a `skill-everywhere` root again (`skills/README.md`). (branch slim-intake/2026-11)
 - Added scheduled relay acknowledgement sweeps and one operator ping per overdue expectation: pages only open overdue rows from `--pending --json` (nothing when that list is unavailable), sanitized and clipped, under one 90 s deadline and a non-blocking lock; a ping killed by its timeout is not retried; a reused ID pages again after its earlier expectation closed. (#236)

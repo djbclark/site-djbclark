@@ -24,6 +24,12 @@ SCHEMA = (
 FDA = "kTCCServiceSystemPolicyAllFiles"
 
 
+_MACOS_CLEANUP = unittest.skipUnless(
+    sys.platform == "darwin",
+    "cleanup scripts call /opt/homebrew/bin/gmktemp",
+)
+
+
 class TccAuditTest(unittest.TestCase):
     def make_db(self, rows):
         d = tempfile.mkdtemp()
@@ -87,6 +93,7 @@ class TccAuditTest(unittest.TestCase):
         self.assertIn("/bin/resigned", full)
         self.assertIn("com.gone.App", full)
 
+    @_MACOS_CLEANUP
     def test_cleanup_script_handles_apostrophes(self):
         db = self.make_db([(FDA, "/it's/gone", 1, 2, b"x")])
         with mock.patch.object(tcc, "csreq_text", lambda b: "req"), \
@@ -111,6 +118,7 @@ class TccAuditTest(unittest.TestCase):
         finally:
             con.close()
 
+    @_MACOS_CLEANUP
     def test_hostile_client_strings_cannot_run_commands(self):
         marker = Path(tempfile.mkdtemp()) / "pwned"
         evil = f"/x/$(touch {marker})/`touch {marker}`/'q\"\ntouch {marker}\n#"
@@ -127,6 +135,7 @@ class TccAuditTest(unittest.TestCase):
         self.assertFalse(marker.exists(), "hostile client string executed a command")
         self.assertEqual(self.db_clients(db), ["/keep"])
 
+    @_MACOS_CLEANUP
     def test_delete_matches_full_primary_key(self):
         db = self.make_db([(FDA, "/gone", 1, 2, b"x")])
         con = sqlite3.connect(db)
@@ -146,6 +155,7 @@ class TccAuditTest(unittest.TestCase):
         con.close()
         self.assertEqual(left, [("com.other.app",)])
 
+    @_MACOS_CLEANUP
     def test_row_changed_since_audit_is_not_deleted(self):
         db = self.make_db([(FDA, "/gone", 1, 2, b"x")])
         with mock.patch.object(tcc, "csreq_text", lambda b: "req"), \
@@ -161,6 +171,7 @@ class TccAuditTest(unittest.TestCase):
         self.assertEqual(self.db_clients(db), ["/gone"])
         self.assertIn("deleted 0 of 1", r.stdout)
 
+    @_MACOS_CLEANUP
     def test_failed_delete_rolls_back_everything_and_backup_is_valid(self):
         db = self.make_db([(FDA, "/gone1", 1, 2, b"x"), (FDA, "/gone2", 1, 2, b"x")])
         con = sqlite3.connect(db)

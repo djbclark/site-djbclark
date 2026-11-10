@@ -8,6 +8,7 @@ FLEET_WATCH_S1_NOW. Nothing is sent and the live store is never opened.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,10 @@ def iso(epoch: int) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+@unittest.skipUnless(
+    shutil.which("gdate"),
+    "fleet-watch s1 calls gdate (Homebrew GNU date)",
+)
 class FleetWatchS1(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

@@ -116,6 +116,10 @@ class LogpipeSupervisionTests(unittest.TestCase):
             f"{wrapper.returncode} after {time.time() - t0:.1f}s"
         )
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "SIGKILL reaping uses kqueue, which is macOS-only",
+    )
     def test_sigkill_to_wrapper_reaper_kills_child_group(self) -> None:
         wrapper, child, grand = self.start("normal")
         t0 = time.time()
@@ -146,6 +150,10 @@ class LogpipeSupervisionTests(unittest.TestCase):
             f"\n  SIGTERM-ignoring child: SIGKILLed, wrapper exited after {elapsed:.1f}s"
         )
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "SIGKILL reaping uses kqueue, which is macOS-only",
+    )
     def test_sigkill_wrapper_with_child_ignoring_sigterm(self) -> None:
         wrapper, child, grand = self.start("ignore-term")
         t0 = time.time()
