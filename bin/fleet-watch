@@ -94,7 +94,7 @@
 # upstream-pr.relay, one line: a Paseo agent id or a hex shortId prefix; since 2026-11-06 a herdr
 # pane or session id is logged and skipped), each pending event is first handed to that session instead: a brief file
 # ($STATE_DIR/<name>-relay.md: what to do, then the event, its text fenced as untrusted data) and
-# one relay.py line naming the brief. The relayed line carries the item, event and login only,
+# one native Paseo notice naming the brief. The relayed line carries the item, event and login only,
 # never the third party's text, since it lands in the session as a typed message. A merge or a
 # close is relayed as a notice too. A refused relay (session ended, blocked on a question, a draft
 # in its input box) pings once and falls back to the worker dispatch above. The check runs at
@@ -204,9 +204,14 @@ UPSTREAM_TIMEOUT="${FLEET_WATCH_UPSTREAM_TIMEOUT:-3600}"
 UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
 UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
 # Per-profile fields (repos, ignore list, dir, prompt, chain, state/lock/relay files) are set by upr_profile.
-UPSTREAM_RELAY="${FLEET_WATCH_RELAY:-$HOME/src/djbclark-ade/skills/session-finder/relay.py}"    # the E3 shim over `paseo send` (slim-down, 2026-11-06)
-# relay.py refuses to send without a sender id (exit 4, 2026-10-25): a launchd job has none, so declare the label.
-export RELAY_SENDER_NAME="${RELAY_SENDER_NAME:-fleet-watch}"
+# Native sender shared by upstream and phantom notices (2026-11-10). Override
+# the CLI with FLEET_WATCH_PASEO (PASEO_CLI remains a fallback). Delivery means
+# JSON status sent/completed; queued/accepted never clears pending work. Manual
+# agent calls retain PASEO_AGENT_ID and need a peer ack for queued messages.
+# Per-event receipt JSON holds accepted/unknown sends for manual reconciliation;
+# those events stay pending without resend or worker fallback.
+# Existing .relay registrations, logs and phantom write-ahead records stay valid.
+FLEET_PASEO_SEND="$REPO_ROOT/bin/fleet_watch_paseo.py"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
 UPSTREAM_AIUSE="${FLEET_WATCH_AIUSE:-$HOME/.local/bin/aiuse}"
 UPSTREAM_DISPATCH="${FLEET_WATCH_DISPATCH:-$HOME/src/djbclark-ade/bin/acp-dispatch}"
@@ -1014,31 +1019,20 @@ upr_event() {
 }
 
 upr_paseo_target() {
-  # 0 when $1 can name a Paseo agent: a uuid or a hex shortId prefix of 4+ characters (what relay.py accepts).
+  # 0 when $1 can name a Paseo agent: a uuid or a hex shortId prefix of 4+ characters (Paseo addresses).
   [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ || "$1" =~ ^[0-9a-f]{4,32}$ ]]
 }
 
 upr_send_line() {
-  # $1 target, $2 text: one line into a session that is NOT this process. A Paseo agent id (a uuid)
-  # goes through `paseo send --behavior steer` with this process's own agent id scrubbed (relay.py
-  # refuses a caller that is the target, which a self-test from the registered session always is);
-  # a shortId prefix through relay.py (the Paseo-only shim); anything else is skipped. 0 only when the send is delivered.
-  local target=$1 text=$2 cli rc
-  if [[ "$target" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-    cli=${PASEO_CLI:-$(command -v paseo || true)}
-    [[ -n "$cli" ]] || return 1
-    runb 60 env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD "$cli" send "$target" --no-wait --behavior steer "$text" >/dev/null 2>&1
-  elif upr_paseo_target "$target"; then
-    # relay.py is the E3 shim over `paseo send` (2026-11-06): exit 0 delivered, 2 not delivered (queued,
-    # timeout, permission, error), 1 paseo failed, 3 unresolvable target, 64 usage. Only 0 is success.
-    runb 60 "$UPSTREAM_RELAY" "$target" "$text" >/dev/null 2>&1
-    rc=$?
-    ((rc == 0)) || ulog "relay to $target: not delivered (relay.py rc=$rc)"
-    return "$rc"
-  else
-    ulog "relay target $target is not a Paseo agent id or shortId prefix (herdr panes and session ids retired), skipped"
-    return 1
-  fi
+  # Native Paseo for UUIDs and unique shortId prefixes alike. CLI exit zero is
+  # not delivery: the helper requires a sent/completed JSON receipt.
+  local target=$1 text=$2 out rc
+  local receipt_args=()
+  [[ -z "${3:-}" ]] || receipt_args=(--receipt-file "$3")
+  out=$(runb 120 "$PY3" "$FLEET_PASEO_SEND" "$target" "$text" "${receipt_args[@]}" 2>&1)
+  rc=$?
+  ((rc == 0)) || ulog "relay to $target: not delivered: $out"
+  return "$rc"
 }
 
 upr_relay_brief() {
@@ -1064,7 +1058,7 @@ EOF
 
 upr_relay() {
   # $1 = event JSON (a pending entry's shape): hand it to the session registered in
-  # UPSTREAM_RELAY_FILE. 0 when relay.py delivered it, rc 0 (--dry-run: would try); 1 when no
+  # UPSTREAM_RELAY_FILE. 0 when Paseo reports sent/completed (--dry-run: would try); 1 when no
   # session is registered or the relay was refused. The relayed line names the item, the event
   # and the login, never the event text: that is third-party words, kept fenced in the brief.
   local ev=$1 target repo n type event login url name brief msg out rc
@@ -1084,11 +1078,11 @@ upr_relay() {
     return 0
   fi
   upr_relay_brief "$ev" "$(upr_draft "$repo" "$n")" >"$brief"
-  out=$(runb 180 "$UPSTREAM_RELAY" "$target" "$msg" 2>&1)    # rc 0 delivered, 2 not delivered: see upr_send_line
+  out=$(upr_send_line "$target" "$msg" "$STATE_DIR/$UPR_BASE-send-$(jq -r '.key | @uri' <<<"$ev").json" 2>&1)
   rc=$?
   ((rc == 0)) || ulog "relay $name to $target: not delivered"
   ulog "relay $name to $target rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
-  ((rc == 0))
+  return "$rc"
 }
 
 upr_dispatch() {
@@ -1115,6 +1109,12 @@ upr_dispatch() {
     # The session reads every comment on the item, as a worker would: one relay covers them all.
     STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
     return 0
+  else
+    rc=$?
+    if ((rc == 5 || rc == 124 || rc == 137)); then
+      ulog "$line: send pending/unknown; held without resend or worker fallback; reconcile receipt/peer ack"
+      return 0
+    fi
   fi
   if [[ "$UPR_FALLBACK" == ping ]]; then
     # No worker for this profile: the detection ping already told the operator; the event stays
@@ -1323,10 +1323,10 @@ upstream_watch() {
 # A hit needs the same signal basis (2c, 2a+2b or 2a+2c), the same UpdatedAt, on two runs FLEET_WATCH_PHANTOM_GAP seconds
 # (default 270, one 300 s launchd tick apart) or more apart (the candidate is $STATE_DIR/phantom.json). Per agent and episode (id +
 # UpdatedAt) it sends one `hermes-ping "paseo: <name> <id8> phantom-running since <UpdatedAt> (<provider>); recovery: G"` and one
-# plain relay.py notice (no --steer, RELAY_SENDER_NAME=fleet-watch-phantom, RELAY_BUSY_ALERT_S=0) to the owning seat: the
+# native Paseo notice (explicit safe steer, JSON receipt checked) to the owning seat: the
 # source-agent-id of the agent's last paseo-system user message, else FLEET_WATCH_PHANTOM_LEAD (default 7c58015b). The relay is
 # held back, never steered in: no relay to a seat that is itself phantom (the ping alone covers it), none to a seat that is no
-# longer a live Paseo agent (the lead gets it), and a working Claude seat (relay.py would steer it) is retried on later runs
+# longer a live Paseo agent (the lead gets it), and a working Claude seat (a send would steer it) is retried on later runs
 # until it is idle. Each send is written ahead: the episode is saved as "sending" before the ping or relay runs, so a crash or
 # a timeout never replays it (an unknown outcome counts as sent); a known failure is retried up to 3 times.
 # `fleet-watch phantom [--dry-run]` runs just this check and prints one line per running agent with its signals;
@@ -1337,7 +1337,7 @@ phantom_watch() {
   # $1 = check (scheduled, quiet), manual (prints) or dry (prints, sends and writes nothing).
   local mode=${1:-check}
   [[ "$PHANTOM" == on || "$mode" != check ]] || return 0
-  "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$UPSTREAM_RELAY" <<'PY' || true
+  "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$FLEET_PASEO_SEND" <<'PY' || true
 import datetime
 import fcntl
 import json
@@ -1372,7 +1372,7 @@ OC_SERVICE = os.environ.get("FLEET_WATCH_PHANTOM_OC_SERVICE", str(home / ".local
 MAX_TRIES = 3
 REFUSAL = (b"reported running but no active run was cancelled", b"cancellation was not acknowledged")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-STEERED = ("claude",)    # providers relay.py steers into while they work (fleet.PASEO_STEER_DEFAULT): a steer replaces the running turn
+STEERED = ("claude",)    # providers the phantom monitor holds back from while they work (fleet.PASEO_STEER_DEFAULT): a steer replaces the running turn
 SOURCE = re.compile(r'source-agent-id=\\?"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\?"')
 
 
@@ -1603,9 +1603,11 @@ def send_ping(text, limit):
 
 
 def send_relay(seat, text, limit):
-    """RELAY_BUSY_ALERT_S=0: relay.py's own 30-minute 'target still working' ping and notice would be a second alert for one episode."""
-    result = subprocess.run([relay, seat, text], capture_output=True, text=True, timeout=limit,
-                            env=dict(os.environ, RELAY_SENDER_NAME="fleet-watch-phantom", RELAY_BUSY_ALERT_S="0"))
+    """Only sent/completed receipts count; keep the episode retry bookkeeping."""
+    result = subprocess.run([sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"],
+                            capture_output=True, text=True, timeout=limit)
+    if result.returncode == 5:
+        return "pending"
     return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
 
 
@@ -1622,7 +1624,7 @@ def relay_parts(agent_id, sid, name, provider, updated, signals):
 
 
 def choose_seat(agent_id, owner, holders, by_id, failed):
-    """(seat, action). action is send, wait (a working Claude seat: relay.py steers a running Claude target, which replaces its
+    """(seat, action). action is send, wait (a working Claude seat: a send steers a running Claude target, which replaces its
     turn, so retry on a later run) or skip (no safe seat). Never the stuck agent itself, never a seat that is itself phantom
     (holders), never an owner that is no longer a live Paseo agent (archived or gone) or whose relay already failed: the lead then."""
     lead = next((i for i in by_id if i.startswith(LEAD)), LEAD)    # LEAD may be a short id; the listing and holders hold full ones
@@ -1665,11 +1667,14 @@ def attempt(state, note, channel, send, label):
         return
     except OSError as error:
         reason = clean(error, 80)
+    if reason == "pending":
+        log(f"{label}: {channel} accepted/unknown, held pending without resend; reconcile receipt/peer ack")
+        return    # retain the persisted write-ahead sending state
     note[channel] = reason is None
     if reason:
         note[f"{channel}_fails"] = note.get(f"{channel}_fails", 0) + 1
         log(f"{label}: {channel} failed: {reason}")
-    persist(state)    # "sending" alone already counts as sent, so a failed save here replays nothing
+    persist(state)    # "sending" alone already suppresses replay, so a failed save here replays nothing
 
 
 def would(agent_id, sid, name, provider, updated, signals, ping_text, holders, by_id):

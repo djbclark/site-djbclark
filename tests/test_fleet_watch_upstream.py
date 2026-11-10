@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -46,10 +47,26 @@ rc=$(cat "$HOME/ping_rc" 2>/dev/null || echo 0)
 exit "$rc"
 """
 
-RELAY_STUB = """#!/bin/bash
-echo "$*" >> "$HOME/relay.log"
-echo "${RELAY_SENDER_NAME-unset}" >> "$HOME/relay.sender"
-exit "$(cat "$HOME/relay_rc" 2>/dev/null || echo 0)"
+PASEO_STUB = r"""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+home = Path(os.environ["HOME"])
+aid = "5e55a100-0000-0000-0000-000000000000"
+args = sys.argv[1:]
+if args[0] == "ls":
+    print(json.dumps([{"id": aid, "shortId": "5e55a1"}]))
+elif args[:2] == ["agent", "inspect"]:
+    print(json.dumps({"Id": aid, "Archived": False, "PendingPermissions": [], "Status": "idle"}))
+elif args[0] == "send":
+    text = Path(args[args.index("--prompt-file") + 1]).read_text()
+    with (home / "relay.log").open("a") as stream:
+        stream.write("5e55a1 " + text + "\n")
+    rc = int((home / "relay_rc").read_text()) if (home / "relay_rc").exists() else 0
+    status = (home / "send_status").read_text() if (home / "send_status").exists() else "sent"
+    print(json.dumps({"status": status}))
+    sys.exit(rc)
+else:
+    sys.exit(2)
 """
 
 REPO_NAME = "cfengine/core"
@@ -73,9 +90,13 @@ class Harness(unittest.TestCase):
             d.mkdir(parents=True)
         for path, text in ((self.home / ".local" / "bin" / "hermes-ping", PING_STUB),
                            (self.bin / "gh", GH_STUB), (self.bin / "acp-dispatch", DISPATCH_STUB),
-                           (self.bin / "aiuse", AIUSE_STUB), (self.bin / "relay.py", RELAY_STUB)):
+                           (self.bin / "aiuse", AIUSE_STUB), (self.bin / "paseo", PASEO_STUB)):
             path.write_text(text)
             path.chmod(0o755)
+        # fleet-watch uses GNU-prefixed tools on macOS; Linux coreutils are equivalent.
+        for tool in ("date", "head", "tail", "sed", "tr", "cut", "grep", "wc", "mktemp", "sort", "stat"):
+            executable = shutil.which("g" + tool) or shutil.which(tool)
+            (self.bin / ("g" + tool)).symlink_to(executable)
         self.state = self.home / ".local" / "state" / "fleet-watch"
         self.bigteam = root / "bigteam"
         self.set("user", {"login": "djbclark"})
@@ -113,7 +134,7 @@ class Harness(unittest.TestCase):
                     FLEET_WATCH_GH=str(self.bin / "gh"), FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
                     FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"), ACP_DISPATCH_STATE=str(self.bigteam),
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_UPSTREAM_CHAIN=str(self.home / "chain"),
-                    FLEET_WATCH_RELAY=str(self.bin / "relay.py"), FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT))
+                    FLEET_WATCH_PASEO=str(self.bin / "paseo"), PATH=str(self.bin) + os.pathsep + os.environ["PATH"], FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT))
         full.pop("RELAY_SENDER_NAME", None)
         full.update(env)
         return subprocess.run(["bash", str(FLEET_WATCH), "upstream", *args], env=full,
@@ -299,6 +320,7 @@ class UpstreamWatch(Harness):
         (self.state / "upstream-pr.last").write_text("")
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
                     FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"),
+                    PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
         subprocess.run(["bash", str(FLEET_WATCH), "check"], env=full, capture_output=True, text=True, timeout=120)
@@ -391,7 +413,7 @@ class PaseoWatch(Harness):
         self.assertEqual(self.fw().returncode, 0)
         (line,) = self.relays()
         self.assertTrue(line.startswith(
-            "5e55a1 fleet-watch upstream: https://github.com/getpaseo/paseo/discussions/7828 comment by maintainer. Brief: "), line)
+            "5e55a1 [fleet-watch] fleet-watch upstream: https://github.com/getpaseo/paseo/discussions/7828 comment by maintainer. Brief: "), line)
         self.assertNotIn("feature request", line)
         brief = next(self.state.glob("upstream-paseo-paseo-7828-*-relay.md")).read_text()
         for text in ("untrusted data", "feature request", "fleet-watch upstream --profile paseo --relay-to",
@@ -400,23 +422,21 @@ class PaseoWatch(Harness):
             self.assertIn(text, brief)
         self.assertEqual((self.pstate()["pending"], self.dispatches()), ([], []))
 
-    def test_relays_declare_a_sender_label_because_relay_py_refuses_without_one(self) -> None:
-        self.assertEqual(self.fw("--relay-to", "5e55a1", "paseowatch session").returncode, 0)
+    def test_queued_receipt_holds_pending_without_resending(self) -> None:
+        self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.maintainer_replies()
+        (self.home / "send_status").write_text("queued")
+        self.assertEqual(self.fw(PASEO_AGENT_ID="source-id").returncode, 0)
+        self.assertEqual(len(self.pstate()["pending"]), 1)
+        self.assertIn("Please reply: ack source-id", "\n".join(self.relays()))
+        count = len(self.relays())
+        # Even a later sent receipt stub must not cause the original to be replayed.
+        (self.home / "send_status").write_text("completed")
         self.assertEqual(self.fw().returncode, 0)
-        self.assertEqual((self.home / "relay.sender").read_text().split(), ["fleet-watch"])
-
-    def test_no_relay_passes_the_retired_no_ack_flag(self) -> None:
-        # The E3 relay.py shim (2026-11-06) exits 64 on --no-ack; rc 0 is delivered, rc 2 not delivered.
-        self.assertEqual(self.fw("--relay-to", "5e55a1", "paseowatch session").returncode, 0)
-        self.assertEqual(self.fw("--relay-test").returncode, 0)
-        self.seed()
-        self.maintainer_replies()
-        self.assertEqual(self.fw().returncode, 0)
-        lines = self.relays()
-        self.assertGreaterEqual(len(lines), 2)
-        self.assertFalse(any("--no-ack" in line for line in lines), lines)
+        self.assertEqual(len(self.pstate()["pending"]), 1)
+        self.assertEqual(len(self.relays()), count)
+        self.assertEqual(self.dispatches(), [])
 
     def test_a_non_paseo_relay_target_is_skipped_and_never_sent(self) -> None:
         self.assertEqual(self.fw("--relay-to", "sess-1").returncode, 0)
@@ -429,14 +449,14 @@ class PaseoWatch(Harness):
         self.assertEqual(self.fw("--relay-to", "5e55a1").returncode, 0)
         self.seed()
         self.maintainer_replies()
-        (self.home / "relay_rc").write_text("1")
+        (self.home / "send_status").write_text("permission")
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual(len(self.pings()), 2)
         self.assertIn("refused", self.pings()[1])
         self.assertEqual((self.dispatches(), len(self.pstate()["pending"])), ([], 1))
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual(len(self.pings()), 2)  # one ping per cause
-        (self.home / "relay_rc").write_text("0")
+        (self.home / "send_status").write_text("sent")
         self.assertEqual(self.fw().returncode, 0)
         self.assertEqual((len(self.relays()), self.pstate()["pending"]), (3, []))
 
@@ -473,6 +493,7 @@ class PaseoWatch(Harness):
                                    note("9100", T0, "getpaseo/paseo", "Discussion", 7828)])
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
                     FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"),
+                    PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
         subprocess.run(["bash", str(FLEET_WATCH), "check"], env=full, capture_output=True, text=True, timeout=120)
