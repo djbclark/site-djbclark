@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for fleet-watch's upstream-PR watcher (`fleet-watch upstream`).
 
-Runs the real script with HOME pointed at a temp dir and stubs for gh, aiuse, acp-dispatch and
+Runs the real script with HOME pointed at a temp dir and stubs for gh, aiuse, paseo and
 hermes-ping: gh answers from fixture files, the others record their arguments. Nothing is sent,
 no worker is dispatched and the live GitHub account is never contacted.
 """
@@ -53,10 +53,23 @@ from pathlib import Path
 home = Path(os.environ["HOME"])
 aid = "5e55a100-0000-0000-0000-000000000000"
 args = sys.argv[1:]
+if not args:
+    sys.exit(2)
 if args[0] == "ls":
-    print(json.dumps([{"id": aid, "shortId": "5e55a1"}]))
+    print(json.dumps([{"id": aid, "shortId": "5e55a1", "status": "running"}]))
 elif args[:2] == ["agent", "inspect"]:
     print(json.dumps({"Id": aid, "Archived": False, "PendingPermissions": [], "Status": "idle"}))
+elif args[:2] == ["workspace", "ls"]:
+    print(json.dumps([{"id": "ws-1", "cwd": str(home)}]))
+elif args[0] == "run":
+    with (home / "dispatch.log").open("a") as stream:
+        stream.write(" ".join(a.replace("\n", "\\n") for a in args) + "\n")
+    rc = int((home / "dispatch_rc").read_text()) if (home / "dispatch_rc").exists() else 0
+    if rc != 0:
+        sys.stderr.write(f"paseo run failed with rc={rc}\n")
+        sys.exit(rc)
+    print(json.dumps({"agentId": aid, "status": "running"}))
+    sys.exit(0)
 elif args[0] == "send":
     text = Path(args[args.index("--prompt-file") + 1]).read_text()
     with (home / "relay.log").open("a") as stream:
@@ -132,7 +145,7 @@ class Harness(unittest.TestCase):
     def run_fw(self, *args: str, **env: str) -> subprocess.CompletedProcess:
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix),
                     FLEET_WATCH_GH=str(self.bin / "gh"), FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
-                    FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"), ACP_DISPATCH_STATE=str(self.bigteam),
+                    ACP_DISPATCH_STATE=str(self.bigteam),
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_UPSTREAM_CHAIN=str(self.home / "chain"),
                     FLEET_WATCH_PASEO=str(self.bin / "paseo"), PATH=str(self.bin) + os.pathsep + os.environ["PATH"], FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT))
         full.pop("RELAY_SENDER_NAME", None)
@@ -181,7 +194,7 @@ class UpstreamWatch(Harness):
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertEqual(self.pings(), ["cfengine-core: cfengine/core#6412 review (commented) by larsewi: Please use StringContains()"])
         (line,) = self.dispatches()
-        for word in ("claude", "--model sonnet", "--task upstream-pr", "--detach", "--no-wait", "-C "):
+        for word in ("run", "--provider", "claude/sonnet", "--mode", "bypassPermissions", "ade.task=upstream-pr", "--no-wait", "--cwd"):
             self.assertIn(word, line)
         self.assertEqual(self.pending(), [])
         brief = next(self.state.glob("upstream-pr-core-6412-*-input.md")).read_text()
@@ -193,6 +206,15 @@ class UpstreamWatch(Harness):
         # Same thread state again: nothing new.
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertEqual((len(self.pings()), len(self.dispatches())), (1, 1))
+
+    def test_legacy_fleet_watch_dispatch_backward_compat(self) -> None:
+        self.seed()
+        self.new_review()
+        self.assertEqual(self.run_fw(FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch")).returncode, 0)
+        (line,) = self.dispatches()
+        for word in ("claude", "--model sonnet", "--task upstream-pr", "--detach", "--no-wait", "-C "):
+            self.assertIn(word, line)
+        self.assertEqual(self.pending(), [])
 
     def test_operator_activity_alone_is_not_an_event(self) -> None:
         self.seed()
@@ -319,7 +341,7 @@ class UpstreamWatch(Harness):
         # `check` runs every other check; a stamp younger than the interval skips the pass.
         (self.state / "upstream-pr.last").write_text("")
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
-                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"),
+                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
                     PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
@@ -492,7 +514,7 @@ class PaseoWatch(Harness):
         self.set("notifications", [note("9001", T0, REPO_NAME, "PullRequest", 6412),
                                    note("9100", T0, "getpaseo/paseo", "Discussion", 7828)])
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
-                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"),
+                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
                     PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))

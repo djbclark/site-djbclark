@@ -124,3 +124,104 @@ class PendingSend(unittest.TestCase):
                 namespace["attempt"]({}, note, "relay", lambda limit: namespace["send_relay"](AID, "notice", limit), "test")
                 self.assertEqual(note["relay"], "sending")
                 self.assertNotIn("relay_fails", note)
+
+
+class NativeDispatch(unittest.TestCase):
+    def test_dispatch_invokes_paseo_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            brief = Path(td) / "brief.md"
+            brief.write_text("Review PR #123")
+            workdir = Path(td) / "work"
+            workdir.mkdir()
+
+            calls = []
+
+            def run_mock(argv, **kwargs):
+                calls.append(argv)
+                if argv[1:3] == ["workspace", "ls"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps([{"id": "ws-test", "cwd": str(workdir)}]), "")
+                elif argv[1] == "run":
+                    return subprocess.CompletedProcess(argv, 0, json.dumps({"agentId": "test-agent-id"}), "")
+                return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+            with patch.dict(os.environ, {"PASEO_AGENT_ID": "lead-456"}), \
+                 patch.object(SENDER, "check_headroom"), \
+                 patch.object(SENDER.subprocess, "run", side_effect=run_mock):
+                rc = SENDER.dispatch(
+                    name="worker-1",
+                    brief=str(brief),
+                    cwd=str(workdir),
+                    provider="claude/sonnet",
+                    mode="bypassPermissions",
+                    kind="judgment",
+                    task="upstream-pr",
+                    min_headroom=0,
+                )
+                self.assertEqual(rc, 0)
+
+            self.assertEqual(len(calls), 2)
+            run_cmd = calls[1]
+            self.assertEqual(run_cmd[1], "run")
+            self.assertIn("--provider", run_cmd)
+            self.assertEqual(run_cmd[run_cmd.index("--provider") + 1], "claude/sonnet")
+            self.assertIn("--mode", run_cmd)
+            self.assertEqual(run_cmd[run_cmd.index("--mode") + 1], "bypassPermissions")
+            self.assertIn("--title", run_cmd)
+            self.assertEqual(run_cmd[run_cmd.index("--title") + 1], "worker-1")
+            self.assertIn("--no-wait", run_cmd)
+            self.assertIn("--json", run_cmd)
+            self.assertIn("--workspace", run_cmd)
+            self.assertEqual(run_cmd[run_cmd.index("--workspace") + 1], "ws-test")
+            self.assertIn("ade.kind=judgment", run_cmd)
+            self.assertIn("ade.name=worker-1", run_cmd)
+            self.assertIn("ade.task=upstream-pr", run_cmd)
+            self.assertIn("ade.lead=lead-456", run_cmd)
+            self.assertIn("ade.via=fleet-watch", run_cmd)
+            self.assertEqual(run_cmd[-1], "Review PR #123")
+
+    def test_dispatch_missing_brief_raises(self):
+        with self.assertRaises(ValueError):
+            SENDER.dispatch(name="w", brief="/nonexistent/brief.md", min_headroom=0)
+
+    def test_dispatch_failure_raises(self):
+        with tempfile.TemporaryDirectory() as td:
+            brief = Path(td) / "brief.md"
+            brief.write_text("brief")
+            fail_proc = subprocess.CompletedProcess(["paseo", "run"], 1, "", "unknown error")
+            with patch.object(SENDER, "check_headroom"), \
+                 patch.object(SENDER, "resolve_workspace", return_value="ws-1"), \
+                 patch.object(SENDER.subprocess, "run", return_value=fail_proc):
+                with self.assertRaises(ValueError):
+                    SENDER.dispatch(name="w", brief=str(brief), min_headroom=0)
+
+    def test_check_headroom_raises_when_insufficient(self):
+        aiuse_data = {"available": [
+            {"provider": "claude", "pool_family": "default", "usable_now": True, "headroom_percent": 5.0}
+        ]}
+        proc = subprocess.CompletedProcess(["aiuse"], 0, json.dumps(aiuse_data), "")
+        with patch.object(SENDER.shutil, "which", return_value="/bin/aiuse"), \
+             patch("pathlib.Path.exists", return_value=True), \
+             patch.object(SENDER.subprocess, "run", return_value=proc):
+            with self.assertRaises(SENDER.QuotaUnavailable):
+                SENDER.check_headroom(min_headroom=10.0)
+
+
+class AgentCounting(unittest.TestCase):
+    def test_count_running_agents(self):
+        rows = [
+            {"id": "a1", "status": "running"},
+            {"id": "a2", "status": "idle"},
+            {"id": "a3", "status": "running"},
+            {"id": "a4", "status": "archived"},
+        ]
+        with patch.object(SENDER, "call", return_value=rows):
+            self.assertEqual(SENDER.count_running_agents(), 2)
+
+    def test_count_running_agents_handles_dict_envelope(self):
+        data = {"agents": [{"id": "a1", "status": "running"}]}
+        with patch.object(SENDER, "call", return_value=data):
+            self.assertEqual(SENDER.count_running_agents(), 1)
+
+    def test_count_running_agents_failure_returns_zero(self):
+        with patch.object(SENDER, "call", side_effect=OSError("CLI not found")):
+            self.assertEqual(SENDER.count_running_agents(), 0)

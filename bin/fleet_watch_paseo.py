@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""Native Paseo delivery for fleet-watch's notices; no ADE relay dependency."""
+"""Native Paseo delivery and dispatch for fleet-watch; no ADE relay/acp-dispatch dependency."""
 
 import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{4,32})\Z")
+
+
 class PendingDelivery(ValueError):
     """Send was accepted or its outcome is unknown; never automatically resend."""
+
+
+class QuotaUnavailable(ValueError):
+    """No pool available with required headroom."""
 
 
 def save_receipt(path, status):
@@ -32,6 +39,126 @@ def call(cli, *args, timeout=20):
     if result.returncode:
         raise ValueError(f"Paseo {args[0]} exited {result.returncode}")
     return json.loads(result.stdout)
+
+
+def count_running_agents(cli=None):
+    cli = cli or os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
+    try:
+        rows = call(cli, "ls", "--json", timeout=20)
+        if isinstance(rows, dict):
+            rows = rows.get("agents")
+        if isinstance(rows, list):
+            return sum(1 for a in rows if isinstance(a, dict) and a.get("status") == "running")
+    except Exception:
+        pass
+    return 0
+
+
+def check_headroom(min_headroom=10.0):
+    if min_headroom <= 0:
+        return
+    aiuse_bin = os.environ.get("FLEET_WATCH_AIUSE") or shutil.which("aiuse") or str(Path.home() / ".local/bin/aiuse")
+    if not aiuse_bin or not Path(aiuse_bin).exists():
+        return
+    try:
+        res = subprocess.run([aiuse_bin, "--available", "--json"], capture_output=True, text=True, timeout=20)
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            pools = data.get("available") if isinstance(data, dict) else []
+            has_pool = any(
+                isinstance(p, dict) and p.get("provider") == "claude"
+                and p.get("pool_family") != "fable" and p.get("usable_now") is True
+                and (p.get("headroom_percent") or 0) >= min_headroom
+                for p in pools
+            )
+            if not has_pool and len(pools) > 0:
+                raise QuotaUnavailable(f"no Claude pool with {min_headroom}% headroom left")
+        elif res.returncode == 3:
+            raise QuotaUnavailable("aiuse: nothing usable")
+    except QuotaUnavailable:
+        raise
+    except Exception:
+        pass
+
+
+def resolve_workspace(cli, target_dir, explicit=None):
+    target_real = os.path.realpath(os.path.expanduser(target_dir))
+    ws_id = explicit or os.environ.get("FLEET_WATCH_PASEO_WORKSPACE") or os.environ.get("PASEO_WORKSPACE_ID")
+    try:
+        rows = call(cli, "workspace", "ls", "--json", timeout=20)
+        if isinstance(rows, dict):
+            rows = rows.get("workspaces")
+        if isinstance(rows, list):
+            if ws_id:
+                for w in rows:
+                    if isinstance(w, dict) and (w.get("workspaceId") == ws_id or w.get("id") == ws_id):
+                        return ws_id
+            for w in rows:
+                if isinstance(w, dict):
+                    w_cwd = w.get("cwd")
+                    if w_cwd and os.path.realpath(os.path.expanduser(w_cwd)) == target_real:
+                        wid = w.get("workspaceId") or w.get("id")
+                        if wid:
+                            return wid
+    except Exception:
+        pass
+    return ws_id
+
+
+def dispatch(name, brief, cwd=".", provider="claude/sonnet", mode="bypassPermissions",
+             kind="judgment", task="upstream-pr", timeout=3600, min_headroom=10.0,
+             lead=None, workspace=None):
+    """Launch a detached worker agent via native `paseo run` with YOLO mode and standard labels."""
+    check_headroom(min_headroom)
+    brief_path = Path(brief).expanduser()
+    if not brief_path.is_file():
+        raise ValueError(f"brief file does not exist: {brief}")
+    prompt_text = brief_path.read_text(encoding="utf-8")
+
+    cwd_path = Path(cwd).expanduser().resolve()
+    os.makedirs(cwd_path, exist_ok=True)
+
+    cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
+    ws = resolve_workspace(cli, str(cwd_path), workspace)
+
+    lead_id = lead or os.environ.get("PASEO_AGENT_ID", "").strip() or "main"
+    labels = [
+        f"ade.kind={kind}",
+        f"ade.name={name}",
+        f"ade.task={task}",
+        f"ade.lead={lead_id}",
+        "ade.via=fleet-watch",
+    ]
+
+    argv = [
+        cli, "run",
+        "--provider", provider,
+        "--mode", mode,
+        "--title", name,
+        "--cwd", str(cwd_path),
+        "--no-wait",
+        "--json",
+    ]
+    if ws:
+        argv.extend(["--workspace", ws])
+    else:
+        argv.extend(["--new-workspace", "local"])
+    for lb in labels:
+        argv.extend(["--label", lb])
+    argv.extend(["--", prompt_text])
+
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise ValueError(f"paseo run exited {result.returncode}: {(result.stderr or result.stdout).strip()}")
+    try:
+        data = json.loads(result.stdout) if result.stdout.strip() else {}
+    except ValueError:
+        data = {}
+    aid = data.get("agentId") if isinstance(data, dict) else None
+    if not aid and isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        aid = data[0].get("agentId") or data[0].get("id")
+    print(f"detached\t{name}\tagent: {aid or 'ok'}")
+    return 0
 
 
 def send(target, text, label="fleet-watch", receipt_file=None):
@@ -109,20 +236,62 @@ def send(target, text, label="fleet-watch", receipt_file=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("target")
-    parser.add_argument("text")
-    parser.add_argument("--label", default="fleet-watch", choices=("fleet-watch", "fleet-watch-phantom"))
-    parser.add_argument("--receipt-file", help="per-event write-ahead record; pending outcomes require manual reconciliation")
-    args = parser.parse_args()
-    try:
-        return send(args.target, args.text, args.label, args.receipt_file)
-    except PendingDelivery as error:
-        print(f"fleet-watch Paseo send pending: {error}", file=sys.stderr)
-        return 5
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
-        print(f"fleet-watch Paseo send: {error}", file=sys.stderr)
-        return 1
+    if len(sys.argv) > 1 and sys.argv[1] == "dispatch":
+        parser = argparse.ArgumentParser(description="Native Paseo dispatch for fleet-watch workers")
+        parser.add_argument("dispatch")  # absorbs "dispatch"
+        parser.add_argument("--name", required=True, help="Agent/slice name")
+        parser.add_argument("--brief", required=True, help="Path to brief markdown file")
+        parser.add_argument("--cwd", default=".", help="Working directory for the agent")
+        parser.add_argument("--provider", default="claude/sonnet", help="Provider/model (default: claude/sonnet)")
+        parser.add_argument("--mode", default="bypassPermissions", help="Provider mode (default: bypassPermissions)")
+        parser.add_argument("--kind", default="judgment", help="Task kind label (default: judgment)")
+        parser.add_argument("--task", default="upstream-pr", help="Task name label (default: upstream-pr)")
+        parser.add_argument("--timeout", type=int, default=3600, help="Task timeout in seconds")
+        parser.add_argument("--min-headroom", type=float, default=10.0, help="Minimum quota headroom percent")
+        parser.add_argument("--lead", help="Lead agent id (defaults to PASEO_AGENT_ID or main)")
+        parser.add_argument("--workspace", help="Explicit Paseo workspace id")
+        args = parser.parse_args()
+        try:
+            return dispatch(
+                name=args.name,
+                brief=args.brief,
+                cwd=args.cwd,
+                provider=args.provider,
+                mode=args.mode,
+                kind=args.kind,
+                task=args.task,
+                timeout=args.timeout,
+                min_headroom=args.min_headroom,
+                lead=args.lead,
+                workspace=args.workspace,
+            )
+        except QuotaUnavailable as error:
+            print(f"fleet-watch Paseo dispatch no quota: {error}", file=sys.stderr)
+            return 5
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            print(f"fleet-watch Paseo dispatch failed: {error}", file=sys.stderr)
+            return 1
+    elif len(sys.argv) > 1 and sys.argv[1] in ("agents", "count-agents"):
+        print(count_running_agents())
+        return 0
+    else:
+        # Default: send mode
+        parser = argparse.ArgumentParser(description=__doc__)
+        if len(sys.argv) > 1 and sys.argv[1] == "send":
+            parser.add_argument("send")
+        parser.add_argument("target")
+        parser.add_argument("text")
+        parser.add_argument("--label", default="fleet-watch", choices=("fleet-watch", "fleet-watch-phantom"))
+        parser.add_argument("--receipt-file", help="per-event write-ahead record; pending outcomes require manual reconciliation")
+        args = parser.parse_args()
+        try:
+            return send(args.target, args.text, args.label, args.receipt_file)
+        except PendingDelivery as error:
+            print(f"fleet-watch Paseo send pending: {error}", file=sys.stderr)
+            return 5
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            print(f"fleet-watch Paseo send: {error}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

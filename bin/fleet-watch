@@ -82,12 +82,12 @@
 # failed ping leaves the thread untouched, so the next run retries. (2) The event is queued as
 # pending (a merge or a close is only pinged: there is nothing to prepare), and each run tries to
 # dispatch ONE detached claude worker for the oldest pending event
-# (acp-dispatch --detach --no-wait, task upstream-pr, brief = prompts/upstream-pr-review.md plus
+# (paseo run --no-wait, task upstream-pr, brief = prompts/upstream-pr-review.md plus
 # the event; the worker prepares a reply and stops, the prompt says never to post). The dispatch
 # waits, event kept pending and one ping per cause, when: a session is already on it (the lock
 # file $STATE_DIR/upstream-pr.lock names a live pid, or a bigteam job record of task upstream-pr is
 # open: no `closed`, no `finished`, no done marker, and younger than its timeout + 15 min), or no
-# Claude pool has FLEET_WATCH_UPSTREAM_MIN_HEADROOM percent left (aiuse --available; acp-dispatch
+# Claude pool has FLEET_WATCH_UPSTREAM_MIN_HEADROOM percent left (aiuse --available; native dispatch
 # also refuses, exit 5). A dispatch that fails 3 times, or an event pending over 24 h, is dropped
 # with a ping. Relay (2026-10-23, djbclark: "start work on that immediately, using /bigteam"): when
 # a session has registered with `fleet-watch upstream --relay-to <session>` ($STATE_DIR/
@@ -212,9 +212,10 @@ UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
 # those events stay pending without resend or worker fallback.
 # Existing .relay registrations, logs and phantom write-ahead records stay valid.
 FLEET_PASEO_SEND="$REPO_ROOT/bin/fleet_watch_paseo.py"
+FLEET_PASEO_DISPATCH="$REPO_ROOT/bin/fleet_watch_paseo.py"
 UPSTREAM_GH="${FLEET_WATCH_GH:-gh}"
 UPSTREAM_AIUSE="${FLEET_WATCH_AIUSE:-$HOME/.local/bin/aiuse}"
-UPSTREAM_DISPATCH="${FLEET_WATCH_DISPATCH:-$HOME/src/djbclark-ade/bin/acp-dispatch}"
+UPSTREAM_DISPATCH="${FLEET_WATCH_DISPATCH:-}"
 BIGTEAM_ROOT="${ACP_DISPATCH_STATE:-$HOME/.local/state/bigteam}"
 UPSTREAM_DRY=0
 # Socket probes run under system python3, never bash's /dev/tcp: macOS SIGKILLs
@@ -1140,21 +1141,29 @@ upr_dispatch() {
   draft=$(upr_draft "$repo" "$n")
   brief="$STATE_DIR/$name-input.md"
   if ((UPSTREAM_DRY)); then
-    echo "would dispatch: acp-dispatch claude --model sonnet --kind judgment --name $name -f $brief -C $UPSTREAM_DIR --task $UPR_BASE --timeout $UPSTREAM_TIMEOUT --detach --no-wait (brief = $UPSTREAM_PROMPT + event; reply draft $draft)"
+    echo "would dispatch: paseo run --provider claude/sonnet --mode bypassPermissions --title $name --cwd $UPSTREAM_DIR --label ade.name=$name --label ade.kind=judgment --label ade.task=$UPR_BASE --label ade.lead=${PASEO_AGENT_ID:-main} --no-wait (brief = $UPSTREAM_PROMPT + event; reply draft $draft)"
     return 0
   fi
   upr_brief "$ev" "$draft" >"$brief"
-  out=$(PATH="$HOME/.local/bin:$PATH" runb 240 "$UPSTREAM_DISPATCH" claude --model sonnet --kind judgment \
-    --name "$name" -f "$brief" -C "$UPSTREAM_DIR" --task "$UPR_BASE" --timeout "$UPSTREAM_TIMEOUT" \
-    --min-headroom "$UPSTREAM_MIN_HEADROOM" --detach --no-wait 2>&1)
-  rc=$?
+  if [[ -n "$UPSTREAM_DISPATCH" ]]; then
+    out=$(PATH="$HOME/.local/bin:$PATH" runb 240 "$UPSTREAM_DISPATCH" claude --model sonnet --kind judgment \
+      --name "$name" -f "$brief" -C "$UPSTREAM_DIR" --task "$UPR_BASE" --timeout "$UPSTREAM_TIMEOUT" \
+      --min-headroom "$UPSTREAM_MIN_HEADROOM" --detach --no-wait 2>&1)
+    rc=$?
+  else
+    out=$(runb 240 "$PY3" "$FLEET_PASEO_DISPATCH" dispatch \
+      --name "$name" --brief "$brief" --cwd "$UPSTREAM_DIR" \
+      --provider claude/sonnet --mode bypassPermissions --kind judgment --task "$UPR_BASE" \
+      --timeout "$UPSTREAM_TIMEOUT" --min-headroom "$UPSTREAM_MIN_HEADROOM" 2>&1)
+    rc=$?
+  fi
   ulog "dispatch $name rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"
   case $rc in
     0)
       # The one worker covers every pending event of the same item: it reads all comments.
       STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
       ;;
-    5) upr_flag noquota "$ev" "$line: no quota, not dispatching (acp-dispatch: pool unavailable), kept pending" ;;
+    5) upr_flag noquota "$ev" "$line: no quota, not dispatching (pool unavailable), kept pending" ;;
     *)
       n_att=$(jq -r '.attempts + 1' <<<"$ev")
       if ((n_att >= 3)); then
@@ -1794,8 +1803,8 @@ PY
 
 check() {
   local agents builds deploys parts=() h sshdk=""
-  # The agent itself (uv's python running acp-run), not the shell or uv wrapper around it.
-  agents=$(count 'bin/python[0-9.]* [^ ]*/site-private(-djbclark)?/bin/acp-run ')
+  # Active running Paseo agents via native fleet_watch_paseo.py
+  agents=$("$PY3" "$FLEET_PASEO_SEND" agents 2>/dev/null || echo 0)
   # A running build, not an idle Gradle daemon left over from an earlier one.
   builds=$(count 'GradleWrapperMain')
   deploys=$(count 'deploy_fleet.py')
