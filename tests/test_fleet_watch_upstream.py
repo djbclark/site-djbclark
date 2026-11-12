@@ -114,7 +114,7 @@ class Harness(unittest.TestCase):
             path.write_text(text)
             path.chmod(0o755)
         # fleet-watch uses GNU-prefixed tools on macOS; Linux coreutils are equivalent.
-        for tool in ("date", "head", "tail", "sed", "tr", "cut", "grep", "wc", "mktemp", "sort", "stat"):
+        for tool in ("date", "head", "tail", "sed", "tr", "cut", "grep", "wc", "mktemp", "sort", "stat", "touch"):
             executable = shutil.which("g" + tool) or shutil.which(tool)
             # Preserve the executable's basename: Linux multicall tools dispatch on argv[0].
             wrapper = self.bin / ("g" + tool)
