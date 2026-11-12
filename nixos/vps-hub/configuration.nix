@@ -82,13 +82,73 @@
       ];
       MaxAuthTries = 3;
       LoginGraceTime = 30;
+      # 2026-11-12 hardening (ssh-audit 3.x and its OpenSSH hardening guide, Mozilla OpenSSH
+      # guidelines). Every client in use runs OpenSSH 9.x/10.x with ed25519 keys.
+      # Kex: the post-quantum hybrids first; curve25519-sha256 stays as the last fallback
+      # for clients without them. Dropped: diffie-hellman-group-exchange-sha256 (only a
+      # 2048-bit modulus in practice) and the curve25519 libssh.org alias.
+      KexAlgorithms = [
+        "mlkem768x25519-sha256"
+        "sntrup761x25519-sha512"
+        "sntrup761x25519-sha512@openssh.com"
+        "curve25519-sha256"
+      ];
+      Ciphers = [
+        "chacha20-poly1305@openssh.com"
+        "aes256-gcm@openssh.com"
+        "aes128-gcm@openssh.com"
+        "aes256-ctr"
+        "aes192-ctr"
+        "aes128-ctr"
+      ];
+      Macs = [
+        "hmac-sha2-512-etm@openssh.com"
+        "hmac-sha2-256-etm@openssh.com"
+        "umac-128-etm@openssh.com"
+      ];
+      # No NIST ECDSA. Comma-joined strings: the module comma-joins lists only for
+      # Ciphers, KexAlgorithms and Macs.
+      HostKeyAlgorithms = "sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,rsa-sha2-512,rsa-sha2-256";
+      PubkeyAcceptedAlgorithms = "sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,ssh-ed25519,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256";
+      # Drop clients that stop answering (not idle ones) after 3 x 5 min.
+      ClientAliveInterval = 300;
+      ClientAliveCountMax = 3;
+      Compression = false;
+      X11Forwarding = false;
+      # TCP forwarding stays on: the radar key's permitopen tunnels to MIT hosts need it.
     };
+    # Host keys: ed25519 plus the existing RSA 4096 (ssh-audit accepts >= 3072); no ECDSA.
+    hostKeys = [
+      { type = "ed25519"; path = "/etc/ssh/ssh_host_ed25519_key"; }
+      { type = "rsa"; bits = 4096; path = "/etc/ssh/ssh_host_rsa_key"; }
+    ];
     # OpenSSH's default PerSourcePenalties stay on for the public address; the
     # tailnet (the Mac's fleet-watch probes and pushes) is never penalised. No
     # backticks or $ here: the module pastes this through a shell heredoc.
     extraConfig = ''
-      PerSourcePenaltyExemptList 100.64.0.0/10
+      PerSourcePenaltyExemptList 100.64.0.0/10,fd7a:115c:a1e0::/48
     '';
+  };
+
+  # fail2ban (2026-11-12): bans sources that keep failing sshd auth on the public address,
+  # on top of OpenSSH's built-in PerSourcePenalties (short, in-memory). Uses the NixOS
+  # default sshd jail (systemd journal backend) and the iptables-multiport action, since
+  # this host's firewall is the iptables backend. Ban 1h, doubling per repeat up to a week.
+  # The tailnet (Mac, box route, fleet-watch) is never banned; the box's public egress
+  # changes address, so it relies on key auth only ever offering one key.
+  services.fail2ban = {
+    enable = true;
+    maxretry = 5;
+    bantime = "1h";
+    bantime-increment = {
+      enable = true;
+      maxtime = "168h";
+      overalljails = true;
+    };
+    ignoreIP = [
+      "100.64.0.0/10"
+      "fd7a:115c:a1e0::/48"
+    ];
   };
 
   # nodejs_24: `npm install -g` scripts of the agents start with `#!/usr/bin/env node`.
