@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- nixos(vps-hub): turn off `GSSAPIAuthentication` in `services.openssh.settings` so it wins over nixathena's later `extraConfig` yes (this GSSAPI OpenSSH build uses the first occurrence). (2026-11-12)
 - nixos(vps-hub): drop `curve25519-sha256` from sshd KexAlgorithms (PQ hybrids only) and turn off `GSSAPIAuthentication` (nixathena's krb5 module sets yes; logins remain keys only). (2026-11-12)
 - nixos(vps-hub): SSH hardening while staying publicly reachable: fail2ban sshd jail (5 failures, 1h ban doubling up to 1 week, tailnet never banned), ssh-audit-guide algorithms (PQ-hybrid kex first, no group-exchange or NIST ECDSA), `LogLevel VERBOSE`, `ClientAliveInterval 300`, compression off, tailnet IPv6 added to the PerSourcePenalties exemption. (2026-11-12)
 - `bin/bg`: when `gdate`, `gseq` and `shlock` are missing, fall back to `date`, `seq` and `flock` (and to `awk`/`tr`/`readlink`/`timeout`, `sysctl`-compatible load/CPU reads, and a plain `exec` when `taskpolicy` is absent) so a slot wait no longer hangs on Linux. macOS behaviour is unchanged when the Homebrew names are on PATH. (2026-11-10)
