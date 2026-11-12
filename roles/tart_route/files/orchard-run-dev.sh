@@ -1,7 +1,8 @@
 #!/bin/bash
 # launchd agent com.djbclark.orchard-dev runs this (installed copy:
 # ~/.orchard/run-dev.sh; source: site-public-djbclark roles/tart_route/files/).
-# `orchard dev` = controller + worker "bigmac", API 127.0.0.1:6120.
+# `orchard dev` = controller + worker "bigmac", API on *:6120 with NO auth
+# (orchard dev has no listen flag; see README caveat 5).
 #
 # 1. VMs use tart's default shared NAT (create them WITHOUT --net-softnet:
 #    softnet needs root). A background watcher runs fix-vmnet-route.sh every
@@ -33,6 +34,6 @@ tab=$'\t'
 exec 2> >(exec /usr/bin/grep --line-buffered -v -E \
   -e "${tab}DEBUG${tab}" \
   -e "${tab}INFO${tab}worker/worker\.go:[0-9]+${tab}syncing [0-9]+ local VMs" \
-  -e "\"status\": 200, \"method\": \"(GET|PUT)\", \"path\": \"/v1/(vms\", \"query\": \"filter=worker|workers/[^\"]+\", \"query\": \"\")" \
+  -e "\"status\": 200, \"method\": \"(GET|PUT)\", \"path\": \"/v1/(vms\", \"query\": \"filter=worker%3Dbigmac|workers/bigmac\", \"query\": \")\", \"ip\": \"127\.0\.0\.1\", \"user-agent\": \"Orchard/" \
   >&2)
 exec /opt/homebrew/bin/orchard dev -d "$here/dev-data"

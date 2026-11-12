@@ -66,6 +66,16 @@ from `(ALL) ALL`).
    tart (see `~/src/cfengine-all/docs/local-ci-containers-vs-tart.md` §C3).
 3. With a container and a VM both up Tailscale may install a wider `192.168.64/23`; the
    rule does not cover it and the caller prints the hand fix (exit 1).
+4. Accepted risk: the rule allows the add on bridge100 and on bridge101 whichever one
+   tart holds, so code running as this user could point 192.168.65.0/24 at the Apple
+   container bridge and let a container answer for the VMs. Such code already owns the
+   Orchard API, the VMs and their admin/admin logins, so this grants nothing new; the
+   caller itself only ever adds the bridge holding 192.168.65.1.
+5. **`orchard dev` has no auth and listens on `*:6120`** (no listen flag; the macOS
+   firewall is off): any LAN device or tailnet peer can drive the API, and with the route
+   repaired so can the VMs (`192.168.65.1:6120`). Not changed here; the fix is to replace
+   `orchard dev` with `orchard controller run --listen 127.0.0.1:6120` plus
+   `orchard worker run` (service-account tokens).
 
 ## Removal
 
