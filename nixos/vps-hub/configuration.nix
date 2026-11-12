@@ -75,6 +75,11 @@
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
       AuthenticationMethods = "publickey";
+      # nixathena's krb5 module later appends "GSSAPIAuthentication yes" via
+      # extraConfig. This GSSAPI OpenSSH build uses the first occurrence, and
+      # settings are written first, so this "no" wins. Logins are keys only
+      # (no host keytab, no Kerberos SSH).
+      GSSAPIAuthentication = false;
       # Phase C of docs/plans/vps-primary-athena.md (2026-10-15).
       AllowUsers = [
         "root"
@@ -126,11 +131,6 @@
     # backticks or $ here: the module pastes this through a shell heredoc.
     extraConfig = ''
       PerSourcePenaltyExemptList 100.64.0.0/10,fd7a:115c:a1e0::/48
-      # nixathena's krb5 module appends "GSSAPIAuthentication yes". Logins here are
-      # keys only (no host keytab, no Kerberos SSH), so turn it off. extraConfig is
-      # concatenated in module order; this file is imported after nixathena, so this
-      # last occurrence wins.
-      GSSAPIAuthentication no
     '';
   };
 
