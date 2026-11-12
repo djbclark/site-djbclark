@@ -126,6 +126,29 @@ class PendingSend(unittest.TestCase):
                 self.assertNotIn("relay_fails", note)
 
 
+class NativeWorkerBusy(unittest.TestCase):
+    def test_active_and_unknown_statuses_hold_dispatch(self):
+        for status in ("running", "starting", "waiting", None):
+            for rows in ([{"status": status}], {"agents": [{"status": status}]}):
+                with self.subTest(status=status, rows=rows), patch.object(SENDER, "call", return_value=rows) as call:
+                    self.assertEqual(SENDER.upstream_busy("upstream-pr"), 0)
+                    self.assertEqual(call.call_args.args[1:], (
+                        "ls", "--label", "ade.task=upstream-pr", "--label", "ade.via=fleet-watch", "--json"))
+
+    def test_finished_workers_release_dispatch(self):
+        for rows in ([], [{"status": "idle"}, {"status": "closed"}, {"status": "archived"}]):
+            with self.subTest(rows=rows), patch.object(SENDER, "call", return_value=rows):
+                self.assertEqual(SENDER.upstream_busy("upstream-pr"), 1)
+
+    def test_invalid_listing_and_transport_hold_dispatch(self):
+        for rows in ({}, None, [None], {"agents": "bad"}):
+            with self.subTest(rows=rows), patch.object(SENDER, "call", return_value=rows):
+                self.assertEqual(SENDER.upstream_busy("upstream-pr"), 0)
+        for error in (ValueError("invalid JSON"), OSError("missing CLI"), subprocess.TimeoutExpired("paseo", 20)):
+            with self.subTest(error=error), patch.object(SENDER, "call", side_effect=error):
+                self.assertEqual(SENDER.upstream_busy("upstream-pr"), 0)
+
+
 class NativeDispatch(unittest.TestCase):
     def test_dispatch_invokes_paseo_run(self):
         with tempfile.TemporaryDirectory() as td:

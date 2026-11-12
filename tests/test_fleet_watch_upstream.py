@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -55,7 +56,13 @@ aid = "5e55a100-0000-0000-0000-000000000000"
 args = sys.argv[1:]
 if not args:
     sys.exit(2)
-if args[0] == "ls":
+if args[0] == "ls" and "--label" in args:
+    assert args[args.index("--label") + 1] == "ade.task=upstream-pr"
+    assert "ade.via=fleet-watch" in args
+    if (home / "busy_fail").exists():
+        sys.exit(1)
+    print((home / "busy_agents").read_text() if (home / "busy_agents").exists() else "[]")
+elif args[0] == "ls":
     print(json.dumps([{"id": aid, "shortId": "5e55a1", "status": "running"}]))
 elif args[:2] == ["agent", "inspect"]:
     print(json.dumps({"Id": aid, "Archived": False, "PendingPermissions": [], "Status": "idle"}))
@@ -109,7 +116,10 @@ class Harness(unittest.TestCase):
         # fleet-watch uses GNU-prefixed tools on macOS; Linux coreutils are equivalent.
         for tool in ("date", "head", "tail", "sed", "tr", "cut", "grep", "wc", "mktemp", "sort", "stat"):
             executable = shutil.which("g" + tool) or shutil.which(tool)
-            (self.bin / ("g" + tool)).symlink_to(executable)
+            # Preserve the executable's basename: Linux multicall tools dispatch on argv[0].
+            wrapper = self.bin / ("g" + tool)
+            wrapper.write_text("#!/bin/bash\nexec " + shlex.quote(executable) + ' "$@"\n')
+            wrapper.chmod(0o755)
         self.state = self.home / ".local" / "state" / "fleet-watch"
         self.bigteam = root / "bigteam"
         self.set("user", {"login": "djbclark"})
@@ -262,6 +272,29 @@ class UpstreamWatch(Harness):
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertEqual(len(self.dispatches()), 1)
         self.assertEqual(self.pending(), [])
+
+    def test_native_worker_holds_event_until_idle(self) -> None:
+        self.seed()
+        self.new_review()
+        agents = self.home / "busy_agents"
+        agents.write_text(json.dumps([{"id": "native-worker", "status": "running"}]))
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertEqual(len(self.pending()), 1)
+        self.assertIn("native Paseo worker active", self.pings()[-1])
+        agents.write_text(json.dumps([{"id": "native-worker", "status": "idle"}]))
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)
+        self.assertEqual(self.pending(), [])
+
+    def test_native_listing_failure_holds_event(self) -> None:
+        self.seed()
+        self.new_review()
+        (self.home / "busy_fail").touch()
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertEqual(len(self.pending()), 1)
+        self.assertIn("state unavailable", self.pings()[-1])
 
     def test_an_open_job_record_blocks_dispatch(self) -> None:
         self.seed()

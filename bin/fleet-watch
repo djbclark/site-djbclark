@@ -85,7 +85,8 @@
 # (paseo run --no-wait, task upstream-pr, brief = prompts/upstream-pr-review.md plus
 # the event; the worker prepares a reply and stops, the prompt says never to post). The dispatch
 # waits, event kept pending and one ping per cause, when: a session is already on it (the lock
-# file $STATE_DIR/upstream-pr.lock names a live pid, or a bigteam job record of task upstream-pr is
+# file $STATE_DIR/upstream-pr.lock names a live pid, a native fleet-watch worker with matching
+# ade.task is active (or its listing fails), or a legacy bigteam job record of task upstream-pr is
 # open: no `closed`, no `finished`, no done marker, and younger than its timeout + 15 min), or no
 # Claude pool has FLEET_WATCH_UPSTREAM_MIN_HEADROOM percent left (aiuse --available; native dispatch
 # also refuses, exit 5). A dispatch that fails 3 times, or an event pending over 24 h, is dropped
@@ -200,6 +201,7 @@ UPSTREAM_PROFILES="${FLEET_WATCH_UPSTREAM_PROFILES:-cfengine paseo}"
 UPSTREAM_SELF="${FLEET_WATCH_UPSTREAM_SELF:-}"
 UPSTREAM_INTERVAL="${FLEET_WATCH_UPSTREAM_INTERVAL:-300}"
 UPSTREAM_MIN_HEADROOM="${FLEET_WATCH_UPSTREAM_MIN_HEADROOM:-10}"
+# Legacy dispatch override only; native detached workers have no runtime timeout.
 UPSTREAM_TIMEOUT="${FLEET_WATCH_UPSTREAM_TIMEOUT:-3600}"
 UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
 UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
@@ -949,7 +951,8 @@ upr_enrich() {
 
 upr_busy() {
   # Is a session already on an upstream PR? Prints why and returns 0 when so: the lock file
-  # names a live pid, or an open job record of bigteam task upstream-pr (no `closed`, no
+  # names a live pid, a matching native Paseo worker is active, or a legacy bigteam job
+  # record is open (no `closed`, no
   # `finished`, no done marker, younger than its timeout + wrap-up + 15 min, so a crashed
   # dispatch cannot block forever).
   local pid f rec donef started window name now
@@ -959,6 +962,14 @@ upr_busy() {
       echo "lock held by pid $pid"
       return 0
     fi
+  fi
+  # Native workers create no bigteam job record. Hold on lookup failures, too.
+  local native rc
+  native=$(runb 30 "$PY3" "$FLEET_PASEO_DISPATCH" upstream-busy --task "$UPR_BASE" 2>&1)
+  rc=$?
+  if ((rc != 1)); then
+    echo "${native:-native Paseo worker lookup failed (rc=$rc)}"
+    return 0
   fi
   now=$(gdate +%s)
   for f in "$BIGTEAM_ROOT/$UPR_BASE"/jobs/*.json; do
@@ -1154,7 +1165,7 @@ upr_dispatch() {
     out=$(runb 240 "$PY3" "$FLEET_PASEO_DISPATCH" dispatch \
       --name "$name" --brief "$brief" --cwd "$UPSTREAM_DIR" \
       --provider claude/sonnet --mode bypassPermissions --kind judgment --task "$UPR_BASE" \
-      --timeout "$UPSTREAM_TIMEOUT" --min-headroom "$UPSTREAM_MIN_HEADROOM" 2>&1)
+      --min-headroom "$UPSTREAM_MIN_HEADROOM" 2>&1)
     rc=$?
   fi
   ulog "dispatch $name rc=$rc: $(gtail -n 2 <<<"$out" | gtr '\n' ' ')"

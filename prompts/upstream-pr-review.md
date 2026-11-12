@@ -76,11 +76,11 @@ without the operator's explicit go.
     or why you pushed nothing, the draft path, and "waiting for the operator's go").
 11. Return to the branch from item 4, then
     `~/.local/bin/hermes-ping "cfengine-core: <repo>#<n> prepared: <one line>"`
-    (one line, what is waiting for the operator), then write the report file the
-    delivery contract below names and finish. Both the ping and the report give: the
+    (one line, what is waiting for the operator), then finish. Native detached
+    Paseo dispatch adds no report-file contract. The ping and reply draft give: the
     `<branch>-prep` head SHA, the draft fork PR URL, the reply draft path, and the exact
     command the operator's session runs to promote it,
     `git push --force-with-lease origin <prep-sha>:<branch>` (the ping carries the SHA
-    and URL; the report carries all four). With nothing pushed, say that instead.
+    and URL; the reply draft carries all four). With nothing pushed, say that instead.
 
 ## Event

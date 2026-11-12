@@ -54,6 +54,26 @@ def count_running_agents(cli=None):
     return 0
 
 
+def upstream_busy(task):
+    """Hold dispatch on active native workers or an unavailable/invalid listing."""
+    cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
+    try:
+        rows = call(cli, "ls", "--label", f"ade.task={task}",
+                    "--label", "ade.via=fleet-watch", "--json")
+        if isinstance(rows, dict):
+            rows = rows.get("agents")
+        if not isinstance(rows, list):
+            raise ValueError("invalid Paseo agent listing")
+        for row in rows:
+            if not isinstance(row, dict) or row.get("status") not in {"idle", "closed", "archived"}:
+                print("native Paseo worker active (or status unknown)")
+                return 0
+        return 1
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print(f"native Paseo worker state unavailable: {error}")
+        return 0
+
+
 def check_headroom(min_headroom=10.0):
     if min_headroom <= 0:
         return
@@ -106,9 +126,13 @@ def resolve_workspace(cli, target_dir, explicit=None):
 
 
 def dispatch(name, brief, cwd=".", provider="claude/sonnet", mode="bypassPermissions",
-             kind="judgment", task="upstream-pr", timeout=3600, min_headroom=10.0,
+             kind="judgment", task="upstream-pr", min_headroom=10.0,
              lead=None, workspace=None):
-    """Launch a detached worker agent via native `paseo run` with YOLO mode and standard labels."""
+    """Launch asynchronously with standard labels; no worker runtime timeout.
+
+    The 120-second subprocess timeout bounds launch acknowledgement only.
+    Detached workers run until completion; their live status gates further dispatch.
+    """
     check_headroom(min_headroom)
     brief_path = Path(brief).expanduser()
     if not brief_path.is_file():
@@ -246,7 +270,6 @@ def main():
         parser.add_argument("--mode", default="bypassPermissions", help="Provider mode (default: bypassPermissions)")
         parser.add_argument("--kind", default="judgment", help="Task kind label (default: judgment)")
         parser.add_argument("--task", default="upstream-pr", help="Task name label (default: upstream-pr)")
-        parser.add_argument("--timeout", type=int, default=3600, help="Task timeout in seconds")
         parser.add_argument("--min-headroom", type=float, default=10.0, help="Minimum quota headroom percent")
         parser.add_argument("--lead", help="Lead agent id (defaults to PASEO_AGENT_ID or main)")
         parser.add_argument("--workspace", help="Explicit Paseo workspace id")
@@ -260,7 +283,6 @@ def main():
                 mode=args.mode,
                 kind=args.kind,
                 task=args.task,
-                timeout=args.timeout,
                 min_headroom=args.min_headroom,
                 lead=args.lead,
                 workspace=args.workspace,
@@ -271,6 +293,11 @@ def main():
         except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             print(f"fleet-watch Paseo dispatch failed: {error}", file=sys.stderr)
             return 1
+    elif len(sys.argv) > 1 and sys.argv[1] == "upstream-busy":
+        parser = argparse.ArgumentParser(description=upstream_busy.__doc__)
+        parser.add_argument("upstream-busy")
+        parser.add_argument("--task", required=True)
+        return upstream_busy(parser.parse_args().task)
     elif len(sys.argv) > 1 and sys.argv[1] in ("agents", "count-agents"):
         print(count_running_agents())
         return 0
