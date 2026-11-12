@@ -84,14 +84,13 @@
       LoginGraceTime = 30;
       # 2026-11-12 hardening (ssh-audit 3.x and its OpenSSH hardening guide, Mozilla OpenSSH
       # guidelines). Every client in use runs OpenSSH 9.x/10.x with ed25519 keys.
-      # Kex: the post-quantum hybrids first; curve25519-sha256 stays as the last fallback
-      # for clients without them. Dropped: diffie-hellman-group-exchange-sha256 (only a
-      # 2048-bit modulus in practice) and the curve25519 libssh.org alias.
+      # Kex: post-quantum hybrids only. Dropped: curve25519-sha256 (ssh-audit I.1),
+      # its libssh.org alias, and diffie-hellman-group-exchange-sha256 (only a
+      # 2048-bit modulus in practice).
       KexAlgorithms = [
         "mlkem768x25519-sha256"
         "sntrup761x25519-sha512"
         "sntrup761x25519-sha512@openssh.com"
-        "curve25519-sha256"
       ];
       Ciphers = [
         "chacha20-poly1305@openssh.com"
@@ -127,6 +126,11 @@
     # backticks or $ here: the module pastes this through a shell heredoc.
     extraConfig = ''
       PerSourcePenaltyExemptList 100.64.0.0/10,fd7a:115c:a1e0::/48
+      # nixathena's krb5 module appends "GSSAPIAuthentication yes". Logins here are
+      # keys only (no host keytab, no Kerberos SSH), so turn it off. extraConfig is
+      # concatenated in module order; this file is imported after nixathena, so this
+      # last occurrence wins.
+      GSSAPIAuthentication no
     '';
   };
 
