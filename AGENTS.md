@@ -25,7 +25,7 @@
 
 > **Agent toolchain:** orchestration, delegation and routing tools
 > live in [`~/src/djbclark-ade`](https://github.com/djbclark/djbclark-ade): the
-> shared skills, `acp-dispatch`/`acp-run`, `route_agent.py`, and
+> shared skills (`fan-out`: native `paseo run`/`paseo send`), `route_agent.py`, and
 > `docs/orchestration-practices.md`. Use them before hand-rolling anything; a
 > harness failure gets its fix there.
 
@@ -221,7 +221,7 @@ registered in `~/.claude/settings.json`) remains under `claude/` here.
    ignored. Never copy it here.
 5. **Orchestration and session-hygiene tooling lives in djbclark-ade**
    (`~/src/djbclark-ade`, github.com/djbclark/djbclark-ade): its skills,
-   `acp-run`, `bin/fleet-watch`, `bin/skill-everywhere` (README:
+   `bin/skill-everywhere` (README:
    `~/src/djbclark-ade/docs/skill-everywhere.md`) and the `helm-all`,
    `session-finder-all` and `resume` command wrappers. Paths for them here
    are absolute compatibility symlinks into it; edit them there.
