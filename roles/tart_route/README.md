@@ -32,7 +32,7 @@ exact-argv NOPASSWD sudoers rule for the route repair. Sibling of
 |---|---|---|
 | `files/tart-route-setup.sh` | `/etc/sudoers.d/tart-route` | One-time privileged install (Touch ID via `sudo-ask`), same mechanism as `container-route-setup.sh`: rule text in the dialog, root writes a dotted temp, `visudo -c`, `root:wheel 0440`, rename. `--print` shows the rule without installing. |
 | `files/fix-vmnet-route.sh` | `~/.orchard/fix-vmnet-route.sh` | Unprivileged caller. Finds the bridge holding `192.168.65.1` (bridge100, or bridge101 when a container network came up first), and only when `netstat` shows the en0 variant runs the exact argvs with `sudo -n`. Exit 0 ok/nothing to do, 1 a case the rule does not cover (printed with the hand fix), 3 rule missing. |
-| `files/orchard-launch.py` | `~/.orchard/orchard-launch.py` | The supervisor. Runs `orchard controller run --listen 127.0.0.1:6120 --insecure-no-tls` with a fresh random admin token in `ORCHARD_BOOTSTRAP_ADMIN_TOKEN` at every start (controller stdout, where Orchard prints account details, is discarded, so the token never reaches the launchd log), rewrites `~/.orchard/orchard.yml` (0600) with one context holding that token so the `orchard` CLI works, then runs `orchard worker run --name bigmac --bootstrap-token-stdin`. Also runs the route caller every 15 s (logs to `~/.orchard/route-watch.log` only when its output changes; backs off 5 min when the rule is missing) and filters DEBUG and the routine 5 s loopback poll lines out of stderr. Either child exiting ends the launcher, so launchd restarts the set. |
+| `files/orchard-launch.py` | `~/.orchard/orchard-launch.py` | The supervisor. Runs `orchard controller run --listen 127.0.0.1:6120` with TLS (Orchard's self-signed certificate in `~/.orchard/controller/controller.crt`) and a fresh random 32-character admin token in `ORCHARD_BOOTSTRAP_ADMIN_TOKEN` at every start (controller stdout, where Orchard prints account details, is discarded, so the token never reaches the launchd log), rewrites `~/.orchard/orchard.yml` (0600) with one context holding that token and the pinned certificate so the `orchard` CLI works, then runs `orchard worker run --name bigmac --bootstrap-token-stdin https://127.0.0.1:6120` (the bootstrap token from `orchard get bootstrap-token bootstrap-admin` carries the certificate, so the worker pins it too). Also runs the route caller every 15 s (logs to `~/.orchard/route-watch.log` only when its output changes; backs off 5 min when the rule is missing) and filters DEBUG and the routine 5 s loopback poll lines out of stderr. Either child exiting ends the launcher, so launchd restarts the set: a dead controller kills the worker at once, and shutdown stops the worker before the controller. |
 | `files/orchard-run-dev.sh` | `~/.orchard/run-dev.sh` | Two-line shim the launchd plist runs (kept under its old name so the plist and label do not change): `exec python3 -I ~/.orchard/orchard-launch.py`. |
 
 The rule (exact argv, no wildcards; `/sbin/route` is root-owned and SIP-protected):
@@ -81,14 +81,26 @@ from `(ALL) ALL`).
    process started before a restart gets 401 and must be rerun. The token is stored only
    in that 0600 file and in the two child processes' environment/stdin (Orchard's own
    `bootstrap-context` file has the same shape); `sudo-secretspec` is not used because the
-   credential is self-generated, local and loopback-only. The API is `http://127.0.0.1:6120`
-   (no TLS, loopback): tart guests at `192.168.65.1` and the LAN cannot reach it. Do not
+   credential is self-generated, local and loopback-only. The API is `https://127.0.0.1:6120`
+   (loopback): tart guests at `192.168.65.1` and the LAN cannot reach it. TLS exists for
+   pinning, not for the wire: the controller runs without `--insecure-no-tls`, Orchard
+   makes a self-signed certificate in its data dir, and the worker (through the bootstrap
+   token) and the CLI (the `certificate:` field of the `local` context) trust only that
+   certificate. If the controller dies, another local account that binds 127.0.0.1:6120
+   cannot impersonate it to the still-running worker (which would obey any VM spec,
+   including hostDir mounts of the home directory): it lacks the key, the TLS handshake
+   fails and the worker never sends it a request. The certificate (10 years) is created
+   once and reused across restarts; deleting `~/.orchard/controller/controller.crt` and
+   `.key` gets a new one at the next start. Each start also generates a new random token
+   (see above), so the pinned certificate is not the only secret. Do not
    set `--host-dir-policies` (default: every hostDir mount is rejected) and never
    re-introduce `orchard dev`.
-6. The launcher sets `umask 077` and `chmod 700 ~/.orchard` itself, but launchd opens
-   the log files before it runs, so they stay 0644 until the operator adds
-   `<key>Umask</key><integer>63</integer>` to
-   `~/Library/LaunchAgents/com.djbclark.orchard-dev.plist` (outside this role).
+6. The launcher sets `umask 077` and `chmod 700 ~/.orchard` itself. launchd opens its
+   logs (`~/.orchard/launchd.stdout.log`, `launchd.stderr.log`) before the launcher
+   runs, so their mode follows the plist's `Umask` key (`<integer>63</integer>` in
+   `~/Library/LaunchAgents/com.djbclark.orchard-dev.plist`, outside this role; without it
+   0644). Either way they live inside `~/.orchard`, which is 0700, so other accounts
+   cannot read them; the token is never written to them in any case.
 7. The launcher refuses to start if anything already listens on 127.0.0.1:6120, and
    checks with `lsof` that its own controller owns the listener before any credential
    leaves it (another local account cannot capture the admin token by binding first).
