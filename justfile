@@ -319,6 +319,12 @@ launchd-path-status:
 container-route-setup:
     roles/container_route/files/container-route-setup.sh
 
+# NOPASSWD rule for three exact `route` commands that repair tart's shared-NAT
+# network (192.168.65.0/24) for the local Orchard when Tailscale replaces the
+# bridge route (roles/tart_route). One privileged step (Touch ID).
+tart-route-setup:
+    roles/tart_route/files/tart-route-setup.sh
+
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
 site-agents-apply *args:
