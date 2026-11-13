@@ -19,7 +19,11 @@ exact-argv NOPASSWD sudoers rule for the route repair. Sibling of
    `192.168.65 via 192.168.68.1 (en0)` shortly after a VM boots
    ([tailscale#22119](https://github.com/tailscale/tailscale/issues/22119)). The worker's
    dial to `192.168.65.x:22` then times out (`orchard ssh vm` hangs) and the VM has no
-   internet.
+   internet. The same happens to **`192.168.64.0/24`** (`192.168.64 via 192.168.68.1 (en0)`)
+   when no Apple `container` network is up and tart's bridge100 takes that subnet
+   (gateway `192.168.64.1`). That case is repaired with the two argvs of the
+   `container-route` rule ([`roles/container_route`](../container_route/README.md)), so it
+   needs that rule installed (`just container-route-setup`); `tart-route` is not widened.
 3. **`orchard dev` is unsafe and noisy.** It listens on `*:6120` with authentication
    disabled (remote code execution as the operator through hostDir mounts; adversary
    review 2026-11-13), and logs at DEBUG: ~15 MB/day of sync-loop lines. The launcher
@@ -31,7 +35,7 @@ exact-argv NOPASSWD sudoers rule for the route repair. Sibling of
 | Piece | Installed at | What it does |
 |---|---|---|
 | `files/tart-route-setup.sh` | `/etc/sudoers.d/tart-route` | One-time privileged install (Touch ID via `sudo-ask`), same mechanism as `container-route-setup.sh`: rule text in the dialog, root writes a dotted temp, `visudo -c`, `root:wheel 0440`, rename. `--print` shows the rule without installing. |
-| `files/fix-vmnet-route.sh` | `~/.orchard/fix-vmnet-route.sh` | Unprivileged caller. Finds the bridge holding `192.168.65.1` (bridge100, or bridge101 when a container network came up first), and only when `netstat` shows the en0 variant runs the exact argvs with `sudo -n`. Exit 0 ok/nothing to do, 1 a case the rule does not cover (printed with the hand fix), 3 rule missing. |
+| `files/fix-vmnet-route.sh` | `~/.orchard/fix-vmnet-route.sh` | Unprivileged caller. Handles two subnets. `192.168.65.0/24`: finds the bridge holding `192.168.65.1` (bridge100, or bridge101 when a container network came up first) and, only when `netstat` shows the en0 variant, runs the `tart-route` argvs with `sudo -n`. `192.168.64.0/24`: only when bridge100 holds `192.168.64.1` and the en0 route is via `192.168.68.1`, runs the two `container-route` argvs (bridge101 holding `.64.1`, another gateway or a wider Tailscale route: hand fix, exit 1). Exit 0 ok/nothing to do, 1 a case the rules do not cover (printed with the hand fix), 3 a rule missing (the message names `tart-route` or `container-route`). Test hooks: `FIX_VMNET_ROUTE_FIXTURE_DIR` (files `netstat`, `ifconfig`) and `FIX_VMNET_ROUTE_DRYRUN=1` (print the sudo argv); see `tests/test_fix_vmnet_route.py`. |
 | `files/orchard-launch.py` | `~/.orchard/orchard-launch.py` | The supervisor. Runs `orchard controller run --listen 127.0.0.1:6120` with TLS (Orchard's self-signed certificate in `~/.orchard/controller/controller.crt`) and a fresh random 32-character admin token in `ORCHARD_BOOTSTRAP_ADMIN_TOKEN` at every start (controller stdout, where Orchard prints account details, is discarded, so the token never reaches the launchd log), rewrites `~/.orchard/orchard.yml` (0600) with one context holding that token and the pinned certificate so the `orchard` CLI works, then runs `orchard worker run --name bigmac --bootstrap-token-stdin https://127.0.0.1:6120` (the bootstrap token from `orchard get bootstrap-token bootstrap-admin` carries the certificate, so the worker pins it too). Also runs the route caller every 15 s (logs to `~/.orchard/route-watch.log` only when its output changes; backs off 5 min when the rule is missing) and filters DEBUG and the routine 5 s loopback poll lines out of stderr. Either child exiting ends the launcher, so launchd restarts the set: a dead controller kills the worker at once, and shutdown stops the worker before the controller. |
 | `files/orchard-run-dev.sh` | `~/.orchard/run-dev.sh` | Two-line shim the launchd plist runs (kept under its old name so the plist and label do not change): `exec python3 -I ~/.orchard/orchard-launch.py`. |
 
@@ -41,6 +45,14 @@ The rule (exact argv, no wildcards; `/sbin/route` is root-owned and SIP-protecte
 /sbin/route -n delete -net 192.168.65.0/24 192.168.68.1
 /sbin/route -n add -net 192.168.65.0/24 -interface bridge100
 /sbin/route -n add -net 192.168.65.0/24 -interface bridge101
+```
+
+The 192.168.64.0/24 repair uses `/etc/sudoers.d/container-route` instead (not installed by
+this role):
+
+```
+/sbin/route -n delete -net 192.168.64.0/24 192.168.68.1
+/sbin/route -n add -net 192.168.64.0/24 -interface bridge100
 ```
 
 ## Use
@@ -116,10 +128,13 @@ watcher repairs the route.
 2. `orchard list workers` shows `bigmac`.
 3. `orchard list vms`: a VM in `failed` or missing is recreated (`orchard delete vm NAME`,
    then the `create` in "Use"); `tart list` must show no leftover `orchard-gha-*` clone.
-4. `netstat -rn -f inet | rg '^192\.168\.65 '` shows `bridge100`, not `en0`. If it does
+4. `netstat -rn -f inet | rg '^192\.168\.6[45] '` shows `bridge100` (or `bridge101` for
+   192.168.65), not `en0`, for whichever of the two subnets tart holds (192.168.64 when no
+   container network is up). If it does
    not after 30 s: `~/.orchard/fix-vmnet-route.sh`, then `tail ~/.orchard/route-watch.log`
    (`sudo: a password is required` means `/etc/sudoers.d/tart-route` is missing: `just
-   tart-route-setup`).
+   tart-route-setup`; for 192.168.64 the message names `container-route`: `just
+   container-route-setup`).
 5. `orchard ssh vm -u admin -p admin gha-ubuntu-2404 'lsb_release -rs'` (and `gha-ubuntu-2204`).
 6. `~/.tart` stays under 300 GiB (`dust -d1 ~/.tart`; last measured 30 GiB). No macOS
    images.
