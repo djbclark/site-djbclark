@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{4,32})\Z")
@@ -16,6 +17,10 @@ TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 class PendingDelivery(ValueError):
     """Send was accepted or its outcome is unknown; never automatically resend."""
+
+
+class LaunchUnknown(ValueError):
+    """The launch may have created a worker; never retry automatically."""
 
 
 class QuotaUnavailable(ValueError):
@@ -34,8 +39,18 @@ def save_receipt(path, status):
 STEER_PROVIDERS = {"claude", "codex", "opencode", "omp", "pi"}
 
 
-def call(cli, *args, timeout=20):
-    result = subprocess.run([cli, *args], capture_output=True, text=True, timeout=timeout)
+# Caller placement that must never steer a worker: `paseo run --workspace` ignores
+# --cwd, and a caller agent id lets the new workspace inherit its background flag.
+AMBIENT_PASEO_ENV = ("PASEO_AGENT_ID", "PASEO_AGENT_CWD", "PASEO_WORKSPACE_ID")
+FINISHED = {"idle", "closed", "archived"}
+
+
+def clean_env():
+    return {k: v for k, v in os.environ.items() if k not in AMBIENT_PASEO_ENV}
+
+
+def call(cli, *args, timeout=20, env=None):
+    result = subprocess.run([cli, *args], capture_output=True, text=True, timeout=timeout, env=env)
     if result.returncode:
         raise ValueError(f"Paseo {args[0]} exited {result.returncode}")
     return json.loads(result.stdout)
@@ -44,30 +59,57 @@ def call(cli, *args, timeout=20):
 def count_running_agents(cli=None):
     cli = cli or os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
     try:
-        rows = call(cli, "ls", "--json", timeout=20)
+        rows = call(cli, "ls", "-a", "-g", "--json", timeout=20)
         if isinstance(rows, dict):
             rows = rows.get("agents")
         if isinstance(rows, list):
-            return sum(1 for a in rows if isinstance(a, dict) and a.get("status") == "running")
+            return sum(1 for a in rows if isinstance(a, dict) and a.get("status") == "running" and not a.get("archivedAt"))
     except Exception:
         pass
     return 0
 
 
-def upstream_busy(task):
-    """Hold dispatch on active native workers or an unavailable/invalid listing."""
+def age_seconds(created):
+    """Seconds since an ISO-8601 or epoch createdAt; None when unreadable."""
+    try:
+        if isinstance(created, (int, float)):
+            stamp = created / 1000 if created > 1e11 else created
+            return max(0.0, datetime.now(timezone.utc).timestamp() - stamp)
+        moment = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - moment).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def upstream_busy(task, max_age=None):
+    """Hold dispatch on active native workers or an unavailable/invalid listing.
+
+    -a -g lists archived-workspace and background agents too. A worker past
+    max_age seconds is reported "overdue" and still holds: stopping paid work is
+    the operator's call (paseo agent archive ID).
+    """
     cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
     try:
-        rows = call(cli, "ls", "--label", f"ade.task={task}",
+        rows = call(cli, "ls", "-a", "-g", "--label", f"ade.task={task}",
                     "--label", "ade.via=fleet-watch", "--json")
         if isinstance(rows, dict):
             rows = rows.get("agents")
         if not isinstance(rows, list):
             raise ValueError("invalid Paseo agent listing")
         for row in rows:
-            if not isinstance(row, dict) or row.get("status") not in {"idle", "closed", "archived"}:
-                print("native Paseo worker active (or status unknown)")
-                return 0
+            if isinstance(row, dict) and (row.get("archivedAt") or row.get("status") in FINISHED):
+                continue
+            if isinstance(row, dict) and max_age:
+                age = age_seconds(row.get("createdAt"))
+                if age is not None and age > max_age:
+                    print(f"native Paseo worker overdue ({int(age // 60)} min running, bound "
+                          f"{int(max_age // 60)} min): archive it by hand if hung: "
+                          f"paseo agent archive {row.get('id') or '?'}")
+                    return 0
+            print("native Paseo worker active (or status unknown)")
+            return 0
         return 1
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"native Paseo worker state unavailable: {error}")
@@ -102,27 +144,49 @@ def check_headroom(min_headroom=10.0):
 
 
 def resolve_workspace(cli, target_dir, explicit=None):
+    """A workspace id only when its directory is the target; else None (new workspace).
+
+    `paseo run --workspace` ignores --cwd, so an id whose directory differs would
+    land the worker elsewhere. The ambient PASEO_WORKSPACE_ID is never consulted;
+    an explicit id (argument or FLEET_WATCH_PASEO_WORKSPACE) must match too.
+    """
     target_real = os.path.realpath(os.path.expanduser(target_dir))
-    ws_id = explicit or os.environ.get("FLEET_WATCH_PASEO_WORKSPACE") or os.environ.get("PASEO_WORKSPACE_ID")
+    ws_id = explicit or os.environ.get("FLEET_WATCH_PASEO_WORKSPACE")
     try:
-        rows = call(cli, "workspace", "ls", "--json", timeout=20)
+        rows = call(cli, "workspace", "ls", "--json", timeout=20, env=clean_env())
         if isinstance(rows, dict):
             rows = rows.get("workspaces")
         if isinstance(rows, list):
-            if ws_id:
-                for w in rows:
-                    if isinstance(w, dict) and (w.get("workspaceId") == ws_id or w.get("id") == ws_id):
-                        return ws_id
+            matches = []
             for w in rows:
                 if isinstance(w, dict):
                     w_cwd = w.get("cwd")
-                    if w_cwd and os.path.realpath(os.path.expanduser(w_cwd)) == target_real:
-                        wid = w.get("workspaceId") or w.get("id")
-                        if wid:
-                            return wid
+                    wid = w.get("workspaceId") or w.get("id")
+                    if wid and w_cwd and os.path.realpath(os.path.expanduser(w_cwd)) == target_real:
+                        matches.append(wid)
+            if ws_id and ws_id in matches:
+                return ws_id
+            if matches:
+                return matches[0]
     except Exception:
         pass
-    return ws_id
+    return None
+
+
+def find_worker(cli, name):
+    """Id of the worker labelled ade.name=NAME; "" when none; None when the lookup fails."""
+    try:
+        rows = call(cli, "ls", "-a", "-g", "--label", f"ade.name={name}", "--json", timeout=30, env=clean_env())
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    if isinstance(rows, dict):
+        rows = rows.get("agents")
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and row.get("id"):
+            return str(row["id"])
+    return ""
 
 
 def dispatch(name, brief, cwd=".", provider="claude/sonnet", mode="bypassPermissions",
@@ -171,9 +235,21 @@ def dispatch(name, brief, cwd=".", provider="claude/sonnet", mode="bypassPermiss
         argv.extend(["--label", lb])
     argv.extend(["--", prompt_text])
 
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        raise ValueError(f"paseo run exited {result.returncode}: {(result.stderr or result.stdout).strip()}")
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=120, env=clean_env())
+        failure = f"paseo run exited {result.returncode}: {(result.stderr or result.stdout).strip()}" if result.returncode else None
+    except subprocess.TimeoutExpired:
+        result, failure = None, "paseo run timed out"
+    if failure:
+        # The agent may already exist: never let fleet-watch dispatch it a second time.
+        worker = find_worker(cli, name)
+        if worker:
+            print(f"detached\t{name}\tagent: {worker} (found after: {failure})")
+            return 0
+        if worker is None or result is None:
+            raise LaunchUnknown(f"{failure}; worker {name} lookup "
+                                f"{'failed' if worker is None else 'found nothing'}: outcome unknown")
+        raise ValueError(failure)
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else {}
     except ValueError:
@@ -290,6 +366,9 @@ def main():
         except QuotaUnavailable as error:
             print(f"fleet-watch Paseo dispatch no quota: {error}", file=sys.stderr)
             return 5
+        except LaunchUnknown as error:
+            print(f"fleet-watch Paseo dispatch unknown: {error}", file=sys.stderr)
+            return 6
         except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             print(f"fleet-watch Paseo dispatch failed: {error}", file=sys.stderr)
             return 1
@@ -297,7 +376,9 @@ def main():
         parser = argparse.ArgumentParser(description=upstream_busy.__doc__)
         parser.add_argument("upstream-busy")
         parser.add_argument("--task", required=True)
-        return upstream_busy(parser.parse_args().task)
+        parser.add_argument("--max-age", type=float, default=None, help="seconds before a running worker is reported overdue")
+        opts = parser.parse_args()
+        return upstream_busy(opts.task, opts.max_age)
     elif len(sys.argv) > 1 and sys.argv[1] in ("agents", "count-agents"):
         print(count_running_agents())
         return 0

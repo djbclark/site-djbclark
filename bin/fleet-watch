@@ -965,7 +965,7 @@ upr_busy() {
   fi
   # Native workers create no bigteam job record. Hold on lookup failures, too.
   local native rc
-  native=$(runb 30 "$PY3" "$FLEET_PASEO_DISPATCH" upstream-busy --task "$UPR_BASE" 2>&1)
+  native=$(runb 30 "$PY3" "$FLEET_PASEO_DISPATCH" upstream-busy --task "$UPR_BASE" --max-age "$((UPSTREAM_TIMEOUT + 1200))" 2>&1)
   rc=$?
   if ((rc != 1)); then
     echo "${native:-native Paseo worker lookup failed (rc=$rc)}"
@@ -1099,7 +1099,7 @@ upr_relay() {
 
 upr_dispatch() {
   # Try to dispatch ONE worker for the oldest pending event; updates STATE_JSON.
-  local ev repo n age name brief draft out rc line why n_att
+  local ev repo n age name brief draft out rc line why n_att flag
   ev=$(jq -c '.pending | sort_by(.at) | .[0] // empty' <<<"$STATE_JSON")
   [[ -n "$ev" ]] || return 0
   repo=$(jq -r .repo <<<"$ev")
@@ -1141,7 +1141,9 @@ upr_dispatch() {
   [[ -s "$UPSTREAM_RELAY_FILE" ]] &&
     upr_flag relayfail "$ev" "$line: relay to $(ghead -n 1 "$UPSTREAM_RELAY_FILE") refused (see $LOG), falling back to a worker"
   if why=$(upr_busy); then
-    upr_flag busy "$ev" "$line: a session is already on it ($why), not dispatching yet"
+    flag=busy
+    [[ $why == *overdue* ]] && flag=overdue  # its own ping: a hung worker needs a human
+    upr_flag "$flag" "$ev" "$line: a session is already on it ($why), not dispatching yet"
     return 0
   fi
   if ! why=$(upr_quota); then
@@ -1175,6 +1177,12 @@ upr_dispatch() {
       STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
       ;;
     5) upr_flag noquota "$ev" "$line: no quota, not dispatching (pool unavailable), kept pending" ;;
+    6)
+      # Launch outcome unknown (timeout or failed exit, worker lookup found nothing or failed): a
+      # worker may exist. Never redispatch; drop the event and ask for a look.
+      upr_ping "$line: worker launch outcome unknown, not retried (check: paseo ls -a -g --label ade.name=$name); dropped. $(gtail -n 1 <<<"$out" | gcut -c1-120)"
+      STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
+      ;;
     *)
       n_att=$(jq -r '.attempts + 1' <<<"$ev")
       if ((n_att >= 3)); then

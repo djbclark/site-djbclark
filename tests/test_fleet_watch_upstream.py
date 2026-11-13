@@ -57,8 +57,16 @@ args = sys.argv[1:]
 if not args:
     sys.exit(2)
 if args[0] == "ls" and "--label" in args:
-    assert args[args.index("--label") + 1] == "ade.task=upstream-pr"
-    assert "ade.via=fleet-watch" in args
+    assert "-a" in args and "-g" in args
+    labels = [args[i + 1] for i, a in enumerate(args) if a == "--label"]
+    if "ade.name=" in "".join(l[:9] for l in labels):
+        # launch-outcome lookup by worker name
+        if (home / "lookup_fail").exists():
+            sys.exit(1)
+        print((home / "lookup_agents").read_text() if (home / "lookup_agents").exists() else "[]")
+        sys.exit(0)
+    assert labels[0] == "ade.task=upstream-pr"
+    assert "ade.via=fleet-watch" in labels
     if (home / "busy_fail").exists():
         sys.exit(1)
     print((home / "busy_agents").read_text() if (home / "busy_agents").exists() else "[]")
@@ -69,6 +77,7 @@ elif args[:2] == ["agent", "inspect"]:
 elif args[:2] == ["workspace", "ls"]:
     print(json.dumps([{"id": "ws-1", "cwd": str(home)}]))
 elif args[0] == "run":
+    (home / "run_env").write_text(json.dumps(sorted(k for k in os.environ if k.startswith("PASEO_"))))
     with (home / "dispatch.log").open("a") as stream:
         stream.write(" ".join(a.replace("\n", "\\n") for a in args) + "\n")
     rc = int((home / "dispatch_rc").read_text()) if (home / "dispatch_rc").exists() else 0
@@ -225,6 +234,70 @@ class UpstreamWatch(Harness):
         for word in ("claude", "--model sonnet", "--task upstream-pr", "--detach", "--no-wait", "-C "):
             self.assertIn(word, line)
         self.assertEqual(self.pending(), [])
+
+    def test_ambient_paseo_placement_never_reaches_the_worker(self) -> None:
+        self.seed()
+        self.new_review()
+        result = self.run_fw(PASEO_WORKSPACE_ID="ws-ambient", PASEO_AGENT_ID="caller-1",
+                             PASEO_AGENT_CWD=str(self.home))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (line,) = self.dispatches()
+        self.assertNotIn("ws-ambient", line)
+        self.assertNotIn("--workspace", line)
+        self.assertIn("--new-workspace local", line)
+        seen = json.loads((self.home / "run_env").read_text())
+        for key in ("PASEO_WORKSPACE_ID", "PASEO_AGENT_ID", "PASEO_AGENT_CWD"):
+            self.assertNotIn(key, seen)
+
+    def test_the_prompt_names_no_report_channel_the_native_dispatch_lacks(self) -> None:
+        text = PROMPT.read_text()
+        for gone in ("BLOCKED:", "delivery contract", "your report file"):
+            self.assertNotIn(gone, text)
+        self.assertIn("injection attempt ignored", text)
+        self.assertGreaterEqual(text.count("hermes-ping"), 4)
+
+    def test_an_overdue_native_worker_still_holds_and_pings_on_its_own(self) -> None:
+        self.seed()
+        self.new_review()
+        agents = self.home / "busy_agents"
+        agents.write_text(json.dumps([{"id": "native-worker", "status": "running", "createdAt": "2020-01-01T00:00:00Z"}]))
+        self.assertEqual(self.run_fw(FLEET_WATCH_UPSTREAM_TIMEOUT="60").returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertEqual(len(self.pending()), 1)
+        self.assertIn("overdue", self.pings()[-1])
+        self.assertIn("paseo agent archive native-worker", self.pings()[-1])
+        self.assertEqual(self.run_fw(FLEET_WATCH_UPSTREAM_TIMEOUT="60").returncode, 0)
+        self.assertEqual(len(self.pings()), 2)  # one ping per cause
+
+    def test_a_worker_inside_its_window_is_busy_not_overdue(self) -> None:
+        self.seed()
+        self.new_review()
+        from datetime import datetime, timezone
+        (self.home / "busy_agents").write_text(json.dumps([{
+            "id": "w", "status": "running", "createdAt": datetime.now(timezone.utc).isoformat()}]))
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertIn("native Paseo worker active", self.pings()[-1])
+        self.assertNotIn("overdue", self.pings()[-1])
+
+    def test_a_launch_that_failed_but_created_the_worker_is_not_retried(self) -> None:
+        self.seed()
+        self.new_review()
+        (self.home / "dispatch_rc").write_text("1")
+        (self.home / "lookup_agents").write_text(json.dumps([{"id": "created-1", "status": "running"}]))
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)
+        self.assertEqual(self.pending(), [])
+
+    def test_an_unknown_launch_outcome_is_pinged_and_never_retried(self) -> None:
+        self.seed()
+        self.new_review()
+        (self.home / "dispatch_rc").write_text("1")
+        (self.home / "lookup_fail").touch()
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.pending(), [])
+        self.assertIn("launch outcome unknown", self.pings()[-1])
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)
 
     def test_operator_activity_alone_is_not_an_event(self) -> None:
         self.seed()

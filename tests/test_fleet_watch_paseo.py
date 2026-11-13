@@ -133,12 +133,23 @@ class NativeWorkerBusy(unittest.TestCase):
                 with self.subTest(status=status, rows=rows), patch.object(SENDER, "call", return_value=rows) as call:
                     self.assertEqual(SENDER.upstream_busy("upstream-pr"), 0)
                     self.assertEqual(call.call_args.args[1:], (
-                        "ls", "--label", "ade.task=upstream-pr", "--label", "ade.via=fleet-watch", "--json"))
+                        "ls", "-a", "-g", "--label", "ade.task=upstream-pr", "--label", "ade.via=fleet-watch", "--json"))
 
     def test_finished_workers_release_dispatch(self):
         for rows in ([], [{"status": "idle"}, {"status": "closed"}, {"status": "archived"}]):
             with self.subTest(rows=rows), patch.object(SENDER, "call", return_value=rows):
                 self.assertEqual(SENDER.upstream_busy("upstream-pr"), 1)
+
+    def test_archived_rows_are_finished_and_old_running_rows_are_overdue(self):
+        with patch.object(SENDER, "call", return_value=[{"status": "running", "archivedAt": "2026-01-01T00:00:00Z"}]):
+            self.assertEqual(SENDER.upstream_busy("upstream-pr"), 1)
+        old = [{"id": "w1", "status": "running", "createdAt": "2020-01-01T00:00:00Z"}]
+        fresh = [{"id": "w1", "status": "running", "createdAt": SENDER.datetime.now(SENDER.timezone.utc).isoformat()}]
+        for rows, word in ((old, "overdue"), (fresh, "active")):
+            with self.subTest(word=word), patch.object(SENDER, "call", return_value=rows), \
+                 patch("builtins.print") as shown:
+                self.assertEqual(SENDER.upstream_busy("upstream-pr", max_age=600), 0)
+                self.assertIn(word, shown.call_args.args[0])
 
     def test_invalid_listing_and_transport_hold_dispatch(self):
         for rows in ({}, None, [None], {"agents": "bad"}):
@@ -202,6 +213,77 @@ class NativeDispatch(unittest.TestCase):
             self.assertIn("ade.via=fleet-watch", run_cmd)
             self.assertEqual(run_cmd[-1], "Review PR #123")
 
+    def dispatch_with(self, run_mock, env=None, **kwargs):
+        with tempfile.TemporaryDirectory() as td:
+            brief = Path(td) / "brief.md"
+            brief.write_text("brief")
+            workdir = Path(td) / "work"
+            workdir.mkdir()
+            with patch.dict(os.environ, env or {}), patch.object(SENDER, "check_headroom"), \
+                 patch.object(SENDER.subprocess, "run", side_effect=run_mock):
+                return SENDER.dispatch(name="w1", brief=str(brief), cwd=str(workdir), min_headroom=0, **kwargs), workdir
+
+    def test_ambient_workspace_id_is_ignored_and_stripped_from_the_child_env(self):
+        calls = []
+
+        def run_mock(argv, **kwargs):
+            calls.append((argv, kwargs.get("env")))
+            if argv[1:3] == ["workspace", "ls"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps([{"id": "ws-ambient", "cwd": "/somewhere/else"}]), "")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"agentId": "a1"}), "")
+
+        env = {"PASEO_WORKSPACE_ID": "ws-ambient", "PASEO_AGENT_ID": "caller", "PASEO_AGENT_CWD": "/somewhere/else"}
+        rc, _ = self.dispatch_with(run_mock, env)
+        self.assertEqual(rc, 0)
+        argv, child_env = calls[-1]
+        self.assertNotIn("--workspace", argv)
+        self.assertEqual(argv[argv.index("--new-workspace") + 1], "local")
+        self.assertIn("ade.lead=caller", argv)  # the label still names the lead
+        for key in ("PASEO_WORKSPACE_ID", "PASEO_AGENT_ID", "PASEO_AGENT_CWD"):
+            self.assertNotIn(key, child_env)
+
+    def test_an_explicit_workspace_must_still_be_the_target_directory(self):
+        with tempfile.TemporaryDirectory() as td:
+            rows = [{"id": "ws-x", "cwd": "/somewhere/else"}, {"id": "ws-t", "cwd": td}]
+            with patch.object(SENDER, "call", return_value=rows):
+                self.assertEqual(SENDER.resolve_workspace("paseo", td, "ws-x"), "ws-t")
+                self.assertEqual(SENDER.resolve_workspace("paseo", td, "ws-t"), "ws-t")
+            with patch.object(SENDER, "call", side_effect=OSError("down")):
+                self.assertIsNone(SENDER.resolve_workspace("paseo", td, "ws-x"))
+
+    def test_launch_timeout_with_a_created_worker_is_success_not_a_retry(self):
+        def run_mock(argv, **kwargs):
+            if argv[1] == "run":
+                raise subprocess.TimeoutExpired(argv, 120)
+            if argv[1] == "ls":
+                self.assertIn("ade.name=w1", argv)
+                return subprocess.CompletedProcess(argv, 0, json.dumps([{"id": "made-1"}]), "")
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+        self.assertEqual(self.dispatch_with(run_mock)[0], 0)
+
+    def test_launch_timeout_without_a_worker_or_lookup_is_unknown(self):
+        for lookup in (subprocess.CompletedProcess([], 0, "[]", ""), subprocess.CompletedProcess([], 1, "", "")):
+            def run_mock(argv, **kwargs):
+                if argv[1] == "run":
+                    raise subprocess.TimeoutExpired(argv, 120)
+                if argv[1] == "ls":
+                    return lookup
+                return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+            with self.subTest(lookup=lookup), self.assertRaises(SENDER.LaunchUnknown):
+                self.dispatch_with(run_mock)
+
+    def test_failed_exit_with_no_worker_found_stays_an_ordinary_retry(self):
+        def run_mock(argv, **kwargs):
+            if argv[1] == "run":
+                return subprocess.CompletedProcess(argv, 1, "", "boom")
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+        with self.assertRaises(ValueError) as caught:
+            self.dispatch_with(run_mock)
+        self.assertNotIsInstance(caught.exception, SENDER.LaunchUnknown)
+
     def test_dispatch_missing_brief_raises(self):
         with self.assertRaises(ValueError):
             SENDER.dispatch(name="w", brief="/nonexistent/brief.md", min_headroom=0)
@@ -239,6 +321,12 @@ class AgentCounting(unittest.TestCase):
         ]
         with patch.object(SENDER, "call", return_value=rows):
             self.assertEqual(SENDER.count_running_agents(), 2)
+
+    def test_count_ignores_archived_and_lists_with_a_g(self):
+        rows = [{"status": "running", "archivedAt": "2026-01-01T00:00:00Z"}, {"status": "running"}]
+        with patch.object(SENDER, "call", return_value=rows) as call:
+            self.assertEqual(SENDER.count_running_agents(), 1)
+        self.assertEqual(call.call_args.args[1:4], ("ls", "-a", "-g"))
 
     def test_count_running_agents_handles_dict_envelope(self):
         data = {"agents": [{"id": "a1", "status": "running"}]}
