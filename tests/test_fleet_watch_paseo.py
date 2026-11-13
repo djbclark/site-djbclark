@@ -133,23 +133,38 @@ class NativeWorkerBusy(unittest.TestCase):
                 with self.subTest(status=status, rows=rows), patch.object(SENDER, "call", return_value=rows) as call:
                     self.assertEqual(SENDER.upstream_busy("upstream-pr"), 0)
                     self.assertEqual(call.call_args.args[1:], (
-                        "ls", "-a", "-g", "--label", "ade.task=upstream-pr", "--label", "ade.via=fleet-watch", "--json"))
+                        "ls", "-g", "--background", "--label", "ade.task=upstream-pr", "--label", "ade.via=fleet-watch", "--json"))
 
     def test_finished_workers_release_dispatch(self):
-        for rows in ([], [{"status": "idle"}, {"status": "closed"}, {"status": "archived"}]):
+        for rows in ([], [{"status": "idle"}, {"status": "closed"}]):
             with self.subTest(rows=rows), patch.object(SENDER, "call", return_value=rows):
-                self.assertEqual(SENDER.upstream_busy("upstream-pr"), 1)
+                self.assertEqual(SENDER.upstream_busy("upstream-pr"), 10)
 
-    def test_archived_rows_are_finished_and_old_running_rows_are_overdue(self):
-        with patch.object(SENDER, "call", return_value=[{"status": "running", "archivedAt": "2026-01-01T00:00:00Z"}]):
-            self.assertEqual(SENDER.upstream_busy("upstream-pr"), 1)
-        old = [{"id": "w1", "status": "running", "createdAt": "2020-01-01T00:00:00Z"}]
-        fresh = [{"id": "w1", "status": "running", "createdAt": SENDER.datetime.now(SENDER.timezone.utc).isoformat()}]
-        for rows, word in ((old, "overdue"), (fresh, "active")):
-            with self.subTest(word=word), patch.object(SENDER, "call", return_value=rows), \
+    def listing(self, rows, created=None):
+        def call(cli, *args, **kwargs):
+            if args[0] == "agent":
+                return {"Id": args[2], "CreatedAt": created} if created else {"Id": args[2]}
+            return rows
+        return call
+
+    def test_errored_and_overdue_workers_hold_and_name_the_id_to_archive(self):
+        now = SENDER.datetime.now(SENDER.timezone.utc).isoformat()
+        for rows, created, word in (
+                ([{"id": "w1", "status": "error"}], None, "errored"),
+                ([{"id": "w1", "status": "running"}], "2020-01-01T00:00:00Z", "overdue"),
+                ([{"id": "w1", "status": "running"}], now, "active"),
+                ([{"id": "w1", "status": "running"}], None, "active")):  # no age: still held
+            with self.subTest(word=word), patch.object(SENDER, "call", side_effect=self.listing(rows, created)), \
                  patch("builtins.print") as shown:
                 self.assertEqual(SENDER.upstream_busy("upstream-pr", max_age=600), 0)
                 self.assertIn(word, shown.call_args.args[0])
+                if word in ("errored", "overdue"):
+                    self.assertIn("paseo agent archive w1", shown.call_args.args[0])
+
+    def test_free_has_its_own_exit_code_so_a_crash_cannot_release_the_gate(self):
+        self.assertEqual(SENDER.FREE, 10)
+        with patch.object(SENDER, "call", return_value=[]), patch.object(SENDER.sys, "argv", ["x", "upstream-busy", "--task", "t"]):
+            self.assertEqual(SENDER.main(), 10)
 
     def test_invalid_listing_and_transport_hold_dispatch(self):
         for rows in ({}, None, [None], {"agents": "bad"}):
@@ -284,6 +299,14 @@ class NativeDispatch(unittest.TestCase):
             self.dispatch_with(run_mock)
         self.assertNotIsInstance(caught.exception, SENDER.LaunchUnknown)
 
+    def test_dispatch_refuses_a_missing_worker_directory(self):
+        with tempfile.TemporaryDirectory() as td:
+            brief = Path(td) / "brief.md"
+            brief.write_text("brief")
+            with patch.object(SENDER, "check_headroom"), self.assertRaisesRegex(ValueError, "does not exist"):
+                SENDER.dispatch(name="w", brief=str(brief), cwd=str(Path(td) / "typo"), min_headroom=0)
+            self.assertFalse((Path(td) / "typo").exists())
+
     def test_dispatch_missing_brief_raises(self):
         with self.assertRaises(ValueError):
             SENDER.dispatch(name="w", brief="/nonexistent/brief.md", min_headroom=0)
@@ -322,11 +345,10 @@ class AgentCounting(unittest.TestCase):
         with patch.object(SENDER, "call", return_value=rows):
             self.assertEqual(SENDER.count_running_agents(), 2)
 
-    def test_count_ignores_archived_and_lists_with_a_g(self):
-        rows = [{"status": "running", "archivedAt": "2026-01-01T00:00:00Z"}, {"status": "running"}]
-        with patch.object(SENDER, "call", return_value=rows) as call:
+    def test_count_lists_non_archived_global_with_background(self):
+        with patch.object(SENDER, "call", return_value=[{"status": "running"}]) as call:
             self.assertEqual(SENDER.count_running_agents(), 1)
-        self.assertEqual(call.call_args.args[1:4], ("ls", "-a", "-g"))
+        self.assertEqual(call.call_args.args[1:4], ("ls", "-g", "--background"))
 
     def test_count_running_agents_handles_dict_envelope(self):
         data = {"agents": [{"id": "a1", "status": "running"}]}

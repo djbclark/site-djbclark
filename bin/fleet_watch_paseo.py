@@ -42,7 +42,8 @@ STEER_PROVIDERS = {"claude", "codex", "opencode", "omp", "pi"}
 # Caller placement that must never steer a worker: `paseo run --workspace` ignores
 # --cwd, and a caller agent id lets the new workspace inherit its background flag.
 AMBIENT_PASEO_ENV = ("PASEO_AGENT_ID", "PASEO_AGENT_CWD", "PASEO_WORKSPACE_ID")
-FINISHED = {"idle", "closed", "archived"}
+FINISHED = {"idle", "closed"}
+FREE = 10  # upstream-busy: no worker holds dispatch. Any other exit (also a crash) means busy.
 
 
 def clean_env():
@@ -59,22 +60,19 @@ def call(cli, *args, timeout=20, env=None):
 def count_running_agents(cli=None):
     cli = cli or os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
     try:
-        rows = call(cli, "ls", "-a", "-g", "--json", timeout=20)
+        rows = call(cli, "ls", "-g", "--background", "--json", timeout=20)
         if isinstance(rows, dict):
             rows = rows.get("agents")
         if isinstance(rows, list):
-            return sum(1 for a in rows if isinstance(a, dict) and a.get("status") == "running" and not a.get("archivedAt"))
+            return sum(1 for a in rows if isinstance(a, dict) and a.get("status") == "running")
     except Exception:
         pass
     return 0
 
 
 def age_seconds(created):
-    """Seconds since an ISO-8601 or epoch createdAt; None when unreadable."""
+    """Seconds since an ISO-8601 createdAt (agent inspect's CreatedAt); None when unreadable."""
     try:
-        if isinstance(created, (int, float)):
-            stamp = created / 1000 if created > 1e11 else created
-            return max(0.0, datetime.now(timezone.utc).timestamp() - stamp)
         moment = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
@@ -83,34 +81,50 @@ def age_seconds(created):
         return None
 
 
-def upstream_busy(task, max_age=None):
-    """Hold dispatch on active native workers or an unavailable/invalid listing.
+def worker_age(cli, agent_id):
+    """Age of a worker from `agent inspect` (ls rows carry only a relative `created` text)."""
+    try:
+        info = call(cli, "agent", "inspect", str(agent_id), "--json", timeout=20)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    return age_seconds(info.get("CreatedAt")) if isinstance(info, dict) else None
 
-    -a -g lists archived-workspace and background agents too. A worker past
-    max_age seconds is reported "overdue" and still holds: stopping paid work is
-    the operator's call (paseo agent archive ID).
+
+def upstream_busy(task, max_age=None):
+    """Exit FREE (10) when no native worker holds dispatch; anything else holds.
+
+    The listing is non-archived (-g) with background agents (--background), so
+    archiving a worker releases the gate. `ls --json` rows have no timestamps:
+    a running worker's age comes from `agent inspect`. A worker past max_age
+    seconds is "overdue", an `error` worker "errored"; both still hold and
+    name the id to archive by hand (stopping paid work is the operator's call).
     """
     cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
     try:
-        rows = call(cli, "ls", "-a", "-g", "--label", f"ade.task={task}",
+        rows = call(cli, "ls", "-g", "--background", "--label", f"ade.task={task}",
                     "--label", "ade.via=fleet-watch", "--json")
         if isinstance(rows, dict):
             rows = rows.get("agents")
         if not isinstance(rows, list):
             raise ValueError("invalid Paseo agent listing")
         for row in rows:
-            if isinstance(row, dict) and (row.get("archivedAt") or row.get("status") in FINISHED):
+            if isinstance(row, dict) and row.get("status") in FINISHED:
                 continue
-            if isinstance(row, dict) and max_age:
-                age = age_seconds(row.get("createdAt"))
+            ident = row.get("id") if isinstance(row, dict) else None
+            status = row.get("status") if isinstance(row, dict) else None
+            if status == "error":
+                print(f"native Paseo worker errored ({ident or '?'}): it holds dispatch until archived: "
+                      f"paseo agent archive {ident or '<id>'}")
+                return 0
+            if ident and max_age:
+                age = worker_age(cli, ident)
                 if age is not None and age > max_age:
-                    print(f"native Paseo worker overdue ({int(age // 60)} min running, bound "
-                          f"{int(max_age // 60)} min): archive it by hand if hung: "
-                          f"paseo agent archive {row.get('id') or '?'}")
+                    print(f"native Paseo worker overdue ({ident}, {int(age // 60)} min running, bound "
+                          f"{int(max_age // 60)} min): archive it by hand if hung: paseo agent archive {ident}")
                     return 0
             print("native Paseo worker active (or status unknown)")
             return 0
-        return 1
+        return FREE
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"native Paseo worker state unavailable: {error}")
         return 0
@@ -204,7 +218,8 @@ def dispatch(name, brief, cwd=".", provider="claude/sonnet", mode="bypassPermiss
     prompt_text = brief_path.read_text(encoding="utf-8")
 
     cwd_path = Path(cwd).expanduser().resolve()
-    os.makedirs(cwd_path, exist_ok=True)
+    if not cwd_path.is_dir():
+        raise ValueError(f"worker directory does not exist: {cwd_path}")
 
     cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
     ws = resolve_workspace(cli, str(cwd_path), workspace)

@@ -13,6 +13,7 @@ on:
       - "skills/diskfree/**"
       - "bin/change-hermes*"
       - "bin/fleet*"
+      - "prompts/upstream-pr-review.md"
       - ".github/workflows/moved-tests.yml"
   pull_request:
   workflow_dispatch:

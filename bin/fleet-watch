@@ -201,7 +201,7 @@ UPSTREAM_PROFILES="${FLEET_WATCH_UPSTREAM_PROFILES:-cfengine paseo}"
 UPSTREAM_SELF="${FLEET_WATCH_UPSTREAM_SELF:-}"
 UPSTREAM_INTERVAL="${FLEET_WATCH_UPSTREAM_INTERVAL:-300}"
 UPSTREAM_MIN_HEADROOM="${FLEET_WATCH_UPSTREAM_MIN_HEADROOM:-10}"
-# Legacy dispatch override only; native detached workers have no runtime timeout.
+# Legacy dispatch timeout; for native workers it bounds only the "overdue" ping (+20 min), never stops one.
 UPSTREAM_TIMEOUT="${FLEET_WATCH_UPSTREAM_TIMEOUT:-3600}"
 UPSTREAM_MAX_AGE="${FLEET_WATCH_UPSTREAM_MAX_AGE:-86400}"
 UPSTREAM_FAIL_AFTER="${FLEET_WATCH_UPSTREAM_FAIL_AFTER:-6}"
@@ -967,7 +967,7 @@ upr_busy() {
   local native rc
   native=$(runb 30 "$PY3" "$FLEET_PASEO_DISPATCH" upstream-busy --task "$UPR_BASE" --max-age "$((UPSTREAM_TIMEOUT + 1200))" 2>&1)
   rc=$?
-  if ((rc != 1)); then
+  if ((rc != 10)); then  # only the helper's FREE code releases; a crash (rc 1) holds
     echo "${native:-native Paseo worker lookup failed (rc=$rc)}"
     return 0
   fi
@@ -1016,7 +1016,7 @@ upr_event() {
   jq -r --arg draft "$2" --arg url "$(upr_url "$repo" "$n" "$type")" '
     "",
     "1. Item: `\(.repo)#\(.n)` (\(.type)), \($url)",
-    "2. Title: \(.title)",
+    "2. Title: \(.title | gsub("[^ -~]"; "") | .[0:200])",
     "3. Event: **\(.event)** by `\(.login)` at \(.at) (fleet-watch detected it \(.detected_iso))",
     (if .head != "" then "4. PR head branch on the fork `origin`: `\(.head)`; work on `\(.head)-prep`, never push to `\(.head)` itself"
      else "4. No PR branch: this is a \(.type); nothing is pushed anywhere" end),
@@ -1116,6 +1116,13 @@ upr_dispatch() {
     STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
     return 0
   fi
+  if [[ -n "$(jq -r '.launch_unknown // empty' <<<"$ev")" ]]; then
+    # An earlier launch may have created a worker: only report it, never dispatch again.
+    if ((UPSTREAM_DRY)); then echo "$line: launch outcome unknown earlier, would only retry the ping"; return 0; fi
+    upr_ping "$line: worker launch outcome unknown, not retried (check: paseo ls -a -g --label ade.name=$(jq -r .launch_unknown <<<"$ev")); dropped" &&
+      STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
+    return 0
+  fi
   if upr_relay "$ev"; then
     ((UPSTREAM_DRY)) && return 0
     # The session reads every comment on the item, as a worker would: one relay covers them all.
@@ -1143,11 +1150,21 @@ upr_dispatch() {
   if why=$(upr_busy); then
     flag=busy
     [[ $why == *overdue* ]] && flag=overdue  # its own ping: a hung worker needs a human
+    [[ $why == *errored* ]] && flag=errored
     upr_flag "$flag" "$ev" "$line: a session is already on it ($why), not dispatching yet"
     return 0
   fi
   if ! why=$(upr_quota); then
     upr_flag noquota "$ev" "$line: no quota, not dispatching ($why), kept pending"
+    return 0
+  fi
+  # A third party chooses the PR head branch name; only a plain ref name reaches a worker's shell.
+  local head_ref pattern='^[A-Za-z0-9._/][A-Za-z0-9._/-]{0,199}$'
+  head_ref=$(jq -r '.head // ""' <<<"$ev")
+  if [[ -n "$head_ref" && ! "$head_ref" =~ $pattern ]]; then
+    if ((UPSTREAM_DRY)); then echo "$line: PR head branch name is not a plain ref name, would not dispatch"; return 0; fi
+    upr_ping "$line: PR head branch name is not a plain ref name (not dispatched; handle it by hand)"
+    STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
     return 0
   fi
   name="$UPR_BASE-${repo#*/}-$n-$(gdate -u +%Y%m%dt%H%M%S)"
@@ -1177,11 +1194,15 @@ upr_dispatch() {
       STATE_JSON=$(jq --arg r "$repo" --argjson n "$n" '.pending |= map(select(.repo != $r or .n != $n))' <<<"$STATE_JSON")
       ;;
     5) upr_flag noquota "$ev" "$line: no quota, not dispatching (pool unavailable), kept pending" ;;
-    6)
+    6 | 124 | 137)
       # Launch outcome unknown (timeout or failed exit, worker lookup found nothing or failed): a
       # worker may exist. Never redispatch; drop the event and ask for a look.
-      upr_ping "$line: worker launch outcome unknown, not retried (check: paseo ls -a -g --label ade.name=$name); dropped. $(gtail -n 1 <<<"$out" | gcut -c1-120)"
-      STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
+      if upr_ping "$line: worker launch outcome unknown (rc=$rc), not retried (check: paseo ls -a -g --label ade.name=$name); dropped. $(gtail -n 1 <<<"$out" | gcut -c1-120)"; then
+        STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" '.pending |= map(select(.key != $k))' <<<"$STATE_JSON")
+      else
+        # Ping failed: keep the event, marked, so the next pass only retries the ping.
+        STATE_JSON=$(jq --arg k "$(jq -r .key <<<"$ev")" --arg name "$name" '.pending |= map(if .key == $k then .launch_unknown = $name else . end)' <<<"$STATE_JSON")
+      fi
       ;;
     *)
       n_att=$(jq -r '.attempts + 1' <<<"$ev")

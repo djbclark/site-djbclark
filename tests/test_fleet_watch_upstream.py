@@ -44,6 +44,7 @@ exit "$(cat "$HOME/aiuse_rc" 2>/dev/null || echo 0)"
 
 PING_STUB = """#!/bin/bash
 rc=$(cat "$HOME/ping_rc" 2>/dev/null || echo 0)
+case "$*" in *"launch outcome unknown"*) [ -f "$HOME/ping_fail_unknown" ] && rc=1 ;; esac
 [ "$rc" = 0 ] && echo "$*" >> "$HOME/pings"
 exit "$rc"
 """
@@ -57,14 +58,16 @@ args = sys.argv[1:]
 if not args:
     sys.exit(2)
 if args[0] == "ls" and "--label" in args:
-    assert "-a" in args and "-g" in args
+    assert "-g" in args
     labels = [args[i + 1] for i, a in enumerate(args) if a == "--label"]
     if "ade.name=" in "".join(l[:9] for l in labels):
         # launch-outcome lookup by worker name
+        assert "-a" in args
         if (home / "lookup_fail").exists():
             sys.exit(1)
         print((home / "lookup_agents").read_text() if (home / "lookup_agents").exists() else "[]")
         sys.exit(0)
+    assert "--background" in args and "-a" not in args  # archived workers must not hold the gate
     assert labels[0] == "ade.task=upstream-pr"
     assert "ade.via=fleet-watch" in labels
     if (home / "busy_fail").exists():
@@ -73,7 +76,10 @@ if args[0] == "ls" and "--label" in args:
 elif args[0] == "ls":
     print(json.dumps([{"id": aid, "shortId": "5e55a1", "status": "running"}]))
 elif args[:2] == ["agent", "inspect"]:
-    print(json.dumps({"Id": aid, "Archived": False, "PendingPermissions": [], "Status": "idle"}))
+    info = {"Id": aid, "Archived": False, "PendingPermissions": [], "Status": "idle"}
+    if (home / "inspect_created").exists():
+        info["CreatedAt"] = (home / "inspect_created").read_text()
+    print(json.dumps(info))
 elif args[:2] == ["workspace", "ls"]:
     print(json.dumps([{"id": "ws-1", "cwd": str(home)}]))
 elif args[0] == "run":
@@ -108,6 +114,11 @@ def review(rid: int, login: str, at: str, body: str, state: str = "COMMENTED") -
             "submitted_at": at, "body": body}
 
 
+LIVE_PASEO = ("PASEO_CLI", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "PASEO_AGENT_CWD", "PASEO_HOME")
+for _key in LIVE_PASEO:  # a test run inside a Paseo agent must never reach the live daemon
+    os.environ.pop(_key, None)
+
+
 class Harness(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -129,6 +140,8 @@ class Harness(unittest.TestCase):
             wrapper = self.bin / ("g" + tool)
             wrapper.write_text("#!/bin/bash\nexec " + shlex.quote(executable) + ' "$@"\n')
             wrapper.chmod(0o755)
+        for work in ("cfengine-core", "paseo"):  # dispatch refuses a missing worker directory
+            (self.home / "src" / work).mkdir(parents=True)
         self.state = self.home / ".local" / "state" / "fleet-watch"
         self.bigteam = root / "bigteam"
         self.set("user", {"login": "djbclark"})
@@ -260,7 +273,8 @@ class UpstreamWatch(Harness):
         self.seed()
         self.new_review()
         agents = self.home / "busy_agents"
-        agents.write_text(json.dumps([{"id": "native-worker", "status": "running", "createdAt": "2020-01-01T00:00:00Z"}]))
+        agents.write_text(json.dumps([{"id": "native-worker", "status": "running", "created": "5 years ago"}]))
+        (self.home / "inspect_created").write_text("2020-01-01T00:00:00Z")
         self.assertEqual(self.run_fw(FLEET_WATCH_UPSTREAM_TIMEOUT="60").returncode, 0)
         self.assertEqual(self.dispatches(), [])
         self.assertEqual(len(self.pending()), 1)
@@ -273,11 +287,61 @@ class UpstreamWatch(Harness):
         self.seed()
         self.new_review()
         from datetime import datetime, timezone
-        (self.home / "busy_agents").write_text(json.dumps([{
-            "id": "w", "status": "running", "createdAt": datetime.now(timezone.utc).isoformat()}]))
+        (self.home / "busy_agents").write_text(json.dumps([{"id": "w", "status": "running", "created": "now"}]))
+        (self.home / "inspect_created").write_text(datetime.now(timezone.utc).isoformat())
         self.assertEqual(self.run_fw().returncode, 0)
         self.assertIn("native Paseo worker active", self.pings()[-1])
         self.assertNotIn("overdue", self.pings()[-1])
+
+    def test_an_errored_worker_holds_with_its_own_ping_until_archived(self) -> None:
+        self.seed()
+        self.new_review()
+        agents = self.home / "busy_agents"
+        agents.write_text(json.dumps([{"id": "dead-worker", "status": "error", "created": "1 hour ago"}]))
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertIn("errored (dead-worker)", self.pings()[-1])
+        self.assertIn("paseo agent archive dead-worker", self.pings()[-1])
+        agents.write_text("[]")  # archived workers drop out of `ls -g`
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)
+
+    def test_a_hostile_pr_branch_name_is_never_dispatched(self) -> None:
+        self.seed()
+        self.thread("2026-10-16T09:00:00Z")
+        self.pr(reviews=[review(1, "larsewi", "2026-10-16T07:00:00Z", "old comment"),
+                         review(2, "larsewi", "2026-10-16T09:00:00Z", "Please fix")])
+        self.set("repos/cfengine/core/pulls/6412", {"head": {"ref": "x$(touch${IFS}pwned)"}, "merged": False,
+                                                    "merged_by": None})
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertEqual(self.pending(), [])
+        self.assertIn("not a plain ref name", self.pings()[-1])
+        self.assertNotIn("pwned", self.pings()[-1])
+
+    def test_a_missing_worker_directory_is_not_created(self) -> None:
+        self.seed()
+        self.new_review()
+        (self.home / "src" / "cfengine-core").rmdir()
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(self.dispatches(), [])
+        self.assertFalse((self.home / "src" / "cfengine-core").exists())
+
+    def test_an_unknown_launch_whose_ping_failed_only_retries_the_ping(self) -> None:
+        self.seed()
+        self.new_review()
+        (self.home / "dispatch_rc").write_text("1")
+        (self.home / "lookup_fail").touch()
+        (self.home / "ping_fail_unknown").touch()
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)
+        (event,) = self.pending()
+        self.assertTrue(event["launch_unknown"].startswith("upstream-pr-core-6412-"))
+        (self.home / "ping_fail_unknown").unlink()
+        self.assertEqual(self.run_fw().returncode, 0)
+        self.assertEqual(len(self.dispatches()), 1)  # never dispatched again
+        self.assertEqual(self.pending(), [])
+        self.assertIn("launch outcome unknown", self.pings()[-1])
 
     def test_a_launch_that_failed_but_created_the_worker_is_not_retried(self) -> None:
         self.seed()
@@ -447,7 +511,7 @@ class UpstreamWatch(Harness):
         # `check` runs every other check; a stamp younger than the interval skips the pass.
         (self.state / "upstream-pr.last").write_text("")
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
-                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
+                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_PASEO=str(self.bin / "paseo"),
                     PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
@@ -620,7 +684,7 @@ class PaseoWatch(Harness):
         self.set("notifications", [note("9001", T0, REPO_NAME, "PullRequest", 6412),
                                    note("9100", T0, "getpaseo/paseo", "Discussion", 7828)])
         full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
-                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
+                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_PASEO=str(self.bin / "paseo"),
                     PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                     FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
