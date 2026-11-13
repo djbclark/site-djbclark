@@ -5,7 +5,7 @@
 **Machine:** MacBook, 8 cores (4P + 4E), 16 GB RAM, single built-in 2560×1600 display.
 **Method:** every number was measured live during the 2026-09-26 sessions (ps/top/vm_stat/launchctl/lsof, the memory-service and LiteLLM APIs, each service's own logs, and Claude transcripts). Estimates are labelled.
 **Revision 3 (evening):** regenerated after the fixes landed. Supersedes the two earlier drafts; §5 lists where those drafts were wrong.
-**Author:** Claude (Fable 5.1) at the operator's request.
+**Author:** Claude (Fable 5.2) at the operator's request.
 
 ---
 

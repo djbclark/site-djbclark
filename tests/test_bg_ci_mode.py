@@ -123,3 +123,28 @@ def test_releases_are_recognised(argv):
 ])
 def test_other_commands_are_not_releases(argv):
     assert not ci_release(*argv)
+
+
+@pytest.mark.parametrize("gate,load,expected", [("16", "16", 0), ("16", "16.1", 75), ("bypass", "99", 0)])
+def test_macos_retry_gate(tmp_path, gate, load, expected):
+    home = tmp_path / "home"
+    lw = home / "src/djbclark-ade/bin/load-watch"
+    lw.parent.mkdir(parents=True)
+    lw.write_text("#!/bin/bash\ncase \"$2\" in check) printf 'ci\\tci-run\\trepo\\n';; "
+                  "route) printf 'local\\t" + gate + "\\t2\\n';; esac\n")
+    lw.chmod(0o755)
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    for name, body in {"uname": "echo Darwin", "sysctl": "case $2 in hw.ncpu) echo 8;; vm.loadavg) echo '{ " + load + " 0 0 }';; esac",
+                       "swift": "echo LOCAL-SWIFT", "taskpolicy": 'shift 2; exec "$@"'}.items():
+        p = fake / name
+        p.write_text("#!/bin/bash\n" + body + "\n")
+        p.chmod(0o755)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    env = {**os.environ, "HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}",
+           "BG_MAX_WAIT": "0", "BG_LOAD_WAIT": "0", "BG_NO_DEADLINE": "1", "BG_TEST_SLOTS": "0"}
+    r = subprocess.run([str(BG), "swift", "test"], cwd=repo, env=env, capture_output=True, text=True, timeout=20)
+    assert r.returncode == expected, r.stderr
+    assert ("LOCAL-SWIFT" in r.stdout) == (expected == 0)
