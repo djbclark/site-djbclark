@@ -85,6 +85,13 @@ from `(ALL) ALL`).
    (no TLS, loopback): tart guests at `192.168.65.1` and the LAN cannot reach it. Do not
    set `--host-dir-policies` (default: every hostDir mount is rejected) and never
    re-introduce `orchard dev`.
+6. The launcher sets `umask 077` and `chmod 700 ~/.orchard` itself, but launchd opens
+   the log files before it runs, so they stay 0644 until the operator adds
+   `<key>Umask</key><integer>63</integer>` to
+   `~/Library/LaunchAgents/com.djbclark.orchard-dev.plist` (outside this role).
+7. The launcher refuses to start if anything already listens on 127.0.0.1:6120, and
+   checks with `lsof` that its own controller owns the listener before any credential
+   leaves it (another local account cannot capture the admin token by binding first).
 
 ## Reboot checklist
 
