@@ -1,0 +1,192 @@
+# Watches the upstream session-recovery Paseo plugin while djbclark's fork carries a
+# local fix (the plugin is opted out of Cafe auto-update and pinned to the fork's
+# branch in ~/.paseo/plugins/session-recovery/*/checkout). Pings when:
+#   - the upstream PR merges or closes: re-enable Cafe auto-update and retire this file;
+#   - upstream main moves past the fork branch's base: rebase the fork, rebuild and
+#     re-pin the installed plugin, or it misses upstream fixes.
+# GitHub cannot trigger this repo's workflows from another repo's events, so it polls.
+# Each event is reported once: a GitHub issue per event key is the dedupe record.
+#
+# Setup: TELEGRAM_BOT_TOKEN must be set as a repository secret.
+
+---
+name: Monitor session-recovery fork
+
+"on":
+  schedule:
+    - cron: "41 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: >-
+          Send a test notification to the standing Hermes Telegram topic
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor-session-recovery-fork
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  UPSTREAM_REPO: sm1ee/paseo-session-recovery
+  UPSTREAM_BRANCH: main
+  UPSTREAM_PR: "14"
+  FORK_REPO: djbclark/paseo-session-recovery
+  FORK_BRANCH: fix/accept-newer-prereleases
+
+jobs:
+  check:
+    name: Check upstream PR and branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # inbox-send is a local action (./.github/actions/inbox-send): without
+      # a checkout the runner cannot find it and every notification fails.
+      - name: Check out (for the local inbox-send action)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Inspect upstream
+        id: inspect
+        run: |
+          set -euo pipefail
+          pr_url="https://github.com/${UPSTREAM_REPO}/pull/${UPSTREAM_PR}"
+          pr=$(gh pr view "$UPSTREAM_PR" --repo "$UPSTREAM_REPO" \
+            --json state,mergeCommit,mergeable)
+          state=$(jq -r '.state' <<<"$pr")
+          event="" key="" text=""
+          case "$state" in
+            MERGED)
+              key=$(jq -r '.mergeCommit.oid // "unknown"' <<<"$pr")
+              event="merged"
+              printf -v text '%s\n%s\n%s\n%s' \
+                "✅ session-recovery: upstream merged the prerelease fix ${pr_url}" \
+                "Next: drop session-recovery from autoUpdateOptOuts in ~/.paseo/plugin-settings/paseo-cafe/directory-settings.json," \
+                "then paseo plugin update session-recovery once the registry pins merge ${key:0:7}." \
+                "Then delete .github/workflows/monitor-session-recovery-fork.yml in site-djbclark."
+              ;;
+            CLOSED)
+              key="closed"
+              event="closed"
+              printf -v text '%s\n%s' \
+                "⚠️ session-recovery: upstream closed the prerelease fix PR without merging ${pr_url}" \
+                "The installed plugin stays pinned to ${FORK_REPO} ${FORK_BRANCH}; decide whether to keep the fork."
+              ;;
+            OPEN)
+              compare=$(gh api \
+                "repos/${UPSTREAM_REPO}/compare/${UPSTREAM_BRANCH}...${FORK_REPO%%/*}:${FORK_REPO#*/}:${FORK_BRANCH}")
+              behind=$(jq -r '.behind_by' <<<"$compare")
+              case "$behind" in
+                ''|*[!0-9]*) echo "::error::behind_by was not a number: '$behind'"; exit 1 ;;
+              esac
+              upstream_sha=$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_BRANCH}" --jq '.sha')
+              mergeable=$(jq -r '.mergeable' <<<"$pr")
+              echo "PR open; fork branch is ${behind} commit(s) behind ${UPSTREAM_BRANCH} at ${upstream_sha}; mergeable=${mergeable}"
+              if [ "$behind" -gt 0 ]; then
+                event="behind"
+                key="${upstream_sha:0:12}"
+                printf -v text '%s\n%s\n%s\n%s\n%s' \
+                  "🔄 session-recovery: upstream ${UPSTREAM_BRANCH} is ${behind} commit(s) ahead of the fork fix (PR mergeable: ${mergeable})" \
+                  "https://github.com/${UPSTREAM_REPO}/compare/${UPSTREAM_BRANCH}...${FORK_REPO%%/*}:${FORK_REPO#*/}:${FORK_BRANCH}" \
+                  "Next: gh repo sync ${FORK_REPO}; rebase ${FORK_BRANCH} onto upstream/${UPSTREAM_BRANCH} in ~/src/paseo-session-recovery and push;" \
+                  "check out the new head in ~/.paseo/plugins/session-recovery/*/checkout, npm ci --ignore-scripts --omit=dev," \
+                  "paseo plugin reload session-recovery. PR: ${pr_url}"
+              fi
+              ;;
+            *) echo "::error::unexpected PR state '$state'"; exit 1 ;;
+          esac
+          echo "event=$event" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          if [ -n "$event" ]; then
+            run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            d="EOF_$(openssl rand -hex 16)"
+            {
+              echo "text<<$d"
+              printf '%s\n%s / %s\n%s\n' "$text" "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+              echo "$d"
+            } >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Check whether this event was already reported
+        id: dedupe
+        if: steps.inspect.outputs.event != ''
+        env:
+          EVENT: ${{ steps.inspect.outputs.event }}
+          KEY: ${{ steps.inspect.outputs.key }}
+        run: |
+          set -euo pipefail
+          title="session-recovery fork: ${EVENT} ${KEY}"
+          count=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --search "${title} in:title" \
+            --limit 100 \
+            --json title \
+            | jq --arg t "$title" '[.[] | select(.title == $t)] | length')
+          case "$count" in
+            ''|*[!0-9]*) echo "::error::dedupe count was not a number: '$count'"; exit 1 ;;
+          esac
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo "new_event=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_event=false" >> "$GITHUB_OUTPUT"
+            echo "Already reported: $title"
+          fi
+
+      - name: Notify via Hermes-style Telegram delivery
+        if: steps.dedupe.outputs.new_event == 'true'
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.session-recovery-fork
+          message: ${{ steps.inspect.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          disable_web_page_preview: "true"
+
+      - name: Record the reported event as a GitHub issue
+        if: steps.dedupe.outputs.new_event == 'true'
+        env:
+          TITLE: ${{ steps.dedupe.outputs.title }}
+          TEXT: ${{ steps.inspect.outputs.text }}
+        run: |
+          set -euo pipefail
+          body=$(printf '%s\n\nThis issue prevents a duplicate Telegram notification for this event. Close it once handled.\n' "$TEXT")
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$body"
+
+  test-notification:
+    name: Test Telegram delivery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.send_test_notification == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out (for the local inbox-send action)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Compose test notification text
+        id: compose
+        run: |
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf -v text '✅ session-recovery fork monitor test\n%s / %s\n%s' \
+            "$GITHUB_REPOSITORY" "$GITHUB_WORKFLOW" "$run_url"
+          d="EOF_$(openssl rand -hex 16)"
+          {
+            echo "text<<$d"
+            echo "$text"
+            echo "$d"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Send test notification to Hermes Telegram topic
+        uses: ./.github/actions/inbox-send
+        with:
+          route: gha.session-recovery-fork
+          message: ${{ steps.compose.outputs.text }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
