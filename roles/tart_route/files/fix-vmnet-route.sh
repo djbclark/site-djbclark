@@ -7,10 +7,11 @@
 #   192.168.65.0/24  tart's NAT subnet while an Apple `container` network holds
 #                    192.168.64.0/24; bridge100 or bridge101 holds 192.168.65.1.
 #                    Sudoers rule /etc/sudoers.d/tart-route.
-#   192.168.64.0/24  tart's NAT subnet when no container network is up; only
-#                    bridge100 holding 192.168.64.1 is repaired. Uses the two
-#                    argvs of /etc/sudoers.d/container-route (roles/container_route);
-#                    tart-route is deliberately not widened.
+#   192.168.64.0/24  repaired whenever bridge100 holds 192.168.64.1, whether tart
+#                    or an Apple `container` network owns it; only bridge100 is
+#                    repaired. Uses the two argvs of /etc/sudoers.d/container-route
+#                    (roles/container_route), whose caller is a second writer for
+#                    this subnet; tart-route is deliberately not widened.
 #
 # Installed copy: ~/.orchard/fix-vmnet-route.sh (source: site-public-djbclark
 # roles/tart_route/files/fix-vmnet-route.sh). Run unprivileged; the Orchard
@@ -24,7 +25,10 @@
 #
 # Test hooks (tests/test_fix_vmnet_route.py): FIX_VMNET_ROUTE_FIXTURE_DIR makes
 # the two read-only inputs come from files `netstat` and `ifconfig` in that
-# directory; FIX_VMNET_ROUTE_DRYRUN=1 prints the sudo argv instead of running it.
+# directory (and then implies FIX_VMNET_ROUTE_DRYRUN=1, so fixture input never
+# reaches real sudo); FIX_VMNET_ROUTE_DRYRUN=1 prints the sudo argv instead of
+# running it. In fixture mode a file `fail` makes `route delete`/`add` fail and
+# `netstat_after` (if present) is what the re-read after a failure sees.
 # Neither can cause anything else to run.
 set -u
 GW=192.168.68.1
@@ -33,6 +37,7 @@ say() { [ "$quiet" = 1 ] || echo "fix-vmnet-route: $*"; }
 
 fixdir=${FIX_VMNET_ROUTE_FIXTURE_DIR:-}
 if [ -n "$fixdir" ]; then
+  FIX_VMNET_ROUTE_DRYRUN=1
   netstat_out=$(/bin/cat "$fixdir/netstat") || exit 2
   ifconfig_out=$(/bin/cat "$fixdir/ifconfig") || exit 2
 else
@@ -45,6 +50,8 @@ fi
 priv() {
   if [ "${FIX_VMNET_ROUTE_DRYRUN:-}" = 1 ]; then
     echo "DRYRUN sudo -n $*"
+    [ -n "$fixdir" ] && [ -e "$fixdir/fail" ] && return 1
+    return 0
   else
     /usr/bin/sudo -n "$@" >/dev/null
   fi
@@ -55,6 +62,35 @@ holds() { # holds BRIDGE IP: does BRIDGE have "inet IP"?
     /^[^ \t]/ { cur = $1; sub(/:$/, "", cur) }
     cur == b && $1 == "inet" && $2 == ip { f = 1 }
     END { exit !f }'
+}
+
+# reread: refresh netstat_out after a failed route call (another writer may have
+# fixed the route meanwhile).
+reread() {
+  if [ -n "$fixdir" ]; then
+    [ -e "$fixdir/netstat_after" ] && netstat_out=$(/bin/cat "$fixdir/netstat_after")
+  else
+    netstat_out=$(/usr/sbin/netstat -rn -f inet)
+  fi
+}
+
+# route_state PFX BRIDGE: bad <gw> | ok | other <if> | wide <net gw> | absent
+route_state() {
+  printf '%s\n' "$netstat_out" | /usr/bin/awk -v br="$2" -v p="$1" '
+    ($1 == p || $1 == p "/24") && $3 !~ /I/ {
+      seen = 1
+      if ($4 == "en0" && $2 !~ /^link#/) { bad = 1; gw = $2 }
+      else if ($4 == br) ok = 1
+      else other = $4
+    }
+    $1 ~ /^192\.168\.(64|65)\/(1[6-9]|2[0-3])$/ && $3 !~ /I/ && $4 == "en0" && $2 !~ /^link#/ { wide = $1 " " $2 }
+    END {
+      if (bad) print "bad " gw
+      else if (ok) print "ok"
+      else if (seen) print "other " other
+      else if (wide) print "wide " wide
+      else print "absent"
+    }'
 }
 
 # fix_net PREFIX GWIP REPAIRABLE OBSERVE RULE
@@ -80,21 +116,7 @@ fix_net() {
 
   # Every non-interface-scoped PREFIX[/24] line counts: "bad <gw>" if any goes
   # via a gateway on en0, "ok" if one is on the bridge.
-  state=$(printf '%s\n' "$netstat_out" | /usr/bin/awk -v br="$bridge" -v p="$pfx" '
-    ($1 == p || $1 == p "/24") && $3 !~ /I/ {
-      seen = 1
-      if ($4 == "en0" && $2 !~ /^link#/) { bad = 1; gw = $2 }
-      else if ($4 == br) ok = 1
-      else other = $4
-    }
-    $1 ~ /^192\.168\.(64|65)\/(1[6-9]|2[0-3])$/ && $3 !~ /I/ && $4 == "en0" && $2 !~ /^link#/ { wide = $1 " " $2 }
-    END {
-      if (bad) print "bad " gw
-      else if (ok) print "ok"
-      else if (seen) print "other " other
-      else if (wide) print "wide " wide
-      else print "absent"
-    }')
+  state=$(route_state "$pfx" "$bridge")
   if [ "$state" = ok ]; then say "$net already on $bridge (nothing to do)"; return 0; fi
   if [ "$can_fix" = 0 ]; then
     echo "fix-vmnet-route: $bridge holds $gwip and $net is not on it ($state); neither sudoers rule covers $bridge for $net; hand fix: sudo route -n add -net $net -interface $bridge (after deleting any en0 route)" >&2
@@ -108,6 +130,8 @@ fix_net() {
     *)      echo "fix-vmnet-route: $net goes via ${state#bad } on en0, not $GW; the sudoers rule does not cover it" >&2; return 1 ;;
   esac
   miss="/etc/sudoers.d/$rule missing? run: just $rule-setup in site-public-djbclark"
+  # already_ok: after a failed call, is the route now right (another writer)?
+  already_ok() { reread; [ "$(route_state "$pfx" "$bridge")" = ok ]; }
   if [ "$state" = "bad $GW" ]; then
     echo "fix-vmnet-route: $net is routed via $GW (en0); restoring $bridge"
     # Constant argvs only: one literal pair per subnet and bridge.
@@ -116,14 +140,20 @@ fix_net() {
       192.168.65.0/24/bridge101) priv /sbin/route -n delete -net 192.168.65.0/24 192.168.68.1 ;;
       192.168.64.0/24/bridge100) priv /sbin/route -n delete -net 192.168.64.0/24 192.168.68.1 ;;
       *) return 1 ;;
-    esac || { echo "fix-vmnet-route: delete failed ($miss)" >&2; return 3; }
+    esac || {
+      already_ok && { say "$net already on $bridge (fixed by another writer)"; return 0; }
+      echo "fix-vmnet-route: delete failed and $net is still not on $bridge ($miss)" >&2; return 3
+    }
   fi
   case "$net/$bridge" in
     192.168.65.0/24/bridge100) priv /sbin/route -n add -net 192.168.65.0/24 -interface bridge100 ;;
     192.168.65.0/24/bridge101) priv /sbin/route -n add -net 192.168.65.0/24 -interface bridge101 ;;
     192.168.64.0/24/bridge100) priv /sbin/route -n add -net 192.168.64.0/24 -interface bridge100 ;;
     *) return 1 ;;
-  esac || { echo "fix-vmnet-route: add failed ($miss); by hand: sudo route -n add -net $net -interface $bridge" >&2; return 3; }
+  esac || {
+  already_ok && { say "$net already on $bridge (fixed by another writer)"; return 0; }
+  echo "fix-vmnet-route: add failed and $net is still not on $bridge ($miss); by hand: sudo route -n add -net $net -interface $bridge" >&2; return 3
+}
   echo "fix-vmnet-route: restored $net -> $bridge"
   return 0
 }
