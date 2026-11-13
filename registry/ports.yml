@@ -106,6 +106,12 @@ hosts:
       - {port: 18807, bind: "*",         owner: unmanaged, service: paseo-dev-metro, status: default-claim,
          must_be_up: false,  # on-demand Expo/Metro for the dev app, started by agents working in ~/src/paseo
          note: "2026-10-24: Paseo checkout Expo web app (`EXPO_PORT=18807 PASEO_LISTEN=127.0.0.1:18806 scripts/dev-app.sh`). The repo default 8081 is the React Native/Expo default and unregistered. Metro listens on all interfaces; dev only."}
+      - {port: 18810, bind: "127.0.0.1", owner: unmanaged, service: paseo-shift-drag-copy-wt-daemon, status: default-claim,
+         must_be_up: false,  # on-demand: hands-on QA of the Shift-drag copy branch
+         note: "2026-11-13: desktop-managed dev daemon for ~/src/paseo-shift-drag-copy-wt (`PASEO_LISTEN=127.0.0.1:18810 EXPO_PORT=18811 packages/desktop/scripts/dev.sh`, home: the worktree's .dev/paseo-home). Not 18806/18807, which are the ~/src/paseo checkout's; not 6768 (orca-app). Release when the upstream PR is open."}
+      - {port: 18811, bind: "*",         owner: unmanaged, service: paseo-shift-drag-copy-wt-metro, status: default-claim,
+         must_be_up: false,  # on-demand Electron-flavored Expo for the same worktree
+         note: "2026-11-13: Expo/Metro for the paseo-shift-drag-copy-wt desktop dev run (see the 18810 row). The repo default 8082-8089 range overlaps open-webui 8085 and landing 8088."}
       - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
          note: "2026-10-03: `aiuse serve` (github.com/djbclark/aiuse, ~/src/aiuse) — on-demand loopback HTTP for agents, auto-started by the operator/agents, not a launchd service we manage (same class as opencli :19825). Its CLI default was 8787 until 2026-10-03, which silently collided with collie-bridge above: collie answers every path with HTML 200, so an agent hitting http://127.0.0.1:8787/v1/snapshot got plausible HTML from collie while aiuse serve wasn't running. aiuse commit 11d67f4 moved the default to 28787 AND made serve fail loudly when the port is held by a non-aiuse responder; clients identity-check via GET /v1/health -> {\"service\": \"aiuse\"}. Do not reassign 8787 or 28787 without checking both repos."}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
