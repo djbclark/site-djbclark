@@ -7,20 +7,29 @@ roles/tart_route/files/). Replaces `orchard dev`, which listens on *:6120 with
 authentication disabled (security review 2026-11-13: remote code execution as
 the operator through hostDir mounts).
 
-1. Controller: `orchard controller run --listen 127.0.0.1:6120 --insecure-no-tls`
-   (loopback only, so tart guests at 192.168.65.1 and the LAN cannot reach it).
-   Authentication is on: a fresh random admin token is made at every start and
-   handed to the controller in ORCHARD_BOOTSTRAP_ADMIN_TOKEN. The controller's
-   stdout (where it prints service-account details) is discarded, so the token
-   never reaches the world-readable launchd log.
+1. Controller: `orchard controller run --listen 127.0.0.1:6120` with TLS (no
+   --insecure-no-tls): Orchard makes a self-signed certificate in its data dir
+   (~/.orchard/controller/controller.crt). Loopback only, so tart guests at
+   192.168.65.1 and the LAN cannot reach it. Authentication is on: a fresh random
+   admin token is made at every start and handed to the controller in
+   ORCHARD_BOOTSTRAP_ADMIN_TOKEN. The controller's stdout (where it prints
+   service-account details) is discarded, so the token never reaches the
+   world-readable launchd log. TLS pinning means another local account that
+   grabs 127.0.0.1:6120 after the controller dies cannot impersonate it to the
+   worker or the CLI: it has no key for the pinned certificate.
 2. CLI config: ~/.orchard/orchard.yml (mode 0600, JSON is valid YAML) is rewritten
-   with one context holding that token, so `orchard ssh vm ...` works. This also
-   drops the credential-less `local-dev` context that `orchard dev` left behind.
-3. Worker: `orchard worker run --name bigmac --bootstrap-token-stdin`, the token
-   string from `orchard get bootstrap-token bootstrap-admin`, fed on stdin.
+   with one context holding that token and the controller's certificate (the
+   client trusts only that certificate), so `orchard ssh vm ...` works. This also
+   drops the credential-less `local-dev` context that `orchard dev` left behind
+   and the `bootstrap-context` the controller writes itself (same content).
+3. Worker: `orchard worker run --name bigmac --bootstrap-token-stdin https://...`,
+   the token string from `orchard get bootstrap-token bootstrap-admin` (it carries
+   the certificate, so the worker pins it too), fed on stdin.
 4. Route watcher: fix-vmnet-route.sh every 15 s (300 s after rc 3, sudoers rule
    missing); logs to ~/.orchard/route-watch.log only on change.
-5. Either child exiting ends the launcher (non-zero) so launchd restarts the set.
+5. Either child exiting ends the launcher (non-zero) so launchd restarts the set;
+   a controller exit kills the worker at once, and shutdown stops the worker
+   before the controller.
    stderr of both children is filtered: DEBUG lines and the worker's own 5 s
    loopback polls are dropped; warnings, errors and real requests stay.
 
@@ -28,6 +37,7 @@ Orchard 0.55: `--data-dir` belongs to `controller`, not `run`; the VM store is
 the worker's, so a restart still leaves running VMs `failed` (README caveat 1).
 """
 
+import base64
 import json
 import os
 import re
@@ -44,9 +54,11 @@ HOME = Path(os.environ["HOME"])
 HERE = HOME / ".orchard"
 ORCHARD = "/opt/homebrew/bin/orchard"
 HOST, PORT = "127.0.0.1", 6120
-URL = f"http://{HOST}:{PORT}"
+URL = f"https://{HOST}:{PORT}"
 WORKER_NAME = "bigmac"
 CONFIG = HERE / "orchard.yml"
+DATA_DIR = HERE / "controller"
+CERT = DATA_DIR / "controller.crt"
 ROUTE_FIX = HERE / "fix-vmnet-route.sh"
 ROUTE_LOG = HERE / "route-watch.log"
 
@@ -76,6 +88,7 @@ NOISE = [
 ]
 
 stop = threading.Event()
+failed = threading.Event()  # a child exited on its own
 children = []
 
 
@@ -104,7 +117,23 @@ def spawn(argv, tag, env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL):
     )
     children.append((tag, proc))
     threading.Thread(target=pump, args=(proc.stderr, tag), daemon=True).start()
+    threading.Thread(target=watch, args=(proc, tag), daemon=True).start()
     return proc
+
+
+def watch(proc, tag):
+    """Block on one child; its exit ends the launcher, and a dead controller
+    takes the worker down immediately (a worker must never outlive it)."""
+    rc = proc.wait()
+    if stop.is_set():
+        return
+    log(f"{tag} exited rc={rc}")
+    failed.set()
+    stop.set()
+    if tag == "controller":
+        for other, p in children:
+            if other == "worker" and p.poll() is None:
+                p.kill()
 
 
 def route_watch():
@@ -126,12 +155,38 @@ def route_watch():
         stop.wait(300 if r.returncode == 3 else 15)
 
 
-def write_config(token):
+def read_cert_b64():
+    """The controller's certificate (PEM, as Orchard writes it), base64 as the
+    `certificate:` field of orchard.yml wants it."""
+    pem = CERT.read_bytes()
+    if b"-----BEGIN CERTIFICATE-----" not in pem:
+        raise RuntimeError(f"{CERT} holds no certificate")
+    return base64.b64encode(pem).decode()
+
+
+def wait_controller_context(cert_b64):
+    """The controller writes its own `bootstrap-context` into orchard.yml (after
+    it starts listening, in two steps). Let it finish before we replace the file
+    so its write cannot clobber ours."""
+    for _ in range(40):
+        try:
+            text = CONFIG.read_text()
+        except OSError:
+            text = ""
+        if "default-context: bootstrap-context" in text and cert_b64 in text:
+            return True
+        if stop.wait(0.25):
+            return False
+    return False
+
+
+def write_config(token, cert_b64):
     cfg = {
         "default-context": "local",
         "contexts": {
             "local": {
                 "url": URL,
+                "certificate": cert_b64,
                 "serviceAccountName": "bootstrap-admin",
                 "serviceAccountToken": token,
             }
@@ -155,14 +210,18 @@ def port_in_use():
 
 def owns_listener(controller):
     """True when our own controller process is the listener on HOST:PORT."""
-    r = subprocess.run(
-        ["/usr/sbin/lsof", "-nP", "-a", "-p", str(controller.pid)]
-        + [f"-iTCP@{HOST}:{PORT}", "-sTCP:LISTEN"],
-        check=False,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        r = subprocess.run(
+            ["/usr/sbin/lsof", "-nP", "-a", "-p", str(controller.pid)]
+            + [f"-iTCP@{HOST}:{PORT}", "-sTCP:LISTEN"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return r.returncode == 0 and "LISTEN" in r.stdout
 
 
@@ -204,6 +263,9 @@ def run():
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("ORCHARD_")}
     base_env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
     token = secrets.token_hex(16)  # 32 characters, new at every start
+    # Stale CLI config (old token or certificate) must not survive; the
+    # controller then creates the file itself, mode 0600 under our umask.
+    CONFIG.unlink(missing_ok=True)
 
     threading.Thread(target=route_watch, daemon=True).start()
 
@@ -213,11 +275,10 @@ def run():
             ORCHARD,
             "controller",
             "--data-dir",
-            str(HERE / "controller"),
+            str(DATA_DIR),
             "run",
             "--listen",
             f"{HOST}:{PORT}",
-            "--insecure-no-tls",
         ],
         "controller",
         ctl_env,
@@ -225,7 +286,10 @@ def run():
     if not wait_listening(controller):
         log("controller did not start listening")
         return terminate(1)
-    write_config(token)
+    cert_b64 = read_cert_b64()
+    if not wait_controller_context(cert_b64):
+        log("controller did not write its context (continuing with our own)")
+    write_config(token, cert_b64)
 
     got = subprocess.run(
         [ORCHARD, "get", "bootstrap-token", "bootstrap-admin"],
@@ -267,26 +331,31 @@ def run():
         return terminate(1)
     log(f"controller + worker {WORKER_NAME} up on {URL}")
 
-    while not stop.is_set():
-        for tag, proc in children:
-            if proc.poll() is not None:
-                log(f"{tag} exited rc={proc.returncode}")
-                return terminate(1)
-        stop.wait(2)
-    return terminate(0)
+    stop.wait()
+    return terminate(1 if failed.is_set() else 0)
+
+
+def stop_child(proc, grace):
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(grace)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def terminate(rc):
+    """Stop the worker first and wait for it, then the controller, so the
+    worker never talks to a dying (or replaced) controller."""
     stop.set()
-    for _, proc in reversed(children):
-        if proc.poll() is None:
-            proc.terminate()
-    deadline = time.time() + 15
-    for _, proc in children:
-        try:
-            proc.wait(max(0.1, deadline - time.time()))
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    for want in ("worker", "controller"):
+        for tag, proc in reversed(children):
+            if tag == want:
+                stop_child(proc, 10)
+    for tag, proc in children:
+        if tag not in ("worker", "controller"):
+            stop_child(proc, 5)
     return rc
 
 
