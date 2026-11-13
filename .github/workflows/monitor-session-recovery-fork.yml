@@ -1,7 +1,9 @@
 # Watches the upstream session-recovery Paseo plugin while djbclark's fork carries a
 # local fix (the plugin is opted out of Cafe auto-update and pinned to the fork's
 # branch in ~/.paseo/plugins/session-recovery/*/checkout). Pings when:
-#   - the upstream PR merges or closes: re-enable Cafe auto-update and retire this file;
+#   - the upstream PR merges, and again once the plugin registry pins a commit that
+#     includes the merge: then re-enable Cafe auto-update and retire this file;
+#   - the upstream PR closes unmerged;
 #   - upstream main moves past the fork branch's base: rebase the fork, rebuild and
 #     re-pin the installed plugin, or it misses upstream fixes.
 # GitHub cannot trigger this repo's workflows from another repo's events, so it polls.
@@ -34,6 +36,8 @@ env:
   UPSTREAM_PR: "14"
   FORK_REPO: djbclark/paseo-session-recovery
   FORK_BRANCH: fix/accept-newer-prereleases
+  REGISTRY_URL: https://plugins.paseo.sh
+  REGISTRY_ID: sm1ee/session-recovery
 
 jobs:
   check:
@@ -61,13 +65,29 @@ jobs:
           event="" key="" text=""
           case "$state" in
             MERGED)
-              key=$(jq -r '.mergeCommit.oid // "unknown"' <<<"$pr")
-              event="merged"
-              printf -v text '%s\n%s\n%s\n%s' \
-                "✅ session-recovery: upstream merged the prerelease fix ${pr_url}" \
-                "Next: drop session-recovery from autoUpdateOptOuts in ~/.paseo/plugin-settings/paseo-cafe/directory-settings.json," \
-                "then paseo plugin update session-recovery once the registry pins merge ${key:0:7}." \
-                "Then delete .github/workflows/monitor-session-recovery-fork.yml in site-djbclark."
+              merge=$(jq -r '.mergeCommit.oid // ""' <<<"$pr")
+              [[ "$merge" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::merge commit was not a SHA: '$merge'"; exit 1; }
+              # The registry pins a reviewed commit; `paseo plugin update` installs only that pin.
+              pinned=$(curl --fail --silent --show-error --proto '=https' --max-time 30 \
+                "${REGISTRY_URL}/plugins/${REGISTRY_ID}.json" | jq -r '.artifact.commit // ""')
+              [[ "$pinned" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::registry pin was not a SHA: '$pinned'"; exit 1; }
+              included=$(gh api "repos/${UPSTREAM_REPO}/compare/${merge}...${pinned}" --jq '.status')
+              echo "PR merged at ${merge}; registry pins ${pinned} (compare: ${included})"
+              if [ "$included" = identical ] || [ "$included" = ahead ]; then
+                event="registry-ready"
+                key="${pinned:0:12}"
+                printf -v text '%s\n%s\n%s\n%s' \
+                  "✅ session-recovery: the Paseo plugin registry now pins ${pinned:0:7}, which includes the merged prerelease fix ${pr_url}" \
+                  "Next: drop session-recovery from autoUpdateOptOuts in ~/.paseo/plugin-settings/paseo-cafe/directory-settings.json," \
+                  "then paseo plugin update session-recovery (or let Cafe do it)." \
+                  "Then delete .github/workflows/monitor-session-recovery-fork.yml in site-djbclark."
+              else
+                event="merged"
+                key="${merge:0:12}"
+                printf -v text '%s\n%s' \
+                  "🔀 session-recovery: upstream merged the prerelease fix ${pr_url}" \
+                  "The registry still pins ${pinned:0:7}; keep the Cafe opt-out. A second ping follows when the registry includes merge ${merge:0:7}."
+              fi
               ;;
             CLOSED)
               key="closed"
