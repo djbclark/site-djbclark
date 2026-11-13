@@ -138,22 +138,41 @@ def write_config(token):
         },
     }
     tmp = CONFIG.with_name(CONFIG.name + ".new")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
     os.replace(tmp, CONFIG)
 
 
+def port_in_use():
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex((HOST, PORT)) == 0
+
+
+def owns_listener(controller):
+    """True when our own controller process is the listener on HOST:PORT."""
+    r = subprocess.run(
+        ["/usr/sbin/lsof", "-nP", "-a", "-p", str(controller.pid)]
+        + [f"-iTCP@{HOST}:{PORT}", "-sTCP:LISTEN"],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    return r.returncode == 0 and "LISTEN" in r.stdout
+
+
 def wait_listening(controller):
     for _ in range(120):
-        if controller.poll() is not None:
+        if stop.is_set() or controller.poll() is not None:
             return False
-        with socket.socket() as s:
-            s.settimeout(0.5)
-            if s.connect_ex((HOST, PORT)) == 0:
-                return True
-        time.sleep(0.5)
+        if port_in_use() and owns_listener(controller):
+            return True
+        stop.wait(0.5)
     return False
 
 
@@ -162,8 +181,26 @@ def shutdown(*_):
 
 
 def main():
+    os.umask(0o077)
+    os.chmod(HERE, 0o700)
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
+    try:
+        return run()
+    except Exception as exc:  # noqa: BLE001 - any failure must stop the children
+        log(f"fatal: {exc!r}")
+        return terminate(1)
+    finally:
+        stop.set()
+        for _, proc in children:
+            if proc.poll() is None:
+                proc.terminate()
+
+
+def run():
+    if port_in_use():
+        log(f"something already listens on {HOST}:{PORT}; refusing to start")
+        return 1
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("ORCHARD_")}
     base_env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
     token = secrets.token_hex(16)  # 32 characters, new at every start
@@ -197,12 +234,16 @@ def main():
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        timeout=30,
     )
     bootstrap = got.stdout.strip()
     if got.returncode != 0 or not bootstrap.startswith("orchard-bootstrap-token-"):
         log(f"could not get a worker bootstrap token (rc={got.returncode})")
         return terminate(1)
 
+    if controller.poll() is not None or not owns_listener(controller):
+        log("controller is gone or no longer the listener; not starting worker")
+        return terminate(1)
     worker = spawn(
         [
             ORCHARD,
@@ -218,8 +259,12 @@ def main():
         stdin=subprocess.PIPE,
     )
     assert worker.stdin is not None
-    worker.stdin.write(bootstrap + "\n")
-    worker.stdin.close()
+    try:
+        worker.stdin.write(bootstrap + "\n")
+        worker.stdin.close()
+    except BrokenPipeError:
+        log("worker closed stdin before reading the bootstrap token")
+        return terminate(1)
     log(f"controller + worker {WORKER_NAME} up on {URL}")
 
     while not stop.is_set():
