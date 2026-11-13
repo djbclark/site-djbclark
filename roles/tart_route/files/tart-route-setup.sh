@@ -15,15 +15,14 @@
 set -euo pipefail
 sudoers=/etc/sudoers.d/tart-route
 operator=$(/usr/bin/id -un)
+# The operator name goes into root's sudoers text: never root, and a plain account name only.
+[ "$(/usr/bin/id -u)" != 0 ] || { echo "tart-route-setup: run as the operator, not root" >&2; exit 1; }
+case "$operator" in
+  ''|[!a-z_]*|*[!a-z0-9_-]*) echo "tart-route-setup: unexpected account name '$operator'" >&2; exit 1 ;;
+esac
 
 content="# site-djbclark roles/tart_route (just tart-route-setup); tailscale#22119; caller ~/.orchard/fix-vmnet-route.sh
 $operator ALL=(root) NOPASSWD: /sbin/route -n delete -net 192.168.65.0/24 192.168.68.1, /sbin/route -n add -net 192.168.65.0/24 -interface bridge100, /sbin/route -n add -net 192.168.65.0/24 -interface bridge101"
-
-# Idempotency check: root cmp only with an already-cached ticket (never prompts).
-if [ -f "$sudoers" ] && /usr/bin/printf '%s\n' "$content" \
-    | /usr/bin/sudo -n /usr/bin/cmp -s - "$sudoers" 2>/dev/null; then
-  echo "tart-route-setup: already installed and current ($sudoers)"; exit 0
-fi
 
 # shellcheck disable=SC2016 # "$1"/"$t" expand in root's sh, not here
 install_body='umask 077; t=/etc/sudoers.d/.tart-route.new; /usr/bin/printf "%s\n" "$1" >"$t" && /usr/sbin/visudo -cqf "$t" && /usr/sbin/chown root:wheel "$t" && /bin/chmod 0440 "$t" && /bin/mv -f "$t" /etc/sudoers.d/tart-route || { /bin/rm -f "$t"; exit 1; }'
@@ -33,6 +32,12 @@ shown=$(printf '%q ' /bin/sh -c "$install_body" sh "$content")
 if [ "${1:-}" = "--print" ]; then
   printf '%s\n' "$content"; echo "(dialog text ${#shown} chars)"; exit 0
 fi
+# Idempotency check: root cmp only with an already-cached ticket (never prompts).
+if [ -f "$sudoers" ] && /usr/bin/printf '%s\n' "$content" \
+    | /usr/bin/sudo -n /usr/bin/cmp -s - "$sudoers" 2>/dev/null; then
+  echo "tart-route-setup: already installed and current ($sudoers)"; exit 0
+fi
+
 if command -v sudo-ask >/dev/null 2>&1; then
   sudo-ask /bin/sh -c "$install_body" sh "$content"
 else
