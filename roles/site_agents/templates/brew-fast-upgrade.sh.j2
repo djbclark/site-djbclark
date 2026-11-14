@@ -5,7 +5,7 @@ set -euo pipefail
 # Upgrades every Homebrew formula and cask (--greedy: auto_updates casks too),
 # globally-installed npm packages (both the user ~/.local npm tree and
 # Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
-# ~/.dsh/profiles/<name> plugin tree), and uv tools, under the
+# ~/.dsh/profiles/<name> plugin tree), native Codex, and uv tools, under the
 # exclusive site advisory lock (Phase F4). Paseo plugins are left to Cafe
 # (auto-update on by default: ~30s after daemon start, then every six hours;
 # failures stay isolated per plugin). zcode-app-cli and
@@ -318,6 +318,13 @@ restart_stale_launchd_jobs() {
   return "$rc"
 }
 
+# Native Codex installs are outside Homebrew/npm tracking. Run the official
+# installer in a child shell so its exit/traps cannot terminate this runner.
+run_codex_pass() {
+  echo "[brew-fast-upgrade] codex: upgrading with the native installer"
+  sh -c 's=$(curl -fsSL https://chatgpt.com/codex/install.sh) && CODEX_NON_INTERACTIVE=1 eval "$s"'
+}
+
 # uv tools are installed once (`uv tool install`, Ansible `creates:` guards)
 # and nothing else upgrades them. --all keeps each tool's own interpreter.
 run_uv_pass() {
@@ -541,7 +548,7 @@ verify_clean() {
 }
 
 run_upgrade_and_restart_apps() {
-  local attempt stale_rc=0
+  local attempt stale_rc=0 codex_rc=0
   MISSING_APP_CASKS="$(missing_app_casks)"
 
   for attempt in $(gseq 1 "$MAX_ATTEMPTS"); do
@@ -564,6 +571,11 @@ run_upgrade_and_restart_apps() {
     if ! run_pnpm_pass; then
       echo "[brew-fast-upgrade] pnpm/dsh pass failed on attempt $attempt"
     fi
+    codex_rc=0
+    if ! run_codex_pass; then
+      echo "[brew-fast-upgrade] codex pass failed on attempt $attempt"
+      codex_rc=1
+    fi
     if ! run_uv_pass; then
       echo "[brew-fast-upgrade] uv tool pass failed on attempt $attempt"
     fi
@@ -571,7 +583,7 @@ run_upgrade_and_restart_apps() {
       echo "[brew-fast-upgrade] venicecode pass failed on attempt $attempt"
     fi
 
-    if verify_clean; then
+    if verify_clean && [ "$codex_rc" -eq 0 ]; then
       echo "[brew-fast-upgrade] Verification passed: nothing outdated remains (attempt $attempt)."
       return "$stale_rc"
     fi
@@ -582,13 +594,13 @@ run_upgrade_and_restart_apps() {
     fi
   done
 
-  echo "[brew-fast-upgrade] ERROR: outdated items remain after $MAX_ATTEMPTS attempts; needs manual intervention:"
+  echo "[brew-fast-upgrade] ERROR: outdated items remain or Codex upgrade failed after $MAX_ATTEMPTS attempts; needs manual intervention:"
   verify_clean || true
   return 1
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
