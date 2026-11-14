@@ -141,6 +141,10 @@ def route_watch():
     while not stop.is_set():
         r = subprocess.run(
             [str(ROUTE_FIX), "-q"],
+            env={
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOME": os.environ.get("HOME", str(Path.home())),
+            },
             check=False,
             stdin=subprocess.DEVNULL,
             capture_output=True,
