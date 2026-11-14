@@ -29,7 +29,9 @@
 # `admit --wait 0` and, once held, hands the waiting to `load-watch admit --wait CHUNK` (CHUNK = BG_ADMIT_CHUNK, default 420 s, cut to the
 # rest of BG_MAX_WAIT and, in a `ci` repo, to the CI-offload threshold): load-watch polls every 15 s, staggers, and applies its
 # starvation valve (refused 300 s on soft gates only: one job through, one per 120 s machine-wide; hard gates never yield; its clock
-# is per call, so bg can be forced only in the last part of each chunk and a chunk under 300 s, such as the final one, never); a
+# spans the chunks since bg passes `--refused-since EPOCH`, the epoch of the hold's first refusal, on every `--wait CHUNK` call, so the
+# valve fires 300 s after the first refusal, not only in the last part of a chunk; an older load-watch without the flag: bg retries that
+# call without it and drops it for the run, and the clock is per call again); a
 # 15 s poll loop of bg's own got no valve and wrote one admit-log line per poll. Without load-watch (missing, erroring) or on the macOS CI
 # fallback gate bg still polls every 15 s itself. Also reverts an expired Gradle profile
 # (gradle-limits check). When testing bg itself, pass BG_LOAD_WAIT=0.
@@ -681,6 +683,7 @@ if [ "$wait_s" != 0 ]; then
   cores=$(sysctl -n hw.ncpu)
   announced=0
   clear=0
+  lw_since= lw_flag_ok=1   # epoch of this hold's first refusal; 0 once an older load-watch rejected --refused-since
   while :; do
     lw_wait=0 lw_rc=x lw_t=$SECONDS   # reset every pass: the sleep decision at the loop end must never read a stale call
     load1=$(sysctl -n vm.loadavg | gawk '{print $2}')
@@ -698,7 +701,7 @@ if [ "$wait_s" != 0 ]; then
       # load-watch does the waiting (2026-11-14): `admit --wait CHUNK` polls, staggers and applies its starvation valve (a soft-gate
       # refusal that lasts LW_STARVE_SOFT_S, 300 s, lets one job through, at most one per 120 s machine-wide), none of which a
       # bare `--wait 0` poll loop could get. A chunk, not the whole budget, so bg still ticks its own budget, ping, deadline
-      # heartbeat and offload between calls (valve needs >= 300 s of refusal inside one call, hence BG_ADMIT_CHUNK 420).
+      # heartbeat and offload between calls (BG_ADMIT_CHUNK 420; the valve clock spans chunks via `--refused-since`, see below).
       lw_wait=0
       if [ "$announced" = 1 ]; then
         lw_wait=$((max_wait - $(waited_s)))
@@ -715,10 +718,35 @@ if [ "$wait_s" != 0 ]; then
       fi
       lw_rc=0
       lw_t=$SECONDS
-      lw_out=$("$lw" admit --wait "$lw_wait" --max-per-core "$max_per_core" 2>/dev/null) || lw_rc=$?
-      if [ "$lw_rc" = 75 ]; then over=1; why="load or memory churn above the load-watch limit (load $load1)"
+      # The valve clock spans chunks (2026-11-14, load-watch `--refused-since EPOCH`): every `--wait CHUNK` call of one hold carries
+      # the epoch of the hold's first refusal, inline (never exported: LW_REFUSED_SINCE would then credit every later child). The
+      # `--wait 0` look gets none. An older load-watch rejects the flag with argparse exit 2, `unrecognized arguments: --refused-since`;
+      # on exactly that, the call is retried once without it and the flag is dropped for the rest of this run (a usage error is
+      # never a refusal or an admit). stderr goes to a throwaway file only when the flag is passed, to read that message.
+      lw_args=(admit --wait "$lw_wait")
+      lw_errf=
+      if [ "$lw_wait" != 0 ] && [ "$lw_flag_ok" = 1 ]; then
+        [ -n "$lw_since" ] || lw_since=$(gdate +%s)   # a hold the look did not stamp: it starts now
+        lw_errf=$(mktemp "${TMPDIR:-/tmp}/bg-lw-err.XXXXXX" 2>/dev/null) || lw_errf=
+        if [ -n "$lw_errf" ]; then lw_args+=(--refused-since "$lw_since")
+        else lw_flag_ok=0; echo "bg: no temp file for load-watch's stderr; waiting without --refused-since" >&2; fi
+      fi
+      lw_args+=(--max-per-core "$max_per_core")
+      lw_out=$("$lw" "${lw_args[@]}" 2>"${lw_errf:-/dev/null}") || lw_rc=$?
+      if [ "$lw_rc" = 2 ] && [ -n "$lw_errf" ] && grep -q 'unrecognized arguments:.*--refused-since' "$lw_errf" 2>/dev/null; then
+        lw_flag_ok=0
+        echo "bg: this load-watch does not know --refused-since; waiting without it" >&2
+        lw_rc=0
+        lw_t=$SECONDS   # the rejected call took no wait: the "load-watch waited" test below must time the retry only
+        lw_out=$("$lw" admit --wait "$lw_wait" --max-per-core "$max_per_core" 2>/dev/null) || lw_rc=$?
+      fi
+      [ -z "$lw_errf" ] || rm -f "$lw_errf"
+      if [ "$lw_rc" = 75 ]; then
+        over=1; why="load or memory churn above the load-watch limit (load $load1)"
+        [ -n "$lw_since" ] || lw_since=$(gdate +%s)   # the hold's first refusal (the --wait 0 look): the valve clock starts here
       elif [ "$lw_rc" = 0 ]; then
         over=0
+        lw_since=   # the hold ended (admitted): a later refusal is a new hold with its own epoch
         # After a waiting call load-watch has staggered and re-read itself, and a forced admit must not be re-read (the claim is
         # spent): go. Its line carries ` waited_s=N` only after a real wait; a call that admitted at its first reading staggered
         # nothing, so it takes bg's own pause and re-read below, as before.
