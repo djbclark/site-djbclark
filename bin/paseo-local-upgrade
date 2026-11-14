@@ -117,8 +117,7 @@ class Ctx:
 
     def paseo(self, *args: str) -> list[str]:
         """argv for a paseo call: the upstream bundle's CLI by absolute path, else `paseo` from PATH."""
-        shim = (self.upstream_bundle or self.installed) / CLI_REL
-        return [str(shim) if shim.is_file() else "paseo", *args]
+        return [str((self.upstream_bundle or self.installed) / CLI_REL), *args]
 
     def cmd(self, argv: list[str], timeout: float = 60) -> Result:
         res = self.runner(argv, timeout)
@@ -253,7 +252,7 @@ def shipit_running(ctx: Ctx) -> bool:
     return False
 
 
-def quit_app_and_daemon(ctx: Ctx) -> None:
+def quit_app_and_daemon(ctx: Ctx, check_update: bool = True) -> None:
     """Quit the app, then stop the daemon. Re-checks the gate once the app is gone while a daemon still runs
     (it may outlive the app). Raises Gate then; the caller relaunches the app."""
     if app_running(ctx):  # a quit sent to a closed app may launch it first, and fails on some macOS versions
@@ -263,7 +262,7 @@ def quit_app_and_daemon(ctx: Ctx) -> None:
                        f"{quit_res.err.strip() or quit_res.out.strip()}")
     wait_for("the Paseo app to quit", ctx, lambda: not app_running(ctx))
     wait_for("ShipIt to finish", ctx, lambda: not shipit_running(ctx))
-    if left := [e for e in update_errors(ctx) if "ShipIt" in e]:
+    if check_update and (left := [e for e in update_errors(ctx) if "ShipIt" in e]):
         raise Fail(left[0])
     if daemon_is_stopped(ctx):
         ctx.log("daemon already stopped with the app; no agent can be running under this home")
@@ -321,7 +320,7 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
 def save_state(ctx: Ctx, name: str = "last-run.json", **kw) -> None:
     ctx.state_dir.mkdir(parents=True, exist_ok=True)
     data = {
-        "installed": str(ctx.installed), "staged": str(ctx.staged), "backup": str(ctx.backup),
+        "installed": str(ctx.installed), "staged": str(ctx.staged), "backup": str(ctx.backup), "home": ctx.home,
         "when": datetime.now(timezone.utc).isoformat(), **kw,
     }
     tmp = ctx.state_dir / f"{name}.tmp"
@@ -412,6 +411,9 @@ def preflight(ctx: Ctx, rollback: bool) -> list[str]:
     errs = check_paths(ctx, [("installed", ctx.installed), ("staged", ctx.staged), ("backup", ctx.backup)])
     if errs:
         return errs
+    shim = (ctx.upstream_bundle or ctx.installed) / CLI_REL
+    if not shim.is_file():  # no PATH fallback: after the swap, `paseo` on PATH is the build under test
+        return [f"the upstream app has no CLI shim at {shim}; refusing"]
     if rollback:
         if not ctx.backup.is_dir():
             errs.append(f"rollback target missing: {ctx.backup}")
@@ -579,7 +581,7 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
         save_state(ctx, phase="failed-gated", error=error)
         return 4 if code == 4 else 3
     try:
-        quit_app_and_daemon(ctx)
+        quit_app_and_daemon(ctx, check_update=False)  # restoring the old build must not wait on an update
         swap_back(ctx)
         start_app_and_wait(ctx, None)
     except Stuck as exc:
@@ -632,7 +634,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--staged", help=f"default {DEFAULT_STAGED}; for --rollback, the value saved by the upgrade")
     p.add_argument("--backup", help="where the current app goes (default Paseo-<version>-previous.app next to it); "
                                     "for --rollback, the value saved by the upgrade")
-    p.add_argument("--home", default=os.path.expanduser("~/.paseo"))
+    p.add_argument("--home", help="the daemon home (default ~/.paseo; for --rollback, the value saved by the upgrade)")
     p.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
     p.add_argument("--settle", type=float, default=20, help="seconds to settle before the final check")
     p.add_argument("--timeout", type=float, default=90, help="seconds to wait for app quit, daemon stop and start")
@@ -650,7 +652,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
 def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     state_dir = Path(args.state_dir).expanduser()
     state_dir.mkdir(parents=True, exist_ok=True)
-    installed, staged, backup = args.installed, args.staged, args.backup
+    installed, staged, backup, home = args.installed, args.staged, args.backup, args.home
     if args.rollback:
         saved = state_dir / "last-run.json"
         if not saved.exists() and not backup:
@@ -663,6 +665,9 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
                 installed = installed or data["installed"]
                 staged = staged or data["staged"]
                 backup = backup or data["backup"]
+                home = home or data.get("home")
+                if home is not None and not isinstance(home, str):
+                    raise TypeError("home must be a string")
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise SystemExit(f"paseo-local-upgrade: unreadable {saved}: {exc}") from exc
     installed_p = Path(installed or DEFAULT_INSTALLED).expanduser()
@@ -679,7 +684,7 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     mode = "rollback" if args.rollback else ("apply" if args.apply else "dry-run")
     ctx = Ctx(
         installed=installed_p, staged=staged_p, backup=backup_p, state_dir=state_dir,
-        home=args.home, settle=args.settle, timeout=args.timeout, require_plugins=args.require_plugin,
+        home=home or os.path.expanduser("~/.paseo"), settle=args.settle, timeout=args.timeout, require_plugins=args.require_plugin,
         allow_terminals=args.allow_terminals, updater_cache=Path(args.updater_cache).expanduser(),
         runner=runner, sleep=sleep, log_path=state_dir / f"{stamp}-{mode}.log",
         shipit_cache=Path(args.shipit_cache).expanduser(),
@@ -701,7 +706,7 @@ def inside_paseo(env, runner) -> str | None:
         if res.code != 0:
             return f"cannot read the parent of process {pid} (ps failed); refusing"
         if len(parts) < 2 or not parts[0].isdigit():
-            return None
+            return f"cannot parse the parent of process {pid}; refusing"
         if pid != os.getpid() and ("Paseo Helper" in parts[1] or "/Paseo.app/" in parts[1]):
             return f"ancestor process {pid} is a Paseo app: {parts[1][:80]}"
         pid = int(parts[0])
@@ -710,12 +715,12 @@ def inside_paseo(env, runner) -> str | None:
     return None
 
 
-def open_lock(home: str) -> int:
-    """A per-user lock file (no symlink following, mode 0600) keyed on what every run shares: the app's bundle id
-    and the daemon home, whatever --installed or --state-dir say."""
+def open_lock() -> int:
+    """A per-user lock file (no symlink following, mode 0600) keyed on the app's bundle id alone: every run quits
+    the same app, whatever --installed, --home or --state-dir say."""
     lock_dir = Path(LOCK_DIR).expanduser()
     lock_dir.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha256(f"{BUNDLE_ID}:{os.path.realpath(os.path.expanduser(home))}".encode()).hexdigest()[:16]
+    key = hashlib.sha256(BUNDLE_ID.encode()).hexdigest()[:16]
     return os.open(lock_dir / f"{key}.lock", os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
 
 
@@ -736,7 +741,7 @@ def main(argv: list[str] | None = None, runner=run, sleep=time.sleep) -> int:
         print(exc, file=sys.stderr)
         return 2
     try:
-        fd = open_lock(ctx.home)
+        fd = open_lock()
     except OSError as exc:
         ctx.log(f"cannot open the lock file: {exc}")
         return 2

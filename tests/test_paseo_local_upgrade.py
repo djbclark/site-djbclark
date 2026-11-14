@@ -69,13 +69,14 @@ class Fake:
         self.app_up = True
         self.pid = 100
         self.calls = []
+        self.raw_calls = []  # argv as the script sent it (absolute shim path)
         self.installed = tmp / "Paseo.app"
 
     def fork_installed(self):
         return not (self.installed / "Contents/Resources/app-update.yml").exists()
 
     def __call__(self, argv, timeout=60):
-        self.calls.append(argv)
+        self.raw_calls.append(argv)
         head = argv[0]
         shim = "/Contents/Resources/bin/paseo"
         if head.endswith(shim):  # an absolute CLI path inside a bundle: only that bundle's CLI answers
@@ -84,7 +85,10 @@ class Fake:
                 self.fork_cli_calls += 1
                 return plu.Result(127, "", "Paseo Helper: no such file")
             head, argv = "paseo", ["paseo", *argv[1:]]
+        self.calls.append(argv)  # normalised, so c[:3] == ["paseo", "daemon", "stop"] matches
         if head == "ps":
+            if argv[1:3] == ["-o", "ppid=,command="]:
+                return plu.Result(0, "1 /sbin/launchd\n")
             if "comm=" in argv[-1]:
                 return plu.Result(0, "  77 /Users/x/Library/Caches/sh.paseo.desktop.ShipIt/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
             return plu.Result(0, "")
@@ -166,9 +170,9 @@ def env(tmp_path, monkeypatch):
     return tmp_path
 
 
-def run_main(env, fake, *extra, with_backup=True):
+def run_main(env, fake, *extra, with_backup=True, with_home=True):
     argv = ["--installed", str(env / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
-            "--state-dir", str(env / "state"), "--home", str(env / "home"),
+            "--state-dir", str(env / "state"), *(["--home", str(env / "home")] if with_home else []),
             "--updater-cache", str(env / "updates"), "--shipit-cache", str(env / "shipit"),
             "--settle", "0", "--timeout", "1", *extra]
     if with_backup:
@@ -212,7 +216,7 @@ def test_gate_fails_closed_on_non_quiet_status(env, status):
 def test_gate_lists_background_agents(env):
     fake = Fake(env)
     run_main(env, fake)
-    ls = [c for c in fake.calls if c[0].endswith("paseo") and c[1] == "ls"]
+    ls = [c for c in fake.calls if c[:2] == ["paseo", "ls"]]
     assert ls and all("-a" in c and "-g" in c for c in ls)
 
 
@@ -363,7 +367,7 @@ def test_rollback_is_gated_too(env):
 
 
 def test_second_run_is_locked_out(env):
-    held = plu.open_lock(str(env / "home"))
+    held = plu.open_lock()
     try:
         fcntl.flock(held, fcntl.LOCK_EX)
         fake = Fake(env)
@@ -377,7 +381,7 @@ def test_lock_file_is_not_followed_through_a_symlink(env):
     plu.Path(plu.LOCK_DIR).mkdir(parents=True)
     decoy = env / "decoy"
     decoy.write_text("keep")
-    held = plu.open_lock(str(env / "home"))
+    held = plu.open_lock()
     os.close(held)
     lock = next(plu.Path(plu.LOCK_DIR).iterdir())
     lock.unlink()
@@ -557,7 +561,7 @@ def test_a_broken_fork_cli_cannot_block_the_automatic_rollback(env):
     assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
     assert fake.fork_cli_calls == 0
     assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
-    swapped_calls = [c[0] for c in fake.calls if c[0].endswith("/bin/paseo")]
+    swapped_calls = [c[0] for c in fake.raw_calls if c[0].endswith("/bin/paseo")]
     assert str(env / "Paseo-prev.app/Contents/Resources/bin/paseo") in swapped_calls
 
 
@@ -577,8 +581,8 @@ def test_a_fork_without_a_cli_shim_does_not_stop_the_manual_rollback(env):
     assert not upstream_in_place(env)
     assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
     assert upstream_in_place(env)
-    shims = [c[0] for c in fake.calls if c[0].endswith("/bin/paseo")]
-    assert shims and not any("Paseo-local" in x for x in shims)
+    assert all(c[0].endswith("/Contents/Resources/bin/paseo") for c in fake.raw_calls if c[0].endswith("paseo"))
+    assert not any("Paseo-local" in c[0] for c in fake.raw_calls)  # never the fork's shim, never bare `paseo`
 
 
 def test_rollback_does_not_quit_an_app_that_is_not_running(env):
@@ -597,7 +601,7 @@ def test_ps_failure_while_walking_ancestors_refuses():
 
 
 def test_locks_are_shared_across_installed_paths(env):
-    held = plu.open_lock(str(env / "home"))
+    held = plu.open_lock()
     try:
         fcntl.flock(held, fcntl.LOCK_EX)
         other = env / "other"
@@ -605,7 +609,7 @@ def test_locks_are_shared_across_installed_paths(env):
         make_app(other / "Paseo.app", updater=True)
         argv = ["--installed", str(other / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
                 "--backup", str(other / "prev.app"), "--state-dir", str(env / "state"),
-                "--home", str(env / "home"), "--apply", "--yes"]
+                "--home", str(env / "other-home"), "--apply", "--yes"]
         assert plu.main(argv, runner=Fake(env), sleep=lambda s: None) == 2
     finally:
         os.close(held)
@@ -715,3 +719,39 @@ def test_last_run_with_non_string_values_is_a_clean_error(env):
     fake = Fake(env)
     assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 2
     assert not touched(fake)
+
+
+# --- fifth adversary check (aa3ea03) -------------------------------------------------------------------------
+
+def test_an_upstream_app_without_a_cli_shim_refuses_before_anything_moves(env):
+    """N1: no silent fallback to PATH, which after the swap is the build under test."""
+    (env / "Paseo.app/Contents/Resources/bin/paseo").unlink()
+    fake = Fake(env)
+    assert run_main(env, fake, "--apply") == 2
+    assert not touched(fake)
+
+
+def test_a_shipit_leftover_does_not_block_a_rollback(env):
+    """N3: restoring the old build must not wait on an update."""
+    assert run_main(env, Fake(env), "--apply") == 0
+    (env / "shipit" / "update.abc").mkdir(parents=True)
+    assert run_main(env, Fake(env), "--rollback", "--apply", "--yes", with_backup=False) == 0
+    assert upstream_in_place(env)
+
+
+def test_rollback_uses_the_home_the_upgrade_used(env):
+    """N5: a rollback without --home must gate against the same daemon the upgrade did."""
+    assert run_main(env, Fake(env), "--apply") == 0
+    assert json.loads((env / "state/last-run.json").read_text())["home"] == str(env / "home")
+    args = plu.parse(["--rollback", "--state-dir", str(env / "state")])
+    ctx = plu.build_ctx(args)
+    assert ctx.home == str(env / "home")
+    explicit = plu.build_ctx(plu.parse(["--rollback", "--state-dir", str(env / "state"), "--home", "/x"]))
+    assert explicit.home == "/x"
+
+
+def test_unparseable_ps_output_while_walking_ancestors_refuses():
+    def ps(argv, timeout=60):
+        return plu.Result(0, "garbage")
+
+    assert "refusing" in plu.inside_paseo({}, ps)
