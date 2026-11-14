@@ -4,7 +4,10 @@ import fcntl
 import importlib.machinery
 import importlib.util
 import json
+import os
 import plistlib
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +28,8 @@ def make_app(path: Path, version="0.16.0-beta.2", updater=False):
     (path / "Contents" / "Resources").mkdir(parents=True)
     with (path / "Contents" / "Info.plist").open("wb") as fh:
         plistlib.dump({"CFBundleIdentifier": "sh.paseo.desktop", "CFBundleShortVersionString": version}, fh)
+    (path / "Contents/Resources/bin").mkdir()
+    (path / "Contents/Resources/bin/paseo").write_text("#!/bin/sh\n")
     if updater:
         (path / "Contents/Resources/app-update.yml").write_text("provider: github\n")
 
@@ -36,7 +41,8 @@ class Fake:
                  status_unreadable_after_stop=False, app_never_quits=False, plugin_item_without_id=False,
                  busy_after_swap=False, ls_shape=UNSET, terminals=None, keeps_daemon_on_quit=False,
                  busy_after_quit=False, interrupt_on_open=False, plugin_item_without_id_always=False,
-                 osascript_running_errors=False):
+                 osascript_running_errors=False, fork_cli_broken=False, lsof_fails=False,
+                 quit_request_fails=False, shipit_stays=False):
         self.agents = agents if agents is not None else [dict(IDLE)]
         self.perms = perms or []
         self.bad_plugin = bad_plugin
@@ -52,6 +58,11 @@ class Fake:
         self.interrupt_on_open = interrupt_on_open
         self.plugin_item_without_id_always = plugin_item_without_id_always
         self.osascript_running_errors = osascript_running_errors
+        self.fork_cli_broken = fork_cli_broken  # the staged build's own CLI (and daemon start) does not work
+        self.lsof_fails = lsof_fails
+        self.quit_request_fails = quit_request_fails
+        self.shipit_stays = shipit_stays
+        self.fork_cli_calls = 0
         self.daemon_up = True
         self.app_up = True
         self.pid = 100
@@ -64,17 +75,32 @@ class Fake:
     def __call__(self, argv, timeout=60):
         self.calls.append(argv)
         head = argv[0]
+        shim = "/Contents/Resources/bin/paseo"
+        if head.endswith(shim):  # an absolute CLI path inside a bundle: only that bundle's CLI answers
+            bundle = Path(head[: -len(shim)])
+            if self.fork_cli_broken and not (bundle / "Contents/Resources/app-update.yml").exists():
+                self.fork_cli_calls += 1
+                return plu.Result(127, "", "Paseo Helper: no such file")
+            head, argv = "paseo", ["paseo", *argv[1:]]
+        if head == "ps":
+            if "comm=" in argv[-1]:
+                return plu.Result(0, "  77 /System/Library/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
+            return plu.Result(0, "")
         if head == "codesign":
             if argv[1] == "-dv":
                 return plu.Result(0, "", "Signature=adhoc\n" if self.fork_installed() else "Authority=Developer ID\n")
             return plu.Result(0)
         if head == "lsof":
+            if self.lsof_fails:
+                return plu.Result(1, "", "lsof: boom")
             return plu.Result(0, f"p{self.pid}\nn{self.installed}/Contents/MacOS/Paseo\n")
         if head == "osascript":
             if "is running" in argv[2]:
                 if self.osascript_running_errors:
                     return plu.Result(1, "", "osascript: error")
                 return plu.Result(0, "true\n" if self.app_up else "false\n")
+            if self.quit_request_fails:
+                return plu.Result(1, "", "not allowed to send Apple events")
             if not self.app_never_quits:
                 self.app_up = False
                 if not self.keeps_daemon_on_quit:
@@ -88,6 +114,8 @@ class Fake:
                 raise KeyboardInterrupt()
             if self.open_fails_after_swap and self.fork_installed():
                 return plu.Result(1, "", "launch failed")
+            if self.fork_cli_broken and self.fork_installed():
+                return plu.Result(0)  # the fork launches, but its daemon never comes up
             self.app_up = self.daemon_up = True
             self.pid += 1
             if self.busy_after_swap and self.fork_installed():
@@ -127,21 +155,24 @@ class Fake:
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    monkeypatch.setattr(plu, "LOCK_DIR", str(tmp_path / "locks"))
     make_app(tmp_path / "Paseo.app", updater=True)
     make_app(tmp_path / "Paseo-local.app", updater=False)
     return tmp_path
 
 
-def run_main(env, fake, *extra, with_backup=True):
+def run_main(env, fake, *extra, with_backup=True, cli=False):
     argv = ["--installed", str(env / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
             "--state-dir", str(env / "state"), "--home", str(env / "home"),
-            "--updater-cache", str(env / "updates"), "--settle", "0", "--timeout", "1", *extra]
+            "--updater-cache", str(env / "updates"), "--shipit-cache", str(env / "shipit"),
+            "--settle", "0", "--timeout", "1", *extra]
     if with_backup:
         argv += ["--backup", str(env / "Paseo-prev.app")]
     if "--apply" in extra and "--yes" not in extra and "--rollback" not in extra:
         argv.append("--yes")
-    return plu.main(argv, runner=fake, sleep=lambda s: None)
+    which = (lambda name: str(env / "Paseo.app/Contents/Resources/bin/paseo")) if cli else (lambda name: None)
+    return plu.main(argv, runner=fake, sleep=lambda s: None, which=which)
 
 
 def touched(fake):
@@ -328,12 +359,27 @@ def test_rollback_is_gated_too(env):
 
 
 def test_second_run_is_locked_out(env):
-    name = plu.hashlib.sha256(str(plu.os.path.realpath(env / "Paseo.app")).encode()).hexdigest()[:16]
-    with open(Path(plu.tempfile.gettempdir()) / f"paseo-local-upgrade-{name}.lock", "w") as held:
+    held = plu.open_lock(env / "Paseo.app")
+    try:
         fcntl.flock(held, fcntl.LOCK_EX)
         fake = Fake(env)
         assert run_main(env, fake, "--apply") == 2
+    finally:
+        os.close(held)
     assert not touched(fake)
+
+
+def test_lock_file_is_not_followed_through_a_symlink(env):
+    plu.Path(plu.LOCK_DIR).mkdir(parents=True)
+    decoy = env / "decoy"
+    decoy.write_text("keep")
+    held = plu.open_lock(env / "Paseo.app")
+    os.close(held)
+    lock = next(plu.Path(plu.LOCK_DIR).iterdir())
+    lock.unlink()
+    lock.symlink_to(decoy)
+    assert run_main(env, Fake(env), "--apply") == 2
+    assert decoy.read_text() == "keep"
 
 
 def test_half_finished_rename_reports_where_bundles_are(env, monkeypatch):
@@ -381,11 +427,25 @@ def test_allow_terminals_lets_it_proceed(env):
     assert run_main(env, fake, "--apply", "--allow-terminals") == 0
 
 
-def test_refuses_inside_a_paseo_terminal(env, monkeypatch):
+def test_refuses_inside_a_paseo_terminal_even_with_allow_terminals(env, monkeypatch):
     monkeypatch.setenv("PASEO_TERMINAL_ID", "abc")
-    fake = Fake(env)
-    assert run_main(env, fake, "--apply") == 2
-    assert not fake.calls
+    for extra in ((), ("--allow-terminals",)):
+        fake = Fake(env)
+        assert run_main(env, fake, "--apply", *extra) == 2
+        assert not fake.calls
+
+
+def test_refuses_when_a_paseo_app_is_an_ancestor(env, monkeypatch):
+    monkeypatch.delenv("PASEO_TERMINAL_ID", raising=False)
+    chain = {os.getpid(): "500 python3 paseo-local-upgrade", 500: "400 -zsh",
+             400: "1 /Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper x"}
+
+    def ps(argv, timeout=60):
+        return plu.Result(0, chain[int(argv[-1])])
+
+    assert "ancestor process 400" in plu.inside_paseo({}, ps)
+    chain[400] = "1 /sbin/launchd"
+    assert plu.inside_paseo({}, ps) is None
 
 
 def test_gate_runs_again_after_the_app_quits(env):
@@ -396,18 +456,55 @@ def test_gate_runs_again_after_the_app_quits(env):
     assert upstream_in_place(env) and fake.calls[-1][0] == "open"  # the app is relaunched
 
 
-def test_pending_update_for_another_version_refuses(env):
-    (env / "updates").mkdir()
-    (env / "updates" / "Paseo-0.16.0-beta.9-arm64.zip").write_text("x")
+def _pending(env, name):
+    (env / "updates").mkdir(exist_ok=True)
+    (env / "updates" / name).write_text("x")
+
+
+@pytest.mark.parametrize("name", ["Paseo-0.16.0-beta.9-arm64.zip", "Paseo-0.16.0-beta.20-arm64.zip",
+                                  "Paseo-0.16.0-beta.21-arm64.zip", "weird-name.zip"])
+def test_pending_update_for_another_or_unreadable_version_refuses(env, name):
+    _pending(env, name)  # beta.20 contains the installed version beta.2 as a substring
     fake = Fake(env)
     assert run_main(env, fake, "--apply") == 2
     assert not touched(fake)
 
 
 def test_pending_update_for_the_installed_version_is_fine(env):
-    (env / "updates").mkdir()
-    (env / "updates" / "Paseo-0.16.0-beta.2-arm64.zip").write_text("x")
+    _pending(env, "Paseo-0.16.0-beta.2-arm64.zip")
     assert run_main(env, Fake(env), "--apply") == 0
+
+
+def test_installed_app_without_a_version_refuses_when_an_update_is_pending(env):
+    (env / "Paseo.app/Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "sh.paseo.desktop"}))
+    _pending(env, "Paseo-0.16.0-beta.2-arm64.zip")
+    fake = Fake(env)
+    assert run_main(env, fake, "--apply") == 2
+    assert not touched(fake)
+
+
+def test_update_downloaded_while_the_prompt_waits_refuses(env):
+    fake = Fake(env)
+    real = plu.confirm
+    plu.confirm = lambda yes: _pending(env, "Paseo-0.16.0-beta.9-arm64.zip")
+    try:
+        assert run_main(env, fake, "--apply") == 2
+    finally:
+        plu.confirm = real
+    assert not touched(fake) and upstream_in_place(env)
+
+
+def test_shipit_leftovers_refuse(env):
+    (env / "shipit" / "update.abc").mkdir(parents=True)
+    fake = Fake(env)
+    assert run_main(env, fake, "--apply") == 2
+    assert not touched(fake)
+
+
+def test_swap_waits_for_shipit_to_finish(env):
+    fake = Fake(env, shipit_stays=True)
+    assert run_main(env, fake, "--apply") == 1  # timed out before the swap
+    assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
 
 
 def test_osascript_error_does_not_count_as_quit(env):
@@ -445,3 +542,136 @@ def test_daemon_from_the_backup_bundle_fails_verification(env):
 
     assert run_main(env, lsof_from_backup, "--apply") == 1
     assert upstream_in_place(env)
+
+
+# --- third adversary check (ef3d042) -------------------------------------------------------------------------
+
+def test_a_broken_fork_cli_cannot_block_the_automatic_rollback(env):
+    """F1: every paseo call runs the upstream bundle's CLI, never the build under test."""
+    fake = Fake(env, fork_cli_broken=True)
+    assert run_main(env, fake, "--apply", cli=True) == 1
+    assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
+    assert fake.fork_cli_calls == 0
+    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
+    swapped_calls = [c[0] for c in fake.calls if c[0].endswith("/bin/paseo")]
+    assert str(env / "Paseo-prev.app/Contents/Resources/bin/paseo") in swapped_calls
+
+
+def test_a_broken_fork_cli_cannot_block_the_manual_rollback(env):
+    fake = Fake(env, fork_cli_broken=True)
+    assert run_main(env, fake, "--apply", "--want-broken", cli=True) == 3
+    assert not upstream_in_place(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False, cli=True) == 0
+    assert upstream_in_place(env) and fake.fork_cli_calls == 0
+
+
+def test_missing_upstream_cli_refuses_before_anything_moves(env):
+    (env / "Paseo.app/Contents/Resources/bin/paseo").unlink()
+    fake = Fake(env)
+    assert run_main(env, fake, "--apply", cli=True) == 2
+    assert not touched(fake)
+
+
+def _lock(env, content):
+    (env / "home").mkdir(exist_ok=True)
+    (env / "home" / "paseo.pid").write_text(content)
+
+
+def _ctx(env):
+    return plu.Ctx(installed=env / "Paseo.app", staged=env / "Paseo-local.app", backup=env / "Paseo-prev.app",
+                   state_dir=env / "state", home=str(env / "home"), settle=0, timeout=1, require_plugins=[],
+                   log_path=env / "t.log", runner=Fake(env), sleep=lambda s: None)
+
+
+def test_a_live_pid_lock_owner_means_not_stopped_whatever_the_cli_says(env):
+    ctx = _ctx(env)
+    ctx.runner.daemon_up = False  # the CLI says stopped
+    assert plu.daemon_is_stopped(ctx)
+    _lock(env, json.dumps({"pid": os.getpid()}))
+    assert not plu.daemon_is_stopped(ctx)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    _lock(env, json.dumps({"pid": dead.pid}))
+    assert plu.daemon_is_stopped(ctx)
+    _lock(env, "not json")
+    assert not plu.daemon_is_stopped(ctx)  # unreadable: fail closed
+    _lock(env, "")
+    assert plu.daemon_is_stopped(ctx)  # abandoned
+
+
+def test_a_signal_during_the_renames_still_records_the_swap(env, monkeypatch):
+    """F2: the interrupt is raised after both renames; the state must already say swapped."""
+    real = plu.os.rename
+    n = {"i": 0}
+
+    def rename(a, b):
+        real(a, b)
+        n["i"] += 1
+        if n["i"] == 2:
+            os.kill(os.getpid(), signal.SIGINT)  # held back by the mask until the swap is recorded
+
+    monkeypatch.setattr(plu.os, "rename", rename)
+    fake = Fake(env)
+    assert run_main(env, fake, "--apply") == 1
+    assert upstream_in_place(env) and (env / "Paseo-local.app").exists()  # rolled back, not relaunched as "untouched"
+    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
+
+
+def test_stuck_outranks_a_pending_signal(env, monkeypatch):
+    real = plu.os.rename
+    n = {"i": 0}
+
+    def rename(a, b):
+        n["i"] += 1
+        if n["i"] == 1:
+            os.kill(os.getpid(), signal.SIGINT)
+            return real(a, b)
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(plu.os, "rename", rename)
+    with pytest.raises(plu.Stuck):
+        plu.swap(env / "Paseo.app", env / "x.app", env / "Paseo-local.app", env / "Paseo.app")
+
+
+def test_logging_survives_a_dead_tty(env, monkeypatch):
+    """F3: a closed terminal makes print raise OSError; the log file still gets the line."""
+    def boom(*a, **k):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(plu, "print", boom, raising=False)
+    ctx = _ctx(env)
+    ctx.log("still written")
+    assert "still written" in ctx.log_path.read_text()
+
+
+def test_a_keyboard_interrupt_in_the_gate_is_a_refusal(env, monkeypatch):
+    """F6"""
+    def boom(ctx):
+        raise KeyboardInterrupt("signal 15")
+
+    monkeypatch.setattr(plu, "gate", boom)
+    assert plu.run_gate(_ctx(env)) == 2
+    assert plu.run_gate(_ctx(env), post_swap=True) == 3
+
+
+def test_lsof_failure_fails_verification(env):
+    """F9"""
+    fake = Fake(env, lsof_fails=True)
+    assert run_main(env, fake, "--apply") == 1
+    assert upstream_in_place(env)
+
+
+def test_a_denied_quit_request_fails_at_once(env):
+    """F10"""
+    fake = Fake(env, quit_request_fails=True)
+    assert run_main(env, fake, "--apply") == 1
+    assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
+    assert not any(c[:2] == ["osascript", "-e"] and "is running" in c[2] for c in fake.calls)
+
+
+def test_last_run_with_non_string_values_is_a_clean_error(env):
+    (env / "state").mkdir()
+    (env / "state" / "last-run.json").write_text(json.dumps({"installed": 5, "staged": "x", "backup": "y"}))
+    fake = Fake(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 2
+    assert not touched(fake)

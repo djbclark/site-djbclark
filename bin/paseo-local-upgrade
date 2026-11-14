@@ -7,8 +7,12 @@ Gate (never overridden; fails closed): refuses while any agent from `paseo ls -g
 than idle, error or closed (so running, initializing and any unknown status all refuse), any permission from
 `paseo permit ls --json` is pending, or any terminal from `paseo terminal ls --all --json` exists (stopping the
 daemon kills them; `--allow-terminals` accepts that), and prints who. A cleanly stopped daemon cannot be asked and
-cannot be running agents, so rollback skips the gate then (that is the state a failed upgrade leaves). It is checked again after the confirmation prompt, right
-before the app is quit, and before an automatic rollback. The script never kills an agent: it quits the app and
+cannot be running agents, so rollback skips the gate then (that is the state a failed upgrade leaves); "stopped"
+also needs the pid-lock owner in <home>/paseo.pid to be dead. An upgrade (not a rollback) refuses when there is
+no daemon to ask. It is checked again after the confirmation prompt, right before the app is quit, and before an
+automatic rollback. Every `paseo` call runs the CLI of the UPSTREAM bundle by absolute path (the installed app
+before the swap, the backup while swapped), never the build under test, so a fork with a broken CLI cannot
+block a rollback. The script refuses to run inside a Paseo terminal (env var or ancestor process), always. The script never kills an agent: it quits the app and
 runs `paseo daemon stop` (no --force), which is safe only once the gate is clear. A short window between the
 last check and the stop remains: the daemon has no drain mode. Known limit: `paseo permit ls` reads one page
 of agents, so a permission wait on an agent far down the list can be missed. The only process this script
@@ -30,10 +34,10 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -43,6 +47,8 @@ DEFAULT_INSTALLED = "/Applications/Paseo.app"
 DEFAULT_STAGED = "/Applications/Paseo-local-beta2.app"
 DEFAULT_STATE_DIR = "~/.local/state/paseo-local-upgrade"
 BUNDLE_ID = "sh.paseo.desktop"
+LOCK_DIR = "~/.local/state/paseo-local-upgrade/locks"
+UPDATE_ZIP = re.compile(r"^.*?-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-(?:arm64|x64|universal|mac)[^/]*\.zip$")
 QUIET_STATUSES = {"idle", "error", "closed"}
 
 
@@ -86,6 +92,12 @@ class Ctx:
     require_plugins: list[str]
     allow_terminals: bool = False
     updater_cache: Path = Path("~/Library/Caches/@getpaseodesktop-updater/pending").expanduser()
+    shipit_cache: Path = Path("~/Library/Caches/sh.paseo.desktop.ShipIt").expanduser()
+    cli_rel: str | None = None  # the `paseo` shim's path inside the app bundle; None: use PATH
+    upstream_bundle: Path | None = None  # the bundle whose CLI is trusted; None means installed
+    swapped: bool = False  # set inside swap_in's signal mask, so it never lags the renames
+    swapped_back: bool = False
+    old_pid: object = None
     runner: object = run
     sleep: object = time.sleep
     log_path: Path | None = None
@@ -93,10 +105,22 @@ class Ctx:
 
     def log(self, msg: str) -> None:
         line = f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}"
-        print(line, flush=True)
         if self.log_path:
-            with self.log_path.open("a") as fh:
-                fh.write(line + "\n")
+            try:
+                with self.log_path.open("a") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
+        try:  # a dead tty (closed terminal) must not stop the rollback that follows
+            print(line, flush=True)
+        except OSError:
+            pass
+
+    def paseo(self, *args: str) -> list[str]:
+        """argv for a paseo call: the upstream bundle's CLI by absolute path, else `paseo` from PATH."""
+        if self.cli_rel is None:
+            return ["paseo", *args]
+        return [str((self.upstream_bundle or self.installed) / self.cli_rel), *args]
 
     def cmd(self, argv: list[str], timeout: float = 60) -> Result:
         res = self.runner(argv, timeout)
@@ -105,7 +129,7 @@ class Ctx:
 
     def paseo_list(self, *args: str) -> list[dict]:
         """A `paseo ... --json` call that must return a list of objects; anything else is a failure."""
-        res = self.cmd(["paseo", *args, "--json", "--home", self.home])
+        res = self.cmd(self.paseo(*args, "--json", "--home", self.home))
         if res.code != 0:
             raise Fail(f"paseo {' '.join(args)} failed: {res.err.strip() or res.out.strip()}")
         try:
@@ -147,7 +171,7 @@ def gate(ctx: Ctx) -> None:
 
 def daemon_status(ctx: Ctx) -> dict | None:
     """The parsed status, or None when it cannot be read (an unreadable status is never 'stopped')."""
-    res = ctx.cmd(["paseo", "daemon", "status", "--json", "--home", ctx.home], timeout=20)
+    res = ctx.cmd(ctx.paseo("daemon", "status", "--json", "--home", ctx.home), timeout=20)
     if res.code != 0 or not res.out.strip():
         return None
     try:
@@ -162,9 +186,33 @@ def daemon_is_running(ctx: Ctx, old_pid=None) -> bool:
     return bool(s and s.get("localDaemon") == "running" and s.get("pid") not in (None, old_pid))
 
 
+def pid_lock_owner_alive(ctx: Ctx) -> bool:
+    """True when <home>/paseo.pid names a live process; an unreadable lock counts as alive (fail closed)."""
+    try:
+        text = (Path(ctx.home).expanduser() / "paseo.pid").read_text()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    if not text.strip():
+        return False  # abandoned between create and write: names no owner
+    try:
+        pid = int(json.loads(text)["pid"])
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (ValueError, KeyError, TypeError, OverflowError):
+        return True
+    return True
+
+
 def daemon_is_stopped(ctx: Ctx) -> bool:
+    """Stopped needs both the CLI's word and a dead pid-lock owner, so a CLI that misreports cannot skip the gate."""
     s = daemon_status(ctx)
-    return bool(s and s.get("localDaemon") not in ("running", "not_ready") and not s.get("pid"))
+    return bool(s and s.get("localDaemon") not in ("running", "not_ready") and not s.get("pid")) \
+        and not pid_lock_owner_alive(ctx)
 
 
 def snapshot(ctx: Ctx) -> dict:
@@ -195,16 +243,27 @@ def app_running(ctx: Ctx) -> bool:
     return not (res.code == 0 and res.out.strip() == "false")
 
 
+def shipit_running(ctx: Ctx) -> bool:
+    """True while a ShipIt process (the updater's installer) exists; unreadable ps counts as running."""
+    res = ctx.cmd(["ps", "-axo", "pid=,comm="], timeout=20)
+    if res.code != 0:
+        return True
+    return any(os.path.basename(ln.strip().partition(" ")[2].strip()) == "ShipIt" for ln in res.out.splitlines())
+
+
 def quit_app_and_daemon(ctx: Ctx) -> None:
     """Quit the app, then stop the daemon. Re-checks the gate once the app is gone while a daemon still runs
     (it may outlive the app). Raises Gate then; the caller relaunches the app."""
-    ctx.cmd(["osascript", "-e", f'tell application id "{BUNDLE_ID}" to quit'], timeout=30)
+    quit_res = ctx.cmd(["osascript", "-e", f'tell application id "{BUNDLE_ID}" to quit'], timeout=30)
+    if quit_res.code != 0:
+        raise Fail(f"the quit request failed (Automation permission?): {quit_res.err.strip() or quit_res.out.strip()}")
     wait_for("the Paseo app to quit", ctx, lambda: not app_running(ctx))
+    wait_for("ShipIt to finish", ctx, lambda: not shipit_running(ctx))
     if daemon_is_stopped(ctx):
         ctx.log("daemon already stopped with the app; no agent can be running under this home")
         return
     gate(ctx)  # Gate, or Fail when the daemon cannot be asked: both leave the daemon alone
-    stop = ctx.cmd(["paseo", "daemon", "stop", "--home", ctx.home], timeout=60)
+    stop = ctx.cmd(ctx.paseo("daemon", "stop", "--home", ctx.home), timeout=60)
     if stop.code != 0:
         raise Fail(f"paseo daemon stop failed: {stop.err.strip() or stop.out.strip()}")
     wait_for("the daemon to stop", ctx, lambda: daemon_is_stopped(ctx))
@@ -238,8 +297,8 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
             in_bundles and not any(str(ctx.installed) in p for p in in_bundles)
         ):
             raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
-        if not in_bundles:
-            ctx.log("warning: could not tie the daemon process to an app bundle; relying on pid, signature and plugins")
+        if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
+            raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
     plugins = {p["id"]: p for p in ctx.paseo_list("plugin", "ls")}
     need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins))
     missing = [pid for pid in need if not (pid in plugins and plugins[pid].get("status") == "running")]
@@ -264,10 +323,12 @@ def save_state(ctx: Ctx, name: str = "last-run.json", **kw) -> None:
     os.replace(tmp, ctx.state_dir / name)
 
 
-def swap(ctx: Ctx, first_from: Path, first_to: Path, second_from: Path, second_to: Path) -> None:
-    """Two renames. If the second fails, undo the first; if that fails too, raise Stuck with the real paths."""
-    # SIGINT/SIGTERM/SIGHUP wait until both renames are done, so a signal never lands between them.
+def swap(first_from: Path, first_to: Path, second_from: Path, second_to: Path, done=None) -> None:
+    """Two renames, then DONE() while signals are still blocked, so state never lags the filesystem.
+    If the second rename fails, undo the first; if that fails too, raise Stuck with the real paths."""
+    # SIGINT/SIGTERM/SIGHUP wait until both renames and DONE are finished; a signal then raises after the state is true.
     old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+    error: BaseException | None = None
     try:
         os.rename(first_from, first_to)
         try:
@@ -279,17 +340,37 @@ def swap(ctx: Ctx, first_from: Path, first_to: Path, second_from: Path, second_t
                 raise Stuck(f"rename failed ({exc}) and undo failed ({undo}); bundles are now at: "
                             f"{first_to} (was {first_from}) and {second_from} (not moved)") from undo
             raise
-    finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        if done:
+            done()
+    except BaseException as exc:  # noqa: BLE001 - re-raised below, after the mask is restored
+        error = exc
+    interrupt: KeyboardInterrupt | None = None
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)  # CPython runs pending handlers inside this call
+    except KeyboardInterrupt as ki:
+        interrupt = ki
+    if error is not None:
+        raise error  # a Stuck or OSError outranks the interrupt: its message says where the bundles are
+    if interrupt is not None:
+        raise interrupt
 
 
 def swap_in(ctx: Ctx) -> None:
-    swap(ctx, ctx.installed, ctx.backup, ctx.staged, ctx.installed)
+    def done() -> None:
+        ctx.swapped = True
+        ctx.upstream_bundle = ctx.backup  # the upstream app is the backup now
+        save_state(ctx, phase="swapped", old_pid=ctx.old_pid)
+
+    swap(ctx.installed, ctx.backup, ctx.staged, ctx.installed, done)
     ctx.log(f"swapped: {ctx.installed} is now the staged build; previous app at {ctx.backup}")
 
 
 def swap_back(ctx: Ctx) -> None:
-    swap(ctx, ctx.installed, ctx.staged, ctx.backup, ctx.installed)
+    def done() -> None:
+        ctx.swapped_back = True
+        ctx.upstream_bundle = ctx.installed  # the upstream app is installed again
+
+    swap(ctx.installed, ctx.staged, ctx.backup, ctx.installed, done)
     ctx.log(f"restored previous app to {ctx.installed}; fork build back at {ctx.staged}")
 
 
@@ -320,6 +401,8 @@ def preflight(ctx: Ctx, rollback: bool) -> list[str]:
     errs = check_paths(ctx, [("installed", ctx.installed), ("staged", ctx.staged), ("backup", ctx.backup)])
     if errs:
         return errs
+    if ctx.cli_rel is not None and not Path(ctx.paseo()[0]).is_file():
+        return [f"the upstream bundle's CLI is missing: {ctx.paseo()[0]}"]
     if rollback:
         if not ctx.backup.is_dir():
             errs.append(f"rollback target missing: {ctx.backup}")
@@ -338,17 +421,34 @@ def preflight(ctx: Ctx, rollback: bool) -> list[str]:
         errs.append(f"backup path already exists: {ctx.backup} (move it away or pass --backup)")
     if not errs:
         # Quitting the old app installs a downloaded update (Squirrel/ShipIt), which would race the swap.
-        installed_ver = str(bundle_info(ctx.installed).get("CFBundleShortVersionString", ""))
-        stale = [p.name for p in ctx.updater_cache.glob("*.zip") if installed_ver not in p.name] \
-            if ctx.updater_cache.is_dir() else []
-        if stale:
-            errs.append(f"a downloaded update is pending in {ctx.updater_cache} ({', '.join(stale)}); quitting the "
-                        "app would install it over the swap. Install or delete it first.")
+        errs += update_errors(ctx)
         for label, app in (("staged", ctx.staged), ("installed", ctx.installed)):
             if bundle_id(app) != BUNDLE_ID:
                 errs.append(f"{label} bundle id is not {BUNDLE_ID}")
         if ctx.cmd(["codesign", "--verify", "--deep", "--strict", str(ctx.staged)]).code != 0:
             errs.append("staged app fails codesign --verify")
+    return errs
+
+
+def update_errors(ctx: Ctx) -> list[str]:
+    """Quitting the old app installs a downloaded update (Squirrel/ShipIt), which would race the swap."""
+    errs = []
+    try:
+        installed_ver = str(bundle_info(ctx.installed).get("CFBundleShortVersionString", ""))
+    except (OSError, ValueError) as exc:
+        return [f"cannot read the installed app's version: {exc}"]
+    if not installed_ver:
+        errs.append("the installed app has no version, so a pending update cannot be compared")
+    if ctx.updater_cache.is_dir():
+        for z in sorted(ctx.updater_cache.glob("*.zip")):
+            m = UPDATE_ZIP.match(z.name)
+            if not m:
+                errs.append(f"cannot read the version of the pending update {z.name} in {ctx.updater_cache}")
+            elif m.group(1) != installed_ver:
+                errs.append(f"a downloaded update {z.name} is pending in {ctx.updater_cache}; quitting the app "
+                            "would install it over the swap. Install or delete it first.")
+    if ctx.shipit_cache.is_dir() and any(ctx.shipit_cache.glob("update.*")):
+        errs.append(f"ShipIt left an update in {ctx.shipit_cache}; let it finish or delete it first")
     return errs
 
 
@@ -380,8 +480,8 @@ def run_gate(ctx: Ctx, post_swap: bool = False, skip_if_stopped: bool = False) -
     except Gate as exc:
         ctx.log(f"GATE: refused: {exc}")
         return 4
-    except Fail as exc:
-        ctx.log(f"GATE: could not check, refusing: {exc}")
+    except (Fail, KeyboardInterrupt) as exc:
+        ctx.log(f"GATE: could not check, refusing: {type(exc).__name__}: {exc}")
         return 3 if post_swap else 2
     return None
 
@@ -414,19 +514,20 @@ def do_apply(ctx: Ctx, args) -> int:
     except Fail as exc:
         ctx.log(str(exc))
         return 2
-    old_pid = ctx.baseline.get("daemon_pid")
+    old_pid = ctx.old_pid = ctx.baseline.get("daemon_pid")
     save_state(ctx, "last-attempt.json", phase="starting", old_pid=old_pid)
+    if (errs := update_errors(ctx)):  # the app may have finished a download while the prompt waited
+        for e in errs:
+            ctx.log(f"preflight: {e}")
+        return 2
     if (code := run_gate(ctx)) is not None:  # again right before the quit: the prompt may have waited
         return code
     installed_before = (bundle_info(ctx.installed).get("CFBundleVersion"), ctx.installed.stat().st_ino)
-    swapped = False
     try:
         quit_app_and_daemon(ctx)  # gates again once the app is gone, while a daemon still runs
         if (bundle_info(ctx.installed).get("CFBundleVersion"), ctx.installed.stat().st_ino) != installed_before:
             raise Fail("the installed app changed while Paseo was quitting (an update installed?); not swapping")
         swap_in(ctx)
-        swapped = True
-        save_state(ctx, phase="swapped", old_pid=old_pid)
         start_app_and_wait(ctx, old_pid)
         verify(ctx, old_pid, expect_fork=True)
         ctx.log(f"settling {ctx.settle:.0f}s")
@@ -443,7 +544,7 @@ def do_apply(ctx: Ctx, args) -> int:
         return 4
     except (Exception, KeyboardInterrupt) as exc:
         ctx.log(f"FAILED: {type(exc).__name__}: {exc}")
-        if not swapped:
+        if not ctx.swapped:
             # Quit or stop failed before the swap: the old app is still installed. Bring it back up.
             ctx.log("failed before the swap: old app untouched")
             relaunch(ctx)
@@ -464,15 +565,13 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
     """Gate, quit, swap back, relaunch. Returns 0 ok, 3 failed, 4 refused by the gate."""
     after_upgrade_failure = error is not None
     if (code := run_gate(ctx, post_swap=True, skip_if_stopped=skip_if_stopped)) is not None:
-        ctx.log("the gate refused the rollback, so the installed build stays; run "
-                "`paseo-local-upgrade --rollback --apply` once agents are quiet")
+        ctx.log("the rollback was not done, so the installed build stays; run `paseo-local-upgrade --rollback "
+                "--apply` once the gate passes (agents quiet), or after quitting Paseo and its daemon yourself")
         save_state(ctx, phase="failed-gated", error=error)
         return 4 if code == 4 else 3
-    swapped_back = False
     try:
         quit_app_and_daemon(ctx)
         swap_back(ctx)
-        swapped_back = True
         start_app_and_wait(ctx, None)
     except Stuck as exc:
         ctx.log(f"STUCK: {exc}")
@@ -485,8 +584,8 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
         return 4
     except (Exception, KeyboardInterrupt) as exc:
         ctx.log(f"ROLLBACK FAILED: {type(exc).__name__}: {exc}. "
-                f"Previous app: {ctx.installed if swapped_back else ctx.backup}")
-        if not swapped_back:
+                f"Previous app: {ctx.installed if ctx.swapped_back else ctx.backup}")
+        if not ctx.swapped_back:
             relaunch(ctx)  # the quit or stop failed first: put the app that is installed back up
         save_state(ctx, phase="rollback-failed", error=f"{error}; rollback: {exc}")
         return 3
@@ -533,12 +632,23 @@ def parse(argv: list[str]) -> argparse.Namespace:
                    help="accept that stopping the daemon kills every terminal it hosts (otherwise any terminal refuses)")
     p.add_argument("--updater-cache", default="~/Library/Caches/@getpaseodesktop-updater/pending",
                    help="where the app keeps a downloaded update; a pending one for another version refuses")
+    p.add_argument("--shipit-cache", default="~/Library/Caches/sh.paseo.desktop.ShipIt",
+                   help="where ShipIt stages an update; an update.* entry there refuses")
     p.add_argument("--require-plugin", action="append", default=[], metavar="ID",
                    help="plugin that must be running afterwards, besides every enabled one running now (repeatable)")
     return p.parse_args(argv)
 
 
-def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
+def find_cli_rel(installed: Path, which) -> str | None:
+    """The `paseo` on PATH, as a path inside INSTALLED's bundle, or None when it lives elsewhere."""
+    found = which("paseo")
+    if not found:
+        return None
+    real, bundle = os.path.realpath(found), os.path.realpath(installed)
+    return os.path.relpath(real, bundle) if real.startswith(bundle + os.sep) else None
+
+
+def build_ctx(args, runner=run, sleep=time.sleep, which=shutil.which) -> Ctx:
     state_dir = Path(args.state_dir).expanduser()
     state_dir.mkdir(parents=True, exist_ok=True)
     installed, staged, backup = args.installed, args.staged, args.backup
@@ -549,6 +659,8 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
         if saved.exists():
             try:
                 data = json.loads(saved.read_text())
+                if not all(isinstance(data[k], str) for k in ("installed", "staged", "backup")):
+                    raise TypeError("installed, staged and backup must be strings")
                 installed = installed or data["installed"]
                 staged = staged or data["staged"]
                 backup = backup or data["backup"]
@@ -566,32 +678,68 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
         backup_p = installed_p.with_name(f"Paseo-{ver}-previous.app")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     mode = "rollback" if args.rollback else ("apply" if args.apply else "dry-run")
-    return Ctx(
+    ctx = Ctx(
         installed=installed_p, staged=staged_p, backup=backup_p, state_dir=state_dir,
         home=args.home, settle=args.settle, timeout=args.timeout, require_plugins=args.require_plugin,
         allow_terminals=args.allow_terminals, updater_cache=Path(args.updater_cache).expanduser(),
         runner=runner, sleep=sleep, log_path=state_dir / f"{stamp}-{mode}.log",
+        shipit_cache=Path(args.shipit_cache).expanduser(), cli_rel=find_cli_rel(installed_p, which),
     )
+    # The CLI to trust is the upstream app's: the backup for a rollback (installed is then the fork), else installed.
+    ctx.upstream_bundle = backup_p if args.rollback else installed_p
+    return ctx
 
 
-def main(argv: list[str] | None = None, runner=run, sleep=time.sleep) -> int:
+def inside_paseo(env, runner) -> str | None:
+    """Why this process runs under Paseo (its env var, or a Paseo app among its ancestors), else None."""
+    if env.get("PASEO_TERMINAL_ID"):
+        return "PASEO_TERMINAL_ID is set"
+    pid = os.getpid()
+    for _ in range(40):
+        res = runner(["ps", "-o", "ppid=,command=", "-p", str(pid)], 20)
+        parts = res.out.strip().split(None, 1)
+        if res.code != 0 or len(parts) < 2 or not parts[0].isdigit():
+            return None
+        if pid != os.getpid() and ("Paseo Helper" in parts[1] or "/Paseo.app/" in parts[1]):
+            return f"ancestor process {pid} is a Paseo app: {parts[1][:80]}"
+        pid = int(parts[0])
+        if pid <= 1:
+            return None
+    return None
+
+
+def open_lock(installed: Path) -> int:
+    """A per-user lock file (no symlink following, mode 0600) keyed on the installed app's parent directory and
+    name, so a case variant of the path and a changed bundle inode (the swap) map to the same lock."""
+    lock_dir = Path(LOCK_DIR).expanduser()
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    st = os.stat(installed.parent)
+    key = hashlib.sha256(f"{st.st_dev}:{st.st_ino}:{installed.name.casefold()}".encode()).hexdigest()[:16]
+    return os.open(lock_dir / f"{key}.lock", os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+
+
+def main(argv: list[str] | None = None, runner=run, sleep=time.sleep, which=shutil.which) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
-    if os.environ.get("PASEO_TERMINAL_ID") and not args.allow_terminals:
-        print("paseo-local-upgrade: running inside a Paseo terminal; stopping the daemon would kill this process "
-              "halfway. Run it from a terminal outside Paseo, or pass --allow-terminals.", file=sys.stderr)
+    if reason := inside_paseo(os.environ, runner):
+        print(f"paseo-local-upgrade: running under Paseo ({reason}); stopping the daemon would kill this process "
+              "halfway. Run it from a terminal outside Paseo.", file=sys.stderr)
         return 2
-    if runner is run:  # real runs only: turn SIGTERM/SIGHUP into the KeyboardInterrupt path so state is saved
+    if runner is run:  # real runs only
         def _raise(signum, frame):
             raise KeyboardInterrupt(f"signal {signum}")
-        signal.signal(signal.SIGTERM, _raise)
-        signal.signal(signal.SIGHUP, _raise)
+        signal.signal(signal.SIGTERM, _raise)  # SIGTERM takes the state-saving, rolling-back path
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)  # a closed terminal must not end a run midway (children inherit)
     try:
-        ctx = build_ctx(args, runner, sleep)
+        ctx = build_ctx(args, runner, sleep, which)
     except SystemExit as exc:
         print(exc, file=sys.stderr)
         return 2
-    lock_name = hashlib.sha256(str(os.path.realpath(ctx.installed)).encode()).hexdigest()[:16]
-    with open(Path(tempfile.gettempdir()) / f"paseo-local-upgrade-{lock_name}.lock", "w") as lock:
+    try:
+        fd = open_lock(ctx.installed)
+    except OSError as exc:
+        ctx.log(f"cannot open the lock file: {exc}")
+        return 2
+    with os.fdopen(fd, "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
