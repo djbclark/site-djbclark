@@ -42,7 +42,8 @@ class Fake:
                  busy_after_swap=False, ls_shape=UNSET, terminals=None, keeps_daemon_on_quit=False,
                  busy_after_quit=False, interrupt_on_open=False, plugin_item_without_id_always=False,
                  osascript_running_errors=False, fork_cli_broken=False, lsof_fails=False,
-                 quit_request_fails=False, shipit_stays=False):
+                 quit_request_fails=False, shipit_stays=False,
+                 quit_needs_running=False):
         self.agents = agents if agents is not None else [dict(IDLE)]
         self.perms = perms or []
         self.bad_plugin = bad_plugin
@@ -62,6 +63,7 @@ class Fake:
         self.lsof_fails = lsof_fails
         self.quit_request_fails = quit_request_fails
         self.shipit_stays = shipit_stays
+        self.quit_needs_running = quit_needs_running  # a quit sent to a closed app errors (-600)
         self.fork_cli_calls = 0
         self.daemon_up = True
         self.app_up = True
@@ -84,7 +86,7 @@ class Fake:
             head, argv = "paseo", ["paseo", *argv[1:]]
         if head == "ps":
             if "comm=" in argv[-1]:
-                return plu.Result(0, "  77 /System/Library/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
+                return plu.Result(0, "  77 /Users/x/Library/Caches/sh.paseo.desktop.ShipIt/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
             return plu.Result(0, "")
         if head == "codesign":
             if argv[1] == "-dv":
@@ -99,7 +101,7 @@ class Fake:
                 if self.osascript_running_errors:
                     return plu.Result(1, "", "osascript: error")
                 return plu.Result(0, "true\n" if self.app_up else "false\n")
-            if self.quit_request_fails:
+            if self.quit_request_fails or (self.quit_needs_running and not self.app_up):
                 return plu.Result(1, "", "not allowed to send Apple events")
             if not self.app_never_quits:
                 self.app_up = False
@@ -157,12 +159,14 @@ class Fake:
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.setattr(plu, "LOCK_DIR", str(tmp_path / "locks"))
+    for var in ("PASEO_TERMINAL_ID", "PASEO_AGENT_ID"):  # the suite itself may run inside a Paseo agent
+        monkeypatch.delenv(var, raising=False)
     make_app(tmp_path / "Paseo.app", updater=True)
     make_app(tmp_path / "Paseo-local.app", updater=False)
     return tmp_path
 
 
-def run_main(env, fake, *extra, with_backup=True, cli=False):
+def run_main(env, fake, *extra, with_backup=True):
     argv = ["--installed", str(env / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
             "--state-dir", str(env / "state"), "--home", str(env / "home"),
             "--updater-cache", str(env / "updates"), "--shipit-cache", str(env / "shipit"),
@@ -171,8 +175,7 @@ def run_main(env, fake, *extra, with_backup=True, cli=False):
         argv += ["--backup", str(env / "Paseo-prev.app")]
     if "--apply" in extra and "--yes" not in extra and "--rollback" not in extra:
         argv.append("--yes")
-    which = (lambda name: str(env / "Paseo.app/Contents/Resources/bin/paseo")) if cli else (lambda name: None)
-    return plu.main(argv, runner=fake, sleep=lambda s: None, which=which)
+    return plu.main(argv, runner=fake, sleep=lambda s: None)
 
 
 def touched(fake):
@@ -209,7 +212,7 @@ def test_gate_fails_closed_on_non_quiet_status(env, status):
 def test_gate_lists_background_agents(env):
     fake = Fake(env)
     run_main(env, fake)
-    ls = [c for c in fake.calls if c[:2] == ["paseo", "ls"]]
+    ls = [c for c in fake.calls if c[0].endswith("paseo") and c[1] == "ls"]
     assert ls and all("-a" in c and "-g" in c for c in ls)
 
 
@@ -316,7 +319,8 @@ def test_non_interactive_without_yes_refuses(env, monkeypatch):
     fake2 = Fake(env)
     assert plu.main(["--installed", str(env / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
                      "--backup", str(env / "Paseo-prev.app"), "--state-dir", str(env / "state"),
-                     "--home", str(env / "home"), "--apply"], runner=fake2, sleep=lambda s: None) == 2
+                     "--home", str(env / "home"), "--updater-cache", str(env / "updates"),
+                     "--shipit-cache", str(env / "shipit"), "--apply"], runner=fake2, sleep=lambda s: None) == 2
     assert not touched(fake2)
 
 
@@ -359,7 +363,7 @@ def test_rollback_is_gated_too(env):
 
 
 def test_second_run_is_locked_out(env):
-    held = plu.open_lock(env / "Paseo.app")
+    held = plu.open_lock(str(env / "home"))
     try:
         fcntl.flock(held, fcntl.LOCK_EX)
         fake = Fake(env)
@@ -373,7 +377,7 @@ def test_lock_file_is_not_followed_through_a_symlink(env):
     plu.Path(plu.LOCK_DIR).mkdir(parents=True)
     decoy = env / "decoy"
     decoy.write_text("keep")
-    held = plu.open_lock(env / "Paseo.app")
+    held = plu.open_lock(str(env / "home"))
     os.close(held)
     lock = next(plu.Path(plu.LOCK_DIR).iterdir())
     lock.unlink()
@@ -549,7 +553,7 @@ def test_daemon_from_the_backup_bundle_fails_verification(env):
 def test_a_broken_fork_cli_cannot_block_the_automatic_rollback(env):
     """F1: every paseo call runs the upstream bundle's CLI, never the build under test."""
     fake = Fake(env, fork_cli_broken=True)
-    assert run_main(env, fake, "--apply", cli=True) == 1
+    assert run_main(env, fake, "--apply") == 1
     assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
     assert fake.fork_cli_calls == 0
     assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
@@ -559,17 +563,52 @@ def test_a_broken_fork_cli_cannot_block_the_automatic_rollback(env):
 
 def test_a_broken_fork_cli_cannot_block_the_manual_rollback(env):
     fake = Fake(env, fork_cli_broken=True)
-    assert run_main(env, fake, "--apply", "--want-broken", cli=True) == 3
+    assert run_main(env, fake, "--apply", "--want-broken") == 3
     assert not upstream_in_place(env)
-    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False, cli=True) == 0
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
     assert upstream_in_place(env) and fake.fork_cli_calls == 0
 
 
-def test_missing_upstream_cli_refuses_before_anything_moves(env):
-    (env / "Paseo.app/Contents/Resources/bin/paseo").unlink()
+def test_a_fork_without_a_cli_shim_does_not_stop_the_manual_rollback(env):
+    """M1: the trusted CLI is the upstream bundle's own shim, whatever PATH or the fork's layout says."""
+    (env / "Paseo-local.app/Contents/Resources/bin/paseo").unlink()
     fake = Fake(env)
-    assert run_main(env, fake, "--apply", cli=True) == 2
-    assert not touched(fake)
+    assert run_main(env, fake, "--apply", "--want-broken", "--require-plugin", "nope") == 3
+    assert not upstream_in_place(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
+    assert upstream_in_place(env)
+    shims = [c[0] for c in fake.calls if c[0].endswith("/bin/paseo")]
+    assert shims and not any("Paseo-local" in x for x in shims)
+
+
+def test_rollback_does_not_quit_an_app_that_is_not_running(env):
+    """L1: the app is already gone after a failed open; a quit request to it would fail or launch it."""
+    fake = Fake(env, open_fails_after_swap=True, quit_needs_running=True)
+    assert run_main(env, fake, "--apply") == 1
+    assert upstream_in_place(env)
+
+
+def test_ps_failure_while_walking_ancestors_refuses():
+    def ps(argv, timeout=60):
+        return plu.Result(1, "", "ps: boom")
+
+    assert "refusing" in plu.inside_paseo({}, ps)
+    assert plu.inside_paseo({"PASEO_AGENT_ID": "x"}, ps) == "PASEO_AGENT_ID is set"
+
+
+def test_locks_are_shared_across_installed_paths(env):
+    held = plu.open_lock(str(env / "home"))
+    try:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        other = env / "other"
+        other.mkdir()
+        make_app(other / "Paseo.app", updater=True)
+        argv = ["--installed", str(other / "Paseo.app"), "--staged", str(env / "Paseo-local.app"),
+                "--backup", str(other / "prev.app"), "--state-dir", str(env / "state"),
+                "--home", str(env / "home"), "--apply", "--yes"]
+        assert plu.main(argv, runner=Fake(env), sleep=lambda s: None) == 2
+    finally:
+        os.close(held)
 
 
 def _lock(env, content):
@@ -666,7 +705,8 @@ def test_a_denied_quit_request_fails_at_once(env):
     fake = Fake(env, quit_request_fails=True)
     assert run_main(env, fake, "--apply") == 1
     assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
-    assert not any(c[:2] == ["osascript", "-e"] and "is running" in c[2] for c in fake.calls)
+    quit_at = next(i for i, c in enumerate(fake.calls) if c[0] == "osascript" and "to quit" in c[2])
+    assert not any(c[0] == "osascript" and "is running" in c[2] for c in fake.calls[quit_at + 1:])  # no waiting
 
 
 def test_last_run_with_non_string_values_is_a_clean_error(env):
