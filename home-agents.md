@@ -45,6 +45,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 36. **NixOS: deploy only the pushed branch head** (get: `main`; vps-primary: `master` → `deploy-vps-primary`); never a local, side-branch or old commit. Deploy in flight: wait, redeploy the new head, verify the revision. Heavy builds and `nix flake update`: Forgejo CI, not vps-primary.
 37. **Heavy jobs, builds, full test runs: CI first, not the Mac, forks/scratch too (push to djbclark's fork): public on GitHub (Linux; macOS for macOS-only builds), private Linux on Forgejo/Hyades. No local-first `cargo build/check`/`make`: read the CI log. macOS jobs may run locally via `bg` when CI is especially slow on them or failed/was cancelled once, starting at load ≤16 (CI failed twice: skip the load gate); also with no CI route or if djbclark says so. No macOS leg in PR checks unless asked by name** (`forgejo-ci` item 6; `memory/feedback_macos_ci_on_request_only.md`).
 38. **Changed third-party source? Dupe-search its issues/PRs, tidy, `frontier` if useful, file upstream as issue/PR** (`memory/feedback_upstream_local_changes.md`).
+41. **New GitHub repos: `frdminc`; public `djbclark/*` we changed move there, private stay `djbclark`/Forgejo** (`memory/project_frdminc_org_move.md`).
 
 ## Other agents, delegation
 
