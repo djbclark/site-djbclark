@@ -116,7 +116,7 @@ class Ctx:
             pass
 
     def paseo(self, *args: str) -> list[str]:
-        """argv for a paseo call: the upstream bundle's CLI by absolute path, else `paseo` from PATH."""
+        """argv for a paseo call: the upstream bundle's CLI by absolute path, never `paseo` from PATH."""
         return [str((self.upstream_bundle or self.installed) / CLI_REL), *args]
 
     def cmd(self, argv: list[str], timeout: float = 60) -> Result:
@@ -649,10 +649,16 @@ def parse(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _abs(path: str) -> str:
+    """An absolute, ~-expanded path, so a saved home means the same daemon from any directory."""
+    return os.path.abspath(os.path.expanduser(path))
+
+
 def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     state_dir = Path(args.state_dir).expanduser()
     state_dir.mkdir(parents=True, exist_ok=True)
     installed, staged, backup, home = args.installed, args.staged, args.backup, args.home
+    notes: list[str] = []
     if args.rollback:
         saved = state_dir / "last-run.json"
         if not saved.exists() and not backup:
@@ -665,9 +671,17 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
                 installed = installed or data["installed"]
                 staged = staged or data["staged"]
                 backup = backup or data["backup"]
-                home = home or data.get("home")
-                if home is not None and not isinstance(home, str):
+                saved_home = data.get("home")
+                if saved_home is not None and not isinstance(saved_home, str):
                     raise TypeError("home must be a string")
+                if saved_home and home and _abs(home) != _abs(saved_home):
+                    raise SystemExit(f"paseo-local-upgrade: --home {home} differs from the home the upgrade used "
+                                     f"({saved_home}); the gate must ask the daemon that was upgraded. Drop --home.")
+                if not saved_home and not home:
+                    notes.append(f"{saved} has no saved home (older run); using {_abs('~/.paseo')}")
+                elif saved_home and not home:
+                    notes.append(f"using the home saved by the upgrade: {saved_home}")
+                home = home or saved_home
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise SystemExit(f"paseo-local-upgrade: unreadable {saved}: {exc}") from exc
     installed_p = Path(installed or DEFAULT_INSTALLED).expanduser()
@@ -684,13 +698,16 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     mode = "rollback" if args.rollback else ("apply" if args.apply else "dry-run")
     ctx = Ctx(
         installed=installed_p, staged=staged_p, backup=backup_p, state_dir=state_dir,
-        home=home or os.path.expanduser("~/.paseo"), settle=args.settle, timeout=args.timeout, require_plugins=args.require_plugin,
+        home=_abs(home or "~/.paseo"), settle=args.settle, timeout=args.timeout,
+        require_plugins=args.require_plugin,
         allow_terminals=args.allow_terminals, updater_cache=Path(args.updater_cache).expanduser(),
         runner=runner, sleep=sleep, log_path=state_dir / f"{stamp}-{mode}.log",
         shipit_cache=Path(args.shipit_cache).expanduser(),
     )
     # The CLI to trust is the upstream app's: the backup for a rollback (installed is then the fork), else installed.
     ctx.upstream_bundle = backup_p if args.rollback else installed_p
+    for note in notes:
+        ctx.log(note)
     return ctx
 
 
@@ -712,7 +729,7 @@ def inside_paseo(env, runner) -> str | None:
         pid = int(parts[0])
         if pid <= 1:
             return None
-    return None
+    return "more than 40 ancestor processes; refusing"
 
 
 def open_lock() -> int:

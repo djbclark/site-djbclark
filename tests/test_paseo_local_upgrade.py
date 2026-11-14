@@ -746,12 +746,54 @@ def test_rollback_uses_the_home_the_upgrade_used(env):
     args = plu.parse(["--rollback", "--state-dir", str(env / "state")])
     ctx = plu.build_ctx(args)
     assert ctx.home == str(env / "home")
-    explicit = plu.build_ctx(plu.parse(["--rollback", "--state-dir", str(env / "state"), "--home", "/x"]))
-    assert explicit.home == "/x"
+    with pytest.raises(SystemExit):  # an explicit, different home is refused (L-B)
+        plu.build_ctx(plu.parse(["--rollback", "--state-dir", str(env / "state"), "--home", "/x"]))
 
 
 def test_unparseable_ps_output_while_walking_ancestors_refuses():
     def ps(argv, timeout=60):
         return plu.Result(0, "garbage")
+
+    assert "refusing" in plu.inside_paseo({}, ps)
+
+
+# --- sixth adversary check (3d63fb4) -------------------------------------------------------------------------
+
+def test_saved_home_is_absolute_and_expanded(env, monkeypatch):
+    """L-A: a relative or ~ home must mean the same daemon whatever directory the rollback runs from."""
+    monkeypatch.chdir(env)
+    monkeypatch.setenv("HOME", str(env))
+    assert run_main(env, Fake(env), "--apply", with_home=False) == 0  # default home: ~/.paseo
+    assert json.loads((env / "state/last-run.json").read_text())["home"] == str(env / ".paseo")
+    ctx = plu.build_ctx(plu.parse(["--state-dir", str(env / "state"), "--home", "rel/dir"]))
+    assert ctx.home == str(env / "rel/dir") and os.path.isabs(ctx.home)
+
+
+def test_rollback_refuses_a_different_home(env, capsys):
+    """L-B"""
+    assert run_main(env, Fake(env), "--apply") == 0
+    fake = Fake(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", "--home", str(env / "elsewhere"),
+                    with_backup=False, with_home=False) == 2
+    assert not touched(fake) and "differs from the home the upgrade used" in capsys.readouterr().err
+    assert run_main(env, Fake(env), "--rollback", "--apply", "--yes", "--home", str(env / "home") + "/",
+                    with_backup=False, with_home=False) == 0  # the same home spelled differently is fine
+
+
+def test_rollback_logs_the_home_fallback_for_old_state_files(env, capsys):
+    """L-C"""
+    assert run_main(env, Fake(env), "--apply") == 0
+    saved = json.loads((env / "state/last-run.json").read_text())
+    saved.pop("home")
+    (env / "state/last-run.json").write_text(json.dumps(saved))
+    ctx = plu.build_ctx(plu.parse(["--rollback", "--state-dir", str(env / "state")]))
+    assert ctx.home.endswith("/.paseo")
+    assert "no saved home" in ctx.log_path.read_text()
+
+
+def test_more_than_forty_ancestors_refuses():
+    def ps(argv, timeout=60):
+        pid = int(argv[-1])
+        return plu.Result(0, f"{pid + 1000} bash\n")
 
     assert "refusing" in plu.inside_paseo({}, ps)
