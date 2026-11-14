@@ -200,7 +200,11 @@ GETBACKUP_INTERVAL="${FLEET_WATCH_GETBACKUP_INTERVAL:-1800}"
 GETBACKUP_DOWN_AFTER="${FLEET_WATCH_GETBACKUP_DOWN_AFTER:-3}"
 GETBACKUP_TIMEOUT="${FLEET_WATCH_GETBACKUP_TIMEOUT:-40}"
 # Upstream PR watcher (2026-10-16); see "Upstream PR watcher" in the header.
-UPSTREAM="${FLEET_WATCH_UPSTREAM:-on}"
+# Default OFF (2026-11-14): the feature has been paused since 2026-11-07 and its dispatcher, djbclark-ade's
+# bin/acp-dispatch, was deleted in the Wave 6 shim deletion (PR 699), so a scheduled dispatch would fail with
+# rc 127. A manual `fleet-watch upstream` still reads GitHub and pings; its worker dispatch needs a native
+# paseo run port first. The live CFEngine watcher is github.com/djbclark/upstream-watch.
+UPSTREAM="${FLEET_WATCH_UPSTREAM:-off}"
 UPSTREAM_PROFILES="${FLEET_WATCH_UPSTREAM_PROFILES:-cfengine paseo}"
 UPSTREAM_SELF="${FLEET_WATCH_UPSTREAM_SELF:-}"
 UPSTREAM_INTERVAL="${FLEET_WATCH_UPSTREAM_INTERVAL:-300}"
