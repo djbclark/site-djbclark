@@ -82,15 +82,22 @@
 # origin (a fork whose origin is upstream sets `git config bgoffload.remote <fork remote>`; upstream never has
 # djbclark's ci/base, so (4) never pushes there). Its (first) fetch url names the GitHub repo whose visibility is
 # asked; check (b) below refuses unless that url is also its one push url. Route (3) always uses `forgejo`.
-# A linked git worktree (.git is a file) has no route: github-ci-run sets GIT_DIR=$top/.git. No route, no gh, no
+# A linked git worktree (or a submodule: its .git is a file) routes like any repo top (bg-offload-wt, 2026-11-14; it had
+# none before). TOP is the work tree's own top (`git rev-parse --show-toplevel`); the config (bgoffload.remote, remotes,
+# push.*), refs and objects are the shared ones git serves from the common git dir, and nothing here reads $top/.git.
+# The runners need no change: git accepts a .git FILE as GIT_DIR (checked 2026-11-14 with the old github-ci-run, which
+# exports GIT_DIR=$top/.git: it overlays and pushes the worktree's own HEAD), so a runner that finds its git dir that way
+# works in a worktree (a sparse worktree too: the offload turns core.sparseCheckout off for the runner); a runner with
+# another assumption about .git is that repo's to fix. This helper clears inherited
+# GIT_DIR, GIT_WORK_TREE and the like: TOP is the only repo it asks about. No route, no gh, no
 # GNU tool, nothing publishable (see below): this helper says so and exits 69; bg then refuses a build (exit 3) or
 # goes on waiting at the gate with a targeted run, as it always did.
 # Probe cost (F9, N8): reads of ci/base's workflow blobs never lazy-fetch without a bound (a partial clone's missing
 # blobs are fetched first, within BG_OFFLOAD_FETCH_TIMEOUT); a timeout knob of 0 or junk means its default; and a
 # --probe's answer is cached in ~/.local/state/bg-offload/probe-cache, a route for BG_OFFLOAD_PROBE_TTL seconds (300;
 # 0 = off, the default with BG_OFFLOAD_TESTING=1), "no route" for at most 60 s, keyed on the repo, the CI and forgejo
-# remotes and urls, HEAD, the local ci/base copies, the route scripts, the push/submodule config and the hooks in
-# effect. An answer that came from a failed ls-remote, fetch or gh call is not cached. The full offload never uses
+# remotes and urls, HEAD, the local ci/base copies, the route scripts, the git dir and common git dir (so each linked
+# worktree has its own entry), the push/submodule config and the hooks in effect. An answer that came from a failed ls-remote, fetch or gh call is not cached. The full offload never uses
 # the cache.
 #
 # What may be offloaded (adversary reviews of c7cab20 to 2d037f7, 2026-10-23, and djbclark's ruling that followed:
@@ -129,7 +136,8 @@
 # called on HEAD itself with git config forced from the environment (push.followTags=false and
 # push.recurseSubmodules=no appended to GIT_CONFIG_PARAMETERS, which git reads after every config file and after
 # GIT_CONFIG_COUNT/KEY/VALUE, so neither the user's config nor a caller's environment can make its `git push` carry
-# tags or submodule commits), and the only thing it pushes is the CI overlay branch: HEAD's tree, the ci/base overlay
+# tags or submodule commits; core.sparseCheckout=false too: a sparse work tree's `git add -A` skips out-of-cone paths, so
+# the overlay would be dropped), and the only thing it pushes is the CI overlay branch: HEAD's tree, the ci/base overlay
 # and .ci-target-sha. "HEAD's tree" holds up to the repo's own filters: github-ci-run checks the tree out and re-adds
 # it, so a smudge filter whose clean is not its inverse would publish the smudged text (adversary round 6, P3;
 # git-crypt, LFS and nbstripout round-trip). That is the runner's code, tracked in each repo, not this helper's.
@@ -212,6 +220,8 @@ unset FORGEJO_HOST FORGEJO_GIT_USER FORGEJO_TOKEN_VAR
 # The same for gh (adversary r3 F1): an inherited GH_HOST would ask another host whether OWNER/REPO is private, and
 # poll it, while the push goes to github.com. Every gh call here names OWNER/REPO, on github.com.
 unset GH_HOST GH_REPO
+# TOP is the only repo this helper asks about: an inherited git location (from a hook, say) must not redirect it.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 say() { echo "bg: $*" >&2; }
 # redact: drop user:password@ from urls in a message
@@ -497,9 +507,16 @@ try_forgejo() { kind=forgejo; runner="$top/scripts/forgejo-ci-run"; forgejo_ok; 
 # visibility (header, djbclark 2026-11-01): public -> (1), (2), (4), and (3) only when none of those exists; private ->
 # (3) only, never GitHub; unreadable -> no route for this run; not on GitHub at all -> (3) only.
 route() {
-  local gwhy
+  local gwhy wt_top
   kind=""; runner=""; remote=""; gh_repo=""; route_why=""; fj_missing=0; vis=""
-  [ -d "$top/.git" ] || { route_why="$top is not a repo top with its own .git (a linked worktree has no route)"; return 1; }
+  # TOP must be a work tree's own top. Its git dir is asked of git, never assumed to be $top/.git (a file in a linked
+  # worktree or a submodule).
+  wt_top=$(git -C "$top" rev-parse --show-toplevel 2>"$tmp/top.err")
+  if [ -z "$wt_top" ] || ! [ "$wt_top" -ef "$top" ]; then
+    route_why="$top is not the top of a git work tree"
+    [ -s "$tmp/top.err" ] && route_why="$route_why (git: $(ghead -n 1 "$tmp/top.err" | redact))"
+    return 1
+  fi
   have1=0; have2=0; have3=0
   if [ -n "$runner_override" ]; then
     [ -x "$runner_override" ] || { route_why="BG_OFFLOAD_RUNNER $runner_override is not executable"; return 1; }
@@ -582,6 +599,8 @@ probe_key() {
     git -C "$top" ls-files -s -- scripts/bg-offload-run scripts/github-ci-run scripts/forgejo-ci-run 2>/dev/null
     for s in scripts/bg-offload-run scripts/github-ci-run scripts/forgejo-ci-run; do [ -x "$top/$s" ] && echo "x $s"; done
     git -C "$top" config --get-regexp '^(push|submodule)\.' 2>/dev/null
+    git -C "$top" rev-parse --absolute-git-dir 2>/dev/null
+    git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null
   } | gsha256sum | gawk '{ print $1 }'
 }
 
@@ -799,10 +818,12 @@ fi
 out="$tmp/runner.out"
 cd "$top" || exit 69
 # The runner's `git push` must carry the one ref and nothing else, whatever the caller's git config says:
-# push.followTags would publish local annotated tags, push.recurseSubmodules submodule commits. GIT_CONFIG_PARAMETERS
+# push.followTags would publish local annotated tags, push.recurseSubmodules submodule commits. core.sparseCheckout
+# (a linked worktree can be sparse while its main clone is not: config.worktree) would make the runner's `git add -A`
+# skip the paths it deletes or refuse the overlay (adversary bg-offload-wt r2 B1). GIT_CONFIG_PARAMETERS
 # is read after every config file and after GIT_CONFIG_COUNT/KEY/VALUE, and the last value wins, so appending to it
 # overrides both (a caller's own entries are kept). A malformed caller value already failed `git status` above.
-export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'push.followtags'='false' 'push.recursesubmodules'='no'"
+export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }'push.followtags'='false' 'push.recursesubmodules'='no' 'core.sparsecheckout'='false'"
 if [ "$kind" = forgejo ]; then
   # Route (3) (adversary F3, F4, F8, N2, N7; djbclark 2026-11-01). Forgejo is the only CI a private repo may use, so
   # when Forgejo cannot run the build (the API or the push fails, or no run of this push shows up) bg refuses it:

@@ -72,6 +72,7 @@ printf '%s\\n' "$2" > "$d/ref"
 git grep -q "SECRETXY[Z]" "$2" -- . && echo yes > "$d/ref.hassecret" || echo no > "$d/ref.hassecret"
 git config --get push.followTags > "$d/cfg.followTags" 2>/dev/null; git config --get push.recurseSubmodules > "$d/cfg.recurse" 2>/dev/null
 git config --get core.testmarker > "$d/cfg.marker" 2>/dev/null
+git config --get core.sparseCheckout > "$d/cfg.sparse" 2>/dev/null
 if [ -f "$d/runner.overlay" ]; then git show "$(cat "$d/runner.overlay")" > "$d/overlay.out" 2>/dev/null || echo MISSING > "$d/overlay.out"; fi
 if [ -f "$d/runner.push" ]; then git push -q --force "${{GITHUB_CI_REMOTE:-origin}}" "$2:refs/heads/ci/run/x-abc" || exit 3; fi
 if [ -f "$d/runner.slow" ]; then
@@ -333,13 +334,146 @@ def test_a_failing_runner_falls_back_to_waiting(s):
     assert len(s.read("runner.calls").splitlines()) == 1  # tried once, not on every poll
 
 
-def test_a_worktree_has_no_route(s):
-    git(s.work, "worktree", "add", "-q", str(s.root / "wt"), "-b", "other")
-    e = {**os.environ, "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"), "BG_OFFLOAD_URL_ALIAS": s.alias}
-    r = subprocess.run([str(OFFLOAD), "--probe", str(s.root / "wt")], env=e)
-    assert r.returncode != 0
-    r = subprocess.run([str(OFFLOAD), "--probe", str(s.work)], env=e)
-    assert r.returncode == 0
+def _wt_probe(s, top, **env):
+    e = {**os.environ, "HOME": str(s.home), "BG_OFFLOAD_TESTING": "1", "BG_GH": str(s.home / "fakebin" / "gh"),
+         "BG_OFFLOAD_URL_ALIAS": s.alias, **env}
+    e = {k: v for k, v in e.items() if v is not None}
+    return subprocess.run([str(OFFLOAD), "--probe", str(top)], env=e, capture_output=True, text=True)
+
+
+def _gitfile_runner(s):
+    """The runner as github-ci-run is: it exports GIT_DIR=$top/.git (a FILE in a linked worktree; git accepts it) and
+    pushes the ref it was given from there; committed, so the worktree has it too."""
+    r = s.work / "scripts" / "github-ci-run"
+    body = RUNNER_STUB.format(state=shlex.quote(str(s.state)), commit=COMMIT)
+    body = body.replace("#!/bin/bash\n", '#!/bin/bash\ntop=$(git rev-parse --show-toplevel); export GIT_DIR="$top/.git"\n', 1)
+    r.write_text(body)
+    r.chmod(0o755)
+    (s.state / "runner.push").write_text("")  # the stub pushes "$2" to refs/heads/ci/run/x-abc of the CI remote
+    s.commit_all("runner that uses GIT_DIR=$top/.git")
+
+
+def _worktree(s, name="wt", on_remote=True):
+    """A linked worktree on its own commit (so its HEAD differs from the main clone's), pushed like the main branch."""
+    wt = s.root / name
+    git(s.work, "worktree", "add", "-q", str(wt), "-b", name)
+    git(wt, "config", "user.name", "t")
+    git(wt, "config", "user.email", "t@example.invalid")
+    (wt / f"{name}.txt").write_text(f"{name}\n")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", f"commit in {name}")
+    if on_remote:
+        git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{name}")
+    assert (wt / ".git").is_file()
+    return wt
+
+
+def _wt_head(cwd):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_a_linked_worktree_has_a_route(s):
+    wt = _worktree(s)
+    assert _wt_probe(s, wt).returncode == 0
+    assert _wt_probe(s, s.work).returncode == 0  # the main clone is unchanged
+
+
+def test_a_linked_worktree_without_any_route_says_so(s):
+    s.route(False)
+    s.commit_all("no route script")
+    wt = _worktree(s)
+    r = _wt_probe(s, wt)
+    # the same refusal, for the same reason, as the main clone gives (here: no tracked route, no generic runner)
+    assert r.returncode != 0 and r.stderr == _wt_probe(s, s.work).stderr
+    assert "generic GitHub runner" in r.stderr and "not the top" not in r.stderr
+
+
+def test_a_path_that_is_not_a_repo_top_has_no_route(s):
+    wt = _worktree(s)
+    for top in (wt / "tests", s.work / "tests", s.root / "home"):
+        r = _wt_probe(s, top)
+        assert r.returncode != 0 and "not the top of a git work tree" in r.stderr, (top, r.stderr)
+    # an inherited git location does not turn a subdirectory (or a stranger) into a repo top
+    r = _wt_probe(s, wt / "tests", GIT_DIR=str(s.work / ".git"))
+    assert r.returncode != 0 and "not the top of a git work tree" in r.stderr
+    r = _wt_probe(s, s.root / "home", GIT_DIR=str(s.work / ".git"), GIT_WORK_TREE=str(s.work))
+    assert r.returncode != 0 and "not the top of a git work tree" in r.stderr
+    # and a stale one does not break a real top
+    assert _wt_probe(s, s.work, GIT_DIR=str(s.root / "nowhere")).returncode == 0
+
+
+def test_a_build_from_a_linked_worktree_is_offloaded_and_pushes_its_own_head(s):
+    _gitfile_runner(s)
+    wt = _worktree(s)
+    assert _wt_head(wt) != _wt_head(s.work)
+    r = s.bg(str(s.home / "fakebin" / "pytest"), cwd=wt)
+    assert r.returncode == 0, r.stderr
+    assert not s.marker.exists()
+    assert "CI workflow PASSED" in r.stdout
+    # the runner ran in the worktree, with GIT_DIR=<wt>/.git (a file), and what it saw and pushed is the worktree's HEAD
+    assert s.read("ref").strip() == _wt_head(wt)
+    assert s.read("head").strip() == _wt_head(wt)
+    assert git_out(s.remote, "rev-parse", "refs/heads/ci/run/x-abc") == _wt_head(wt)
+    assert s.read("runner.remote").strip() == "origin"
+
+
+def git_out(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_a_worktree_inherits_the_shared_config_remote(s):
+    # bgoffload.remote is set once, in the shared config: a worktree finds it with no config of its own
+    _gitfile_runner(s)
+    fork = _bare(s, "fork.git")
+    git(s.work, "remote", "add", "fork", str(fork))
+    git(s.work, "config", "bgoffload.remote", "fork")
+    git(s.work, "push", "-q", "fork", "main")
+    wt = _worktree(s, on_remote=False)
+    git(wt, "push", "-q", "fork", "HEAD:refs/heads/wt")
+    r = s.bg(str(s.home / "fakebin" / "pytest"), cwd=wt, BG_OFFLOAD_URL_ALIAS=f"{fork} {STUB_REPO};file://{fork} {STUB_REPO}")
+    assert r.returncode == 0, r.stderr
+    assert s.read("runner.remote").strip() == "fork"
+    assert (fork / "refs" / "heads" / "ci" / "run" / "x-abc").exists() and not (s.remote / "refs" / "heads" / "ci" / "run").exists()
+
+
+def test_a_worktree_still_refuses_what_a_main_clone_refuses(s):
+    _gitfile_runner(s)
+    wt = _worktree(s)
+    (wt / "tests" / "test_a.py").write_text("def test_x(): assert 1\n")  # a tracked change
+    r = s.bg(str(s.home / "fakebin" / "pytest"), cwd=wt, BG_MAX_WAIT="4")
+    assert r.returncode == 3, r.stderr
+    assert "uncommitted changes" in r.stderr and s.read("runner.calls") == ""
+    git(wt, "checkout", "--", "tests/test_a.py")
+    (wt / "more.txt").write_text("more\n")
+    git(wt, "add", "more.txt")
+    git(wt, "commit", "-q", "-m", "unpushed in the worktree")
+    r = s.bg(str(s.home / "fakebin" / "pytest"), cwd=wt, BG_MAX_WAIT="4")
+    assert r.returncode == 3, r.stderr
+    assert "not on the remote" in r.stderr and s.read("runner.calls") == ""
+
+
+def test_a_sparse_worktree_runs_the_runner_with_sparse_checkout_off(s):
+    # config.worktree makes a linked worktree sparse on its own: the runner's `git add -A` would skip or refuse the
+    # overlay's deletions (adversary r2 B1), so the offload turns core.sparseCheckout off for the runner
+    _gitfile_runner(s)
+    wt = _worktree(s)
+    git(wt, "sparse-checkout", "set", "scripts", "tests")
+    assert git_out(wt, "config", "--get", "core.sparseCheckout") == "true"
+    r = s.bg(str(s.home / "fakebin" / "pytest"), cwd=wt)
+    assert r.returncode == 0, r.stderr
+    assert s.read("cfg.sparse").strip() == "false"
+
+
+def test_the_probe_cache_has_one_entry_per_worktree(s):
+    wt1, wt2 = _worktree(s, "one"), _worktree(s, "two")
+    env = {"BG_OFFLOAD_PROBE_TTL": "300"}
+    cache = s.home / ".local" / "state" / "bg-offload" / "probe-cache"
+    for top in (wt1, wt2, s.work):
+        assert _wt_probe(s, top, **env).returncode == 0
+    assert len(list(cache.iterdir())) == 3
+    for top in (wt1, wt2, s.work):  # answered from the cache this time: still a route, no new entry
+        assert _wt_probe(s, top, **env).returncode == 0
+    assert len(list(cache.iterdir())) == 3
 
 
 def test_ci_still_running_at_the_limit_is_76(s):
