@@ -69,6 +69,11 @@
 # $STATE_DIR/load-high; one recovery notice when the condition clears. Notice only: it never
 # kills or stops anything. `fleet-watch load` runs just this check.
 
+# PAUSED (2026-11-07, operator yes): the launchd job carries FLEET_WATCH_UPSTREAM=off, because the
+# dispatch and relay below hand third-party PR text to an agent (djbclark-ade Argon review F-CRIT-1).
+# The live CFEngine watcher is github.com/djbclark/upstream-watch (GitHub Actions, ping only; verified
+# 2026-11-14). $STATE_DIR/upstream-pr.relay still names agent 6eb6d3f6, which no longer exists.
+# Do not re-enable this without fixing F-CRIT-1 first.
 # Upstream PR watcher (2026-10-16): GitHub files every reply to the operator's upstream pull
 # requests under their notifications, so one `gh api notifications` call (unread, participating)
 # is the whole signal. Threads of type PullRequest or Issue in FLEET_WATCH_UPSTREAM_REPOS
