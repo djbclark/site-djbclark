@@ -30,7 +30,7 @@ def repo(tmp_path):
     (tmp_path / "test" / "setup.ts").write_text("// setup\n")
     (tmp_path / "tests" / "bun").mkdir()
     (tmp_path / "tests" / "jest").mkdir()
-    (tmp_path / "package.json").write_text('{"scripts": {"test": "vitest run", "test:unit": "vitest run --dir src"}}\n')
+    (tmp_path / "package.json").write_text('{"scripts": {"test": "vitest run", "test:unit": "vitest run --dir=src"}}\n')
     return tmp_path
 
 
@@ -114,6 +114,7 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npx", "vitest", "run", "tests/foo.test.ts", "integration"],
     ["npx", "vitest", "run", "tests/foo.test.ts", "tests/**"],
     ["npx", "vitest", "run", "tests/typo.test.ts"],
+    ["npx", "vitest", "run", "tests/foo.test.ts", "tests/typo.test.ts"],  # a named file that does not exist is still a filter
     ["npx", "vitest", "run", "--pool", "threads"],
     # lead adversary B3: the runner counts only in command position
     ["make", "-j8", "vitest", "tests/foo.test.ts"],
@@ -407,7 +408,7 @@ def test_log_lines_cannot_be_forged_through_the_directory_name(tmp_path, tmp_pat
 
 SCRIPT_CASES = [
     ({"test": "vitest run"}, True),
-    ({"test": "npx vitest run --dir src"}, True),
+    ({"test": "npx vitest run --dir=src --coverage"}, True),
     ({"test": "NODE_ENV=test jest"}, True),
     ({"test": "bun test"}, True),
     ({"test": "pnpm exec vitest run"}, True),
@@ -424,6 +425,14 @@ SCRIPT_CASES = [
     ({"test": "playwright test"}, False),
     ({"test": "bash test/unit.sh"}, False),
     ({"test": 7}, False),
+    # the body's own arguments must not widen what the caller's file or -t narrows (lead adversary round 2, BLOCK2)
+    ({"test": "vitest run src"}, False),
+    ({"test": "bun test ./tests"}, False),
+    ({"test": "jest tests/*"}, False),
+    ({"test": "vitest run #"}, False),
+    ({"test": "vitest run --"}, False),
+    ({"test": "vitest run --dir src"}, False),
+    ({"test": "vitest run ''"}, False),
     ({}, False),
 ]
 
@@ -475,3 +484,53 @@ def test_an_approval_follows_the_physical_directory(repo, tmp_path, tmp_path_fac
     assert approve(repo, home, "vitest", "run", PWD=str(link)).returncode == 0  # approved from the symlinked path (logical PWD)
     r = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)  # run from the physical one
     assert r.returncode == 0 and "FAKE-VITEST" in r.stdout
+
+
+@pytest.mark.parametrize("argv", [
+    ["pnpm", "-r", "test", "tests/foo.test.ts"],
+    ["pnpm", "--recursive", "test", "tests/foo.test.ts"],
+    ["pnpm", "--filter=a", "test", "tests/foo.test.ts"],
+    ["pnpm", "--dir=packages/a", "test", "-t", "x"],
+    ["pnpm", "-w", "test", "tests/foo.test.ts"],
+    ["npm", "--prefix=packages/a", "test", "--", "tests/foo.test.ts"],
+    ["npm", "--workspaces", "test", "--", "tests/foo.test.ts"],
+    ["npm", "test", "--workspaces", "--", "tests/foo.test.ts"],
+    ["npm", "--workspace=a", "test", "--", "tests/foo.test.ts"],
+    ["yarn", "--cwd=x", "test", "tests/foo.test.ts"],
+    ["bun", "--filter=a", "run", "test", "tests/foo.test.ts"],
+    ["pnpm", "test", "--filter=a", "tests/foo.test.ts"],
+])
+def test_a_package_manager_workspace_option_is_never_targeted(repo, argv):
+    # these pick another package's script (or all of them); bg reads only ./package.json (lead adversary round 2, BLOCK1)
+    assert not ci_targeted(repo, *argv)
+
+
+@pytest.mark.parametrize("argv", [
+    ["pnpm", "--silent", "test", "tests/foo.test.ts"],
+    ["npm", "run", "--silent", "test", "--", "tests/foo.test.ts"],
+    ["yarn", "test", "tests/foo.test.ts", "--silent"],
+])
+def test_a_harmless_package_manager_option_is_still_targeted(repo, argv):
+    assert ci_targeted(repo, *argv)
+
+
+def test_a_workspace_setting_in_npmrc_or_env_is_never_targeted(repo):
+    assert ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    (repo / ".npmrc").write_text("workspaces=true\n")
+    assert not ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    (repo / ".npmrc").write_text("registry=https://example.invalid/\n")
+    assert ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    os.environ["npm_config_workspaces"] = "true"
+    try:
+        assert not ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    finally:
+        del os.environ["npm_config_workspaces"]
+
+
+@pytest.mark.parametrize("argv", [
+    ["npx", "jest", "gradle", "--tests", "x"],
+    ["npx", "vitest", "run", "pytest", "-k", "x"],
+])
+def test_pytest_and_gradle_words_never_replace_a_js_runner(repo, argv):
+    # `jest gradle --tests x` would otherwise read as a gradle run and stay local while jest runs everything (round 2, WARN2)
+    assert not ci_targeted(repo, *argv)

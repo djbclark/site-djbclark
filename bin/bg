@@ -393,7 +393,7 @@ fi
 ci_pm_script_ok() {
   [ -f package.json ] || return 1
   python3 -I -c '
-import json, re, sys
+import json, os, re, sys
 n = sys.argv[1]
 try:
     s = json.load(open("package.json"))["scripts"]
@@ -402,6 +402,15 @@ except Exception:
     sys.exit(1)
 if not isinstance(b, str) or ("pre" + n) in s or ("post" + n) in s or re.search(r"[&|;<>$`()\n\\]", b):
     sys.exit(1)
+# a workspace setting makes `npm test` run the script of every workspace, whatever ./package.json says
+for rc in ("./.npmrc", os.path.expanduser("~/.npmrc")):
+    try:
+        if re.search(r"^\s*workspaces?\s*=", open(rc).read(), re.I | re.M):
+            sys.exit(1)
+    except OSError:
+        pass
+if any(k.lower() in ("npm_config_workspace", "npm_config_workspaces") for k in os.environ):
+    sys.exit(1)
 w = b.split()
 while w and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w[0]):
     w.pop(0)
@@ -409,12 +418,26 @@ if w[:2] == ["pnpm", "exec"]:
     w = w[2:]
 while w and w[0] in ("npx", "bunx", "--no-install", "--yes", "-y"):
     w.pop(0)
-ok = bool(w) and (w[0].rsplit("/", 1)[-1] in ("vitest", "jest") or w[:2] == ["bun", "test"])
-sys.exit(0 if ok else 1)
+if w[:2] == ["bun", "test"]:
+    rest = w[2:]
+elif w and w[0].rsplit("/", 1)[-1] == "vitest":
+    rest = w[1:]
+    if rest[:1] == ["run"]:
+        rest = rest[1:]
+elif w and w[0].rsplit("/", 1)[-1] == "jest":
+    rest = w[1:]
+else:
+    sys.exit(1)
+# the runner may carry options only: a positional (`vitest run src`), a glob, a comment or a bare `--` in the body would
+# widen what the file or -t the caller adds narrows (its arguments are appended after the body)
+for t in rest:
+    if t == "--" or not re.fullmatch(r"-[A-Za-z0-9._-]+(=[^\s*?\[#]*)?", t):
+        sys.exit(1)
+sys.exit(0)
 ' "$1" 2>/dev/null
 }
 ci_targeted() {
-  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0 okf okp cmdpos=1 cp jsrun pmw="" bunrun=0 script=""
+  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0 okf okp cmdpos=1 cp jsrun pmw="" bunrun=0 script="" pmbad=0
   for a in "$@"; do
     # cp: this word is still in command position (only wrappers, options, numbers and assignments before it), so a JS runner or
     # package-manager word counts; `make -j8 vitest x` and `pytest tests/jest` do not make a JS run (lead adversary B3).
@@ -426,10 +449,10 @@ ci_targeted() {
       esac
     fi
     jsrun=0
-    [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
+    [ "$prev" = -m ] && [ "$runner" != js ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
-      pytest|py.test) runner=pytest ;;
-      gradle|gradlew) runner=gradle ;;
+      pytest|py.test) [ "$runner" = js ] || runner=pytest ;;
+      gradle|gradlew) [ "$runner" = js ] || runner=gradle ;;
       # JavaScript runners (2026-11-14): the runner itself, behind any wrapper (bunx/npx/pnpm exec/yarn)...
       vitest|vitest.js|vitest.[cm]js|jest|jest.js|jest-cli) [ -z "$runner" ] && [ "$cp" = 1 ] && { runner=js; jsrun=1; } ;;
       # ...or a package manager's test script: `npm|pnpm|yarn|bun [run] test[:x]` (`bun test` is bun's own runner).
@@ -444,7 +467,11 @@ ci_targeted() {
     esac
     if [ "$pm" = 1 ] && [ -z "$runner" ]; then
       case "$a" in
-        -*|exec|x|dlx) ;;
+        # an option here (`-r`, `--filter=a`, `--prefix=x`, `-w`, `--workspaces`) can choose another package.json than the
+        # one bg reads: only the plainly harmless ones pass (lead adversary round 2, BLOCK1)
+        --silent|-s|--if-present|--no-color) ;;
+        -*) pmbad=1 ;;
+        exec|x|dlx) ;;
         run|run-script) bunrun=1 ;;
         test|test:*)
           runner=js; pm=0; prev=$a
@@ -477,10 +504,18 @@ ci_targeted() {
           # a name or path-pattern filter narrows even a directory (as pytest -k does)
           -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*|--testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*)
             [ "$okf" = 1 ] && { sel=1; narrow=1; } ;;
-          -*) ;;
+          -*)
+            # a package manager's own option after the script name and before `--`: npm eats all of them, and the others
+            # have workspace selectors that may sit here too; either can run another package's script (BLOCK1)
+            if [ -n "$script" ] && [ "$dd" = 0 ]; then
+              case "$a" in
+                -r|--recursive|--filter|--filter=*|-F|--dir|--dir=*|-C|--workspace*|-w|--workspaces|-ws|--ws|--prefix|--prefix=*|--cwd|--cwd=*|--include-workspace-root|--workspace-root) pmbad=1 ;;
+                *) [ "$npm" = 1 ] && pmbad=1 ;;
+              esac
+            fi ;;
           *)
             # the value of an option is not a filter (`--config tests/jest.config.js`, `--pool threads`)...
-            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--setupFilesAfterEnv|--roots|--collectCoverageFrom|--coverage.include|--coverage.exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns|--pool|--testTimeout|--maxWorkers|--workers|--shard|--environment|--mode|--logLevel|--retry|--bail|--coverage.reporter|--browser|-w) ;; *)
+            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--setupFilesAfterEnv|--roots|--collectCoverageFrom|--coverage.include|--coverage.exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns|--pool|--testTimeout|--maxWorkers|--workers|--shard|--environment|--mode|--logLevel|--retry|--bail|--coverage.reporter|--browser|-w|--globalTeardown|--testSequencer|--resolver|--rootDir|--snapshotSerializers|--typecheck.include|--transform|--reporters|--testEnvironment|--cacheDirectory) ;; *)
               # ...and vitest's subcommands are not either; any OTHER positional is a substring/regex filter that widens the
               # run by union (`f.test.ts ""` or `f.test.ts integration` runs more than f; lead adversary B2), so it counts as
               # broad (a -t filter can still narrow it) unless it is an existing test file.
@@ -512,6 +547,7 @@ ci_targeted() {
   done
   [ -n "$runner" ] && [ "$sel" = 1 ] || return 1
   [ "$broad" = 0 ] || [ "$narrow" = 1 ] || return 1
+  [ "$pmbad" = 0 ] || return 1
   [ -z "$script" ] || ci_pm_script_ok "$script"
 }
 # A release also runs here in `ci` mode (djbclark, 2026-10-18): `just release*` or a release.py, whose
