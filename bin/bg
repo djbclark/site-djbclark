@@ -405,7 +405,7 @@ if not isinstance(b, str) or ("pre" + n) in s or ("post" + n) in s or re.search(
 # a workspace setting makes `npm test` run the script of every workspace, whatever ./package.json says
 for rc in ("./.npmrc", os.path.expanduser("~/.npmrc")):
     try:
-        if re.search(r"^\s*workspaces?\s*=", open(rc).read(), re.I | re.M):
+        if re.search(r"^\s*[\"\x27]?workspaces?(\[\])?[\"\x27]?\s*=", open(rc).read(), re.I | re.M):
             sys.exit(1)
     except OSError:
         pass
@@ -430,7 +430,12 @@ else:
     sys.exit(1)
 # the runner may carry options only: a positional (`vitest run src`), a glob, a comment or a bare `--` in the body would
 # widen what the file or -t the caller adds narrows (its arguments are appended after the body)
+valued = ("-c", "--config", "--project", "--dir", "--root", "--reporter", "--outputFile", "--exclude", "--pool", "--bail", "--shard", "--environment", "--testPathIgnorePatterns")
+if rest and rest[-1] in valued:
+    sys.exit(1)   # a trailing option that takes a value would swallow the file the caller adds
 for t in rest:
+    if re.match(r"--(testPathPattern|testPathPatterns|testMatch|testRegex)\b", t):
+        sys.exit(1)   # jest ORs these with the positionals the caller adds: the run would widen
     if t == "--" or not re.fullmatch(r"-[A-Za-z0-9._-]+(=[^\s*?\[#]*)?", t):
         sys.exit(1)
 sys.exit(0)
@@ -443,6 +448,11 @@ ci_targeted() {
     # package-manager word counts; `make -j8 vitest x` and `pytest tests/jest` do not make a JS run (lead adversary B3).
     cp=$cmdpos
     if [ "$cmdpos" = 1 ]; then
+      # an assignment or option that moves npm/pnpm to another workspace or directory (`env npm_config_workspaces=true npm test`,
+      # `env -C /x npm test`) makes the package.json bg reads the wrong one (lead adversary round 2, WARN1, WARN2)
+      case "$a" in
+        [nN][pP][mM]_[cC][oO][nN][fF][iI][gG]_*=*|[pP][nN][pP][mM]_[cC][oO][nN][fF][iI][gG]_*=*|-C|--chdir|--chdir=*) pmbad=1 ;;
+      esac
       case "$a" in
         -*|[0-9]*|*=*|env|nice|time|timeout|gtimeout|caffeinate|taskpolicy|npx|bunx|npm|pnpm|yarn|bun|exec|x|dlx|run|node|*/node|*/node_modules/.bin/*|vitest|vitest.*|jest|jest.js|jest-cli) ;;
         *) cmdpos=0 ;;

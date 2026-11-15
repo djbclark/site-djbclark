@@ -434,6 +434,10 @@ SCRIPT_CASES = [
     ({"test": "vitest run --"}, False),
     ({"test": "vitest run --dir src"}, False),
     ({"test": "vitest run ''"}, False),
+    ({"test": "jest --testPathPattern=unit"}, False),  # jest ORs it with the caller's file
+    ({"test": "jest --testMatch=**/x.js"}, False),
+    ({"test": "jest --testPathIgnorePatterns"}, False),  # a trailing valued option would swallow the caller's file
+    ({"test": "vitest run --project"}, False),
     ({}, False),
 ]
 
@@ -500,6 +504,10 @@ def test_an_approval_follows_the_physical_directory(repo, tmp_path, tmp_path_fac
     ["yarn", "--cwd=x", "test", "tests/foo.test.ts"],
     ["bun", "--filter=a", "run", "test", "tests/foo.test.ts"],
     ["pnpm", "test", "--filter=a", "tests/foo.test.ts"],
+    ["env", "npm_config_workspaces=true", "npm", "test", "tests/foo.test.ts"],  # an assignment in argv moves npm too
+    ["env", "NPM_CONFIG_WORKSPACE=pkg-a", "npm", "test", "tests/foo.test.ts"],
+    ["env", "--chdir=/elsewhere", "npm", "test", "tests/foo.test.ts"],
+    ["env", "-C", "/elsewhere", "npm", "test", "tests/foo.test.ts"],
     ["npm", "test", "--some-npm-option", "--", "tests/foo.test.ts"],  # npm eats every flag before its `--`: unknown, so CI
 ])
 def test_a_package_manager_workspace_option_is_never_targeted(repo, argv):
@@ -519,6 +527,10 @@ def test_a_harmless_package_manager_option_is_still_targeted(repo, argv):
 def test_a_workspace_setting_in_npmrc_or_env_is_never_targeted(repo):
     assert ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
     (repo / ".npmrc").write_text("workspaces=true\n")
+    assert not ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    (repo / ".npmrc").write_text("workspace[]=pkg-a\n")
+    assert not ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
+    (repo / ".npmrc").write_text('"workspaces" = true\n')
     assert not ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
     (repo / ".npmrc").write_text("registry=https://example.invalid/\n")
     assert ci_targeted(repo, "npm", "test", "--", "tests/foo.test.ts")
