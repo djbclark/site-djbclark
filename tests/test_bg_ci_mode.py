@@ -104,6 +104,7 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npx", "jest", "--config", "tests/jest.config.js"],
     ["npx", "vitest", "run", "--setupFiles", "test/setup.ts"],
     ["npx", "vitest", "run", "-c", "tests/jest.config.js"],
+    ["npx", "vitest", "run", "--setupFiles", "tests/foo.test.ts"],  # even a test-shaped name is only the option's value
     # npm reads flags before `--` itself and drops the filter: the whole suite would run here (adversary W2)
     ["npm", "test", "-t", "name"],
     ["npm", "run", "test", "--testNamePattern=foo"],
