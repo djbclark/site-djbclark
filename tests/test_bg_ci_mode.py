@@ -556,3 +556,42 @@ def test_a_workspace_setting_in_npmrc_or_env_is_never_targeted(repo):
 def test_pytest_and_gradle_words_never_replace_a_js_runner(repo, argv):
     # `jest gradle --tests x` would otherwise read as a gradle run and stay local while jest runs everything (round 2, WARN2)
     assert not ci_targeted(repo, *argv)
+
+
+def env_seen_by_the_helper(repo, home, **env):
+    """Replace the stub sudo-ask with one that dumps its environment, run approve-local, return {NAME: value}."""
+    sa = home / ".local" / "bin" / "sudo-ask"
+    sa.write_text(f'#!/bin/bash\n/usr/bin/env > "{home}/sudo-ask.env"\nexit 0\n')
+    a = approve(repo, home, "vitest", "run", **env)
+    assert a.returncode == 0, a.stderr
+    return dict(ln.split("=", 1) for ln in (home / "sudo-ask.env").read_text().splitlines() if "=" in ln)
+
+
+def test_the_helper_sees_only_the_allow_listed_environment(repo, tmp_path_factory):
+    # operator 2026-11-15: a caller's BASH_ENV/ENV/DYLD_* must not reach the approved (privileged) path
+    home = make_home(tmp_path_factory, "allow")
+    seen = env_seen_by_the_helper(
+        repo, home, BASH_ENV="/nonexistent/evil", ENV="/nonexistent/evil", PYTHONSTARTUP="/nonexistent/evil",
+        DYLD_INSERT_LIBRARIES="/nonexistent/evil.dylib", LD_PRELOAD="/nonexistent/evil.so", IFS="x", LC_ALL="C", XDG_STATE_HOME="/nonexistent",
+        SUDO_ASK_MAX_WAIT="1", LANG="de_DE.UTF-8", TERM="xterm-256color", USER="someone")
+    for name in ("BASH_ENV", "ENV", "PYTHONSTARTUP", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "IFS", "LC_ALL", "XDG_STATE_HOME", "SUDO_ASK_MAX_WAIT"):
+        assert name not in seen, name
+    assert seen["HOME"] == str(home)
+    assert (seen["LANG"], seen["TERM"], seen["USER"]) == ("de_DE.UTF-8", "xterm-256color", "someone")
+    assert str(home) not in seen["PATH"] and "fakebin" not in seen["PATH"]  # a fixed trusted PATH, not the caller's
+    assert seen["PATH"].split(":")[:2] == ["/opt/homebrew/bin", "/usr/bin"]
+    # the helper's own interpreter still resolves, and what survives is the allow-list plus the shell's own PWD/SHLVL/_
+    assert set(seen) - {"PWD", "SHLVL", "_", "OLDPWD", "__CF_USER_TEXT_ENCODING"} == {"HOME", "USER", "LANG", "TERM", "PATH"}
+
+
+def test_odd_locale_and_term_values_are_replaced_not_forwarded(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    seen = env_seen_by_the_helper(repo, home, LANG="en_US;touch /tmp/x", TERM="x y", USER="a b")
+    assert seen["LANG"] == "en_US.UTF-8" and seen["TERM"] == "dumb" and " " not in seen["USER"]
+
+
+def test_every_authentication_call_goes_through_the_scrub():
+    code = [ln for ln in BG.read_text().splitlines() if not ln.lstrip().startswith("#")]
+    for ln in code:
+        if ('"$sa"' in ln and "-x" not in ln) or "/usr/bin/sudo" in ln:
+            assert "bg_scrub_run" in ln, ln
