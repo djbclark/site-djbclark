@@ -1,0 +1,61 @@
+# quiet-mac daemon policy. Tab-separated: action, domain, label, why.
+# action: freeze (SIGSTOP; launchd does not respawn a job that has not exited),
+#         term (SIGTERM, then SIGKILL; the memory is released),
+#         flag (launchctl disable only; a kill comes back within about a second).
+# domain: gui or user (this user), system (root helper; never frozen).
+# freeze+system is rejected: a stopped root process stalls shutdown, and the
+# thaw agent only sees this user's processes.
+# tests/test_quiet_mac.py checks this file against macos/sip-doit-with-sudo.sh,
+# bin/apple_daemon_ban.sh and roles/watchdogd/files/apple_daemon_ban_root.sh.
+freeze	gui	com.apple.suggestd	Proactive suggestions; long-lived, respawns if killed
+freeze	gui	com.apple.cloudd	iCloud sync for this user; long-lived
+freeze	gui	com.apple.photoanalysisd	Photos face and scene analysis
+freeze	gui	com.apple.siriactionsd	Shortcuts and App Intents; long-lived, respawns if killed
+freeze	gui	com.apple.sharingd	AirDrop, Handoff, Universal Clipboard; KeepAlive
+freeze	gui	com.apple.duetexpertd	CoreDuet suggestions, suggestd's sibling
+freeze	gui	com.apple.mediaanalysisd	Visual Look Up, Live Text, Photos object search
+freeze	gui	com.apple.campo	Siri AI.app; KeepAlive; wakes generativeexperiencesd
+freeze	gui	com.apple.visualintelligenced	Visual Intelligence
+freeze	gui	com.apple.siriknowledged	Siri knowledge
+freeze	gui	com.apple.intelligenceplatformd	On-device knowledge platform
+freeze	gui	com.apple.chronod	Desktop and Notification Center widgets
+freeze	gui	com.apple.homeenergyd	Home energy and grid-forecast sync
+freeze	gui	com.apple.geoanalyticsd	Maps and geo analytics
+freeze	gui	com.apple.analyticsagent	Mac Analytics collector
+freeze	gui	com.apple.inputanalyticsd	Keyboard and input analytics
+freeze	gui	com.apple.proactiveeventtrackerd	Proactive event tracking
+freeze	gui	com.apple.feedbackd	Feedback Assistant
+freeze	gui	com.apple.ap.adprivacyd	Ad privacy and personalised-ad metrics
+freeze	gui	com.apple.ap.promotedcontentd	Promoted content
+freeze	gui	com.apple.tipsd	Tips
+freeze	gui	com.apple.UsageTrackingAgent	Screen Time usage feed
+freeze	gui	com.apple.knowledge-agent	Knowledge-store agent
+freeze	gui	com.apple.weatherd	Weather
+freeze	gui	com.apple.financed	Stocks and finance data
+freeze	gui	com.apple.studentd	Classroom and Schooltime
+freeze	gui	com.apple.businessservicesd	Apple Business services
+freeze	gui	com.apple.betaenrollmentagent	Beta enrollment agent
+freeze	gui	com.apple.spotlightknowledged	Spotlight semantic search
+freeze	gui	com.apple.spotlightknowledged.updater	Spotlight semantic index updater
+freeze	gui	com.apple.spotlightknowledged.importer	Spotlight semantic importer
+term	gui	com.apple.triald	Apple experiment treatments; short one-shot
+term	gui	com.apple.helpd	In-app Help Viewer content; short one-shot
+term	gui	com.apple.sirittsd	Siri voices for Spoken Content; idle-exits
+term	gui	com.apple.knowledgeconstructiond	Nightly on-device knowledge pipeline; one-shot
+flag	gui	com.apple.generativeexperiencesd	Writing Tools runtime; clients respawn it immediately
+flag	gui	com.apple.intelligencecontextd	Apple Intelligence context; clients respawn it immediately
+flag	gui	com.apple.intelligenceflowd	Left running: a freeze hangs clients such as sudo's password sheet
+freeze	user	com.apple.contactsd	Contacts store; lives in the user domain, not gui
+term	system	com.apple.cloudd	System iCloud daemon
+term	system	com.apple.triald.system	System half of experiment treatments
+term	system	com.apple.coreduetd	Root half of CoreDuet
+term	system	com.apple.spindump	Hang reports
+term	system	com.apple.tailspind	Stall reports
+flag	system	com.apple.modelmanagerd	On-device model manager; coreaudiod respawns it immediately
+flag	system	com.apple.modelcatalogd	Model catalog; coreaudiod respawns it immediately
+flag	system	com.apple.audioanalyticsd	Audio analytics; coreaudiod would respawn a kill
+flag	system	com.apple.betaenrollmentd	Beta enrollment daemon
+flag	system	com.apple.liquiddetectiond	Liquid detection telemetry
+flag	system	com.apple.PerfPowerTelemetryClientRegistrationService	Power telemetry registration
+flag	system	com.apple.rtcreportingd	Realtime telemetry reports
+flag	system	com.apple.osanalytics.osanalyticshelper	OS analytics helper

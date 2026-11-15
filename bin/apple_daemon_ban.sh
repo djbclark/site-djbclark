@@ -31,7 +31,8 @@
 #
 # The one stdout line is the watchdogd probe detail; actions are logged to
 # ~/Library/Logs/watchdogd/apple-daemon-ban.log. Labels must stay in step
-# with macos/sip-doit-with-sudo.sh and the root helper's system half.
+# with macos/sip-doit-with-sudo.sh, the root helper's system half, and
+# macos/quiet/daemons.tsv (tests/test_quiet_mac.py).
 
 export PATH="/opt/homebrew/bin:$PATH"
 set -u
@@ -217,10 +218,28 @@ if mdutil -s / 2>/dev/null | ggrep -q 'Indexing enabled' || \
   fi
 fi
 
+# Semantic caches over 50 MiB. Path checks live in macos/quiet/quiet_mac.py.
+# A failure here must not change this script's exit status.
+QUIET_DIR=$(CDPATH= cd -- "$(dirname "$0")/../macos/quiet" && pwd)
+QUIET_PY="${QUIET_MAC_PYTHON:-/opt/homebrew/bin/python3}"
+if [ ! -x "$QUIET_PY" ]; then
+  QUIET_PY=$(command -v python3 || true)
+fi
+EMPTIED=""
+if [ -n "${QUIET_PY:-}" ] && [ -f "$QUIET_DIR/quiet_mac.py" ]; then
+  if EMPTIED=$("$QUIET_PY" "$QUIET_DIR/quiet_mac.py" empty-stores 2>>"$LOG"); then
+    [ -n "$EMPTIED" ] && say "$EMPTIED"
+  else
+    say "empty-stores failed"
+    EMPTIED=""
+  fi
+fi
+
 out=""
 [ -n "$FROZEN" ] && out="frozen:$FROZEN"
 [ -n "$KILLED" ] && out="$out${out:+ }killed:$KILLED"
 [ -n "$DISABLED_INDEXING" ] && out="$out${out:+ }$DISABLED_INDEXING"
+[ -n "$EMPTIED" ] && out="$out${out:+ }stores:${EMPTIED//$'\n'/ }"
 if [ -n "$out" ]; then
   echo "$out"
 else

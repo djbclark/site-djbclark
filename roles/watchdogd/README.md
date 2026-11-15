@@ -96,9 +96,11 @@ make the sudoers grant a root shell), and re-run both `install` lines after
 editing `files/apple_daemon_ban_root.sh`. `bin/apple_daemon_ban.sh` also
 enforces Spotlight volume indexing is disabled (`mdutil -a -i off`, allowed
 NOPASSWD by `sudoers.mdutil-index-off`) outside the 01:00-05:45 nightly window
-and when no NeoFinder nightly job is running. Label lists live in three places
-that must stay in step: `macos/sip-doit-with-sudo.sh` (the flags),
+and when no NeoFinder nightly job is running. Label lists live in `macos/quiet/daemons.tsv` and the three scripts that
+still enforce them on this machine: `macos/sip-doit-with-sudo.sh` (the flags),
 `bin/apple_daemon_ban.sh` (gui half) and the root helper (system half).
+`tests/test_quiet_mac.py` fails when those copies disagree. Someone without
+the rest of ~/ops installs the same policy from `macos/` (`just install`).
 
 ## `shutdown-thaw` and `auxkc-heal`: unclean restarts (2026-10-15)
 

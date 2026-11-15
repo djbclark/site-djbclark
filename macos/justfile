@@ -1,0 +1,47 @@
+# Portable macOS memory diet. See README.md. Every recipe is safe to repeat.
+# `install` asks for an administrator password (or Touch ID) once.
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+here := justfile_directory()
+python := `command -v python3`
+tool := here / "quiet" / "quiet_mac.py"
+
+default:
+    @just --list --unsorted
+
+# Disable the noisy Apple daemons and install the 60s fixer plus shutdown thaw.
+install:
+    "{{python}}" "{{tool}}" install
+
+# One fix pass. Also what the 60s agent runs.
+enforce:
+    "{{python}}" "{{tool}}" enforce
+
+# Exit 0 and print nothing when healthy. Regressions print and exit 1.
+check:
+    "{{python}}" "{{tool}}" check
+
+# Desired state, Spotlight, semantic-store sizes, whether the agents are loaded.
+status:
+    "{{python}}" "{{tool}}" status
+
+# Every daemon, including the ones already in the desired state.
+status-full:
+    "{{python}}" "{{tool}}" status --full
+
+# Empty CoreSpotlight semantic caches that are over 50 MiB. The file index stays.
+empty-stores:
+    "{{python}}" "{{tool}}" empty-stores
+
+# Turn the daemons back on, continue anything frozen, and remove quiet-mac.
+revert:
+    "{{python}}" "{{tool}}" revert
+
+# Remove the agents and the root helper. Leave the disable flags set.
+uninstall:
+    "{{python}}" "{{tool}}" uninstall
+
+# Open the Apple Intelligence restrictions profile. Approve it in System Settings.
+profile:
+    open "{{here}}/no-apple-intelligence/no-apple-intelligence.mobileconfig"

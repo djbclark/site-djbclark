@@ -224,6 +224,8 @@ CONSOLE_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null 
 
 GUI_DOMAIN="gui/$CONSOLE_UID"
 
+# The same labels live in macos/quiet/daemons.tsv (the portable kit).
+# tests/test_quiet_mac.py fails if this list and that file disagree.
 GUI_DAEMONS=(
   "com.apple.suggestd"
   "com.apple.cloudd"
