@@ -31,11 +31,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1794681746,
-        "narHash": "sha256-AupXW2NU9O9nwl5mR0+B22sILBeCJlU+DLERgbYr2e8=",
+        "lastModified": 1794757702,
+        "narHash": "sha256-y9Q0hBXGzypz7HH+byjgEaqrajfRTRuLKzb+rdrGlmc=",
         "owner": "djbclark",
         "repo": "bot-briefs",
-        "rev": "75885feaed5d74d0ab94cc8b532e2cafb394eaa9",
+        "rev": "69af0799c66bad4540cf059dea5bab810d755fcc",
         "type": "github"
       },
       "original": {
