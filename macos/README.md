@@ -4,10 +4,11 @@ What in this folder cuts the RAM and CPU macOS spends on its own background
 daemons, and how to install that on a Mac that does not have the rest of
 `~/ops`.
 
-On this machine the same policy is also enforced by
-[`roles/watchdogd`](../roles/watchdogd/README.md) (`apple-daemons`, every 60
-seconds) and by [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh) (the durable
-`launchctl disable` flags). The lists are the same file,
+`just install` loads the watchdog itself: `com.quiet-mac.enforce`, every 60
+seconds, and `com.quiet-mac.thaw` at shutdown. It does not need
+[`roles/watchdogd`](../roles/watchdogd/README.md). On this machine that role's
+`apple-daemons` rule also enforces the same list. [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh)
+is the older flag applier and is not required. The lists are the same file,
 [`quiet/daemons.tsv`](quiet/daemons.tsv). `tests/test_quiet_mac.py` fails if
 the copies drift.
 
@@ -44,8 +45,11 @@ Three other levers are larger than the frozen RSS:
 part a later run can check. On this macOS it does **not** stop launchd from
 starting the job when something sends it an XPC. That was measured
 2026-10-10: the flags were already set, and launchd had still launched
-`suggestd` 22 times and `triald` 148 times since boot. The 60-second fixer
-is the part that holds.
+`suggestd` 22 times and `triald` 148 times since boot. The 60-second
+watchdog is the part that holds. `just install` loads it as
+`com.quiet-mac.enforce`. A Mac does not need `roles/watchdogd` first. If
+that agent is missing, `just doctor` reports an error and `just install`
+loads it.
 
 ## What gets frozen, killed, or left alone
 
@@ -187,10 +191,10 @@ These stay optional. Naming the recipe is what runs it.
 1. NeoFinder catalogues: `just neofinder-install`. It refuses when NeoFinder.app is absent. plocate is the file-name search install always sets up.
 2. `just corner-rescue`, `just graft-hook`, `just hourly-updates`, `just otp`, and `just mds-clients`. The last one only reports who is talking to `mds`.
 3. `net-watch` and `stagger-login`. Those plists are installed by their own programs, outside this justfile.
-4. The one-quiet-session SIP path in `sip-doit-with-sudo.sh`. `just recovery` prints how to open Recovery. The standing diet does not boot it.
-5. The site watchdog under `roles/watchdogd`. `just install` adds the portable 60-second fixer beside it and does not replace it.
+4. `sip-doit-with-sudo.sh`, including its SIP-off bootout. That unload lasts until the next login. `just recovery` prints how to open Recovery and says to leave SIP on.
+5. The rest of `roles/watchdogd` (litellm, the funnel, auxkc, and this site's other service rules). The diet's own watchdog is `com.quiet-mac.enforce`, and `just install` loads it when it is not already loaded.
 
-### What the 60-second fixer repairs
+### What the 60-second watchdog repairs
 
 `com.quiet-mac.enforce` runs `quiet-mac enforce` at login and every 60
 seconds. Each pass:
@@ -371,27 +375,31 @@ Intel: restart and immediately hold Command-R until the Apple logo or a
 spinning globe, then Utilities → Terminal. If Command-R finds nothing, hold
 Option-Command-R for internet Recovery.
 
-Use that only to run `sip-doit-with-sudo.sh --sip-disable`, boot once so
-`launchctl bootout` works, then go back and `--sip-enable`. With SIP left
-on, bootout is refused and the freeze path above is the one that holds.
+Leave SIP on. `sip-doit-with-sudo.sh` is not required for this diet.
+`just install` sets the same disable flags, and `com.quiet-mac.enforce`
+freezes or TERMs on the same list every 60 seconds. With SIP off, `launchctl
+bootout` unloads Apple's jobs for this login only. They come back at the
+next login, including when the flags are still set. That was measured on
+2026-10-10. Turning SIP off does not make the standing diet stronger, and
+the Mac is without System Integrity Protection until you turn it back on.
 
 ## On this machine, with ~/ops
 
-The site watchdog already freezes and TERMs on the same list, and
-`com.djbclark.shutdown-thaw` already thaws at shutdown. The gui and user
-freezes do not need `just install` here. `just install` still adds the
-portable fixer, the portable root helper, and the system-domain flags, and
-it leaves the existing plocate nightly in place. `just status` and
-`just doctor` report state. They do not freeze or disable. While system
-flags are unset they also post at most one notification every six hours.
-
-`just install` on this Mac adds a second fixer next to that watchdog. Both
-treat an already-stopped pid as a no-op. The site path is
-`bin/apple_daemon_ban.sh` plus
-`roles/watchdogd/files/apple_daemon_ban_root.sh`, installed under
+This Mac also runs `roles/watchdogd`. That is not a prerequisite. A checkout
+with no watchdogd still gets `com.quiet-mac.enforce` and `com.quiet-mac.thaw`
+from `just install`. On this Mac both watchdogs run. Each treats an
+already-stopped pid as a no-op. The site path is `bin/apple_daemon_ban.sh`
+plus `roles/watchdogd/files/apple_daemon_ban_root.sh`, installed under
 `/usr/local/libexec/djbclark/`. The portable path is a different directory
 and a different sudoers file (`/etc/sudoers.d/quiet-mac`), so they do not
-overwrite each other.
+overwrite each other. `com.djbclark.shutdown-thaw` is the site thaw.
+`com.quiet-mac.thaw` is the one install loads. Either one is enough to allow
+freezes.
+
+`just status` and `just doctor` report state. They do not freeze or disable.
+A missing 60-second watchdog is an error. `just install` loads it. While
+system flags are unset they also post at most one notification every six
+hours.
 
 Each pass of `bin/apple_daemon_ban.sh` also re-asserts the gui and user
 disable flags (a macOS update clears them; on 2026-11-15 only `suggestd`
@@ -422,7 +430,7 @@ the memory diet. The other recipes do not run unless you name them.
 | [`README.md`](README.md) | this file |
 | [`neofinder/`](neofinder/README.md) | `just neofinder-install`, `neofinder-status`, `neofinder-nightly`, `neofinder-stop`. The four names at the top of this folder (`neofinder-stub-export.py` and the rest) are symlinks into that directory. |
 | [`no-apple-intelligence/`](no-apple-intelligence/README.md) | `just profile` installs it. `just factory` tries to remove it. |
-| [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh) | the site flag applier. `just system-flags` is the portable equivalent. `just recovery` prints the Recovery steps its SIP wrappers need. |
+| [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh) | Historical site applier for the same flags. Not required. `just install` sets the flags and loads the 60-second watchdog. SIP-off `bootout` lasts until the next login. |
 | [`corner-rescue/`](corner-rescue/) | `just corner-rescue` |
 | [`graft-hook-timeout-fix/`](graft-hook-timeout-fix/) | `just graft-hook` |
 | [`hourly-updates/`](hourly-updates/) | `just hourly-updates`. The per-app scripts live in `bin/hourly-updates.d/`, outside this folder. |

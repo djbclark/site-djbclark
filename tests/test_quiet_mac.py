@@ -373,9 +373,12 @@ class VersionAndGuideTests(unittest.TestCase):
         apple = qm.recovery_text("apple")
         intel = qm.recovery_text("intel")
         self.assertIn("does not boot into Recovery", apple)
+        self.assertIn("next login", apple)
+        self.assertIn("com.quiet-mac.enforce", apple)
         self.assertIn("power button", apple)
         self.assertIn("Command-R", intel)
         self.assertIn("does not boot into Recovery", intel)
+        self.assertIn("next login", intel)
         self.assertNotIn("power button", intel)
 
     def test_plocate_plan_keeps_an_existing_nightly(self) -> None:

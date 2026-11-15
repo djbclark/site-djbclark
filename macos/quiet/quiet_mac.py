@@ -375,11 +375,14 @@ def recovery_text(kind: str) -> str:
         "The normal quiet-mac install does not boot into Recovery and does not\n"
         "turn SIP off. While SIP is on, launchctl bootout of Apple's own jobs is\n"
         "refused. The diet does not need that. It sets disable flags, SIGSTOPs\n"
-        "this user's jobs, and SIGTERMs the short system jobs.\n"
+        "this user's jobs, and SIGTERMs the short system jobs. The 60-second\n"
+        "watchdog, com.quiet-mac.enforce, is what holds that. just install loads\n"
+        "it. A Mac does not need roles/watchdogd or sip-doit-with-sudo.sh.\n"
         "\n"
-        "Open Recovery only for the one-quiet-session path in\n"
-        "sip-doit-with-sudo.sh (--sip-disable, then bootout, then --sip-enable).\n"
-        "That quiet ends at the next login. It is not the standing fix.\n"
+        "Turning SIP off does not make the flags hold. bootout then unloads the\n"
+        "jobs for this login only. They come back at the next login, flags or\n"
+        "not. That path is sip-doit-with-sudo.sh --sip-disable, one boot, then\n"
+        "--sip-enable. It is not a stronger version of the diet.\n"
     )
     if kind == "apple":
         steps = (
@@ -1283,13 +1286,17 @@ def infra_findings() -> list[Finding]:
             which = LABEL_THAW if agent_loaded(LABEL_THAW, uid) else SITE_THAW
             out.append(Finding("info", "thaw", f"thaw: {which}"))
         if agent_loaded(LABEL_ENFORCE, uid):
-            out.append(Finding("info", "enforce", "60s fixer is loaded"))
+            out.append(
+                Finding(
+                    "info", "watchdog", "60s watchdog is loaded (com.quiet-mac.enforce)"
+                )
+            )
         else:
             out.append(
                 Finding(
-                    "warning",
-                    "enforce",
-                    "60s fixer is not loaded (just install)",
+                    "error",
+                    "watchdog",
+                    "60s watchdog is not loaded (just install)",
                 )
             )
     if HELPER.is_file():
