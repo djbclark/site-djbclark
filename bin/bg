@@ -203,6 +203,91 @@ if ! command -v shlock >/dev/null 2>&1; then
     return 1
   }
 fi
+# One-run approval (djbclark via the lead, 2026-11-14: "an agent should be able to use the override with his approval").
+# `bg approve-local [--ttl 1h] -- CMD...` asks djbclark for fresh authentication, then writes a one-shot token under
+# ~/.local/state/bg/approvals/ (mode 0600, written atomically), bound to sha256(physical cwd + argv) and an expiry (default 1 h,
+# at most 24 h). The next `bg CMD...` in that directory with the same argv that bg would otherwise send to CI (a bare suite, an
+# unknown runner) consumes the token (renamed away, then deleted, before anything runs) and runs here. A run that is
+# targeted anyway never consumes it. Authentication: djbclark's Touch ID helper `sudo-ask` (an Allow dialog that shows the
+# command and directory, then sudo's Touch ID/password), else `sudo -k` then `sudo -v`. Each approval and each consumption is
+# appended to ~/.local/state/bg/approvals.log (time, event, hash prefix, directory, program name; never the arguments).
+# This guards against honest mistakes, not evasion: a token is plain files, like the other overrides here.
+bg_state="$HOME/.local/state/bg"
+bg_appr_dir="$bg_state/approvals"
+bg_sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi; }
+# bg_appr_key ARGV...: sha256 of the physical working directory and the argv, NUL-separated (no two commands share a key)
+bg_appr_key() {
+  local cwd key
+  cwd=$(pwd -P) || return 1
+  key=$(printf '%s\0' "$cwd" "$@" | bg_sha256 | gawk '{print $1}')
+  [ "${#key}" = 64 ] || return 1
+  printf '%s\n' "$key"
+}
+# bg_appr_log EVENT KEY PROGRAM
+bg_appr_log() {
+  mkdir -p "$bg_state" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(gdate -Is)" "$1" "${2:0:12}" "$(pwd -P)" "${3##*/}" >> "$bg_state/approvals.log" 2>/dev/null || true
+}
+# bg_approval_consume ARGV...: succeed (once) when an unexpired token for this cwd+argv exists. The rename is the claim: of two
+# racing runs one wins; the token is gone before the caller runs anything. An expired or damaged token is deleted and refused.
+bg_approval_consume() {
+  local key f claimed exp k now
+  key=$(bg_appr_key "$@") || return 1
+  f="$bg_appr_dir/$key"
+  [ -f "$f" ] || return 1
+  claimed="$f.used.$$"
+  mv "$f" "$claimed" 2>/dev/null || return 1
+  exp=$(gawk -F= '$1 == "expires" { print $2 }' "$claimed" 2>/dev/null)
+  k=$(gawk -F= '$1 == "key" { print $2 }' "$claimed" 2>/dev/null)
+  rm -f "$claimed"
+  now=$(gdate +%s)
+  if [[ "$exp" =~ ^[0-9]+$ ]] && [ "$k" = "$key" ] && [ "$now" -lt "$exp" ]; then
+    bg_appr_log consumed "$key" "$1"
+    return 0
+  fi
+  bg_appr_log refused-expired-or-damaged "$key" "$1"
+  return 1
+}
+# bg_approve_local [--ttl T] -- CMD...
+bg_approve_local() {
+  local ttl=1h secs unit key tmp now sa="$HOME/.local/bin/sudo-ask" shown
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ttl) [ $# -ge 2 ] || { echo "bg approve-local: --ttl needs a value (30m, 1h, 90s)" >&2; return 2; }; ttl=$2; shift 2 ;;
+      --ttl=*) ttl=${1#--ttl=}; shift ;;
+      --) shift; break ;;
+      *) echo "usage: bg approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2 ;;
+    esac
+  done
+  if [ $# -eq 0 ]; then echo "usage: bg approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2; fi
+  if [[ "$ttl" =~ ^([0-9]+)([smhd]?)$ ]]; then
+    secs=$((10#${BASH_REMATCH[1]})); unit=${BASH_REMATCH[2]}
+    case "$unit" in m) secs=$((secs * 60)) ;; h) secs=$((secs * 3600)) ;; d) secs=$((secs * 86400)) ;; esac
+  else
+    secs=0
+  fi
+  if [ "$secs" -lt 1 ] || [ "$secs" -gt 86400 ]; then
+    echo "bg approve-local: --ttl must be between 1 s and 24 h (got '$ttl'); examples: 30m, 1h, 90s" >&2
+    return 2
+  fi
+  key=$(bg_appr_key "$@") || { echo "bg approve-local: cannot hash the command" >&2; return 1; }
+  shown=$(printf '%q ' "$@"); shown=${shown% }
+  echo "bg approve-local: asking djbclark to approve ONE local run in $(pwd -P): $shown" >&2
+  if [ -x "$sa" ]; then
+    # The Allow dialog shows the command and directory (mouse click only); sudo then asks for Touch ID or the password.
+    "$sa" /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
+      echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
+  else
+    sudo -k && sudo -v || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+  fi
+  mkdir -p "$bg_appr_dir" && chmod 700 "$bg_appr_dir" || return 1
+  tmp=$(mktemp "$bg_appr_dir/.tmp.XXXXXX") || return 1
+  now=$(gdate +%s)
+  printf 'key=%s\nexpires=%s\ncreated=%s\n' "$key" "$((now + secs))" "$now" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$bg_appr_dir/$key" || {
+    rm -f "$tmp"; echo "bg approve-local: could not write the approval" >&2; return 1; }
+  bg_appr_log approved "$key" "$1"
+  echo "bg approve-local: approved; the next identical run here (same directory and arguments, within ${ttl}) runs locally once" >&2
+}
 # bg has no flags of its own: everything after the name is the command. Agents
 # sometimes invent `--name`/`--log`/`--` (from other wrappers); those become
 # `taskpolicy -c utility --name …` and macOS taskpolicy errors with
@@ -218,11 +303,19 @@ Runs <command> at utility QoS (taskpolicy -c utility). No bg-owned flags:
 
 Redirect or name the run yourself (bg does not take --log/--name):
   bg bash -lc './build >out.log 2>&1'
+
+One run that bg sends to CI but must run here: ask djbclark to approve exactly that run (his Touch ID):
+  bg approve-local [--ttl 1h] -- <the exact command>
 EOF
 }
 if [ "$#" -eq 0 ]; then
   bg_usage
   exit 2
+fi
+if [ "$1" = approve-local ]; then
+  shift
+  bg_approve_local "$@"
+  exit $?
 fi
 case "$1" in
   -h|--help)
@@ -281,19 +374,50 @@ fi
 # to CI. cargo stays out: a filtered `cargo test` still compiles the whole crate graph here. A filter
 # that matches nearly everything (`-k "not slow"`, `--tests '*'`) gets through: this guards against
 # honest mistakes, not evasion.
+# JavaScript (2026-11-14): vitest, jest and `bun test`, bare or behind bunx/npx/pnpm exec/yarn, and `npm|pnpm|yarn|bun [run]
+# test[:x]`, count the same way: a test file path (.test./.spec./_test./__tests__/tests/ names that exist, `file:12` too), or a -t /
+# --testNamePattern (or --testPathPattern) filter, which also narrows a directory. A bare suite, a bare directory, `npm test`,
+# `bun run test` and `vitest run` alone go to CI. A run bg sends to CI that must run here: `bg approve-local` (header).
 ci_targeted() {
-  local a prev="" runner="" sel=0 narrow=0 broad=0
+  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f
   for a in "$@"; do
     [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
       pytest|py.test) runner=pytest ;;
       gradle|gradlew) runner=gradle ;;
+      # JavaScript runners (2026-11-14): the runner itself, behind any wrapper (bunx/npx/pnpm exec/yarn)...
+      vitest|vitest.js|vitest.[cm]js|jest|jest.js|jest-cli) runner=js ;;
+      # ...or a package manager's test script: `npm|pnpm|yarn|bun [run] test[:x]` (`bun test` is bun's own runner).
+      npm|pnpm|yarn|bun) [ -n "$runner" ] || pm=1; prev=$a; continue ;;
     esac
+    if [ "$pm" = 1 ] && [ -z "$runner" ]; then
+      case "$a" in
+        -*|run|run-script|exec|x|dlx) ;;
+        test|test:*) runner=js; pm=0; prev=$a; continue ;;
+        *) pm=0 ;;
+      esac
+    fi
     case "$a" in
       -k|-k?*|*::*) sel=1; narrow=1 ;;
       --tests|--tests=*) sel=1 ;;
     esac
     case "$runner" in
+      js)
+        case "$a" in
+          # a name or path-pattern filter narrows even a directory (as pytest -k does)
+          -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*) sel=1; narrow=1 ;;
+          --testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*) sel=1; narrow=1 ;;
+          -*) ;;
+          *)
+            f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
+            case "$f" in
+              *.test.*|*.spec.*|*_test.*|*_spec.*|__tests__/*|*/__tests__/*|test/*|tests/*|*/test/*|*/tests/*)
+                if [ -f "$f" ]; then sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
+              *) [ -d "$a" ] && broad=1 ;;
+            esac
+            ;;
+        esac
+        ;;
       pytest|unittest)
         case "$a" in
           -*) ;;
@@ -473,6 +597,8 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     fi
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_release "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); a release gates on CI and publishes here." >&2
+  elif [ "$rc" = 0 ] && [ "$mode" = ci ] && bg_approval_consume "$@"; then
+    echo "bg: $top runs full suites and builds on CI (load-watch ci); djbclark approved this one local run (bg approve-local), now used up." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
     # A build or full suite: to CI at once, no load wait and no slot (header); never run here. Not when the command
     # names another tree (adversary F6, 2026-11-01): `bg make -C ~/src/other` run from inside a `ci` repo would get
@@ -495,7 +621,11 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     esac
     echo "bg: $top runs full suites and builds on CI, never on this Mac (load-watch ci)." >&2
     echo "bg: run instead: $text" >&2
-    echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests; so may a release." >&2
+    echo "bg: a targeted run may stay here: test files, path::test ids or -k, gradle --tests, vitest/jest/bun test file paths or -t; so may a release." >&2
+    bg_self=$0
+    bg_cmd=$(printf '%q ' "$@"); bg_cmd=${bg_cmd% }
+    echo "bg: if this run really must run on this Mac, ask djbclark to approve this one run: run \`$bg_self approve-local -- $bg_cmd\` yourself;" >&2
+    echo "bg: it asks for his Touch ID/password, then the next identical run here goes through once." >&2
     case "$no_route" in
       "private repo has no Forgejo route:"*|"FORGEJO UNREACHABLE:"*) ;;
       *) echo "bg: no CI route was found to run it there now: $no_route" >&2 ;;

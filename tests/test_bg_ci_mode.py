@@ -21,6 +21,10 @@ def ci_targeted(tmp_path, *argv):
 def repo(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_a.py").write_text("def test_x(): pass\n")
+    (tmp_path / "tests" / "foo.test.ts").write_text("// js\n")
+    (tmp_path / "test").mkdir()
+    (tmp_path / "test" / "bar.spec.js").write_text("// js\n")
+    (tmp_path / "vitest.config.ts").write_text("export default {}\n")
     return tmp_path
 
 
@@ -36,6 +40,26 @@ def repo(tmp_path):
     ["pytest", "tests", "tests/test_a.py::test_x"],
     ["./gradlew", "test", "--tests", "com.example.FooTest"],
     ["gradle", "test", "--tests=com.example.FooTest"],
+    # JavaScript runners (2026-11-14): a test file, or a -t name filter (which also narrows a directory)
+    ["bunx", "vitest", "run", "tests/foo.test.ts"],
+    ["npx", "vitest", "run", "tests/foo.test.ts"],
+    ["npx", "vitest", "run", "tests/foo.test.ts:12"],
+    ["npx", "--no-install", "jest", "tests/foo.test.ts"],
+    ["node_modules/.bin/vitest", "run", "--reporter", "dot", "tests/foo.test.ts"],
+    ["pnpm", "exec", "vitest", "run", "tests/foo.test.ts"],
+    ["pnpm", "vitest", "run", "-t", "name"],
+    ["yarn", "vitest", "run", "--testNamePattern=name"],
+    ["bun", "test", "tests/foo.test.ts"],
+    ["bun", "test", "test/bar.spec.js"],
+    ["bun", "test", "-t", "name"],
+    ["bun", "test", "--test-name-pattern", "name"],
+    ["bun", "run", "test", "tests/foo.test.ts"],
+    ["npm", "run", "test", "--", "tests/foo.test.ts"],
+    ["npm", "test", "--", "-t", "name"],
+    ["yarn", "test:unit", "-t", "name"],
+    ["pnpm", "run", "test", "tests", "-t", "name"],
+    ["npx", "vitest", "run", "tests", "-t", "name"],
+    ["npx", "jest", "--testPathPattern", "foo", "tests"],
 ])
 def test_targeted_runs_are_recognised(repo, argv):
     assert ci_targeted(repo, *argv)
@@ -56,13 +80,30 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["make", "build"],
     ["swift", "build"],
     ["npm", "run", "build"],
+    # JavaScript: a bare suite, a bare directory, a config file, or another script is not targeted
+    ["bunx", "vitest", "run"],
+    ["npx", "vitest"],
+    ["npx", "vitest", "run", "tests"],
+    ["npx", "vitest", "run", "--config", "vitest.config.ts"],
+    ["npx", "jest", "--coverage"],
+    ["bun", "test"],
+    ["bun", "test", "tests"],
+    ["bun", "run", "test"],
+    ["npm", "test"],
+    ["npm", "run", "test:coverage"],
+    ["pnpm", "run", "test", "tests"],
+    ["yarn", "test"],
+    ["npm", "run", "build", "--", "tests/foo.test.ts"],
+    ["npm", "install", "vitest"],
+    ["pnpm", "exec", "tsc", "tests/foo.test.ts"],
+    ["pnpm", "exec", "vitest", "run", "tests", "tests/foo.test.ts"],
 ])
 def test_suites_directories_and_builds_are_not(repo, argv):
     assert not ci_targeted(repo, *argv)
 
 
-def run_bg(repo, tmp_path_factory, *argv):
-    """bg end to end in a throwaway HOME whose load-watch says the repo is `ci`."""
+def make_home(tmp_path_factory, auth=None):
+    """A throwaway HOME whose load-watch says `ci`. auth: None (no Touch ID helper), "allow" or "deny" (a stub sudo-ask)."""
     home = tmp_path_factory.mktemp("home")
     lw = home / "src" / "djbclark-ade" / "bin" / "load-watch"
     lw.parent.mkdir(parents=True)
@@ -70,12 +111,28 @@ def run_bg(repo, tmp_path_factory, *argv):
     lw.chmod(0o755)
     fake = home / "fakebin"
     fake.mkdir()
-    (fake / "pytest").write_text('#!/bin/bash\necho "FAKE-PYTEST $*"\n')
-    (fake / "pytest").chmod(0o755)
+    for name in ("pytest", "vitest"):
+        (fake / name).write_text(f'#!/bin/bash\necho "FAKE-{name.upper()} $*"\n')
+        (fake / name).chmod(0o755)
+    if auth:
+        sa = home / ".local" / "bin" / "sudo-ask"
+        sa.parent.mkdir(parents=True)
+        # never prompts: records its argv, then allows or denies
+        sa.write_text(f'#!/bin/bash\necho "$@" >> "{home}/sudo-ask.calls"\nexit {0 if auth == "allow" else 1}\n')
+        sa.chmod(0o755)
+    return home
+
+
+def bg_env(home, **extra):
+    return {**os.environ, "HOME": str(home), "PATH": f"{home}/fakebin:{os.environ['PATH']}",
+            "BG_LOAD_WAIT": "0", "BG_MAX_WAIT": "30", "BG_PING_CMD": "/usr/bin/true", "BG_NO_DEADLINE": "1", **extra}
+
+
+def run_bg(repo, tmp_path_factory, *argv, home=None, **env):
+    """bg end to end in a throwaway HOME whose load-watch says the repo is `ci`."""
+    home = home or make_home(tmp_path_factory)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    env = {**os.environ, "HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}",
-           "BG_LOAD_WAIT": "0", "BG_MAX_WAIT": "30", "BG_PING_CMD": "/usr/bin/true", "BG_NO_DEADLINE": "1"}
-    return subprocess.run([str(BG), *argv], cwd=repo, env=env, capture_output=True, text=True, timeout=120)
+    return subprocess.run([str(BG), *argv], cwd=repo, env=bg_env(home, **env), capture_output=True, text=True, timeout=120)
 
 
 def test_bg_runs_a_targeted_test_in_a_ci_repo(repo, tmp_path_factory):
@@ -148,3 +205,137 @@ def test_macos_retry_gate(tmp_path, gate, load, expected):
     r = subprocess.run([str(BG), "swift", "test"], cwd=repo, env=env, capture_output=True, text=True, timeout=20)
     assert r.returncode == expected, r.stderr
     assert ("LOCAL-SWIFT" in r.stdout) == (expected == 0)
+
+
+# --- JavaScript runners end to end, and the one-run approval (2026-11-14) ---
+
+
+def test_bg_runs_a_targeted_vitest_file_in_a_ci_repo(repo, tmp_path_factory):
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", "tests/foo.test.ts")
+    assert r.returncode == 0, r.stderr
+    assert "FAKE-VITEST run tests/foo.test.ts" in r.stdout
+    assert "this targeted test run stays here" in r.stderr
+
+
+def test_bg_sends_a_bare_vitest_suite_to_ci_and_names_the_approval_path(repo, tmp_path_factory):
+    r = run_bg(repo, tmp_path_factory, "vitest", "run")
+    assert r.returncode == 3
+    assert "FAKE-VITEST" not in r.stdout
+    assert "ask djbclark to approve this one run" in r.stderr
+    assert "approve-local -- vitest run" in r.stderr
+    assert "Touch ID" in r.stderr
+    assert "BG_ALLOW_LOCAL_CI_ONLY" not in r.stderr + r.stdout  # never advertised to agents (2026-11-14)
+    assert "BG_ALLOW_LOCAL_CI_ONLY" not in subprocess.run([str(BG), "--help"], capture_output=True, text=True).stderr
+
+
+def token_files(home):
+    d = home / ".local" / "state" / "bg" / "approvals"
+    return sorted(p for p in d.glob("*") if p.is_file()) if d.is_dir() else []
+
+
+def approve(repo, home, *argv, ttl=None, **env):
+    ttl_args = ["--ttl", ttl] if ttl else []
+    return subprocess.run([str(BG), "approve-local", *ttl_args, "--", *argv], cwd=repo, env=bg_env(home, **env),
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_approval_runs_one_refused_command_once(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    a = approve(repo, home, "vitest", "run")
+    assert a.returncode == 0, a.stderr
+    assert "vitest run" in (home / "sudo-ask.calls").read_text()  # the helper's dialog shows the command
+    [tok] = token_files(home)
+    assert tok.stat().st_mode & 0o777 == 0o600
+    assert tok.parent.stat().st_mode & 0o777 == 0o700
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)
+    assert r.returncode == 0, r.stderr
+    assert "FAKE-VITEST run" in r.stdout
+    assert "approved this one local run" in r.stderr
+    assert token_files(home) == []  # consumed: deleted before the run
+    again = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)
+    assert again.returncode == 3 and "FAKE-VITEST" not in again.stdout
+    log = (home / ".local" / "state" / "bg" / "approvals.log").read_text()
+    events = [ln.split("\t")[1] for ln in log.splitlines()]
+    assert events == ["approved", "consumed"]
+    assert [ln.split("\t")[-1] for ln in log.splitlines()] == ["vitest", "vitest"]  # program name only, never the arguments
+
+
+def test_approval_is_bound_to_the_argv(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", "--silent", home=home)
+    assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
+    assert len(token_files(home)) == 1  # a mismatch leaves it for the run it was meant for
+
+
+def test_approval_is_bound_to_the_directory(repo, tmp_path, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    other = tmp_path / "other"
+    other.mkdir()
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    r = run_bg(other, tmp_path_factory, "vitest", "run", home=home)
+    assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
+    assert len(token_files(home)) == 1
+
+
+def test_expired_approval_is_refused_and_removed(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run", ttl="1h").returncode == 0
+    [tok] = token_files(home)
+    text = tok.read_text().replace(next(ln for ln in tok.read_text().splitlines() if ln.startswith("expires=")), "expires=1")
+    tok.write_text(text)
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)
+    assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
+    assert token_files(home) == []
+
+
+def test_damaged_or_forged_token_is_refused(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    [tok] = token_files(home)
+    tok.write_text("garbage\n")
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)
+    assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
+
+
+def test_ttl_is_recorded_and_bounded(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run", ttl="2h").returncode == 0
+    [tok] = token_files(home)
+    kv = dict(ln.split("=", 1) for ln in tok.read_text().splitlines())
+    assert int(kv["expires"]) - int(kv["created"]) == 7200
+    for bad in ("0", "abc", "25h", "99d", "-5m"):
+        r = approve(repo, home, "vitest", "run", ttl=bad)
+        assert r.returncode == 2, bad
+
+
+def test_denied_authentication_writes_nothing(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "deny")
+    r = approve(repo, home, "vitest", "run")
+    assert r.returncode != 0 and "nothing was written" in r.stderr
+    assert token_files(home) == []
+
+
+def test_without_the_helper_it_asks_sudo_afresh(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory)  # no sudo-ask: falls back to `sudo -k` then `sudo -v`
+    (home / "fakebin" / "sudo").write_text(f'#!/bin/bash\necho "$@" >> "{home}/sudo.calls"\n')
+    (home / "fakebin" / "sudo").chmod(0o755)
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    assert (home / "sudo.calls").read_text().split() == ["-k", "-v"]
+    assert len(token_files(home)) == 1
+
+
+def test_approve_local_needs_a_command_after_double_dash(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    for argv in (["approve-local"], ["approve-local", "--"], ["approve-local", "vitest", "run"]):
+        r = subprocess.run([str(BG), *argv], cwd=repo, env=bg_env(home), capture_output=True, text=True, timeout=60)
+        assert r.returncode == 2 and "usage: bg approve-local" in r.stderr, argv
+    assert token_files(home) == []
+
+
+def test_a_targeted_run_does_not_spend_the_approval(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run", "tests/foo.test.ts").returncode == 0
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", "tests/foo.test.ts", home=home)
+    assert r.returncode == 0 and "stays here" in r.stderr
+    assert len(token_files(home)) == 1
