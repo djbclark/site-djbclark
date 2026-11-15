@@ -20,15 +20,20 @@ import datetime as dt
 import fcntl
 import grp
 import os
+import platform
 import plistlib
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+# Bump when the installed behavior changes. `just upgrade` re-runs install
+# when the copy under ~/.local/libexec/quiet-mac is older than this.
+VERSION = "1.0.0"
 LABEL_ENFORCE = "com.quiet-mac.enforce"
 LABEL_THAW = "com.quiet-mac.thaw"
 SITE_THAW = "com.djbclark.shutdown-thaw"
@@ -39,6 +44,21 @@ HELPER_REVERT = ROOT_LIB / "quiet-mac-root-revert"
 INTERVAL_S = 60
 UNFROZEN_LIMIT_S = 120
 STORE_CAP_BYTES = 50 * 1024 * 1024
+PLOCATE_DB_MAX_AGE_H = 36
+PLOCATE_NIGHTLY_LABELS = (
+    "com.djbclark.plocate-updatedb",
+    "sh.brew.plocate",
+    "homebrew.mxcl.plocate",
+)
+PROFILE_ID = "com.djbclark.no-apple-intelligence"
+NAG_INTERVAL_S = 6 * 3600
+SUDO_NAG = (
+    "NAG: the system-domain half has not been applied. It needs one\n"
+    "administrator click (Touch ID works; Enter and Esc do not decide).\n"
+    "  just install        # user half, root helper, system flags, plocate\n"
+    "  just system-flags   # only the root helper, after install wrote it\n"
+    "doctor and status keep reporting this until those flags are set."
+)
 SEMANTIC_STORES = (
     "Library/Metadata/CoreSpotlight/DocumentProcessing",
     "Library/Metadata/CoreSpotlight/SpotlightKnowledgeEvents",
@@ -52,20 +72,31 @@ NIGHTLY_NAMES = (
 ACTIONS = frozenset({"freeze", "term", "flag"})
 DOMAINS = frozenset({"gui", "user", "system"})
 
-HELP = """\
+HELP = (
+    """\
 quiet-mac — freeze the Apple daemons that grow in the background
 
-  status                 one screen: anything not in the desired state
-  check                  exit 0 and no output when healthy; else exit 1
+  status                 desired state, then errors and warnings
+  doctor                 errors, warnings, and the sudo nag; exit 1 on errors
+  check                  exit 0 and no output when the daemon policy holds
   enforce                one fix pass (the 60s agent runs this)
-  install                flags, 60s fixer, shutdown thaw, root helper
-  revert                 turn the daemons back on and remove quiet-mac
-  uninstall              remove quiet-mac and continue anything it froze
+  install                idempotent: flags, fixer, thaw, root helper, plocate
+  upgrade                install this checkout when it is newer
+  system-flags           system-domain disable flags (the step that needs sudo)
   empty-stores           empty CoreSpotlight semantic caches over 50 MiB
+  recovery               how to open Recovery on this Mac; does not reboot
+  snapshot               write status and doctor to ~/.local/state/quiet-mac
+  revert                 turn the daemons back on and remove quiet-mac
+  factory                Apple's shipping behavior: flags, Spotlight, profile
+  uninstall              remove quiet-mac and continue anything it froze
   thaw-wait              stay running; on SIGTERM, thaw stopped processes
 
-Needs python3.9+. `just install` from macos/ is the supported entry.
+Needs python3.9+ and Homebrew. `just install` from macos/ is the entry.
+Version """
+    + VERSION
+    + """.
 """
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +122,13 @@ class Action:
     domain: str
     label: str
     pid: int | None = None
+
+
+@dataclass(frozen=True)
+class Finding:
+    level: str  # error, warning, info
+    code: str
+    message: str
 
 
 def policy_path() -> Path:
@@ -292,6 +330,122 @@ def sudoers_text(user: str) -> str:
     )
 
 
+def version_tuple(text: str) -> tuple[int, ...]:
+    pieces = text.strip().split(".")
+    if not pieces or not all(piece.isdigit() for piece in pieces):
+        raise ValueError(f"bad version {text!r}")
+    return tuple(int(piece) for piece in pieces)
+
+
+def version_relation(installed: str | None, repo: str = VERSION) -> str:
+    """missing, invalid, same, older, or newer. older means the install is behind."""
+    if not installed:
+        return "missing"
+    try:
+        left = version_tuple(installed)
+        right = version_tuple(repo)
+    except ValueError:
+        return "invalid"
+    if left == right:
+        return "same"
+    if left < right:
+        return "older"
+    return "newer"
+
+
+def silicon_kind(machine: str) -> str:
+    """apple or intel, from uname -m / platform.machine()."""
+    return "apple" if machine == "arm64" else "intel"
+
+
+def recovery_text(kind: str) -> str:
+    """How to open Recovery. The diet itself does not need this."""
+    common = (
+        "The normal quiet-mac install does not boot into Recovery and does not\n"
+        "turn SIP off. While SIP is on, launchctl bootout of Apple's own jobs is\n"
+        "refused. The diet does not need that. It sets disable flags, SIGSTOPs\n"
+        "this user's jobs, and SIGTERMs the short system jobs.\n"
+        "\n"
+        "Open Recovery only for the one-quiet-session path in\n"
+        "sip-doit-with-sudo.sh (--sip-disable, then bootout, then --sip-enable).\n"
+        "That quiet ends at the next login. It is not the standing fix.\n"
+    )
+    if kind == "apple":
+        steps = (
+            "This Mac is Apple silicon. To open Recovery:\n"
+            "1. Shut the Mac down.\n"
+            "2. Press and hold the power button until Loading startup options appears.\n"
+            "3. Click Options, then Continue.\n"
+            "4. Choose a user and enter its password.\n"
+            "5. Menu bar: Utilities, then Terminal.\n"
+        )
+    else:
+        steps = (
+            "This Mac is Intel. To open Recovery:\n"
+            "1. Restart the Mac.\n"
+            "2. Immediately hold Command-R until the Apple logo or a spinning globe.\n"
+            "3. Menu bar: Utilities, then Terminal.\n"
+            "If Command-R does not find a local Recovery, hold Option-Command-R\n"
+            "instead. That starts internet Recovery and needs a network.\n"
+        )
+    return common + "\n" + steps
+
+
+def disable_toml_service(text: str, name: str) -> tuple[str, str]:
+    """Set enabled = false in a watchdogd service file. Idempotent.
+
+    The second value is already, disabled, or inserted.
+    """
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "enabled = false":
+            return text, "already"
+        if stripped == "enabled = true":
+            newline = "\n" if line.endswith("\n") else ""
+            lines[index] = f"enabled = false{newline}"
+            return "".join(lines), "disabled"
+    needle = f'name = "{name}"'
+    for index, line in enumerate(lines):
+        if line.strip() == needle:
+            lines.insert(index + 1, "enabled = false\n")
+            return "".join(lines), "inserted"
+    return "enabled = false\n" + text, "inserted"
+
+
+def plocate_plan(binary: bool, nightly: str | None, brew: bool) -> str:
+    """What install should do. keep means a nightly is already loaded."""
+    if not brew:
+        return "need-brew"
+    if not binary and nightly:
+        return "install-only"
+    if not binary:
+        return "install-and-start"
+    if nightly:
+        return "keep"
+    return "start-nightly"
+
+
+def render_findings(findings: list[Finding]) -> str:
+    lines: list[str] = []
+    for level, title in (
+        ("error", "errors"),
+        ("warning", "warnings"),
+        ("info", "notes"),
+    ):
+        rows = [item for item in findings if item.level == level]
+        if not rows:
+            if level != "info":
+                lines.append(f"{title}: none")
+            continue
+        lines.append(f"{title} ({len(rows)}):")
+        for item in rows:
+            lines.append(f"  {item.message}")
+    if any(item.code == "sudo" for item in findings):
+        lines.append(SUDO_NAG)
+    return "\n".join(lines)
+
+
 def agent_python() -> str:
     candidates = [
         os.environ.get("QUIET_MAC_PYTHON") or "",
@@ -409,14 +563,25 @@ def job_pid(domain: str, label: str) -> int | None:
     return None
 
 
+_disabled_cache: dict[str, str] = {}
+
+
+def clear_probe_cache() -> None:
+    _disabled_cache.clear()
+
+
 def is_disabled(domain: str, label: str) -> bool:
-    try:
-        result = _run(["launchctl", "print-disabled", domain])
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    blob = _disabled_cache.get(domain)
+    if blob is None:
+        try:
+            result = _run(["launchctl", "print-disabled", domain])
+            blob = result.stdout
+        except (OSError, subprocess.TimeoutExpired):
+            blob = ""
+        _disabled_cache[domain] = blob
     needle_disabled = f'"{label}" => disabled'
     needle_true = f'"{label}" => true'
-    return needle_disabled in result.stdout or needle_true in result.stdout
+    return needle_disabled in blob or needle_true in blob
 
 
 def proc_info(pid: int) -> tuple[bool, int | None, int | None]:
@@ -666,6 +831,8 @@ def _enforce(uid: int) -> int:
         return 2
     if root_rc != 0:
         print(f"root helper: {root_out or 'failed'}", file=sys.stderr)
+        print(SUDO_NAG, file=sys.stderr)
+        maybe_notify_sudo()
         return 1
     return 0
 
@@ -692,19 +859,139 @@ def cmd_empty_stores(
     return removed
 
 
-def cmd_check() -> int:
-    uid = console_uid()
+def _write_if_changed(path: Path, data: bytes, mode: int | None = None) -> bool:
+    """Write data only when the bytes differ. Returns True when the file changed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    changed = not (path.is_file() and path.read_bytes() == data)
+    if changed:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_bytes(data)
+        os.replace(temporary, path)
+    if mode is not None and stat.S_IMODE(path.stat().st_mode) != mode:
+        os.chmod(path, mode)
+        changed = True
+    return changed
+
+
+def installed_version() -> str | None:
+    path = libexec_dir() / "VERSION"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def brew_exe() -> str | None:
+    for candidate in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+        if os.access(candidate, os.X_OK):
+            return candidate
+    found = shutil.which("brew")
+    return found or None
+
+
+def plocate_db_path() -> Path:
+    brew = brew_exe() or ""
+    if brew.startswith("/usr/local/"):
+        return Path("/usr/local/var/lib/plocate/plocate.db")
+    return Path("/opt/homebrew/var/lib/plocate/plocate.db")
+
+
+def loaded_plocate_nightly() -> str | None:
+    """A nightly that already rebuilds the plocate db. Do not add a second one."""
+    uid = os.getuid()
+    domains = [f"gui/{uid}", f"user/{uid}", "system"]
+    for label in PLOCATE_NIGHTLY_LABELS:
+        for domain in domains:
+            try:
+                result = _run(["launchctl", "print", f"{domain}/{label}"])
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if result.returncode == 0:
+                return f"{domain}/{label}"
+    return None
+
+
+def neofinder_app_installed() -> bool:
+    home = home_dir()
+    return (
+        Path("/Applications/NeoFinder.app").is_dir()
+        or (home / "Applications/NeoFinder.app").is_dir()
+    )
+
+
+def intelligence_profile_installed() -> bool | None:
+    """True, False, or None when the profiles command cannot say."""
+    try:
+        result = _run(["profiles", "list"], timeout=8)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    blob = (result.stdout or "") + (result.stderr or "")
+    if PROFILE_ID in blob:
+        return True
+    if result.returncode != 0:
+        return None
+    return False
+
+
+def recent_log_hits(limit: int = 5) -> list[str]:
+    hits: list[str] = []
+    for name in ("enforce.log", "thaw.log"):
+        path = logs_dir() / name
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines[-80:]:
+            if "failed" in line.lower():
+                hits.append(f"{name}: {line[-180:]}")
+    return hits[-limit:]
+
+
+def maybe_notify_sudo() -> None:
+    """One notification per six hours. Tests and snapshots set QUIET_MAC_HOME."""
+    if os.environ.get("QUIET_MAC_NO_NOTIFY") or os.environ.get("QUIET_MAC_HOME"):
+        return
+    path = state_dir() / "sudo-nag"
+    now = time.time()
+    try:
+        if path.is_file() and now - path.stat().st_mtime < NAG_INTERVAL_S:
+            return
+        state_dir().mkdir(parents=True, exist_ok=True)
+        path.write_text(str(int(now)), encoding="utf-8")
+    except OSError:
+        return
+    _run(
+        [
+            "osascript",
+            "-e",
+            (
+                "display notification "
+                '"System flags still need an admin click. Run: just doctor" '
+                'with title "quiet-mac"'
+            ),
+        ]
+    )
+
+
+def policy_findings(uid: int | None) -> list[Finding]:
+    clear_probe_cache()
     if uid is None:
-        return 0
+        return [Finding("error", "console", "no console user")]
     if uid != os.getuid():
-        print("check: not the console user")
-        return 1
-    problems: list[str] = []
+        return [Finding("error", "console", "not the console user")]
+    out: list[Finding] = []
     for job in load_policy():
         live = probe(domain_name(job, uid), job.label)
         found = problem(job, live)
-        if found:
-            problems.append(found)
+        if not found:
+            continue
+        code = "regression"
+        if job.domain == "system" and (
+            not live.disabled or found.startswith("running unfrozen")
+        ):
+            code = "sudo"
+        out.append(Finding("error", code, found))
     home = home_dir()
     when = dt.datetime.now()
     commands = command_lines()
@@ -712,7 +999,7 @@ def cmd_check() -> int:
     if indexing_enabled() and not skip_indexing_off(
         home, when, lock_held(lock_path), commands
     ):
-        problems.append("Spotlight indexing is enabled")
+        out.append(Finding("error", "spotlight", "Spotlight indexing is enabled"))
     for rel in SEMANTIC_STORES:
         root = home / rel
         try:
@@ -720,17 +1007,299 @@ def cmd_check() -> int:
         except OSError:
             continue
         if size > STORE_CAP_BYTES:
-            problems.append(f"semantic store {size // (1024 * 1024)} MiB: ~/{rel}")
-    if not problems:
+            mib = size // (1024 * 1024)
+            out.append(
+                Finding(
+                    "error",
+                    "stores",
+                    f"semantic store {mib} MiB: ~/{rel} (just empty-stores)",
+                )
+            )
+    return out
+
+
+def infra_findings() -> list[Finding]:
+    out: list[Finding] = []
+    installed = installed_version()
+    relation = version_relation(installed)
+    if relation == "missing":
+        out.append(
+            Finding(
+                "warning",
+                "version",
+                f"quiet-mac {VERSION} is not installed (just install)",
+            )
+        )
+    elif relation == "older":
+        out.append(
+            Finding(
+                "warning",
+                "version",
+                f"installed {installed} is older than {VERSION} (just upgrade)",
+            )
+        )
+    elif relation == "newer":
+        out.append(
+            Finding(
+                "warning",
+                "version",
+                f"installed {installed} is newer than this checkout {VERSION}",
+            )
+        )
+    elif relation == "invalid":
+        out.append(
+            Finding(
+                "warning", "version", f"installed version {installed!r} is unreadable"
+            )
+        )
+    else:
+        out.append(Finding("info", "version", f"version {VERSION}"))
+
+    brew = brew_exe()
+    if not brew:
+        out.append(
+            Finding(
+                "error",
+                "brew",
+                "Homebrew is required and was not found. Install it from https://brew.sh",
+            )
+        )
+    else:
+        out.append(Finding("info", "brew", f"Homebrew: {brew}"))
+
+    binary = shutil.which("plocate")
+    nightly = loaded_plocate_nightly()
+    if not binary:
+        out.append(
+            Finding(
+                "error",
+                "plocate",
+                "plocate is required and is not on PATH (just install)",
+            )
+        )
+    else:
+        out.append(
+            Finding(
+                "info",
+                "plocate",
+                f"plocate: {binary}  (filename search: plocate -i NAME)",
+            )
+        )
+    if nightly:
+        out.append(Finding("info", "plocate-nightly", f"plocate nightly: {nightly}"))
+    else:
+        out.append(
+            Finding(
+                "error",
+                "plocate-nightly",
+                "plocate has no nightly service (just install starts the brew one)",
+            )
+        )
+    database = plocate_db_path()
+    if binary and not database.exists():
+        out.append(
+            Finding("error", "plocate-db", f"plocate database missing: {database}")
+        )
+    elif binary:
+        age_h = (time.time() - database.stat().st_mtime) / 3600
+        message = f"plocate database is {age_h:.0f}h old: {database}"
+        if age_h > PLOCATE_DB_MAX_AGE_H:
+            out.append(Finding("warning", "plocate-db", message))
+        else:
+            out.append(Finding("info", "plocate-db", message))
+
+    uid = console_uid()
+    if uid == os.getuid():
+        if not thaw_available(uid):
+            out.append(
+                Finding("error", "thaw", "no shutdown thaw is loaded (just install)")
+            )
+        else:
+            which = LABEL_THAW if agent_loaded(LABEL_THAW, uid) else SITE_THAW
+            out.append(Finding("info", "thaw", f"thaw: {which}"))
+        if agent_loaded(LABEL_ENFORCE, uid):
+            out.append(Finding("info", "enforce", "60s fixer is loaded"))
+        else:
+            out.append(
+                Finding(
+                    "warning",
+                    "enforce",
+                    "60s fixer is not loaded (just install)",
+                )
+            )
+    if HELPER.is_file():
+        out.append(Finding("info", "root", f"root helper: {HELPER}"))
+    else:
+        out.append(
+            Finding(
+                "error",
+                "sudo",
+                f"root helper missing: {HELPER} (just install)",
+            )
+        )
+
+    profile = intelligence_profile_installed()
+    if profile is True:
+        out.append(
+            Finding("info", "profile", "Apple Intelligence profile is installed")
+        )
+    elif profile is False:
+        # A computer-level profile is invisible to an unprivileged `profiles list`
+        # (verified 2026-10-15). Do not warn on that absence.
+        out.append(
+            Finding(
+                "info",
+                "profile",
+                "Apple Intelligence profile is not in the user profile list. "
+                "A computer-level install shows in System Settings, or "
+                "`sudo profiles list`. just profile opens the file.",
+            )
+        )
+    else:
+        out.append(Finding("info", "profile", "could not read configuration profiles"))
+
+    if neofinder_app_installed():
+        out.append(
+            Finding(
+                "info",
+                "neofinder",
+                "NeoFinder.app is installed. Catalogue search: just neofinder-status",
+            )
+        )
+    else:
+        out.append(
+            Finding(
+                "info",
+                "neofinder",
+                "NeoFinder is not installed (optional). Filename search: plocate -i NAME",
+            )
+        )
+    for hit in recent_log_hits():
+        out.append(Finding("warning", "log", hit))
+    try:
+        result = _run(["csrutil", "status"], timeout=10)
+        text = ((result.stdout or "") + (result.stderr or "")).strip()
+        line = text.splitlines()[0] if text else "csrutil status unknown"
+    except (OSError, subprocess.TimeoutExpired):
+        line = "csrutil status failed"
+    out.append(Finding("info", "sip", line))
+    return out
+
+
+def ensure_plocate() -> int:
+    """Install plocate and a nightly brew service, unless a nightly already runs."""
+    brew = brew_exe()
+    nightly = loaded_plocate_nightly()
+    plan = plocate_plan(bool(shutil.which("plocate")), nightly, bool(brew))
+    if plan == "need-brew":
+        print(
+            "plocate: Homebrew is required and was not found.",
+            file=sys.stderr,
+        )
+        return 1
+    if plan == "keep":
+        print(f"plocate: already installed; nightly already loaded ({nightly})")
         return 0
-    print(f"quiet-mac: {len(problems)} problem(s)")
-    for item in problems:
-        print(f"  {item}")
+    if plan in ("install-and-start", "install-only"):
+        print("plocate: installing with Homebrew")
+        if not brew:
+            return 1
+        try:
+            result = subprocess.run(
+                [brew, "install", "plocate"], text=True, check=False, timeout=900
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"plocate: brew install failed: {exc}", file=sys.stderr)
+            return 1
+        if result.returncode != 0:
+            print(
+                "plocate: brew install plocate failed; tapping ylluminate/utilities",
+                file=sys.stderr,
+            )
+            tap = subprocess.run(
+                [brew, "tap", "ylluminate/utilities"],
+                text=True,
+                check=False,
+                timeout=180,
+            )
+            if tap.returncode != 0:
+                return tap.returncode or 1
+            result = subprocess.run(
+                [brew, "install", "ylluminate/utilities/plocate"],
+                text=True,
+                check=False,
+                timeout=900,
+            )
+            if result.returncode != 0:
+                return result.returncode or 1
+    if plan == "install-only":
+        print(f"plocate: binary installed; leaving the existing nightly ({nightly})")
+        return 0
     print(
-        "Fix: just enforce sets gui/user flags and freezes what it can. "
-        "System flags need root: sudo macos/sip-doit-with-sudo.sh "
-        "(or just install, which adds its own root helper)."
+        "plocate: starting the Homebrew nightly (an administrator dialog).\n"
+        "It rebuilds the filename index about once a day. Search: plocate -i NAME"
     )
+    if not brew:
+        return 1
+    result = subprocess.run(
+        [*_sudo_prefix(), brew, "services", "start", "plocate"],
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print("plocate: brew services start plocate failed", file=sys.stderr)
+        return result.returncode or 1
+    print("plocate: brew service started")
+    return 0
+
+
+def root_kit_current(user: str) -> bool:
+    """True when the root helper, its policy, and the sudoers file match this tree."""
+    source = Path(__file__).resolve().parent
+    try:
+        script = (source / "quiet-mac-root.sh").read_bytes()
+        policy = (source / "daemons.tsv").read_bytes()
+    except OSError:
+        return False
+    for path in (HELPER, HELPER_REVERT):
+        try:
+            if not path.is_file() or path.read_bytes() != script:
+                return False
+        except OSError:
+            return False
+    policy_dest = ROOT_LIB / "daemons.tsv"
+    try:
+        if not policy_dest.is_file() or policy_dest.read_bytes() != policy:
+            return False
+    except OSError:
+        return False
+    if not SUDOERS.exists():
+        return False
+    try:
+        current = SUDOERS.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    try:
+        return current == sudoers_text(user)
+    except ValueError:
+        return False
+
+
+def cmd_check() -> int:
+    uid = console_uid()
+    if uid is None:
+        return 0
+    findings = [item for item in policy_findings(uid) if item.level == "error"]
+    if not findings:
+        return 0
+    print(f"quiet-mac: {len(findings)} problem(s)")
+    for item in findings:
+        print(f"  {item.message}")
+    if any(item.code == "sudo" for item in findings):
+        print(SUDO_NAG)
+        maybe_notify_sudo()
+    else:
+        print("Fix: just enforce")
     return 1
 
 
@@ -775,7 +1344,15 @@ def cmd_status(full: bool = False) -> int:
         print(f"agents: enforce {fixer}, thaw {thaw}")
     helper = "installed" if HELPER.is_file() else "not installed"
     print(f"root helper: {helper}")
-    return 0
+    findings = [
+        item
+        for item in policy_findings(uid) + infra_findings()
+        if item.level in ("error", "warning")
+    ]
+    print(render_findings(findings))
+    if any(item.code == "sudo" for item in findings):
+        maybe_notify_sudo()
+    return 1 if any(item.level == "error" for item in findings) else 0
 
 
 def _status_line(job: Job, live: Live) -> str:
@@ -795,35 +1372,79 @@ def _write_plist(path: Path, payload: dict) -> None:
     path.write_bytes(plistlib.dumps(payload, fmt=plistlib.FMT_XML))
 
 
-def prepare_user_files(python: str) -> tuple[Path, Path]:
-    """Copy the kit into ~/.local and write the two LaunchAgent plists."""
+def prepare_user_files(python: str) -> tuple[Path, Path, bool, bool]:
+    """Copy the kit into ~/.local. The bools say whether each agent must reload.
+
+    A second call with the same bytes changes nothing, including mtime.
+    """
     source = Path(__file__).resolve().parent
     dest = libexec_dir()
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("quiet_mac.py", "daemons.tsv", "quiet-mac-root.sh"):
-        shutil.copy2(source / name, dest / name)
-    os.chmod(dest / "quiet_mac.py", 0o755)
-    os.chmod(dest / "quiet-mac-root.sh", 0o755)
+    kit_changed = _write_if_changed(
+        dest / "VERSION", (VERSION + "\n").encode("utf-8"), 0o644
+    )
+    modes = {
+        "quiet_mac.py": 0o755,
+        "daemons.tsv": 0o644,
+        "quiet-mac-root.sh": 0o755,
+    }
+    for name, mode in modes.items():
+        if _write_if_changed(dest / name, (source / name).read_bytes(), mode):
+            kit_changed = True
     logs = logs_dir()
     logs.mkdir(parents=True, exist_ok=True)
     home = home_dir()
     script = str(dest / "quiet_mac.py")
     enforce = agents_dir() / f"{LABEL_ENFORCE}.plist"
     thaw = agents_dir() / f"{LABEL_THAW}.plist"
-    _write_plist(enforce, enforce_plist(python, script, home, logs))
-    _write_plist(thaw, thaw_plist(python, script, home, logs))
-    return enforce, thaw
+    enforce_changed = _write_if_changed(
+        enforce,
+        plistlib.dumps(enforce_plist(python, script, home, logs), fmt=plistlib.FMT_XML),
+        0o644,
+    )
+    thaw_changed = _write_if_changed(
+        thaw,
+        plistlib.dumps(thaw_plist(python, script, home, logs), fmt=plistlib.FMT_XML),
+        0o644,
+    )
+    return (
+        enforce,
+        thaw,
+        enforce_changed or kit_changed,
+        thaw_changed or kit_changed,
+    )
+
+
+def ensure_agent(label: str, plist: Path, changed: bool) -> str:
+    """Bootstrap only when the plist changed or the agent is not loaded."""
+    if not changed and agent_loaded(label):
+        return "unchanged"
+    reload_agent(label, plist)
+    return "loaded"
 
 
 def reload_agent(label: str, plist: Path) -> None:
+    """Boot out and bootstrap one agent.
+
+    A KeepAlive job often answers the immediate bootstrap with
+    "Bootstrap failed: 5: Input/output error" because launchd has not
+    finished the bootout. Retry; if it is already loaded, that is success.
+    """
     uid = os.getuid()
     target = f"gui/{uid}/{label}"
+    domain = f"gui/{uid}"
     _run(["launchctl", "bootout", target])
-    result = _run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        raise SystemExit(f"launchctl bootstrap {label} failed: {detail}")
     _run(["launchctl", "enable", target])
+    last = ""
+    for attempt in range(6):
+        if attempt:
+            time.sleep(0.5)
+        result = _run(["launchctl", "bootstrap", domain, str(plist)])
+        if result.returncode == 0 or agent_loaded(label, uid):
+            _run(["launchctl", "enable", target])
+            return
+        last = (result.stderr or result.stdout).strip()
+    raise SystemExit(f"launchctl bootstrap {label} failed: {last}")
 
 
 def bootout_agent(label: str) -> None:
@@ -847,6 +1468,9 @@ def install_root_as_root(user: str) -> int:
     if not user:
         print("quiet-mac: --install-root needs --user", file=sys.stderr)
         return 1
+    if root_kit_current(user):
+        print(f"root helper already matches this tree for {user}")
+        return 0
     source = Path(__file__).resolve().parent
     ROOT_LIB.mkdir(parents=True, exist_ok=True)
     script = (source / "quiet-mac-root.sh").read_bytes()
@@ -892,11 +1516,22 @@ def cmd_install() -> int:
             "install: log in at the console and run this as that user", file=sys.stderr
         )
         return 1
+    if not brew_exe():
+        print(
+            "install: Homebrew is required. Install it from https://brew.sh "
+            "and run this again.",
+            file=sys.stderr,
+        )
+        return 1
+    print("snapshot before install:")
+    cmd_snapshot()
     print(
         "quiet-mac disables iCloud (cloudd), Photos analysis, Spotlight semantic\n"
         "search, Siri, Shortcuts, widgets, Weather, Screen Time, AirDrop, Handoff\n"
         "and Contacts. BiomeAgent is left running so sudo can still prompt.\n"
-        "A shutdown thaw is installed with the freezer; without it, reboot stalls."
+        "A shutdown thaw is installed with the freezer; without it, reboot stalls.\n"
+        "CoreSpotlight semantic caches are emptied on install, even under 50 MiB.\n"
+        "The on-disk file index is not touched."
     )
     if agent_loaded(SITE_THAW, uid):
         print(
@@ -904,32 +1539,175 @@ def cmd_install() -> int:
             "60s fixer beside it. Both are safe to run; the site one is enough if\n"
             "you only wanted the thaw."
         )
+    failed = ensure_plocate() != 0
     python = agent_python()
-    enforce_plist_path, thaw_plist_path = prepare_user_files(python)
-    reload_agent(LABEL_THAW, thaw_plist_path)
-    user = _current_user()
-    root = subprocess.run(
-        [
-            *_sudo_prefix(),
-            python,
-            str(Path(__file__).resolve()),
-            "--install-root",
-            "--user",
-            user,
-        ],
-        text=True,
-        check=False,
+    enforce_plist_path, thaw_plist_path, enforce_changed, thaw_changed = (
+        prepare_user_files(python)
     )
-    if root.returncode != 0:
+    print(f"thaw: {ensure_agent(LABEL_THAW, thaw_plist_path, thaw_changed)}")
+    user = _current_user()
+    root_rc = 0
+    if root_kit_current(user):
+        print("root helper: already installed")
+    else:
         print(
-            "root install did not finish; the 60s freezer was not started",
-            file=sys.stderr,
+            "root helper: a dialog will ask to install it. Click Allow.\n"
+            "Touch ID works. Enter and Esc do not decide."
         )
-        return root.returncode
-    reload_agent(LABEL_ENFORCE, enforce_plist_path)
-    # install empties the semantic caches once, even under the cap.
+        root = subprocess.run(
+            [
+                *_sudo_prefix(),
+                python,
+                str(Path(__file__).resolve()),
+                "--install-root",
+                "--user",
+                user,
+            ],
+            text=True,
+            check=False,
+        )
+        root_rc = root.returncode
+        if root_rc != 0:
+            print(
+                "root install did not finish. The user half stays installed.",
+                file=sys.stderr,
+            )
+            failed = True
+    # B5: system-domain flags. sudo -n works after the sudoers file is in place.
+    if HELPER.is_file():
+        flag_rc, flag_out = run_root_helper(revert=False)
+        if flag_out:
+            print(flag_out)
+        if flag_rc != 0:
+            print(f"system flags: {flag_out or 'root helper failed'}", file=sys.stderr)
+            failed = True
+    else:
+        failed = True
+    when = dt.datetime.now()
+    commands = command_lines()
+    lock_path = (
+        home_dir() / "Library/Application Support/neofinder-stub-export/nightly.lock"
+    )
+    indexing_blocked = indexing_enabled() and not skip_indexing_off(
+        home_dir(), when, lock_held(lock_path), commands
+    )
+    if indexing_blocked and not indexing_off():
+        print("Spotlight indexing is still enabled", file=sys.stderr)
+        failed = True
+    print(
+        f"enforce: {ensure_agent(LABEL_ENFORCE, enforce_plist_path, enforce_changed)}"
+    )
+    # B2: empty the semantic caches on every install, even under the cap.
+    # A second install deletes nothing when the directories are already empty.
     cmd_empty_stores(only_over=None, quiet_ok=True)
-    print("install: thaw and enforcer loaded. `just status` shows the result.")
+    if failed:
+        print(SUDO_NAG, file=sys.stderr)
+        maybe_notify_sudo()
+        print("install: finished with errors. just doctor lists them.", file=sys.stderr)
+        return 1
+    print(
+        f"install: quiet-mac {VERSION}. A second run changes nothing already applied."
+    )
+    return 0
+
+
+def cmd_upgrade() -> int:
+    installed = installed_version()
+    relation = version_relation(installed)
+    if relation == "newer":
+        print(
+            f"installed {installed} is newer than this checkout ({VERSION}). "
+            "Refusing to downgrade."
+        )
+        return 1
+    if relation == "older":
+        print(f"upgrading {installed} -> {VERSION}")
+    elif relation == "missing":
+        print(f"nothing installed; installing {VERSION}")
+    else:
+        print(f"quiet-mac {VERSION} is current; install will only repair drift")
+    return cmd_install()
+
+
+def cmd_system_flags() -> int:
+    """Set the system-domain disable flags. This is the step that needs root."""
+    if not HELPER.is_file():
+        print(SUDO_NAG)
+        maybe_notify_sudo()
+        return 1
+    rc, out = run_root_helper(False)
+    if rc != 0:
+        print(out or "sudo -n failed; asking with a dialog")
+        asked = subprocess.run([*_sudo_prefix(), str(HELPER)], text=True, check=False)
+        rc = asked.returncode
+        if asked.stdout:
+            print(asked.stdout.strip())
+        if asked.stderr:
+            print(asked.stderr.strip(), file=sys.stderr)
+    elif out:
+        print(out)
+    clear_probe_cache()
+    missing = [
+        job.label
+        for job in load_policy()
+        if job.domain == "system" and not is_disabled("system", job.label)
+    ]
+    if missing or rc != 0:
+        print(f"system flags still unset: {len(missing)}")
+        for label in missing:
+            print(f"  {label}")
+        print(SUDO_NAG)
+        maybe_notify_sudo()
+        return 1
+    count = sum(1 for job in load_policy() if job.domain == "system")
+    print(f"system flags: set ({count} labels)")
+    return 0
+
+
+def cmd_doctor(notify: bool = True) -> int:
+    print(f"quiet-mac {VERSION}")
+    findings = policy_findings(console_uid()) + infra_findings()
+    print(render_findings(findings))
+    sudo_errors = [
+        item for item in findings if item.code == "sudo" and item.level == "error"
+    ]
+    if notify and sudo_errors:
+        maybe_notify_sudo()
+    return 1 if any(item.level == "error" for item in findings) else 0
+
+
+def cmd_recovery() -> int:
+    print(recovery_text(silicon_kind(platform.machine())))
+    return 0
+
+
+def cmd_snapshot() -> int:
+    """Record status and doctor. Does not change the Mac, and does not notify."""
+    directory = state_dir() / "snapshots"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = directory / f"{stamp}.txt"
+    import io
+
+    buf = io.StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    previous = os.environ.get("QUIET_MAC_NO_NOTIFY")
+    os.environ["QUIET_MAC_NO_NOTIFY"] = "1"
+    sys.stdout = buf
+    sys.stderr = buf
+    try:
+        cmd_status()
+        buf.write("\n# doctor\n")
+        cmd_doctor(notify=False)
+    finally:
+        sys.stdout = old_out
+        sys.stderr = old_err
+        if previous is None:
+            os.environ.pop("QUIET_MAC_NO_NOTIFY", None)
+        else:
+            os.environ["QUIET_MAC_NO_NOTIFY"] = previous
+    path.write_text(buf.getvalue(), encoding="utf-8")
+    print(path)
     return 0
 
 
@@ -992,6 +1770,148 @@ def cmd_uninstall(continue_jobs: bool = True) -> int:
     return 0
 
 
+def pause_site_apple_daemons() -> str:
+    """Stop the site watchdog re-freezing Apple daemons on its next pass.
+
+    The file is machine-local, under ~/.config, not this repo. A later
+    site deploy can write enabled = true again.
+    """
+    path = Path.home() / ".config/djbclark/watchdogd.d/apple-daemons.toml"
+    if not path.is_file():
+        return "no site apple-daemons rule"
+    text = path.read_text(encoding="utf-8")
+    new, note = disable_toml_service(text, "apple-daemons")
+    if note == "already":
+        return f"site apple-daemons already disabled ({path})"
+    path.write_text(new, encoding="utf-8")
+    return (
+        f"site apple-daemons disabled ({path}). "
+        "watchdogd reads that on its next pass. A later site deploy can turn it back on."
+    )
+
+
+def continue_stopped_user() -> int:
+    """SIGCONT every stopped process of this user. Does not terminate them."""
+    try:
+        result = _run(
+            ["ps", "-axo", "pid=,stat=,comm=", "-U", str(os.getuid())], timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"ps failed: {exc}", file=sys.stderr)
+        return 0
+    continued = 0
+    for pid, _proc_stat, comm in stopped_from_ps(result.stdout):
+        if pid == os.getpid():
+            continue
+        if _signal(pid, signal.SIGCONT):
+            print(f"continued pid {pid} {comm}")
+            continued += 1
+    return continued
+
+
+def factory_as_root() -> int:
+    """Enable system flags, turn Spotlight indexing on, remove our profile."""
+    if os.geteuid() != 0:
+        print("quiet-mac: --factory-root must run as root", file=sys.stderr)
+        return 1
+    for job in load_policy():
+        if job.domain != "system":
+            continue
+        _run(["launchctl", "enable", f"system/{job.label}"])
+        print(f"enable system/{job.label}")
+    indexing = subprocess.run(
+        ["/usr/bin/mdutil", "-a", "-i", "on"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    detail = (indexing.stdout or indexing.stderr).strip()
+    if detail:
+        print(detail)
+    if indexing.returncode != 0:
+        print("Spotlight indexing could not be turned on", file=sys.stderr)
+        return indexing.returncode or 1
+    print("Spotlight indexing: on")
+    removed = subprocess.run(
+        [
+            "profiles",
+            "remove",
+            "-type",
+            "configuration",
+            "-identifier",
+            PROFILE_ID,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    blob = (removed.stdout or "") + (removed.stderr or "")
+    if removed.returncode == 0:
+        print(f"profile: removed {PROFILE_ID}")
+    else:
+        print(
+            "profile: not removed by the command"
+            + (f" ({blob.strip()})" if blob.strip() else "")
+        )
+        print(
+            "If it is still installed, delete it in System Settings → "
+            "Privacy & Security → Profiles. The payload id is "
+            f"{PROFILE_ID}."
+        )
+    return 0
+
+
+def cmd_factory() -> int:
+    """Restore Apple's shipping daemon and Spotlight behavior.
+
+    plocate, NeoFinder, and Homebrew stay installed. Emptied semantic
+    caches are left for Apple to rebuild.
+    """
+    uid = console_uid()
+    if uid is None or uid != os.getuid():
+        print(
+            "factory: log in at the console and run this as that user",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        "factory restores Apple's shipping daemons and Spotlight indexing.\n"
+        "plocate, NeoFinder, and Homebrew stay installed.\n"
+        "Emptied CoreSpotlight caches are not put back; Apple rebuilds them.\n"
+        "The site shutdown thaw stays, so a leftover stopped process cannot\n"
+        "stall the next reboot."
+    )
+    print(pause_site_apple_daemons())
+    bootout_agent(LABEL_ENFORCE)
+    _enable_user(uid)
+    continued = continue_stopped_user()
+    print(f"continued {continued} stopped process(es)")
+    print(
+        "factory: a dialog will ask to enable the system daemons, turn\n"
+        "Spotlight indexing on, and remove the Apple Intelligence profile.\n"
+        "Click Allow. Touch ID works. Enter and Esc do not decide."
+    )
+    root = subprocess.run(
+        [
+            *_sudo_prefix(),
+            agent_python(),
+            str(Path(__file__).resolve()),
+            "--factory-root",
+        ],
+        text=True,
+        check=False,
+    )
+    bootout_agent(LABEL_THAW)
+    remove_root_files()
+    print(
+        "factory: quiet-mac agents removed. Disable flags were enabled.\n"
+        "File name search is still: plocate -i NAME"
+    )
+    return 0 if root.returncode == 0 else root.returncode
+
+
 def cmd_revert() -> int:
     uid = console_uid()
     if uid is None or uid != os.getuid():
@@ -1028,14 +1948,14 @@ def thaw_once() -> int:
         log_line("thaw.log", f"ps failed: {exc}")
         return 0
     rows = [
-        (pid, stat, comm)
-        for pid, stat, comm in stopped_from_ps(result.stdout)
+        (pid, proc_stat, comm)
+        for pid, proc_stat, comm in stopped_from_ps(result.stdout)
         if pid != os.getpid()
     ]
-    for pid, stat, comm in rows:
+    for pid, proc_stat, comm in rows:
         _signal(pid, signal.SIGCONT)
         _signal(pid, signal.SIGTERM)
-        log_line("thaw.log", f"CONT+TERM {pid} {comm} (was {stat})")
+        log_line("thaw.log", f"CONT+TERM {pid} {comm} (was {proc_stat})")
     if rows:
         time.sleep(3)
         for pid, _stat, comm in rows:
@@ -1075,6 +1995,8 @@ def main(argv: list[str]) -> int:
         if "--user" in argv:
             user = argv[argv.index("--user") + 1]
         return install_root_as_root(user)
+    if len(argv) >= 2 and argv[1] == "--factory-root":
+        return factory_as_root()
     cmd = argv[1] if len(argv) > 1 else "status"
     if cmd in ("-h", "--help", "help"):
         print(HELP)
@@ -1087,8 +2009,20 @@ def main(argv: list[str]) -> int:
         return cmd_enforce()
     if cmd == "install":
         return cmd_install()
+    if cmd == "upgrade":
+        return cmd_upgrade()
+    if cmd == "doctor":
+        return cmd_doctor()
+    if cmd == "system-flags":
+        return cmd_system_flags()
+    if cmd == "recovery":
+        return cmd_recovery()
+    if cmd == "snapshot":
+        return cmd_snapshot()
     if cmd == "revert":
         return cmd_revert()
+    if cmd == "factory":
+        return cmd_factory()
     if cmd == "uninstall":
         return cmd_uninstall()
     if cmd == "empty-stores":

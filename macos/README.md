@@ -74,14 +74,14 @@ Two jobs are deliberately absent from the freeze list:
 ## What you give up
 
 This is the policy used on this Mac. It is a real loss of features, not a
-tune-up.
+tune-up. The table further down is one row per daemon.
 
 - iCloud does not sync (`cloudd`, user and system). Run `just revert` before
   signing into an Apple ID.
 - Photos face and scene analysis, Visual Look Up, and Live Text stop.
 - Spotlight's semantic and "related content" results stop. Filename search
-  of an indexed volume still works. On this Mac the only indexed volume is
-  the NeoFinder batch image; see [`neofinder/README.md`](neofinder/README.md).
+  does not use Spotlight. It uses `plocate`, and NeoFinder if you install it.
+  See [File search](#file-search).
 - Siri, Shortcuts automations, App Shortcuts, widgets, Weather, Stocks,
   Tips, Screen Time stats, AirDrop, Handoff, Universal Clipboard, and
   Contacts stop.
@@ -110,23 +110,52 @@ stopped yourself. A stopped process of any kind stalls shutdown.
 
 ## Install without ~/ops
 
-Needs `python3` (3.9 or newer; Homebrew's is the one the agent is given) and
-`just`. An administrator password or Touch ID is asked once, for the
-root-owned helper and one sudoers file.
+Needs Homebrew, `python3` (3.9 or newer; Homebrew's is the one the agent is
+given), and `just`. An administrator password or Touch ID is asked once, for
+the root-owned helper and one sudoers file. If a nightly plocate service is
+not already loaded, the same install starts Homebrew's plocate service,
+which is a second administrator prompt.
 
 ```sh
 cd macos
-just install    # flags, 60s fixer, shutdown thaw, root helper
-just status     # what is frozen, store sizes, whether the agents are loaded
-just check      # silent and exit 0 when healthy; prints and exits 1 on a regression
-just profile    # open the Apple Intelligence profile; approve it in System Settings
+just install        # flags, 60s fixer, thaw, root helper, system flags, plocate
+just doctor         # errors, warnings, and a nag if the sudo step was skipped
+just status         # desired state, then errors and warnings
+just check          # silent and exit 0 when the daemon policy holds; else exit 1
+just system-flags   # only the system-domain flags (the sudo step)
+just upgrade        # re-run install when this checkout is newer
+just recovery       # how to open Recovery on this Mac; does not reboot
+just profile        # open the Apple Intelligence profile; approve it in System Settings
 ```
 
-`just install` is safe to repeat. It copies the kit to
-`~/.local/libexec/quiet-mac/` and the root half to
+Version **1.0.0** is the constant in `quiet/quiet_mac.py`. `just install`
+writes it to `~/.local/libexec/quiet-mac/VERSION`. `just upgrade` refuses to
+replace a newer installed copy with an older checkout. When the versions
+match, `just upgrade` still runs `just install`, and that run only repairs
+drift.
+
+`just install` is safe to repeat. The second run does not rewrite a file
+whose bytes already match, does not reload an agent whose plist did not
+change, and does not open the administrator dialog when the root helper and
+sudoers file already match this tree. It still empties the CoreSpotlight
+semantic caches (a no-op when they are already empty) and asks the root
+helper to re-assert the system flags.
+
+It copies the kit to `~/.local/libexec/quiet-mac/` and the root half to
 `/usr/local/libexec/quiet-mac/`. The root helper and its policy file are
 root-owned. The sudoers line allows exactly three commands, with no
 arguments: the helper, the revert helper, and `/usr/bin/mdutil -a -i off`.
+
+If the dialog is denied, the user half stays installed and `just doctor`
+keeps reporting the missing system flags. A notification is posted at most
+once every six hours until those flags are set. `just status` and
+`just check` print the same nag. The 60-second fixer prints it too, on any
+pass whose root helper fails.
+
+Nothing here needs Recovery. `just recovery` prints the steps anyway, and
+picks the Apple silicon steps or the Intel steps from `uname -m`. The
+one-quiet-session SIP dance in [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh)
+is the only reason to use them, and that quiet ends at the next login.
 
 Approve the profile separately:
 
@@ -168,12 +197,165 @@ just uninstall   # remove quiet-mac and continue frozen jobs; leave the flags se
 time something asks for them. The flags alone do not hold them down. Use
 `revert` when you want the features back.
 
+### Factory
+
+`just factory` is the as-shipped Apple restore:
+
+1. It continues every stopped process of this user. It does not terminate them.
+2. It enables every disable flag in [`quiet/daemons.tsv`](quiet/daemons.tsv), including the system-domain ones. That step is one administrator dialog.
+3. It turns Spotlight indexing back on (`mdutil -a -i on`).
+4. It tries to remove the `com.djbclark.no-apple-intelligence` profile. If the command cannot, delete it in System Settings → Privacy & Security → Profiles.
+5. It removes the quiet-mac agents and the root helper.
+6. On a machine that has the site watchdog, it sets `enabled = false` in `~/.config/djbclark/watchdogd.d/apple-daemons.toml` so the next watchdog pass does not freeze the daemons again. A later site deploy can turn that rule back on.
+
+It leaves plocate, NeoFinder, and Homebrew installed. Those are not Apple features. Emptied CoreSpotlight semantic caches are not restored. Apple rebuilds them. The site shutdown thaw stays loaded, because a leftover stopped process would stall the next reboot, and the thaw does nothing while the machine is up.
+
+`just revert` is the smaller undo: flags on, quiet-mac removed, Spotlight left however it was.
+
+## File search
+
+Spotlight indexing of the real disks stays off, so `mdfind` does not search
+them. Two replacements exist. NeoFinder is optional. plocate is part of this
+kit.
+
+### plocate (required)
+
+`just install` requires Homebrew. It installs `plocate` if the `plocate`
+command is missing (`brew install plocate`, and the `ylluminate/utilities`
+tap if the formula is not already available). It starts Homebrew's nightly
+service (`brew services start plocate`, label `sh.brew.plocate`) only when
+no nightly is already loaded.
+
+A nightly that already exists is left alone. On this Mac that is
+`com.djbclark.plocate-updatedb`, which rebuilds
+`/opt/homebrew/var/lib/plocate/plocate.db` at 03:30. Adding the Homebrew
+service as well would index twice. `just doctor` warns when the database is
+missing or older than 36 hours.
+
+Search file names, not file contents:
+
+```sh
+plocate -i NAME
+```
+
+The index can be a day old. It still works when NeoFinder is installed:
+plocate searches real paths from last night, including files no catalogue
+has listed, and it does not need the NeoFinder batch volume to be mounted.
+It does not search inside files. For that, `rg` with a path.
+
+### NeoFinder (optional)
+
+Do not assume NeoFinder is installed. `just neofinder-install` checks for
+`NeoFinder.app` and stops if it is absent, with a pointer at `plocate -i`.
+When the app is present, that recipe runs the setup in
+[`neofinder/justfile`](neofinder/justfile): the batch disk image, the
+root-owned index applier, the saved search, and the `~/.local/bin` links.
+Full detail is [`neofinder/README.md`](neofinder/README.md).
+
+NeoFinder catalogues become a small tree of aliases and zero-byte stubs on
+`/Volumes/NeoFinderBatch`. Spotlight indexes only that volume, during an
+update you start by hand (`just neofinder-nightly`). Nothing schedules it.
+Finder and `mdfind` then search the tree:
+
+```sh
+mdfind -onlyin /Volumes/NeoFinderBatch 'kMDItemUserTags == "nf-image"'
+mdfind -onlyin /Volumes/NeoFinderBatch 'kMDItemNFRealSize > 1000000000'
+```
+
+Offline disks show up as stubs. plocate only knows paths that were mounted
+when its database was built. While a NeoFinder update is actually running
+(01:00–05:45, the nightly lock, or the exporter process), quiet-mac does
+not turn Spotlight indexing off. A Mac without NeoFinder has no such window.
+
+## Upside and downside of each daemon
+
+The upside is the memory or CPU that stops. The downside is the feature that
+stops with it. `SIGSTOP` does not free RAM the process already holds.
+
+| Label | Action | Upside | Downside |
+| --- | --- | --- | --- |
+| `com.apple.suggestd` | freeze gui | Stops the long-lived suggester. Killing it was measured to burn about a core in the respawn gaps. | Proactive suggestions and share-sheet suggestions stop. |
+| `com.apple.cloudd` | freeze gui | Stops this user's iCloud daemon growing. | iCloud Drive, Photos, and Mail sync for this user stop. `just revert` before signing into an Apple ID. |
+| `com.apple.photoanalysisd` | freeze gui | Face and scene analysis is a large CPU and RAM job. | Photos faces, scenes, and Memories stop updating. The library itself stays. |
+| `com.apple.siriactionsd` | freeze gui | Long-lived. Killing it respawns it. | Shortcuts automations and App Intents stop. |
+| `com.apple.sharingd` | freeze gui | KeepAlive. A kill comes straight back. | AirDrop, Handoff, Universal Clipboard, and Continuity Camera stop. |
+| `com.apple.duetexpertd` | freeze gui | Sibling of suggestd. Same growth pattern. | CoreDuet personalization stops. |
+| `com.apple.mediaanalysisd` | freeze gui | Visual analysis is a large resident job. | Visual Look Up, Live Text, and Photos object search stop. |
+| `com.apple.campo` | freeze gui | KeepAlive, and it wakes `generativeexperiencesd`. | The Siri AI app stays down. |
+| `com.apple.visualintelligenced` | freeze gui | Stops Visual Intelligence from staying resident. | Visual Intelligence stops. |
+| `com.apple.siriknowledged` | freeze gui | Stops the Siri knowledge store growing. | Siri answers that need that store stop. |
+| `com.apple.intelligenceplatformd` | freeze gui | Stops the on-device knowledge platform growing. | On-device knowledge features that use it stop updating. |
+| `com.apple.chronod` | freeze gui | Widget refresh is a steady background cost. | Desktop and Notification Center widgets stop refreshing. |
+| `com.apple.homeenergyd` | freeze gui | Stops grid-forecast sync. | Home energy suggestions stop. Home control itself is a different daemon. |
+| `com.apple.geoanalyticsd` | freeze gui | Stops Maps analytics. | Apple gets fewer Maps analytics. Maps still opens. |
+| `com.apple.analyticsagent` | freeze gui | Stops the Mac Analytics collector. | Sharing analytics with Apple from this agent stops. |
+| `com.apple.inputanalyticsd` | freeze gui | Stops keyboard and input analytics. | Those analytics stop. Typing still works. |
+| `com.apple.proactiveeventtrackerd` | freeze gui | Stops proactive event tracking. | Proactive event suggestions stop. Calendar still works. |
+| `com.apple.feedbackd` | freeze gui | Stops Feedback Assistant staying around. | Filing a Feedback Assistant report from this agent stops. |
+| `com.apple.ap.adprivacyd` | freeze gui | Stops ad-privacy metric collection. | Personalized-ad metrics stop. |
+| `com.apple.ap.promotedcontentd` | freeze gui | Stops promoted-content fetches. | Promoted content in Apple apps stops. |
+| `com.apple.tipsd` | freeze gui | Stops Tips staying resident. | The Tips app stops updating. |
+| `com.apple.UsageTrackingAgent` | flag gui | A disable flag is recorded. `kill -STOP` returns "operation not permitted" (seen 2026-11-15), so a freeze never lands. | The process keeps running, so the memory win is small. Screen Time may miss samples if the flag is honored. |
+| `com.apple.knowledge-agent` | freeze gui | Stops the knowledge-store agent. | Knowledge features that use this agent stop. |
+| `com.apple.weatherd` | freeze gui | Stops weather refresh. | Weather stops updating. |
+| `com.apple.financed` | freeze gui | Stops stocks refresh. | Stocks stops updating. |
+| `com.apple.studentd` | freeze gui | Stops Classroom and Schooltime background work. | Classroom and Schooltime features stop. |
+| `com.apple.businessservicesd` | freeze gui | Stops Apple Business background sync. | Apple Business services that use it stop. |
+| `com.apple.betaenrollmentagent` | freeze gui | Stops the beta-enrollment UI agent. | Beta enrollment UI from this agent stops. An installed beta keeps running. |
+| `com.apple.spotlightknowledged` | freeze gui | Stops the semantic Spotlight daemon. | Spotlight's semantic and related-content results stop. Filename search is plocate, or NeoFinder if you install it. |
+| `com.apple.spotlightknowledged.updater` | freeze gui | Stops the semantic index updater. | The semantic index stops updating. The file index is not this process. |
+| `com.apple.spotlightknowledged.importer` | freeze gui | Stops the semantic importer. | New semantic embeddings are not imported. |
+| `com.apple.triald` | term gui | Short one-shot. TERM releases its RAM instead of leaving it frozen. | Apple's experiment treatments stop applying. |
+| `com.apple.helpd` | term gui | Short one-shot. TERM releases its RAM. | In-app Help Viewer content may not load. |
+| `com.apple.sirittsd` | term gui | Idle-exits on its own. TERM releases the voices it loaded. | Spoken Content and Siri voices stop. |
+| `com.apple.knowledgeconstructiond` | term gui | Nightly one-shot. TERM releases its RAM. | The on-device knowledge pipeline does not run. |
+| `com.apple.generativeexperiencesd` | flag gui | Clients respawn a kill within about a second, so a kill saves nothing. | Writing Tools stop when the flag is honored. |
+| `com.apple.intelligencecontextd` | flag gui | Clients respawn a kill within about a second. | Apple Intelligence context features stop when the flag is honored. |
+| `com.apple.intelligenceflowd` | flag gui | Left running on purpose. A freeze hangs clients, including sudo's password sheet. | The live process stays, so the memory win is the flag, not a freeze. Do not SIGSTOP it. |
+| `com.apple.contactsd` | freeze user | The Contacts store lives in the user domain and stays resident. | Contacts, and Mail address lookup, stop. A lookup that hangs is this freeze. |
+| `com.apple.cloudd` | term system | The system iCloud daemon is TERM'd, which releases its RAM. It is never frozen: a stopped root process stalls shutdown. | System-side iCloud sync stops, on top of the user `cloudd` freeze. |
+| `com.apple.triald.system` | term system | System half of experiment treatments. TERM releases its RAM. | System-side experiment treatments stop. |
+| `com.apple.coreduetd` | term system | Root half of CoreDuet. TERM releases its RAM. | Root-side CoreDuet suggestions stop. |
+| `com.apple.spindump` | term system | Hang reports spike CPU and RAM. TERM releases that. | Hang reports are not written, so a later diagnosis has less to read. |
+| `com.apple.tailspind` | term system | Stall reports spike CPU and RAM. | Stall reports are not written. Same diagnostic loss as spindump. |
+| `com.apple.modelmanagerd` | flag system | `coreaudiod` respawns a kill immediately, so the flag is the only lever. | On-device model loads that need this daemon do not start. Audio still plays. |
+| `com.apple.modelcatalogd` | flag system | Same respawn problem as the model manager. | The model catalog does not start. |
+| `com.apple.audioanalyticsd` | flag system | A kill is respawned by `coreaudiod`. | Audio analytics stop. Playback continues. |
+| `com.apple.betaenrollmentd` | flag system | The daemon is not needed for a beta that is already installed. | Beta-enrollment checks from this daemon stop. |
+| `com.apple.liquiddetectiond` | flag system | Stops liquid-detection telemetry. | Liquid-detection reports are not sent. The hardware itself is unchanged. |
+| `com.apple.PerfPowerTelemetryClientRegistrationService` | flag system | Stops power-telemetry registration. | Apple's power telemetry from this service stops. The battery menu still works. |
+| `com.apple.rtcreportingd` | flag system | Stops realtime telemetry reports. | Those reports are not sent. |
+| `com.apple.osanalytics.osanalyticshelper` | flag system | Stops the OS analytics helper. | Analytics forwarding stops. Local crash logs from ReportCrash are a different process. |
+
+`BiomeAgent` is not in the table. Stopping it keeps a Mach port that never
+answers, and the sudo password sheet waits forever. It was put back on
+2026-11-08.
+
+## Recovery
+
+`just recovery` prints these steps for the CPU this Mac is running on. It
+does not reboot, and it does not change SIP.
+
+Apple silicon: shut down, hold the power button until Loading startup
+options appears, click Options, then Continue, then Utilities → Terminal.
+
+Intel: restart and immediately hold Command-R until the Apple logo or a
+spinning globe, then Utilities → Terminal. If Command-R finds nothing, hold
+Option-Command-R for internet Recovery.
+
+Use that only to run `sip-doit-with-sudo.sh --sip-disable`, boot once so
+`launchctl bootout` works, then go back and `--sip-enable`. With SIP left
+on, bootout is refused and the freeze path above is the one that holds.
+
 ## On this machine, with ~/ops
 
 The site watchdog already freezes and TERMs on the same list, and
-`com.djbclark.shutdown-thaw` already thaws at shutdown. You do not need
-`just install` here for the freeze. `just status` and `just check` are
-read-only and safe either way.
+`com.djbclark.shutdown-thaw` already thaws at shutdown. The gui and user
+freezes do not need `just install` here. `just install` still adds the
+portable fixer, the portable root helper, and the system-domain flags, and
+it leaves the existing plocate nightly in place. `just status` and
+`just doctor` report state. They do not freeze or disable. While system
+flags are unset they also post at most one notification every six hours.
 
 `just install` on this Mac adds a second fixer next to that watchdog. Both
 treat an already-stopped pid as a no-op. The site path is
@@ -186,31 +368,39 @@ overwrite each other.
 Each pass of `bin/apple_daemon_ban.sh` also re-asserts the gui and user
 disable flags (a macOS update clears them; on 2026-11-15 only `suggestd`
 still had one) and runs `quiet-mac empty-stores`, so a semantic cache over
-50 MiB is emptied by the site watchdog without `just install`. System-domain
-flags still need root: `sudo macos/sip-doit-with-sudo.sh`. Flags still go through `sudo sip-doit-with-sudo.sh` (apply),
-which also empties those caches even when they are under the cap.
-`--status` / `--check` / `--revert` are unchanged. `--check` is the report
-the site cron reads: it prints only on a regression and always exits 0.
-`just check` exits 1 on a regression so a shell can see it.
+50 MiB is emptied by the site watchdog without a person in the loop.
+`just install` empties those caches even when they are under the cap, and
+`just empty-stores` does the over-cap pass by hand. System-domain flags
+need root: `just system-flags`, or `just install`, or
+`sudo macos/sip-doit-with-sudo.sh`. The site script's `--check` prints only
+on a regression and always exits 0. `just check` exits 1 on a regression so
+a shell can see it.
 
-NeoFinder, for people who want filename search while Spotlight indexing of
-the real disks stays off: [`neofinder/README.md`](neofinder/README.md).
-`just -f neofinder/justfile install`.
+NeoFinder stays optional: [`neofinder/README.md`](neofinder/README.md),
+`just neofinder-install`.
 
 Who is keeping `mds` busy, as a diagnostic (it does not stop `mds`):
 [`mds-xpc-clients/`](mds-xpc-clients/).
 
-## Other tools in this folder
+## What is in this folder
 
-These do not change memory use.
+Every top-level entry, and where it is operated from. `just install` is only
+the memory diet. The other recipes do not run unless you name them.
 
-| Path | What it is |
+| Path | Covered by |
 | --- | --- |
-| [`athena-kerberos/`](athena-kerberos/README.md) | Moved to [athena-mac](https://forgejo.mit.edu/djbclark/athena-mac) |
-| [`corner-rescue/`](corner-rescue/) | Top-left hot corner that recovers a stuck fullscreen space |
-| [`graft-hook-timeout-fix/`](graft-hook-timeout-fix/) | LaunchAgent that repairs the graft hook timeout in `~/.claude/settings.json` |
-| [`hourly-updates/`](hourly-updates/) | Hourly LaunchAgent; the per-app scripts live in `bin/hourly-updates.d/` |
-| [`net-watch/`](net-watch/) | LaunchAgent plist for the home-link watchdog. Behaviour: [`docs/net-watch.md`](../docs/net-watch.md) |
-| [`otp-to-clipboard/`](otp-to-clipboard/) | Copies a one-time code from a notification banner |
-| [`stagger-login/`](stagger-login/) | Spreads login items so they do not all start at once |
-| [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh) | The flag applier described above, including the recoveryOS SIP wrappers |
+| [`quiet/`](quiet/) | `just install`, `doctor`, `status`, `check`, `enforce`, `upgrade`, `system-flags`, `empty-stores`, `recovery`, `snapshot`, `revert`, `factory`, `uninstall` |
+| [`justfile`](justfile) | this list |
+| [`README.md`](README.md) | this file |
+| [`neofinder/`](neofinder/README.md) | `just neofinder-install`, `neofinder-status`, `neofinder-nightly`, `neofinder-stop`. The four names at the top of this folder (`neofinder-stub-export.py` and the rest) are symlinks into that directory. |
+| [`no-apple-intelligence/`](no-apple-intelligence/README.md) | `just profile` installs it. `just factory` tries to remove it. |
+| [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh) | the site flag applier. `just system-flags` is the portable equivalent. `just recovery` prints the Recovery steps its SIP wrappers need. |
+| [`corner-rescue/`](corner-rescue/) | `just corner-rescue` |
+| [`graft-hook-timeout-fix/`](graft-hook-timeout-fix/) | `just graft-hook` |
+| [`hourly-updates/`](hourly-updates/) | `just hourly-updates`. The per-app scripts live in `bin/hourly-updates.d/`, outside this folder. |
+| [`otp-to-clipboard/`](otp-to-clipboard/) | `just otp` |
+| [`mds-xpc-clients/`](mds-xpc-clients/) | `just mds-clients`. Diagnostic only. It does not stop `mds`. |
+| [`net-watch/`](net-watch/) | plist only. Installed by `net-watch install`. Behaviour: [`docs/net-watch.md`](../docs/net-watch.md). |
+| [`stagger-login/`](stagger-login/) | plist only. The program is `bin/stagger-login-sync-agent`, outside this folder. |
+| [`athena-kerberos/`](athena-kerberos/README.md) | moved to [athena-mac](https://forgejo.mit.edu/djbclark/athena-mac). Nothing to install. |
+| [`graft/`](graft/) | code-index cards for this folder. Not a tool. |

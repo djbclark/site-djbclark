@@ -253,7 +253,10 @@ class RenderTests(unittest.TestCase):
             env = os.environ.get("QUIET_MAC_HOME")
             os.environ["QUIET_MAC_HOME"] = str(home)
             try:
-                enforce, thaw = qm.prepare_user_files("/opt/homebrew/bin/python3")
+                enforce, thaw, _enforce_changed, _thaw_changed = qm.prepare_user_files(
+                    "/opt/homebrew/bin/python3"
+                )
+                again = qm.prepare_user_files("/opt/homebrew/bin/python3")
             finally:
                 if env is None:
                     os.environ.pop("QUIET_MAC_HOME", None)
@@ -263,6 +266,10 @@ class RenderTests(unittest.TestCase):
             loaded = plistlib.loads(thaw.read_bytes())
             self.assertEqual(loaded["Label"], qm.LABEL_THAW)
             self.assertTrue((home / ".local/libexec/quiet-mac/daemons.tsv").is_file())
+            version = home / ".local/libexec/quiet-mac/VERSION"
+            self.assertEqual(version.read_text(encoding="utf-8").strip(), qm.VERSION)
+            self.assertFalse(again[2])
+            self.assertFalse(again[3])
 
 
 class RootHelperTests(unittest.TestCase):
@@ -326,6 +333,101 @@ class RootHelperTests(unittest.TestCase):
         self.assertEqual(qm._etime_seconds("01:02:03"), 3723)
         self.assertEqual(qm._etime_seconds("2-00:00:01"), 2 * 86400 + 1)
         self.assertEqual(qm._etime_seconds("45"), 45)
+
+
+class VersionAndGuideTests(unittest.TestCase):
+    def test_version_relation(self) -> None:
+        self.assertEqual(qm.version_relation(None), "missing")
+        self.assertEqual(qm.version_relation("1.0.0", "1.0.0"), "same")
+        self.assertEqual(qm.version_relation("0.9.0", "1.0.0"), "older")
+        self.assertEqual(qm.version_relation("2.0.0", "1.0.0"), "newer")
+        self.assertEqual(qm.version_relation("nope"), "invalid")
+
+    def test_upgrade_refuses_a_downgrade_without_installing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            lib = home / ".local/libexec/quiet-mac"
+            lib.mkdir(parents=True)
+            (lib / "VERSION").write_text("9.9.9\n", encoding="utf-8")
+            previous = os.environ.get("QUIET_MAC_HOME")
+            os.environ["QUIET_MAC_HOME"] = str(home)
+            os.environ["QUIET_MAC_NO_NOTIFY"] = "1"
+            try:
+                self.assertEqual(qm.cmd_upgrade(), 1)
+            finally:
+                if previous is None:
+                    os.environ.pop("QUIET_MAC_HOME", None)
+                else:
+                    os.environ["QUIET_MAC_HOME"] = previous
+                os.environ.pop("QUIET_MAC_NO_NOTIFY", None)
+
+    def test_silicon_and_recovery_text(self) -> None:
+        self.assertEqual(qm.silicon_kind("arm64"), "apple")
+        self.assertEqual(qm.silicon_kind("x86_64"), "intel")
+        apple = qm.recovery_text("apple")
+        intel = qm.recovery_text("intel")
+        self.assertIn("does not boot into Recovery", apple)
+        self.assertIn("power button", apple)
+        self.assertIn("Command-R", intel)
+        self.assertIn("does not boot into Recovery", intel)
+        self.assertNotIn("power button", intel)
+
+    def test_plocate_plan_keeps_an_existing_nightly(self) -> None:
+        self.assertEqual(
+            qm.plocate_plan(True, "gui/1/com.djbclark.plocate-updatedb", True), "keep"
+        )
+        self.assertEqual(qm.plocate_plan(True, None, True), "start-nightly")
+        self.assertEqual(qm.plocate_plan(False, None, True), "install-and-start")
+        self.assertEqual(
+            qm.plocate_plan(False, "gui/1/sh.brew.plocate", True), "install-only"
+        )
+        self.assertEqual(qm.plocate_plan(False, None, False), "need-brew")
+
+    def test_sudo_nag_is_printed_once(self) -> None:
+        findings = [
+            qm.Finding("error", "sudo", "flag not set: system/com.apple.cloudd"),
+            qm.Finding("error", "sudo", "flag not set: system/com.apple.spindump"),
+            qm.Finding("warning", "version", "not installed"),
+        ]
+        text = qm.render_findings(findings)
+        self.assertEqual(text.count("NAG:"), 1)
+        self.assertIn("just install", text)
+        self.assertIn("just system-flags", text)
+
+    def test_usage_tracking_agent_is_flag_only(self) -> None:
+        jobs = {(job.domain, job.label): job for job in qm.load_policy()}
+        job = jobs[("gui", "com.apple.UsageTrackingAgent")]
+        self.assertEqual(job.action, "flag")
+
+    def test_readme_names_every_daemon_and_the_new_commands(self) -> None:
+        readme = (ROOT / "macos" / "README.md").read_text(encoding="utf-8")
+        for job in qm.load_policy():
+            self.assertIn(job.label, readme, job.label)
+        for word in (
+            "just doctor",
+            "just upgrade",
+            "just factory",
+            "plocate -i",
+            "NeoFinder",
+            "corner-rescue",
+            "stagger-login",
+            "net-watch",
+        ):
+            self.assertIn(word, readme)
+
+    def test_disable_toml_service_is_idempotent(self) -> None:
+        text = 'name = "apple-daemons"\ninterval_s = 60\n'
+        once, note = qm.disable_toml_service(text, "apple-daemons")
+        self.assertEqual(note, "inserted")
+        self.assertIn("enabled = false\n", once)
+        twice, note_again = qm.disable_toml_service(once, "apple-daemons")
+        self.assertEqual(note_again, "already")
+        self.assertEqual(twice, once)
+        flipped, note_true = qm.disable_toml_service(
+            "enabled = true\n", "apple-daemons"
+        )
+        self.assertEqual(note_true, "disabled")
+        self.assertNotIn("enabled = true", flipped)
 
 
 if __name__ == "__main__":

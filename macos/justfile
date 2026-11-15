@@ -1,28 +1,39 @@
-# Portable macOS memory diet. See README.md. Every recipe is safe to repeat.
-# `install` asks for an administrator password (or Touch ID) once.
+# Portable macOS memory diet. See README.md.
+# Every recipe is safe to repeat. A second `install` changes nothing already applied.
+# `install` asks for an administrator password (or Touch ID) once, the first time
+# the root helper is missing. Homebrew is required. plocate is installed with it.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 here := justfile_directory()
 python := `command -v python3`
 tool := here / "quiet" / "quiet_mac.py"
+neofinder := here / "neofinder" / "justfile"
 
 default:
     @just --list --unsorted
 
-# Disable the noisy Apple daemons and install the 60s fixer plus shutdown thaw.
+# Flags, 60s fixer, shutdown thaw, root helper, system flags, plocate, empty stores.
 install:
     "{{python}}" "{{tool}}" install
+
+# Re-run install when this checkout is newer than the copy under ~/.local.
+upgrade:
+    "{{python}}" "{{tool}}" upgrade
+
+# Errors, warnings, and a nag until the system-domain sudo has happened.
+doctor:
+    "{{python}}" "{{tool}}" doctor
 
 # One fix pass. Also what the 60s agent runs.
 enforce:
     "{{python}}" "{{tool}}" enforce
 
-# Exit 0 and print nothing when healthy. Regressions print and exit 1.
+# Exit 0 and print nothing when the daemon policy holds. Regressions exit 1.
 check:
     "{{python}}" "{{tool}}" check
 
-# Desired state, Spotlight, semantic-store sizes, whether the agents are loaded.
+# Desired state, then any errors and warnings.
 status:
     "{{python}}" "{{tool}}" status
 
@@ -30,13 +41,50 @@ status:
 status-full:
     "{{python}}" "{{tool}}" status --full
 
-# Empty CoreSpotlight semantic caches that are over 50 MiB. The file index stays.
+# System-domain disable flags. This is the step that needs sudo.
+system-flags:
+    "{{python}}" "{{tool}}" system-flags
+
+# Empty CoreSpotlight semantic caches over 50 MiB. The file index stays.
+# install does this even under the cap. The 60s fixer does it when a store grows.
 empty-stores:
     "{{python}}" "{{tool}}" empty-stores
+
+# How to open Recovery on this Mac. Prints only. Does not reboot.
+recovery:
+    "{{python}}" "{{tool}}" recovery
+
+# Write status and doctor to ~/.local/state/quiet-mac/snapshots/.
+snapshot:
+    "{{python}}" "{{tool}}" snapshot
 
 # Turn the daemons back on, continue anything frozen, and remove quiet-mac.
 revert:
     "{{python}}" "{{tool}}" revert
+
+# Restore Apple's shipping daemons and Spotlight. Leaves plocate and NeoFinder.
+factory:
+    "{{python}}" "{{tool}}" factory
+
+# Optional. Build and load the top-left hot-corner rescue. Not part of install.
+corner-rescue:
+    "{{here}}/corner-rescue/install.sh"
+
+# Optional. LaunchAgent that repairs the graft hook timeout.
+graft-hook:
+    "{{here}}/graft-hook-timeout-fix/install.sh"
+
+# Optional. Hourly LaunchAgent. Per-app scripts live in bin/hourly-updates.d/.
+hourly-updates:
+    "{{here}}/hourly-updates/install.sh"
+
+# Optional. Copy a one-time code from a notification banner.
+otp:
+    "{{here}}/otp-to-clipboard/install.sh"
+
+# Optional. Install the read-only mds XPC-peer helper. It does not stop mds.
+mds-clients:
+    "{{here}}/mds-xpc-clients/mds-xpc-clients-setup.sh"
 
 # Remove the agents and the root helper. Leave the disable flags set.
 uninstall:
@@ -45,3 +93,27 @@ uninstall:
 # Open the Apple Intelligence restrictions profile. Approve it in System Settings.
 profile:
     open "{{here}}/no-apple-intelligence/no-apple-intelligence.mobileconfig"
+
+# Optional. NeoFinder catalogues as the file search. Refuses if the app is absent.
+neofinder-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -d /Applications/NeoFinder.app && ! -d "$HOME/Applications/NeoFinder.app" ]]; then
+      echo "NeoFinder.app is not installed. It is optional."
+      echo "Download it from https://www.cdfinder.de/ and run just neofinder-install again."
+      echo "Without it, file names are searched with: plocate -i NAME"
+      exit 1
+    fi
+    just --justfile "{{neofinder}}" install
+
+# Read-only NeoFinder status. Fails if that setup has not been installed.
+neofinder-status:
+    just --justfile "{{neofinder}}" status
+
+# One NeoFinder catalogue update, now. Nothing schedules this.
+neofinder-nightly *args:
+    just --justfile "{{neofinder}}" nightly {{args}}
+
+# Stop a NeoFinder update and turn Spotlight indexing back off.
+neofinder-stop:
+    just --justfile "{{neofinder}}" stop
