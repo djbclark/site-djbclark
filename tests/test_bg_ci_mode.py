@@ -436,6 +436,11 @@ SCRIPT_CASES = [
     ({"test": "vitest run ''"}, False),
     ({"test": "jest --testPathPattern=unit"}, False),  # jest ORs it with the caller's file
     ({"test": "jest --testMatch=**/x.js"}, False),
+    ({"test": "jest --test-path-pattern=src"}, False),  # kebab-case spellings (final adversary WARN B)
+    ({"test": "jest --test-match=src"}, False),
+    ({"test": "jest --test-regex=src"}, False),
+    ({"test": "vitest run --mode"}, False),
+    ({"test": "jest -t"}, False),
     ({"test": "jest --testPathIgnorePatterns"}, False),  # a trailing valued option would swallow the caller's file
     ({"test": "vitest run --project"}, False),
     ({}, False),
@@ -508,6 +513,9 @@ def test_an_approval_follows_the_physical_directory(repo, tmp_path, tmp_path_fac
     ["env", "NPM_CONFIG_WORKSPACE=pkg-a", "npm", "test", "tests/foo.test.ts"],
     ["env", "--chdir=/elsewhere", "npm", "test", "tests/foo.test.ts"],
     ["env", "-C", "/elsewhere", "npm", "test", "tests/foo.test.ts"],
+    ["env", "-C/elsewhere", "npm", "test", "--", "tests/foo.test.ts"],  # attached and abbreviated chdir (final adversary WARN A)
+    ["env", "--ch=/elsewhere", "npm", "test", "--", "tests/foo.test.ts"],
+    ["env", "-vC/elsewhere", "npm", "test", "--", "tests/foo.test.ts"],
     ["npm", "test", "--some-npm-option", "--", "tests/foo.test.ts"],  # npm eats every flag before its `--`: unknown, so CI
 ])
 def test_a_package_manager_workspace_option_is_never_targeted(repo, argv):
