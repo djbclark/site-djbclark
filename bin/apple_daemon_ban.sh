@@ -71,6 +71,8 @@ freeze() {
   if kill -STOP "$pid" 2>/dev/null; then
     say "STOP  $domain/$label pid $pid"
     FROZEN="$FROZEN ${label#com.apple.}($pid)"
+  else
+    say "STOP failed $domain/$label pid $pid"
   fi
 }
 
@@ -120,7 +122,7 @@ FREEZE_LABELS=(
   "com.apple.ap.adprivacyd"   # ad privacy / personalised-ad metrics (2026-11-02)
   "com.apple.ap.promotedcontentd"   # promoted content (ads) (2026-11-02)
   "com.apple.tipsd"   # Tips (2026-11-02)
-  "com.apple.UsageTrackingAgent"   # Screen Time usage feed (2026-11-02)
+  # UsageTrackingAgent is flag-only (2026-11-15): kill -STOP returns EPERM.
   "com.apple.knowledge-agent"   # CoreDuet-style knowledge store agent (2026-11-02)
   "com.apple.weatherd"   # Weather (2026-11-02)
   "com.apple.financed"   # Stocks/finance data (2026-11-02)
@@ -218,9 +220,31 @@ if mdutil -s / 2>/dev/null | ggrep -q 'Indexing enabled' || \
   fi
 fi
 
-# Semantic caches over 50 MiB. Path checks live in macos/quiet/quiet_mac.py.
-# A failure here must not change this script's exit status.
+# Semantic caches over 50 MiB, and gui/user disable flags that a macOS update
+# dropped. Path checks and the label list live in macos/quiet/. A failure
+# here must not change this script's exit status. System-domain flags stay
+# with the root helper / sip-doit-with-sudo.sh (this pass is not root).
 QUIET_DIR=$(CDPATH= cd -- "$(dirname "$0")/../macos/quiet" && pwd)
+if [ -f "$QUIET_DIR/daemons.tsv" ]; then
+  disabled_gui=$(launchctl print-disabled "gui/$CONSOLE_UID" 2>/dev/null || true)
+  disabled_user=$(launchctl print-disabled "user/$CONSOLE_UID" 2>/dev/null || true)
+  while IFS=$'\t' read -r action domain label _why; do
+    case "$action" in
+      ''|\#*) continue ;;
+    esac
+    case "$domain" in
+      gui) blob=$disabled_gui ;;
+      user) blob=$disabled_user ;;
+      *) continue ;;
+    esac
+    if printf '%s\n' "$blob" | ggrep -Eq "\"$label\" => (disabled|true)"; then
+      continue
+    fi
+    if launchctl disable "$domain/$CONSOLE_UID/$label"; then
+      say "disable $domain/$label"
+    fi
+  done <"$QUIET_DIR/daemons.tsv"
+fi
 QUIET_PY="${QUIET_MAC_PYTHON:-/opt/homebrew/bin/python3}"
 if [ ! -x "$QUIET_PY" ]; then
   QUIET_PY=$(command -v python3 || true)

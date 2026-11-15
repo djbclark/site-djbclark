@@ -28,7 +28,7 @@ freeze	gui	com.apple.feedbackd	Feedback Assistant
 freeze	gui	com.apple.ap.adprivacyd	Ad privacy and personalised-ad metrics
 freeze	gui	com.apple.ap.promotedcontentd	Promoted content
 freeze	gui	com.apple.tipsd	Tips
-freeze	gui	com.apple.UsageTrackingAgent	Screen Time usage feed
+flag	gui	com.apple.UsageTrackingAgent	Screen Time usage feed; SIGSTOP is EPERM (2026-11-15), so a freeze never lands
 freeze	gui	com.apple.knowledge-agent	Knowledge-store agent
 freeze	gui	com.apple.weatherd	Weather
 freeze	gui	com.apple.financed	Stocks and finance data

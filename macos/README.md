@@ -55,7 +55,7 @@ The full list, with the reason on each line, is
 | --- | --- | --- |
 | `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `chronod`, `weatherd`, `contactsd` |
 | `term` | `SIGTERM`, then `SIGKILL`. RAM is released. Used for short jobs. | `triald`, `helpd`, `sirittsd`, `knowledgeconstructiond`, and the root jobs `cloudd`, `coreduetd`, `spindump`, `tailspind` |
-| `flag` | Disable flag only. Killing them comes back within about a second and the respawn churn costs CPU. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `modelmanagerd`, `modelcatalogd` |
+| `flag` | Disable flag only. Killing them comes back within about a second, or `SIGSTOP` is refused. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `modelmanagerd`, `modelcatalogd`, `UsageTrackingAgent` |
 
 Root jobs are never frozen. A stopped root process stalls shutdown, and the
 thaw agent only sees this user's processes.
@@ -67,6 +67,9 @@ Two jobs are deliberately absent from the freeze list:
   `sudo` never prompts. Put back 2026-11-08.
 - **`intelligenceflowd`.** Same class of bug: a stopped XPC service hangs
   its clients. It is flag-only.
+- **`UsageTrackingAgent`.** `kill -STOP` returns "operation not permitted"
+  (seen 2026-11-15, pid had been running five days). The disable flag is set.
+  The process keeps running.
 
 ## What you give up
 
@@ -180,9 +183,11 @@ treat an already-stopped pid as a no-op. The site path is
 and a different sudoers file (`/etc/sudoers.d/quiet-mac`), so they do not
 overwrite each other.
 
-Each pass of `bin/apple_daemon_ban.sh` also runs `quiet-mac empty-stores`,
-so a semantic cache over 50 MiB is emptied by the site watchdog without
-`just install`. Flags still go through `sudo sip-doit-with-sudo.sh` (apply),
+Each pass of `bin/apple_daemon_ban.sh` also re-asserts the gui and user
+disable flags (a macOS update clears them; on 2026-11-15 only `suggestd`
+still had one) and runs `quiet-mac empty-stores`, so a semantic cache over
+50 MiB is emptied by the site watchdog without `just install`. System-domain
+flags still need root: `sudo macos/sip-doit-with-sudo.sh`. Flags still go through `sudo sip-doit-with-sudo.sh` (apply),
 which also empties those caches even when they are under the cap.
 `--status` / `--check` / `--revert` are unchanged. `--check` is the report
 the site cron reads: it prints only on a regression and always exits 0.

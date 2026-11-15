@@ -147,7 +147,8 @@
 #     RemoveMacAI comparison ("section C"). gui, frozen: geoanalyticsd,
 #     analyticsagent, inputanalyticsd, proactiveeventtrackerd, feedbackd,
 #     ap.adprivacyd, ap.promotedcontentd, tipsd, UsageTrackingAgent (Screen Time
-#     usage feed), knowledge-agent, weatherd, financed, studentd,
+#     usage feed; moved to flag-only 2026-11-15 because SIGSTOP is EPERM),
+#     knowledge-agent, weatherd, financed, studentd,
 #     businessservicesd, betaenrollmentagent. system, FLAG-ONLY (no kill loop,
 #     so the root helper is unchanged): audioanalyticsd, betaenrollmentd,
 #     liquiddetectiond, PerfPowerTelemetryClientRegistrationService,
@@ -301,7 +302,7 @@ SYSTEM_DAEMONS=(
 # Daemons (gui or system domain) that get the disable flag but are NOT killed or
 # checked for running: persistent clients (assistantd, coreaudiod, Siri AI)
 # reactivate them within ~1 s of a kill, so enforcing them only churns.
-FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd com.apple.generativeexperiencesd com.apple.intelligencecontextd com.apple.intelligenceflowd com.apple.audioanalyticsd com.apple.betaenrollmentd com.apple.liquiddetectiond com.apple.PerfPowerTelemetryClientRegistrationService com.apple.rtcreportingd com.apple.osanalytics.osanalyticshelper "
+FLAG_ONLY_DAEMONS=" com.apple.modelmanagerd com.apple.modelcatalogd com.apple.generativeexperiencesd com.apple.intelligencecontextd com.apple.intelligenceflowd com.apple.audioanalyticsd com.apple.betaenrollmentd com.apple.liquiddetectiond com.apple.PerfPowerTelemetryClientRegistrationService com.apple.rtcreportingd com.apple.osanalytics.osanalyticshelper com.apple.UsageTrackingAgent "
 is_flag_only() { case "$FLAG_ONLY_DAEMONS" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # CoreSpotlight semantic-search stores (embeddings, journals). Safe to delete;

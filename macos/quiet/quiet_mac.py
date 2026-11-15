@@ -726,7 +726,11 @@ def cmd_check() -> int:
     print(f"quiet-mac: {len(problems)} problem(s)")
     for item in problems:
         print(f"  {item}")
-    print("Fix: just enforce    (or just install, if the 60s agent is not loaded)")
+    print(
+        "Fix: just enforce sets gui/user flags and freezes what it can. "
+        "System flags need root: sudo macos/sip-doit-with-sudo.sh "
+        "(or just install, which adds its own root helper)."
+    )
     return 1
 
 
