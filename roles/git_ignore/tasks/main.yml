@@ -3,6 +3,11 @@
 # canonical. A live file that differs is never overwritten silently: the play
 # fails and shows the diff unless git_ignore_adopt=true.
 
+- name: Assert the destination is an absolute path (HOME set)
+  ansible.builtin.assert:
+    that: git_ignore_dest is match('^/.+') and not git_ignore_dest.startswith('//') and not git_ignore_dest.startswith('/.config')
+    fail_msg: "git_ignore_dest is {{ git_ignore_dest | quote }}; HOME is probably unset."
+
 - name: Stat the live excludes file (not following symlinks)
   ansible.builtin.stat:
     path: "{{ git_ignore_dest }}"
@@ -28,6 +33,7 @@
     argv: [diff, -u, "{{ git_ignore_dest }}", "{{ role_path }}/files/ignore"]
   register: _git_ignore_diff
   changed_when: false
+  check_mode: false
   failed_when: _git_ignore_diff.rc > 1
   when:
     - _git_ignore_live.stat.exists
@@ -47,13 +53,13 @@
   ansible.builtin.file:
     path: "{{ git_ignore_dest | dirname }}"
     state: directory
-    mode: "0755"
 
 - name: Install the global excludes file
   ansible.builtin.copy:
     src: ignore
     dest: "{{ git_ignore_dest }}"
     mode: "0644"
+    force: "{{ git_ignore_adopt | bool }}"
     backup: "{{ git_ignore_adopt | bool }}"
   when: not _git_ignore_live.stat.exists or _git_ignore_diff is not skipped
   register: _git_ignore_install
