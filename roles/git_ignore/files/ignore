@@ -1,0 +1,13 @@
+**/.claude/settings.local.json
+
+# token-savior (token-savior-recall) writes its symbol index into the repo root
+# and has no env var to relocate it; ~14 MB on a mid-size repo.
+.token-savior-cache.json
+.codebase-index-cache.json
+# zcode-acp-server writes .zcode/acp/sandbox.json into every workspace (no opt-out, 2026-10-16)
+.zcode/
+
+**/.claude/.cc-writes/
+# graft 0.29.0 writes /opencode.json into every fresh worktree while ~/.config/opencode exists (2026-11-14,
+# djbclark yes; upstream https://github.com/trailhq/Trail-Code/issues/830)
+/opencode.json

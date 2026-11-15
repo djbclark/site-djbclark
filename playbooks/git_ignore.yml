@@ -1,0 +1,8 @@
+---
+# Global git excludes file (~/.config/git/ignore), tracked in roles/git_ignore.
+- name: Install the global git excludes file
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: git_ignore

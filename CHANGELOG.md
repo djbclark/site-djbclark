@@ -3,6 +3,8 @@
 ## Unreleased
 
 - `bin/bg approve-local`: the authentication call (`sudo-ask`, or `sudo -k` without it) now runs under `env -i` with only a fixed PATH, HOME, USER, LANG and TERM, so a caller's `BASH_ENV`, `ENV`, `PYTHONSTARTUP`, `LD_*`/`DYLD_*`, `IFS`, `LC_*` or PATH entries no longer reach sudo-ask or sudo (bg's own shell still honours BASH_ENV, same user); LANG, TERM and USER are forwarded only when they are plain names. (2026-11-15)
+||||||| parent of f063e00 (git_ignore: track and install the global git excludes file (~/.config/git/ignore))
+- Added `roles/git_ignore` (`just git-ignore-check` / `git-ignore-apply`): the global git excludes file `~/.config/git/ignore` is now tracked and installed from the repo; a differing live file is shown as a diff and refused unless `-e git_ignore_adopt=true`. (2026-11-15)
 - nixos(vps-hub): turn off `GSSAPIAuthentication` in `services.openssh.settings` so it wins over nixathena's later `extraConfig` yes (this GSSAPI OpenSSH build uses the first occurrence). (2026-11-12)
 - nixos(vps-hub): drop `curve25519-sha256` from sshd KexAlgorithms (PQ hybrids only) and turn off `GSSAPIAuthentication` (nixathena's krb5 module sets yes; logins remain keys only). (2026-11-12)
 - nixos(vps-hub): SSH hardening while staying publicly reachable: fail2ban sshd jail (5 failures, 1h ban doubling up to 1 week, tailnet never banned), ssh-audit-guide algorithms (PQ-hybrid kex first, no group-exchange or NIST ECDSA), `LogLevel VERBOSE`, `ClientAliveInterval 300`, compression off, tailnet IPv6 added to the PerSourcePenalties exemption. (2026-11-12)
