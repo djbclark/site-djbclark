@@ -25,6 +25,9 @@ def repo(tmp_path):
     (tmp_path / "test").mkdir()
     (tmp_path / "test" / "bar.spec.js").write_text("// js\n")
     (tmp_path / "vitest.config.ts").write_text("export default {}\n")
+    (tmp_path / "tests" / "jest.config.js").write_text("module.exports = {}\n")
+    (tmp_path / "test" / "setup.ts").write_text("// setup\n")
+    (tmp_path / "tests" / "bun").mkdir()
     return tmp_path
 
 
@@ -97,6 +100,15 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npm", "install", "vitest"],
     ["pnpm", "exec", "tsc", "tests/foo.test.ts"],
     ["pnpm", "exec", "vitest", "run", "tests", "tests/foo.test.ts"],
+    # review 2026-11-14: an option's value is not a test file (adversary W1)
+    ["npx", "jest", "--config", "tests/jest.config.js"],
+    ["npx", "vitest", "run", "--setupFiles", "test/setup.ts"],
+    ["npx", "vitest", "run", "-c", "tests/jest.config.js"],
+    # npm reads flags before `--` itself and drops the filter: the whole suite would run here (adversary W2)
+    ["npm", "test", "-t", "name"],
+    ["npm", "run", "test", "--testNamePattern=foo"],
+    # `bun`/`npm` as a directory name inside another runner's arguments must not hide a broad argument (adversary N5)
+    ["pytest", "tests/bun", "tests/test_a.py"],
 ])
 def test_suites_directories_and_builds_are_not(repo, argv):
     assert not ci_targeted(repo, *argv)
@@ -350,3 +362,18 @@ def test_a_token_copied_from_another_command_is_refused(repo, tmp_path_factory):
     b_tok.write_text(a_tok.read_text())  # right file name for B, the approval written for A
     r = run_bg(repo, tmp_path_factory, "vitest", "run", "--silent", home=home)
     assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
+
+
+def test_the_helper_is_asked_for_fresh_authentication(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    assert (home / "sudo-ask.calls").read_text().startswith("-k /usr/bin/printf")  # -k: ignore a cached sudo ticket
+
+
+def test_log_lines_cannot_be_forged_through_the_directory_name(tmp_path, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    evil = tmp_path / "a\tb\nforged\tconsumed"
+    evil.mkdir()
+    assert approve(evil, home, "vitest", "run").returncode == 0
+    log = (home / ".local" / "state" / "bg" / "approvals.log").read_text()
+    assert len(log.splitlines()) == 1 and len(log.splitlines()[0].split("\t")) == 5

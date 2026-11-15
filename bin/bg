@@ -207,7 +207,8 @@ fi
 # `bg approve-local [--ttl 1h] -- CMD...` asks djbclark for fresh authentication, then writes a one-shot token under
 # ~/.local/state/bg/approvals/ (mode 0600, written atomically), bound to sha256(physical cwd + argv) and an expiry (default 1 h,
 # at most 24 h). The next `bg CMD...` in that directory with the same argv that bg would otherwise send to CI (a bare suite, an
-# unknown runner) consumes the token (renamed away, then deleted, before anything runs) and runs here. A run that is
+# unknown runner) consumes the token (renamed away, then deleted, before the load gate and any slot wait) and runs here; a run
+# that then gives up (exit 75) or is killed has spent it, and djbclark is asked again. A run that is
 # targeted anyway never consumes it. Authentication: djbclark's Touch ID helper `sudo-ask` (an Allow dialog that shows the
 # command and directory, then sudo's Touch ID/password), else `sudo -k` then `sudo -v`. Each approval and each consumption is
 # appended to ~/.local/state/bg/approvals.log (time, event, hash prefix, directory, program name; never the arguments).
@@ -226,7 +227,7 @@ bg_appr_key() {
 # bg_appr_log EVENT KEY PROGRAM
 bg_appr_log() {
   mkdir -p "$bg_state" 2>/dev/null || return 0
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(gdate -Is)" "$1" "${2:0:12}" "$(pwd -P)" "${3##*/}" >> "$bg_state/approvals.log" 2>/dev/null || true
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(gdate -Is)" "$1" "${2:0:12}" "$(printf '%q' "$(pwd -P)")" "$(printf '%q' "${3##*/}")" >> "$bg_state/approvals.log" 2>/dev/null || true
 }
 # bg_approval_consume ARGV...: succeed (once) when an unexpired token for this cwd+argv exists. The rename is the claim: of two
 # racing runs one wins; the token is gone before the caller runs anything. An expired or damaged token is deleted and refused.
@@ -275,7 +276,8 @@ bg_approve_local() {
   echo "bg approve-local: asking djbclark to approve ONE local run in $(pwd -P): $shown" >&2
   if [ -x "$sa" ]; then
     # The Allow dialog shows the command and directory (mouse click only); sudo then asks for Touch ID or the password.
-    "$sa" /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
+    # -k: sudo ignores any cached credential for this one command (the machine's sudo timestamp is global), so Touch ID is asked
+    "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
       echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
   else
     sudo -k && sudo -v || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
@@ -379,7 +381,7 @@ fi
 # --testNamePattern (or --testPathPattern) filter, which also narrows a directory. A bare suite, a bare directory, `npm test`,
 # `bun run test` and `vitest run` alone go to CI. A run bg sends to CI that must run here: `bg approve-local` (header).
 ci_targeted() {
-  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f
+  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0
   for a in "$@"; do
     [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
@@ -388,7 +390,14 @@ ci_targeted() {
       # JavaScript runners (2026-11-14): the runner itself, behind any wrapper (bunx/npx/pnpm exec/yarn)...
       vitest|vitest.js|vitest.[cm]js|jest|jest.js|jest-cli) runner=js ;;
       # ...or a package manager's test script: `npm|pnpm|yarn|bun [run] test[:x]` (`bun test` is bun's own runner).
-      npm|pnpm|yarn|bun) [ -n "$runner" ] || pm=1; prev=$a; continue ;;
+      npm|pnpm|yarn|bun)
+        # a package manager's own word, not part of another runner's arguments (`pytest tests/bun` is a directory)
+        if [ -z "$runner" ]; then
+          pm=1; prev=$a
+          [ "${a##*/}" = npm ] && npm=1
+          continue
+        fi
+        ;;
     esac
     if [ "$pm" = 1 ] && [ -z "$runner" ]; then
       case "$a" in
@@ -403,17 +412,24 @@ ci_targeted() {
     esac
     case "$runner" in
       js)
+        # npm reads the flags before `--` itself and drops them (`npm test -t foo` runs the whole suite); the others pass them on
         case "$a" in
+          --) dd=1 ;;
           # a name or path-pattern filter narrows even a directory (as pytest -k does)
-          -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*) sel=1; narrow=1 ;;
-          --testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*) sel=1; narrow=1 ;;
+          -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*|--testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*)
+            if [ "$npm" = 0 ] || [ "$dd" = 1 ]; then sel=1; narrow=1; fi ;;
           -*) ;;
           *)
-            f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
-            case "$f" in
-              *.test.*|*.spec.*|*_test.*|*_spec.*|__tests__/*|*/__tests__/*|test/*|tests/*|*/test/*|*/tests/*)
-                if [ -f "$f" ]; then sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
-              *) [ -d "$a" ] && broad=1 ;;
+            # the value of an option that takes a file or directory (`--config tests/jest.config.js`) is not a test file
+            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile) ;; *)
+              f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
+              case "${f##*/}" in
+                *.test.*|*.spec.*|*_test.*|*_spec.*)
+                  if [ -f "$f" ]; then sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
+                *)
+                  case "$f" in __tests__/*|*/__tests__/*) [ -f "$f" ] && sel=1 ;; esac
+                  [ -d "$a" ] && broad=1 ;;
+              esac ;;
             esac
             ;;
         esac
