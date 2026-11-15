@@ -13,7 +13,7 @@ neofinder := here / "neofinder" / "justfile"
 default:
     @just --list --unsorted
 
-# Flags, 60s fixer, shutdown thaw, root helper, system flags, plocate, empty stores.
+# Flags, 60s fixer, thaw, root helper, system flags, plocate, empty stores, Apple Intelligence profile.
 install:
     "{{python}}" "{{tool}}" install
 
@@ -90,9 +90,9 @@ mds-clients:
 uninstall:
     "{{python}}" "{{tool}}" uninstall
 
-# Open the Apple Intelligence restrictions profile. Approve it in System Settings.
+# Open the Apple Intelligence profile and print the System Settings steps. install does this too.
 profile:
-    open "{{here}}/no-apple-intelligence/no-apple-intelligence.mobileconfig"
+    "{{python}}" "{{tool}}" profile
 
 # Optional. NeoFinder catalogues as the file search. Refuses if the app is absent.
 neofinder-install:

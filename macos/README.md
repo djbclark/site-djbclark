@@ -33,10 +33,11 @@ Three other levers are larger than the frozen RSS:
    These are embeddings, not the file index. On 2026-11-15
    `~/Library/Metadata/CoreSpotlight/DocumentProcessing` was about 1.0 GiB,
    over that cap. The file index (`index.spotlightV3`) is not touched.
-3. **Apple Intelligence models are not downloaded.** The restrictions
-   profile below points the model-asset URLs at `127.0.0.1:9`. Those models
-   are the multi-gigabyte part. The profile is a separate, one-time approval
-   in System Settings. See
+3. **Apple Intelligence models are not downloaded.** `just install` opens
+   the restrictions profile and waits while you approve it in System Settings.
+   Since macOS 11 the `profiles` command cannot install a configuration
+   profile, so that approval is a click. The profile points the model-asset
+   URLs at `127.0.0.1:9`. Those models are the multi-gigabyte part. See
    [`no-apple-intelligence/README.md`](no-apple-intelligence/README.md).
 
 `launchctl disable` is set too. It survives a reboot on disk, and it is the
@@ -118,17 +119,17 @@ which is a second administrator prompt.
 
 ```sh
 cd macos
-just install        # flags, 60s fixer, thaw, root helper, system flags, plocate
-just doctor         # errors, warnings, and a nag if the sudo step was skipped
+just install        # flags, fixer, thaw, root helper, system flags, plocate, Apple Intelligence profile
+just doctor         # errors, warnings, and a nag if sudo or the profile was skipped
 just status         # desired state, then errors and warnings
 just check          # silent and exit 0 when the daemon policy holds; else exit 1
 just system-flags   # only the system-domain flags (the sudo step)
 just upgrade        # re-run install when this checkout is newer
 just recovery       # how to open Recovery on this Mac; does not reboot
-just profile        # open the Apple Intelligence profile; approve it in System Settings
+just profile        # open the Apple Intelligence profile again and print the steps
 ```
 
-Version **1.0.0** is the constant in `quiet/quiet_mac.py`. `just install`
+Version **1.1.0** is the constant in `quiet/quiet_mac.py`. `just install`
 writes it to `~/.local/libexec/quiet-mac/VERSION`. `just upgrade` refuses to
 replace a newer installed copy with an older checkout. When the versions
 match, `just upgrade` still runs `just install`, and that run only repairs
@@ -137,14 +138,17 @@ drift.
 `just install` is safe to repeat. The second run does not rewrite a file
 whose bytes already match, does not reload an agent whose plist did not
 change, and does not open the administrator dialog when the root helper and
-sudoers file already match this tree. It still empties the CoreSpotlight
+sudoers file already match this tree. It does not open System Settings when
+the Apple Intelligence profile is already installed. It still empties the CoreSpotlight
 semantic caches (a no-op when they are already empty) and asks the root
 helper to re-assert the system flags.
 
 It copies the kit to `~/.local/libexec/quiet-mac/` and the root half to
 `/usr/local/libexec/quiet-mac/`. The root helper and its policy file are
-root-owned. The sudoers line allows exactly three commands, with no
-arguments: the helper, the revert helper, and `/usr/bin/mdutil -a -i off`.
+root-owned. The sudoers file allows exactly four commands: the helper,
+the revert helper, `/usr/bin/mdutil -a -i off`, and `/usr/bin/profiles list`.
+The last one is how `just doctor` sees this computer-level profile. An
+unprivileged `profiles list` does not.
 
 If the dialog is denied, the user half stays installed and `just doctor`
 keeps reporting the missing system flags. A notification is posted at most
@@ -157,10 +161,34 @@ picks the Apple silicon steps or the Intel steps from `uname -m`. The
 one-quiet-session SIP dance in [`sip-doit-with-sudo.sh`](sip-doit-with-sudo.sh)
 is the only reason to use them, and that quiet ends at the next login.
 
-Approve the profile separately:
+### Apple Intelligence profile
 
-System Settings → Privacy & Security → Profiles. The payload id is
-`com.djbclark.no-apple-intelligence`. Removing the profile undoes it.
+`just install` opens
+[`no-apple-intelligence/no-apple-intelligence.mobileconfig`](no-apple-intelligence/no-apple-intelligence.mobileconfig)
+and waits until `com.djbclark.no-apple-intelligence` shows up. A later install
+that finds it already installed does not open System Settings.
+
+The clicks, on this Mac (macOS 15 and later, including macOS 27):
+
+1. System Settings opens to General → Device Management. On macOS 13 and 14 that pane is Privacy & Security → Profiles. On macOS 12 and earlier it is System Preferences → Profiles.
+2. In the Downloaded section, double-click "No Apple Intelligence (djbclark)". macOS drops a downloaded profile after about 8 minutes. Run `just install` again if it is gone.
+3. Review the list, then click Continue or Install.
+4. Click Install on the confirmation sheet.
+5. Approve with Touch ID or the administrator password. Enter and Esc do not install it.
+
+`just install` keeps waiting for about 8 minutes, then stops. `just doctor` reports the profile missing after that, and posts at most one notification every six hours. `just profile` prints the same steps and opens the file again. `just factory` tries to remove the profile. If that command cannot, delete it in the same Device Management pane.
+
+The payload leaves Xcode code completion, Photos Clean Up, and inline text predictions alone.
+
+### Not part of just install
+
+These stay optional. Naming the recipe is what runs it.
+
+1. NeoFinder catalogues: `just neofinder-install`. It refuses when NeoFinder.app is absent. plocate is the file-name search install always sets up.
+2. `just corner-rescue`, `just graft-hook`, `just hourly-updates`, `just otp`, and `just mds-clients`. The last one only reports who is talking to `mds`.
+3. `net-watch` and `stagger-login`. Those plists are installed by their own programs, outside this justfile.
+4. The one-quiet-session SIP path in `sip-doit-with-sudo.sh`. `just recovery` prints how to open Recovery. The standing diet does not boot it.
+5. The site watchdog under `roles/watchdogd`. `just install` adds the portable 60-second fixer beside it and does not replace it.
 
 ### What the 60-second fixer repairs
 

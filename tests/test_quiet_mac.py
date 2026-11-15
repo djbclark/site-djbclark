@@ -220,7 +220,7 @@ class IndexAndStoreTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
-    def test_sudoers_is_three_exact_commands(self) -> None:
+    def test_sudoers_is_four_exact_commands(self) -> None:
         text = qm.sudoers_text("ada")
         self.assertIn(
             "ada ALL=(root) NOPASSWD: /usr/local/libexec/quiet-mac/quiet-mac-root\n",
@@ -228,6 +228,8 @@ class RenderTests(unittest.TestCase):
         )
         self.assertIn("quiet-mac-root-revert", text)
         self.assertIn("/usr/bin/mdutil -a -i off\n", text)
+        self.assertIn("/usr/bin/profiles list\n", text)
+        self.assertEqual(text.count("NOPASSWD:"), 4)
         self.assertNotIn("ALL=(ALL)", text)
         with self.assertRaises(ValueError):
             qm.sudoers_text("ada bad")
@@ -412,8 +414,40 @@ class VersionAndGuideTests(unittest.TestCase):
             "corner-rescue",
             "stagger-login",
             "net-watch",
+            "Device Management",
+            "1.1.0",
         ):
             self.assertIn(word, readme)
+
+    def test_profile_steps_follow_the_os(self) -> None:
+        self.assertEqual(
+            qm.profiles_settings_location("14.6"), "Privacy & Security → Profiles"
+        )
+        self.assertEqual(
+            qm.profiles_settings_location("15.0"), "General → Device Management"
+        )
+        self.assertEqual(
+            qm.profiles_settings_location("27.2"), "General → Device Management"
+        )
+        self.assertEqual(
+            qm.profiles_settings_location("12.7"), "System Preferences → Profiles"
+        )
+        steps = qm.profile_install_steps("General → Device Management")
+        self.assertIn("No Apple Intelligence (djbclark)", steps)
+        self.assertIn("8 minutes", steps)
+        self.assertIn("Enter and Esc do not install it", steps)
+        self.assertIn("1. System Settings opens", steps)
+
+    def test_profile_install_is_skipped_under_the_test_home(self) -> None:
+        previous = os.environ.get("QUIET_MAC_HOME")
+        os.environ["QUIET_MAC_HOME"] = "/tmp/quiet-mac-test-home"
+        try:
+            self.assertEqual(qm.ensure_intelligence_profile(), 0)
+        finally:
+            if previous is None:
+                os.environ.pop("QUIET_MAC_HOME", None)
+            else:
+                os.environ["QUIET_MAC_HOME"] = previous
 
     def test_disable_toml_service_is_idempotent(self) -> None:
         text = 'name = "apple-daemons"\ninterval_s = 60\n'

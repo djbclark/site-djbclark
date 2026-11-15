@@ -23,8 +23,12 @@ Contains:
 Deliberately not touched: Xcode code completion, Photos Clean Up, Spatial Photos,
 inline text predictions.
 
-Install: `open no-apple-intelligence.mobileconfig`, then approve it in System
-Settings > Privacy & Security > Profiles. Check: `sudo profiles list` shows
+Install: `just install` from `macos/`, or `just profile` to open it again.
+Since macOS 11, `profiles` cannot install a configuration profile. On macOS 15
+and later (this Mac is 27) the clicks are System Settings → General →
+Device Management → the Downloaded profile "No Apple Intelligence (djbclark)".
+macOS 13 and 14 use Privacy & Security → Profiles. A downloaded profile is
+dropped after about 8 minutes. Check: `sudo profiles list` shows
 `com.djbclark.no-apple-intelligence` (it installs at computer level; the
-user-level `profiles list` does not show it, verified 2026-10-15). Remove: delete it in the same pane; that
-undoes everything.
+user-level `profiles list` does not show it, verified 2026-10-15). Remove:
+`just factory`, or delete it in the same pane. That undoes the profile.

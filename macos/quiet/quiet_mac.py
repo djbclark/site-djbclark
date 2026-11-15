@@ -33,7 +33,7 @@ from pathlib import Path
 
 # Bump when the installed behavior changes. `just upgrade` re-runs install
 # when the copy under ~/.local/libexec/quiet-mac is older than this.
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 LABEL_ENFORCE = "com.quiet-mac.enforce"
 LABEL_THAW = "com.quiet-mac.thaw"
 SITE_THAW = "com.djbclark.shutdown-thaw"
@@ -51,13 +51,22 @@ PLOCATE_NIGHTLY_LABELS = (
     "homebrew.mxcl.plocate",
 )
 PROFILE_ID = "com.djbclark.no-apple-intelligence"
+PROFILE_DISPLAY = "No Apple Intelligence (djbclark)"
+PROFILE_SETTINGS_URL = "x-apple.systempreferences:com.apple.Profiles-Settings.extension"
+PROFILE_WAIT_S = 8 * 60
 NAG_INTERVAL_S = 6 * 3600
 SUDO_NAG = (
     "NAG: the system-domain half has not been applied. It needs one\n"
     "administrator click (Touch ID works; Enter and Esc do not decide).\n"
-    "  just install        # user half, root helper, system flags, plocate\n"
+    "  just install        # user half, root helper, system flags, plocate, profile\n"
     "  just system-flags   # only the root helper, after install wrote it\n"
     "doctor and status keep reporting this until those flags are set."
+)
+PROFILE_NAG = (
+    "NAG: the Apple Intelligence profile is not installed. macOS will not\n"
+    "install a configuration profile from the command line. just install\n"
+    "opens it and prints the System Settings steps. doctor and status keep\n"
+    "reporting this until the profile is installed."
 )
 SEMANTIC_STORES = (
     "Library/Metadata/CoreSpotlight/DocumentProcessing",
@@ -80,7 +89,8 @@ quiet-mac — freeze the Apple daemons that grow in the background
   doctor                 errors, warnings, and the sudo nag; exit 1 on errors
   check                  exit 0 and no output when the daemon policy holds
   enforce                one fix pass (the 60s agent runs this)
-  install                idempotent: flags, fixer, thaw, root helper, plocate
+  install                idempotent: flags, fixer, thaw, root helper, plocate, profile
+  profile                open the Apple Intelligence profile and print the steps
   upgrade                install this checkout when it is newer
   system-flags           system-domain disable flags (the step that needs sudo)
   empty-stores           empty CoreSpotlight semantic caches over 50 MiB
@@ -323,10 +333,11 @@ def sudoers_text(user: str) -> str:
     if not user or any(c in user for c in " \t\n#,\\"):
         raise ValueError(f"refusing sudoers user {user!r}")
     return (
-        "# quiet-mac: system-domain half. Exactly these paths, no arguments.\n"
+        "# quiet-mac: system-domain half. Exactly these commands, no others.\n"
         f"{user} ALL=(root) NOPASSWD: {HELPER}\n"
         f"{user} ALL=(root) NOPASSWD: {HELPER_REVERT}\n"
         f"{user} ALL=(root) NOPASSWD: /usr/bin/mdutil -a -i off\n"
+        f"{user} ALL=(root) NOPASSWD: /usr/bin/profiles list\n"
     )
 
 
@@ -391,6 +402,64 @@ def recovery_text(kind: str) -> str:
     return common + "\n" + steps
 
 
+def macos_version() -> str:
+    version = platform.mac_ver()[0]
+    if version:
+        return version
+    try:
+        result = _run(["sw_vers", "-productVersion"], timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return "0"
+    return (result.stdout or "").strip() or "0"
+
+
+def macos_major(version: str) -> int:
+    piece = version.split(".")[0]
+    return int(piece) if piece.isdigit() else 0
+
+
+def profiles_settings_location(version: str) -> str:
+    """The System Settings path for a downloaded configuration profile."""
+    major = macos_major(version)
+    if major >= 15:
+        return "General → Device Management"
+    if major >= 13:
+        return "Privacy & Security → Profiles"
+    return "System Preferences → Profiles"
+
+
+def profile_install_steps(location: str) -> str:
+    """What the person clicks. macOS 11 and later refuse `profiles install`."""
+    return (
+        f'Apple Intelligence is stopped by the profile "{PROFILE_DISPLAY}"\n'
+        f"({PROFILE_ID}). Since macOS 11, the profiles command cannot install a\n"
+        "configuration profile. System Settings has to. Do these steps now.\n"
+        "macOS drops a downloaded profile after about 8 minutes. If it is gone,\n"
+        "run just install again.\n"
+        "1. System Settings opens to the profile pane. If it does not, choose\n"
+        f"   Apple menu → System Settings → {location}.\n"
+        "2. In the Downloaded section, double-click\n"
+        f"   {PROFILE_DISPLAY}.\n"
+        "3. Review the list, then click Continue or Install.\n"
+        "4. Click Install on the confirmation sheet.\n"
+        "5. Approve with Touch ID or the administrator password.\n"
+        "   Enter and Esc do not install it.\n"
+        "quiet-mac waits here until that profile is installed."
+    )
+
+
+def profile_mobileconfig_path() -> Path:
+    here = Path(__file__).resolve().parent
+    candidates = (
+        here / "no-apple-intelligence.mobileconfig",
+        here.parent / "no-apple-intelligence" / "no-apple-intelligence.mobileconfig",
+    )
+    for path in candidates:
+        if path.is_file():
+            return path
+    return candidates[-1]
+
+
 def disable_toml_service(text: str, name: str) -> tuple[str, str]:
     """Set enabled = false in a watchdogd service file. Idempotent.
 
@@ -441,8 +510,10 @@ def render_findings(findings: list[Finding]) -> str:
         lines.append(f"{title} ({len(rows)}):")
         for item in rows:
             lines.append(f"  {item.message}")
-    if any(item.code == "sudo" for item in findings):
+    if any(item.code == "sudo" and item.level == "error" for item in findings):
         lines.append(SUDO_NAG)
+    if any(item.code == "profile" and item.level == "error" for item in findings):
+        lines.append(PROFILE_NAG)
     return "\n".join(lines)
 
 
@@ -920,18 +991,86 @@ def neofinder_app_installed() -> bool:
     )
 
 
-def intelligence_profile_installed() -> bool | None:
-    """True, False, or None when the profiles command cannot say."""
+def _profiles_list_blob(argv: list[str]) -> tuple[int, str] | None:
     try:
-        result = _run(["profiles", "list"], timeout=8)
+        result = _run(argv, timeout=8)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    blob = (result.stdout or "") + (result.stderr or "")
-    if PROFILE_ID in blob:
+    return result.returncode, (result.stdout or "") + (result.stderr or "")
+
+
+def intelligence_profile_installed() -> bool | None:
+    """True, False, or None when the computer-level list cannot be read.
+
+    An unprivileged `profiles list` does not show a System-scope profile.
+    The sudoers file allows exactly `/usr/bin/profiles list` with no password.
+    A failed `sudo -n` means we cannot say, so doctor does not treat that as
+    a missing profile.
+    """
+    user = _profiles_list_blob(["/usr/bin/profiles", "list"])
+    if user is not None and user[0] == 0 and PROFILE_ID in user[1]:
         return True
-    if result.returncode != 0:
+    if os.geteuid() == 0:
+        if user is None or user[0] != 0:
+            return None
+        return PROFILE_ID in user[1]
+    root = _profiles_list_blob(["sudo", "-n", "/usr/bin/profiles", "list"])
+    if root is None or root[0] != 0:
         return None
-    return False
+    return PROFILE_ID in root[1]
+
+
+def ensure_intelligence_profile() -> int:
+    """Open the profile and wait while the person installs it in System Settings.
+
+    QUIET_MAC_HOME is the test redirect. It must not open System Settings.
+    QUIET_MAC_NO_WAIT prints the steps and returns without waiting.
+    """
+    if os.environ.get("QUIET_MAC_HOME"):
+        return 0
+    state = intelligence_profile_installed()
+    if state is True:
+        print("Apple Intelligence profile: already installed")
+        return 0
+    path = profile_mobileconfig_path()
+    if not path.is_file():
+        print(f"profile file missing: {path}", file=sys.stderr)
+        return 1
+    location = profiles_settings_location(macos_version())
+    print(profile_install_steps(location))
+    _run(["open", str(path)])
+    _run(["open", PROFILE_SETTINGS_URL])
+    if state is None:
+        print(
+            "profile: this run cannot confirm the install yet. `sudo -n profiles list`\n"
+            "starts working once the root helper's sudoers file includes it.\n"
+            "Finish the System Settings steps, then run just install again.",
+            file=sys.stderr,
+        )
+        return 1
+    if os.environ.get("QUIET_MAC_NO_WAIT"):
+        print(
+            "profile: not installed yet. Finish the steps, then run just install again.",
+            file=sys.stderr,
+        )
+        return 1
+    print("profile: waiting until it shows up in `profiles list` (about 8 minutes).")
+    deadline = time.time() + PROFILE_WAIT_S
+    next_note = time.time() + 30
+    while time.time() < deadline:
+        if intelligence_profile_installed() is True:
+            print("Apple Intelligence profile: installed")
+            return 0
+        if time.time() >= next_note:
+            print(f"profile: still waiting. System Settings → {location}, Downloaded.")
+            next_note = time.time() + 30
+        time.sleep(2)
+    print(
+        "profile: still not installed. The downloaded profile expires after about\n"
+        "8 minutes. Run just install again and finish the steps.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def recent_log_hits(limit: int = 5) -> list[str]:
@@ -969,6 +1108,32 @@ def maybe_notify_sudo() -> None:
                 "display notification "
                 '"System flags still need an admin click. Run: just doctor" '
                 'with title "quiet-mac"'
+            ),
+        ]
+    )
+
+
+def maybe_notify_profile() -> None:
+    """One notification per six hours until the Apple Intelligence profile is in."""
+    if os.environ.get("QUIET_MAC_NO_NOTIFY") or os.environ.get("QUIET_MAC_HOME"):
+        return
+    path = state_dir() / "profile-nag"
+    now = time.time()
+    try:
+        if path.is_file() and now - path.stat().st_mtime < NAG_INTERVAL_S:
+            return
+        state_dir().mkdir(parents=True, exist_ok=True)
+        path.write_text(str(int(now)), encoding="utf-8")
+    except OSError:
+        return
+    _run(
+        [
+            "osascript",
+            "-e",
+            (
+                "display notification "
+                '"Apple Intelligence profile still needs a click in System Settings. '
+                'Run: just install" with title "quiet-mac"'
             ),
         ]
     )
@@ -1144,19 +1309,24 @@ def infra_findings() -> list[Finding]:
             Finding("info", "profile", "Apple Intelligence profile is installed")
         )
     elif profile is False:
-        # A computer-level profile is invisible to an unprivileged `profiles list`
-        # (verified 2026-10-15). Do not warn on that absence.
+        out.append(
+            Finding(
+                "error",
+                "profile",
+                "Apple Intelligence profile is not installed (just install)",
+            )
+        )
+    else:
+        # sudo -n profiles list is what can see a System-scope profile. Until the
+        # sudoers file allows that command, absence is not evidence.
         out.append(
             Finding(
                 "info",
                 "profile",
-                "Apple Intelligence profile is not in the user profile list. "
-                "A computer-level install shows in System Settings, or "
-                "`sudo profiles list`. just profile opens the file.",
+                "computer-level profiles are not visible yet. just install allows "
+                "`profiles list` with no password, then opens the Apple Intelligence profile.",
             )
         )
-    else:
-        out.append(Finding("info", "profile", "could not read configuration profiles"))
 
     if neofinder_app_installed():
         out.append(
@@ -1352,6 +1522,8 @@ def cmd_status(full: bool = False) -> int:
     print(render_findings(findings))
     if any(item.code == "sudo" for item in findings):
         maybe_notify_sudo()
+    if any(item.code == "profile" for item in findings):
+        maybe_notify_profile()
     return 1 if any(item.level == "error" for item in findings) else 0
 
 
@@ -1391,6 +1563,15 @@ def prepare_user_files(python: str) -> tuple[Path, Path, bool, bool]:
     for name, mode in modes.items():
         if _write_if_changed(dest / name, (source / name).read_bytes(), mode):
             kit_changed = True
+    profile_src = (
+        source.parent / "no-apple-intelligence" / "no-apple-intelligence.mobileconfig"
+    )
+    if profile_src.is_file():
+        _write_if_changed(
+            dest / "no-apple-intelligence.mobileconfig",
+            profile_src.read_bytes(),
+            0o644,
+        )
     logs = logs_dir()
     logs.mkdir(parents=True, exist_ok=True)
     home = home_dir()
@@ -1531,7 +1712,9 @@ def cmd_install() -> int:
         "and Contacts. BiomeAgent is left running so sudo can still prompt.\n"
         "A shutdown thaw is installed with the freezer; without it, reboot stalls.\n"
         "CoreSpotlight semantic caches are emptied on install, even under 50 MiB.\n"
-        "The on-disk file index is not touched."
+        "The on-disk file index is not touched.\n"
+        "The Apple Intelligence profile is opened at the end. macOS makes you\n"
+        "approve that one in System Settings."
     )
     if agent_loaded(SITE_THAW, uid):
         print(
@@ -1603,6 +1786,12 @@ def cmd_install() -> int:
     if failed:
         print(SUDO_NAG, file=sys.stderr)
         maybe_notify_sudo()
+    profile_rc = ensure_intelligence_profile()
+    if profile_rc != 0:
+        print(PROFILE_NAG, file=sys.stderr)
+        maybe_notify_profile()
+        failed = True
+    if failed:
         print("install: finished with errors. just doctor lists them.", file=sys.stderr)
         return 1
     print(
@@ -1668,16 +1857,30 @@ def cmd_doctor(notify: bool = True) -> int:
     print(f"quiet-mac {VERSION}")
     findings = policy_findings(console_uid()) + infra_findings()
     print(render_findings(findings))
-    sudo_errors = [
-        item for item in findings if item.code == "sudo" and item.level == "error"
-    ]
-    if notify and sudo_errors:
-        maybe_notify_sudo()
+    if notify:
+        if any(item.code == "sudo" and item.level == "error" for item in findings):
+            maybe_notify_sudo()
+        if any(item.code == "profile" and item.level == "error" for item in findings):
+            maybe_notify_profile()
     return 1 if any(item.level == "error" for item in findings) else 0
 
 
 def cmd_recovery() -> int:
     print(recovery_text(silicon_kind(platform.machine())))
+    return 0
+
+
+def cmd_profile() -> int:
+    """Print the System Settings steps and open the profile. install waits."""
+    path = profile_mobileconfig_path()
+    if not path.is_file():
+        print(f"profile file missing: {path}", file=sys.stderr)
+        return 1
+    print(profile_install_steps(profiles_settings_location(macos_version())))
+    if os.environ.get("QUIET_MAC_HOME"):
+        return 0
+    _run(["open", str(path)])
+    _run(["open", PROFILE_SETTINGS_URL])
     return 0
 
 
@@ -1855,10 +2058,10 @@ def factory_as_root() -> int:
             "profile: not removed by the command"
             + (f" ({blob.strip()})" if blob.strip() else "")
         )
+        location = profiles_settings_location(macos_version())
         print(
             "If it is still installed, delete it in System Settings → "
-            "Privacy & Security → Profiles. The payload id is "
-            f"{PROFILE_ID}."
+            f"{location}. The payload id is {PROFILE_ID}."
         )
     return 0
 
@@ -2017,6 +2220,8 @@ def main(argv: list[str]) -> int:
         return cmd_system_flags()
     if cmd == "recovery":
         return cmd_recovery()
+    if cmd == "profile":
+        return cmd_profile()
     if cmd == "snapshot":
         return cmd_snapshot()
     if cmd == "revert":
