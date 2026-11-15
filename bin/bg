@@ -210,8 +210,10 @@ fi
 # unknown runner) consumes the token (renamed away, then deleted, before the load gate and any slot wait) and runs here; a run
 # that then gives up (exit 75) or is killed has spent it, and djbclark is asked again. A run that is
 # targeted anyway never consumes it. Authentication: djbclark's Touch ID helper `sudo-ask` (an Allow dialog that shows the
-# command and directory, then sudo's Touch ID/password), else `sudo -k` then `sudo -v`. Each approval and each consumption is
-# appended to ~/.local/state/bg/approvals.log (time, event, hash prefix, directory, program name; never the arguments).
+# command and directory, then sudo's Touch ID/password), else `sudo -k /usr/bin/true`. Each approval and each consumption is
+# appended to ~/.local/state/bg/approvals.log (time, event, hash prefix, directory, program name; never the arguments). The
+# command itself is shown to djbclark (that is the point) and so lands in sudo-ask's own log (~/.local/state/sudo-ask/log) and in
+# the system log's record of the sudo call: never put a secret in an argument (secretspec injects environment instead).
 # This guards against honest mistakes, not evasion: a token is plain files, like the other overrides here.
 bg_state="$HOME/.local/state/bg"
 bg_appr_dir="$bg_state/approvals"
@@ -280,7 +282,9 @@ bg_approve_local() {
     "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
       echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
   else
-    sudo -k && sudo -v || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+    # -k with a command: ask afresh, run /usr/bin/true, and leave the machine's sudo ticket neither cleared nor refreshed
+    # (`sudo -k` then `sudo -v` would cache a new global ticket for every session; lead adversary B4)
+    /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
   fi
   mkdir -p "$bg_appr_dir" && chmod 700 "$bg_appr_dir" || return 1
   tmp=$(mktemp "$bg_appr_dir/.tmp.XXXXXX") || return 1
@@ -380,29 +384,73 @@ fi
 # test[:x]`, count the same way: a test file path (.test./.spec./_test./__tests__/tests/ names that exist, `file:12` too), or a -t /
 # --testNamePattern (or --testPathPattern) filter, which also narrows a directory. A bare suite, a bare directory, `npm test`,
 # `bun run test` and `vitest run` alone go to CI. A run bg sends to CI that must run here: `bg approve-local` (header).
+# ci_pm_script_ok NAME (2026-11-14, lead adversary B1): `npm|pnpm|yarn|bun run NAME` runs whatever ./package.json says, and its pre/post
+# scripts, and appends the extra arguments only to the LAST command of a compound script (`bun test ./a && bun test ./b`,
+# `pnpm -r test && node --test`, `pnpm run build && playwright test`), so a file or -t on it proves nothing. Targeted only when
+# scripts.NAME is ONE plain runner call (vitest, jest or `bun test`, behind env assignments, npx, bunx or `pnpm exec`), with no
+# shell metacharacter, no pre/post script of that name, and the file readable here (the current directory's; --prefix/-C already
+# send the run to CI). A missing file, a parse failure or no python3 is not targeted: fail closed.
+ci_pm_script_ok() {
+  [ -f package.json ] || return 1
+  python3 -I -c '
+import json, re, sys
+n = sys.argv[1]
+try:
+    s = json.load(open("package.json"))["scripts"]
+    b = s[n]
+except Exception:
+    sys.exit(1)
+if not isinstance(b, str) or ("pre" + n) in s or ("post" + n) in s or re.search(r"[&|;<>$`()\n\\]", b):
+    sys.exit(1)
+w = b.split()
+while w and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w[0]):
+    w.pop(0)
+if w[:2] == ["pnpm", "exec"]:
+    w = w[2:]
+while w and w[0] in ("npx", "bunx", "--no-install", "--yes", "-y"):
+    w.pop(0)
+ok = bool(w) and (w[0].rsplit("/", 1)[-1] in ("vitest", "jest") or w[:2] == ["bun", "test"])
+sys.exit(0 if ok else 1)
+' "$1" 2>/dev/null
+}
 ci_targeted() {
-  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0 okf okp
+  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0 okf okp cmdpos=1 cp jsrun pmw="" bunrun=0 script=""
   for a in "$@"; do
+    # cp: this word is still in command position (only wrappers, options, numbers and assignments before it), so a JS runner or
+    # package-manager word counts; `make -j8 vitest x` and `pytest tests/jest` do not make a JS run (lead adversary B3).
+    cp=$cmdpos
+    if [ "$cmdpos" = 1 ]; then
+      case "$a" in
+        -*|[0-9]*|*=*|env|nice|time|timeout|gtimeout|caffeinate|taskpolicy|npx|bunx|npm|pnpm|yarn|bun|exec|x|dlx|run|node|*/node|*/node_modules/.bin/*|vitest|vitest.*|jest|jest.js|jest-cli) ;;
+        *) cmdpos=0 ;;
+      esac
+    fi
+    jsrun=0
     [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
       pytest|py.test) runner=pytest ;;
       gradle|gradlew) runner=gradle ;;
       # JavaScript runners (2026-11-14): the runner itself, behind any wrapper (bunx/npx/pnpm exec/yarn)...
-      vitest|vitest.js|vitest.[cm]js|jest|jest.js|jest-cli) runner=js ;;
+      vitest|vitest.js|vitest.[cm]js|jest|jest.js|jest-cli) [ -z "$runner" ] && [ "$cp" = 1 ] && { runner=js; jsrun=1; } ;;
       # ...or a package manager's test script: `npm|pnpm|yarn|bun [run] test[:x]` (`bun test` is bun's own runner).
       npm|pnpm|yarn|bun)
         # a package manager's own word, not part of another runner's arguments (`pytest tests/bun` is a directory)
-        if [ -z "$runner" ]; then
-          pm=1; prev=$a
-          [ "${a##*/}" = npm ] && npm=1
+        if [ -z "$runner" ] && [ "$cp" = 1 ]; then
+          pm=1; pmw=${a##*/}; prev=$a
+          [ "$pmw" = npm ] && npm=1
           continue
         fi
         ;;
     esac
     if [ "$pm" = 1 ] && [ -z "$runner" ]; then
       case "$a" in
-        -*|run|run-script|exec|x|dlx) ;;
-        test|test:*) runner=js; pm=0; prev=$a; continue ;;
+        -*|exec|x|dlx) ;;
+        run|run-script) bunrun=1 ;;
+        test|test:*)
+          runner=js; pm=0; prev=$a
+          # a script (read from ./package.json at the end), except `bun test` itself, which is bun's own runner
+          if [ "$pmw" = bun ] && [ "$bunrun" = 0 ] && [ "$a" = test ]; then :; else script=$a; fi
+          continue ;;
         *) pm=0 ;;
       esac
     fi
@@ -424,22 +472,26 @@ ci_targeted() {
         else
           [ "$dd" = 0 ] && okf=1 && okp=1
         fi
-        case "$a" in
+        [ "$jsrun" = 1 ] || case "$a" in
           --) dd=$((dd + 1)) ;;
           # a name or path-pattern filter narrows even a directory (as pytest -k does)
           -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*|--testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*)
             [ "$okf" = 1 ] && { sel=1; narrow=1; } ;;
           -*) ;;
           *)
-            # the value of an option that takes a file or directory (`--config tests/jest.config.js`) is not a test file
-            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--setupFilesAfterEnv|--roots|--collectCoverageFrom|--coverage.include|--coverage.exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns) ;; *)
-              f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
-              case "${f##*/}" in
-                *.test.*|*.spec.*|*_test.*|*_spec.*)
-                  if [ -f "$f" ]; then [ "$okp" = 1 ] && sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
-                *)
-                  case "$f" in __tests__/*|*/__tests__/*) [ -f "$f" ] && [ "$okp" = 1 ] && sel=1 ;; esac
-                  [ -d "$a" ] && broad=1 ;;
+            # the value of an option is not a filter (`--config tests/jest.config.js`, `--pool threads`)...
+            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--setupFilesAfterEnv|--roots|--collectCoverageFrom|--coverage.include|--coverage.exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns|--pool|--testTimeout|--maxWorkers|--workers|--shard|--environment|--mode|--logLevel|--retry|--bail|--coverage.reporter|--browser|-w) ;; *)
+              # ...and vitest's subcommands are not either; any OTHER positional is a substring/regex filter that widens the
+              # run by union (`f.test.ts ""` or `f.test.ts integration` runs more than f; lead adversary B2), so it counts as
+              # broad (a -t filter can still narrow it) unless it is an existing test file.
+              case "$a" in run|watch|dev|related|bench|typecheck|list) ;; *)
+                if [ "$okp" = 1 ]; then
+                  f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
+                  case "${f##*/}" in
+                    *.test.*|*.spec.*|*_test.*|*_spec.*) if [ -f "$f" ]; then sel=1; else broad=1; fi ;;
+                    *) case "$f" in __tests__/*|*/__tests__/*) if [ -f "$f" ]; then sel=1; else broad=1; fi ;; *) broad=1 ;; esac ;;
+                  esac
+                fi ;;
               esac ;;
             esac
             ;;
@@ -458,7 +510,9 @@ ci_targeted() {
     esac
     prev=$a
   done
-  [ -n "$runner" ] && [ "$sel" = 1 ] && { [ "$broad" = 0 ] || [ "$narrow" = 1 ]; }
+  [ -n "$runner" ] && [ "$sel" = 1 ] || return 1
+  [ "$broad" = 0 ] || [ "$narrow" = 1 ] || return 1
+  [ -z "$script" ] || ci_pm_script_ok "$script"
 }
 # A release also runs here in `ci` mode (djbclark, 2026-10-18): `just release*` or a release.py, whose
 # test gate is the CI run itself; what stays local is the publish step (tag, tap sync, brew reinstall and

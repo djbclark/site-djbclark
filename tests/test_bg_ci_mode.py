@@ -12,7 +12,8 @@ BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
 
 def ci_targeted(tmp_path, *argv):
     """Run bg's ci_targeted() on ARGV, from a repo with tests/test_a.py and a tests/ directory."""
-    body = re.search(r"^ci_targeted\(\) \{.*?^\}", BG.read_text(), re.M | re.S).group(0)
+    text = BG.read_text()
+    body = "\n".join(re.search(rf"^{name}\(\) \{{.*?^\}}", text, re.M | re.S).group(0) for name in ("ci_pm_script_ok", "ci_targeted"))
     script = body + '\nci_targeted "$@"\n'
     return subprocess.run(["bash", "-c", script, "bg", *argv], cwd=tmp_path).returncode == 0
 
@@ -28,6 +29,8 @@ def repo(tmp_path):
     (tmp_path / "tests" / "jest.config.js").write_text("module.exports = {}\n")
     (tmp_path / "test" / "setup.ts").write_text("// setup\n")
     (tmp_path / "tests" / "bun").mkdir()
+    (tmp_path / "tests" / "jest").mkdir()
+    (tmp_path / "package.json").write_text('{"scripts": {"test": "vitest run", "test:unit": "vitest run --dir src"}}\n')
     return tmp_path
 
 
@@ -63,6 +66,10 @@ def repo(tmp_path):
     ["pnpm", "run", "test", "tests", "-t", "name"],
     ["npx", "vitest", "run", "tests", "-t", "name"],
     ["npx", "jest", "--testPathPattern", "foo", "tests"],
+    ["env", "CI=1", "npx", "vitest", "run", "tests/foo.test.ts"],
+    ["nice", "-n", "15", "npx", "vitest", "run", "tests/foo.test.ts"],
+    ["npx", "vitest", "run", "--pool", "threads", "tests/foo.test.ts"],
+    ["pytest", "tests/jest", "-k", "foo"],  # a directory named jest does not turn a pytest run into a JS one
 ])
 def test_targeted_runs_are_recognised(repo, argv):
     assert ci_targeted(repo, *argv)
@@ -100,6 +107,17 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npm", "install", "vitest"],
     ["pnpm", "exec", "tsc", "tests/foo.test.ts"],
     ["pnpm", "exec", "vitest", "run", "tests", "tests/foo.test.ts"],
+    # lead adversary B2: an extra positional is a substring/regex filter that UNIONS with the file (the empty one matches all)
+    ["npx", "vitest", "run", "tests/foo.test.ts", ""],
+    ["npx", "jest", "tests/foo.test.ts", ""],
+    ["npx", "vitest", "run", "tests/foo.test.ts", ".test"],
+    ["npx", "vitest", "run", "tests/foo.test.ts", "integration"],
+    ["npx", "vitest", "run", "tests/foo.test.ts", "tests/**"],
+    ["npx", "vitest", "run", "tests/typo.test.ts"],
+    ["npx", "vitest", "run", "--pool", "threads"],
+    # lead adversary B3: the runner counts only in command position
+    ["make", "-j8", "vitest", "tests/foo.test.ts"],
+    ["echo", "jest", "tests/foo.test.ts"],
     # review 2026-11-14: an option's value is not a test file (adversary W1)
     ["npx", "jest", "--config", "tests/jest.config.js"],
     ["npx", "vitest", "run", "--setupFiles", "test/setup.ts"],
@@ -343,15 +361,6 @@ def test_denied_authentication_writes_nothing(repo, tmp_path_factory):
     assert token_files(home) == []
 
 
-def test_without_the_helper_it_asks_sudo_afresh(repo, tmp_path_factory):
-    home = make_home(tmp_path_factory)  # no sudo-ask: falls back to `sudo -k` then `sudo -v`
-    (home / "fakebin" / "sudo").write_text(f'#!/bin/bash\necho "$@" >> "{home}/sudo.calls"\n')
-    (home / "fakebin" / "sudo").chmod(0o755)
-    assert approve(repo, home, "vitest", "run").returncode == 0
-    assert (home / "sudo.calls").read_text().split() == ["-k", "-v"]
-    assert len(token_files(home)) == 1
-
-
 def test_approve_local_needs_a_command_after_double_dash(repo, tmp_path_factory):
     home = make_home(tmp_path_factory, "allow")
     for argv in (["approve-local"], ["approve-local", "--"], ["approve-local", "vitest", "run"]):
@@ -392,3 +401,77 @@ def test_log_lines_cannot_be_forged_through_the_directory_name(tmp_path, tmp_pat
     assert approve(evil, home, "vitest", "run").returncode == 0
     log = (home / ".local" / "state" / "bg" / "approvals.log").read_text()
     assert len(log.splitlines()) == 1 and len(log.splitlines()[0].split("\t")) == 5
+
+
+# --- lead adversary B1: a package-manager test script is read, not assumed (2026-11-14) ---
+
+SCRIPT_CASES = [
+    ({"test": "vitest run"}, True),
+    ({"test": "npx vitest run --dir src"}, True),
+    ({"test": "NODE_ENV=test jest"}, True),
+    ({"test": "bun test"}, True),
+    ({"test": "pnpm exec vitest run"}, True),
+    ({"test": "pnpm -r test && vitest"}, False),
+    ({"test": "bun test ./a && bun test ./b && bash x.sh"}, False),
+    ({"pretest": "tsc -b", "test": "vitest"}, False),
+    ({"test": "vitest", "posttest": "node cleanup.js"}, False),
+    ({"test": "vitest run; echo done"}, False),
+    ({"test": "vitest run | tee out.log"}, False),
+    ({"test": "vitest run $(pwd)"}, False),
+    ({"test": "pnpm run build"}, False),
+    ({"test": "turbo run test"}, False),
+    ({"test": "npm run lint && vitest"}, False),
+    ({"test": "playwright test"}, False),
+    ({"test": "bash test/unit.sh"}, False),
+    ({"test": 7}, False),
+    ({}, False),
+]
+
+
+@pytest.mark.parametrize("scripts,expected", SCRIPT_CASES)
+@pytest.mark.parametrize("argv", [
+    ["npm", "test", "--", "tests/foo.test.ts"],
+    ["pnpm", "test", "-t", "name"],
+    ["yarn", "test", "-t", "name"],
+    ["bun", "run", "test", "tests/foo.test.ts"],
+])
+def test_a_package_script_is_targeted_only_if_its_body_is_one_runner_call(repo, argv, scripts, expected):
+    import json
+    (repo / "package.json").write_text(json.dumps({"scripts": scripts}))
+    assert ci_targeted(repo, *argv) == expected
+
+
+@pytest.mark.parametrize("argv", [["npm", "test", "--", "tests/foo.test.ts"], ["bun", "run", "test", "-t", "x"]])
+def test_a_missing_or_broken_package_json_is_not_targeted(repo, argv):
+    (repo / "package.json").unlink()
+    assert not ci_targeted(repo, *argv)
+    (repo / "package.json").write_text("{not json")
+    assert not ci_targeted(repo, *argv)
+
+
+def test_bun_test_itself_does_not_read_package_json(repo):
+    (repo / "package.json").write_text('{"scripts": {"test": "bun test ./a && bun test ./b"}}')
+    assert ci_targeted(repo, "bun", "test", "tests/foo.test.ts")  # bun's own runner: scripts.test is not run
+    assert not ci_targeted(repo, "bun", "run", "test", "tests/foo.test.ts")  # the script is
+
+
+def test_the_sudo_fallback_leaves_the_ticket_alone():
+    # Not run (it would prompt): the code path is read instead. `sudo -k` then `sudo -v` would cache a fresh global ticket (B4).
+    code = [ln for ln in BG.read_text().splitlines() if not ln.lstrip().startswith("#")]
+    assert any("/usr/bin/sudo -k /usr/bin/true" in ln for ln in code)
+    assert not any(re.search(r"\bsudo -v\b", ln) for ln in code)
+
+
+def test_the_refusal_quotes_an_argument_with_a_space(repo, tmp_path_factory):
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", "a b")
+    assert r.returncode == 3
+    assert "approve-local -- vitest run a\\ b" in r.stderr
+
+
+def test_an_approval_follows_the_physical_directory(repo, tmp_path, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    link = tmp_path.parent / (tmp_path.name + "-link")
+    link.symlink_to(repo)
+    assert approve(repo, home, "vitest", "run", PWD=str(link)).returncode == 0  # approved from the symlinked path (logical PWD)
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", home=home)  # run from the physical one
+    assert r.returncode == 0 and "FAKE-VITEST" in r.stdout
