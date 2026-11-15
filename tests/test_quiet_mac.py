@@ -233,6 +233,10 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("ALL=(ALL)", text)
         with self.assertRaises(ValueError):
             qm.sudoers_text("ada bad")
+        self.assertFalse(qm.sudoers_is_current(None, False, "ada"))
+        self.assertTrue(qm.sudoers_is_current(None, True, "ada"))
+        self.assertTrue(qm.sudoers_is_current(text, False, "ada"))
+        self.assertFalse(qm.sudoers_is_current("other\n", True, "ada"))
 
     def test_plists_thaw_is_persistent_and_enforce_is_a_minute(self) -> None:
         home = pathlib.Path("/Users/ada")

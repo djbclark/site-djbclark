@@ -1423,6 +1423,29 @@ def ensure_plocate() -> int:
     return 0
 
 
+def sudoers_is_current(text: str | None, profiles_allowed: bool, user: str) -> bool:
+    """True when sudoers matches this tree.
+
+    text is None when the file cannot be read (mode 0440). An unreadable file
+    is current only when `sudo -n /usr/bin/profiles list` is already allowed.
+    Treating "unreadable" as "current" hid the new profiles command.
+    """
+    if text is None:
+        return profiles_allowed
+    try:
+        return text == sudoers_text(user)
+    except ValueError:
+        return False
+
+
+def _sudo_profiles_list_allowed() -> bool:
+    try:
+        result = _run(["sudo", "-n", "/usr/bin/profiles", "list"], timeout=8)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def root_kit_current(user: str) -> bool:
     """True when the root helper, its policy, and the sudoers file match this tree."""
     source = Path(__file__).resolve().parent
@@ -1446,13 +1469,10 @@ def root_kit_current(user: str) -> bool:
     if not SUDOERS.exists():
         return False
     try:
-        current = SUDOERS.read_text(encoding="utf-8")
+        current: str | None = SUDOERS.read_text(encoding="utf-8")
     except OSError:
-        return True
-    try:
-        return current == sudoers_text(user)
-    except ValueError:
-        return False
+        current = None
+    return sudoers_is_current(current, _sudo_profiles_list_allowed(), user)
 
 
 def cmd_check() -> int:
