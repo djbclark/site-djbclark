@@ -1,12 +1,18 @@
 # no-apple-intelligence.mobileconfig
 
 Hand-built (2026-10-13) after reading RemoveMacAI's `Profile.swift`/`Catalog.swift`
-(github.com/omlahore/RemoveMacAI); their binary is not used. Complements
-`../sip-doit-with-sudo.sh`: that script sets disable flags and the watchdogd
-`apple-daemons` rule TERMs the daemons, but persistent clients (assistantd,
-coreaudiod, Siri AI.app) reactivate them within ~1 s, and with SIP on nothing
-can unload them. This profile reduces what the clients ask for; the daemons stay
-loaded.
+(github.com/omlahore/RemoveMacAI); their binary is not used. `just install`
+from `macos/` applies this profile and loads `com.quiet-mac.enforce`, which
+SIGSTOPs this user's jobs and SIGTERMs the short system jobs every 60 seconds.
+Persistent clients (assistantd, coreaudiod, Siri AI.app) reactivate the
+daemons within ~1 s, and with SIP on nothing can unload them. This profile
+reduces what the clients ask for; the daemons stay loaded.
+
+[`../sip-doit-with-sudo.sh`](../sip-doit-with-sudo.sh) is the older flag
+applier. NeoFinder's `just services` and `just services-status` still run it,
+and on this machine `~/.hermes/scripts/check-macos-daemon-disables.sh` runs
+its `--check`. The site `apple-daemons` rule also TERMs the same list. The
+standing hold for a Mac that has run `just install` is `com.quiet-mac.enforce`.
 
 Contains:
 1. `com.apple.applicationaccess` restrictions (all `false`): allowAssistant,
