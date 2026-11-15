@@ -137,7 +137,8 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["yarn", "test", "--", "-t", "name"],
     ["npm", "test", "--", "--", "-t", "name"],
     ["npm", "test", "--", "--", "tests/foo.test.ts"],
-    ["npx", "vitest", "run", "--setupFiles", "tests/foo.test.ts"],  # even a test-shaped name is only the option's value
+    ["npx", "vitest", "run", "--setupFiles", "tests/foo.test.ts"],
+    ["npx", "vitest", "run", "--globalTeardown", "tests/foo.test.ts"],  # even a test-shaped name is only the option's value
     # npm reads flags before `--` itself and drops the filter: the whole suite would run here (adversary W2)
     ["npm", "test", "-t", "name"],
     ["npm", "run", "test", "--testNamePattern=foo"],
@@ -499,6 +500,7 @@ def test_an_approval_follows_the_physical_directory(repo, tmp_path, tmp_path_fac
     ["yarn", "--cwd=x", "test", "tests/foo.test.ts"],
     ["bun", "--filter=a", "run", "test", "tests/foo.test.ts"],
     ["pnpm", "test", "--filter=a", "tests/foo.test.ts"],
+    ["npm", "test", "--some-npm-option", "--", "tests/foo.test.ts"],  # npm eats every flag before its `--`: unknown, so CI
 ])
 def test_a_package_manager_workspace_option_is_never_targeted(repo, argv):
     # these pick another package's script (or all of them); bg reads only ./package.json (lead adversary round 2, BLOCK1)
