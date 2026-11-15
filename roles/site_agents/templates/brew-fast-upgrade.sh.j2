@@ -5,7 +5,8 @@ set -euo pipefail
 # Upgrades every Homebrew formula and cask (--greedy: auto_updates casks too),
 # globally-installed npm packages (both the user ~/.local npm tree and
 # Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
-# ~/.dsh/profiles/<name> plugin tree), native Codex, and uv tools, under the
+# ~/.dsh/profiles/<name> plugin tree), native Codex, uv tools and Kiri
+# (`kiri update`), under the
 # exclusive site advisory lock (Phase F4). Paseo plugins are left to Cafe
 # (auto-update on by default: ~30s after daemon start, then every six hours;
 # failures stay isolated per plugin). zcode-app-cli and
@@ -325,6 +326,24 @@ run_codex_pass() {
   sh -c 's=$(curl -fsSL https://chatgpt.com/codex/install.sh) && CODEX_NON_INTERACTIVE=1 eval "$s"'
 }
 
+# Kiri (runkiri.com, Docker-API runtime; operator 2026-11-15) has no Homebrew
+# cask: `kiri update` is its own updater (release feed with SHA-256, codesign
+# and notarization checks, like its install.sh). Skipped until Kiri is
+# installed. stdin from /dev/null so it can never wait on a prompt; the second
+# --check proves the update took.
+run_kiri_pass() {
+  local kiri="$HOME/.kiri/bin/kiri" out
+  [ -x "$kiri" ] || return 0
+  out="$("$kiri" update --check </dev/null 2>&1)" || { echo "[brew-fast-upgrade] kiri: update --check failed: $out" >&2; return 1; }
+  case "$out" in *"is up to date"*) return 0 ;; esac
+  echo "[brew-fast-upgrade] kiri: $out; upgrading with kiri update"
+  "$kiri" update </dev/null || return 1
+  out="$("$kiri" update --check </dev/null 2>&1)"
+  case "$out" in *"is up to date"*) return 0 ;; esac
+  echo "[brew-fast-upgrade] kiri: still not current after update: $out" >&2
+  return 1
+}
+
 # uv tools are installed once (`uv tool install`, Ansible `creates:` guards)
 # and nothing else upgrades them. --all keeps each tool's own interpreter.
 run_uv_pass() {
@@ -579,6 +598,9 @@ run_upgrade_and_restart_apps() {
     if ! run_uv_pass; then
       echo "[brew-fast-upgrade] uv tool pass failed on attempt $attempt"
     fi
+    if ! run_kiri_pass; then
+      echo "[brew-fast-upgrade] kiri pass failed on attempt $attempt"
+    fi
     if ! run_venicecode_pass; then
       echo "[brew-fast-upgrade] venicecode pass failed on attempt $attempt"
     fi
@@ -600,7 +622,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_kiri_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
