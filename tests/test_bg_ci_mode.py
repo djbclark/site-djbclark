@@ -106,6 +106,11 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npx", "vitest", "run", "-c", "tests/jest.config.js"],
     ["npx", "vitest", "run", "--exclude", "tests/foo.test.ts"],  # a path to leave OUT is not a target (adversary W4)
     ["npx", "jest", "--testPathIgnorePatterns", "tests/foo.test.ts"],
+    ["npx", "jest", "--setupFilesAfterEnv", "tests/foo.test.ts"],
+    ["npx", "vitest", "run", "--coverage.exclude", "tests/foo.test.ts"],
+    # pytest's -k and path::id are not JS filters (adversary round 3, N2)
+    ["npx", "vitest", "run", "--", "a::b"],
+    ["pnpm", "test", "--", "-k", "foo"],
     # after a `--` the runner's own parser sees the rest as its double-dash option, not as filters (adversary N8)
     ["npx", "vitest", "run", "--", "tests/foo.test.ts"],
     ["pnpm", "test", "--", "-t", "name"],

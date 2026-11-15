@@ -406,7 +406,8 @@ ci_targeted() {
         *) pm=0 ;;
       esac
     fi
-    case "$a" in
+    # (pytest's -k and path::id, gradle's --tests: not for a JS runner, whose own forms are below)
+    [ "$runner" = js ] || case "$a" in
       -k|-k?*|*::*) sel=1; narrow=1 ;;
       --tests|--tests=*) sel=1 ;;
     esac
@@ -431,7 +432,7 @@ ci_targeted() {
           -*) ;;
           *)
             # the value of an option that takes a file or directory (`--config tests/jest.config.js`) is not a test file
-            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns) ;; *)
+            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--setupFilesAfterEnv|--roots|--collectCoverageFrom|--coverage.include|--coverage.exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns) ;; *)
               f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
               case "${f##*/}" in
                 *.test.*|*.spec.*|*_test.*|*_spec.*)
