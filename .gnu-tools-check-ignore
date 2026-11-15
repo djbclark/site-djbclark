@@ -23,5 +23,8 @@ macos/neofinder/neofinder-spotlight-index
 roles/watchdogd/files/auxkc_heal_root.sh
 # Root half of the apple-daemons rule, NOPASSWD sudo: same reason, fixed /usr/bin PATH.
 roles/watchdogd/files/apple_daemon_ban_root.sh
+# Runs as root via NOPASSWD sudo: djbclark-owned brew binaries would be a root path
+# (2026-11-15: commit 4f5742d put g* tools and /opt/homebrew/bin in it; reverted).
+roles/mac_dns/files/mac-dns-apply
 # Shows the old find/grep habits it replaces (moved from djbclark-ade with the skill, 2026-11-06)
 skills/setup-modern-cli/*
