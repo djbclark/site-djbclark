@@ -104,6 +104,15 @@ def test_targeted_runs_are_recognised(repo, argv):
     ["npx", "jest", "--config", "tests/jest.config.js"],
     ["npx", "vitest", "run", "--setupFiles", "test/setup.ts"],
     ["npx", "vitest", "run", "-c", "tests/jest.config.js"],
+    ["npx", "vitest", "run", "--exclude", "tests/foo.test.ts"],  # a path to leave OUT is not a target (adversary W4)
+    ["npx", "jest", "--testPathIgnorePatterns", "tests/foo.test.ts"],
+    # after a `--` the runner's own parser sees the rest as its double-dash option, not as filters (adversary N8)
+    ["npx", "vitest", "run", "--", "tests/foo.test.ts"],
+    ["pnpm", "test", "--", "-t", "name"],
+    ["pnpm", "run", "test", "--", "tests/foo.test.ts"],
+    ["yarn", "test", "--", "-t", "name"],
+    ["npm", "test", "--", "--", "-t", "name"],
+    ["npm", "test", "--", "--", "tests/foo.test.ts"],
     ["npx", "vitest", "run", "--setupFiles", "tests/foo.test.ts"],  # even a test-shaped name is only the option's value
     # npm reads flags before `--` itself and drops the filter: the whole suite would run here (adversary W2)
     ["npm", "test", "-t", "name"],

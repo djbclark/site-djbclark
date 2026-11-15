@@ -381,7 +381,7 @@ fi
 # --testNamePattern (or --testPathPattern) filter, which also narrows a directory. A bare suite, a bare directory, `npm test`,
 # `bun run test` and `vitest run` alone go to CI. A run bg sends to CI that must run here: `bg approve-local` (header).
 ci_targeted() {
-  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0
+  local a prev="" runner="" sel=0 narrow=0 broad=0 pm=0 f npm=0 dd=0 okf okp
   for a in "$@"; do
     [ "$prev" = -m ] && case "$a" in pytest) runner=pytest ;; unittest) runner=unittest ;; esac
     case "${a##*/}" in
@@ -412,22 +412,32 @@ ci_targeted() {
     esac
     case "$runner" in
       js)
-        # npm reads the flags before `--` itself and drops them (`npm test -t foo` runs the whole suite); the others pass them on
+        # npm reads the flags before `--` itself and drops them (`npm test -t foo` runs the whole suite), then passes what follows its
+        # one `--`. Anywhere else a `--` moves what follows into the runner's double-dash option, not its filters (vitest, 2026-11-14:
+        # `pnpm test -- tests/a.test.ts` starts the whole suite, cobuildwithus/murph#2917). So a filter counts when no `--` precedes
+        # it (npm: exactly one), a file path likewise (npm: up to one).
+        okf=0; okp=0
+        if [ "$npm" = 1 ]; then
+          [ "$dd" = 1 ] && okf=1
+          [ "$dd" -le 1 ] && okp=1
+        else
+          [ "$dd" = 0 ] && okf=1 && okp=1
+        fi
         case "$a" in
-          --) dd=1 ;;
+          --) dd=$((dd + 1)) ;;
           # a name or path-pattern filter narrows even a directory (as pytest -k does)
           -t|-t=*|--testNamePattern|--testNamePattern=*|--test-name-pattern|--test-name-pattern=*|--testPathPattern|--testPathPattern=*|--testPathPatterns|--testPathPatterns=*)
-            if [ "$npm" = 0 ] || [ "$dd" = 1 ]; then sel=1; narrow=1; fi ;;
+            [ "$okf" = 1 ] && { sel=1; narrow=1; } ;;
           -*) ;;
           *)
             # the value of an option that takes a file or directory (`--config tests/jest.config.js`) is not a test file
-            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile) ;; *)
+            case "$prev" in -c|--config|--setupFiles|--globalSetup|--root|--dir|--project|--reporter|--outputFile|--exclude|--testPathIgnorePatterns|--coveragePathIgnorePatterns|--modulePathIgnorePatterns|--watchPathIgnorePatterns) ;; *)
               f=${a%%:[0-9]*}   # file.test.ts:12 (vitest line filter)
               case "${f##*/}" in
                 *.test.*|*.spec.*|*_test.*|*_spec.*)
-                  if [ -f "$f" ]; then sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
+                  if [ -f "$f" ]; then [ "$okp" = 1 ] && sel=1; elif [ -d "$a" ]; then broad=1; fi ;;
                 *)
-                  case "$f" in __tests__/*|*/__tests__/*) [ -f "$f" ] && sel=1 ;; esac
+                  case "$f" in __tests__/*|*/__tests__/*) [ -f "$f" ] && [ "$okp" = 1 ] && sel=1 ;; esac
                   [ -d "$a" ] && broad=1 ;;
               esac ;;
             esac
