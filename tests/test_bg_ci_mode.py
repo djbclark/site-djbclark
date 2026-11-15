@@ -339,3 +339,14 @@ def test_a_targeted_run_does_not_spend_the_approval(repo, tmp_path_factory):
     r = run_bg(repo, tmp_path_factory, "vitest", "run", "tests/foo.test.ts", home=home)
     assert r.returncode == 0 and "stays here" in r.stderr
     assert len(token_files(home)) == 1
+
+
+def test_a_token_copied_from_another_command_is_refused(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, "allow")
+    assert approve(repo, home, "vitest", "run").returncode == 0
+    [a_tok] = token_files(home)
+    assert approve(repo, home, "vitest", "run", "--silent").returncode == 0
+    [b_tok] = [t for t in token_files(home) if t != a_tok]
+    b_tok.write_text(a_tok.read_text())  # right file name for B, the approval written for A
+    r = run_bg(repo, tmp_path_factory, "vitest", "run", "--silent", home=home)
+    assert r.returncode == 3 and "FAKE-VITEST" not in r.stdout
