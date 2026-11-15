@@ -369,7 +369,7 @@ if [ "$is_gradle" = 1 ] && [ "${BG_ALLOW_LOCAL_PLEKTRA:-0}" != 1 ]; then
 fi
 # CI-first (djbclark, 2026-10-18): before a build or test runs here, its repo needs a recorded decision
 # about CI: `load-watch ci decide DIR ci "CMD"` (bg refuses and names the command), `local "why"`
-# (runs here) or `pending` (seeded from repos bg already ran in; runs here, with a reminder). No decision:
+# (runs here; recording it needs djbclark's Allow dialog + Touch ID, like `bg approve-local`: operator 2026-11-15) or `pending` (seeded from repos bg already ran in; runs here, with a reminder). No decision:
 # refuse until the agent has looked at offloading it (forgejo-ci skill) and recorded one. Worktrees and
 # cow pastures take their main repo's decision. BG_ALLOW_LOCAL_CI_ONLY=1 on djbclark's say only (don't
 # advertise it in messages agents see); BG_CI_UNDECIDED_OK=1 lets one small test file through undecided.
@@ -709,7 +709,7 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     echo "bg: Linux-capable builds and tests usually can; macOS-only work can use GitHub's macOS runners." >&2
     echo "bg: Ask djbclark before pushing CI branches to a repo he does not own. Then record the decision and rerun:" >&2
     echo "bg:   $lw ci decide $top ci \"<command that runs it on CI>\"" >&2
-    echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"" >&2
+    echo "bg:   $lw ci decide $top local \"<why it must run on this Mac>\"   (asks djbclark: Allow dialog + Touch ID)" >&2
     exit 3
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && bg_mac_route; then
     echo "bg: macOS CI fallback for $bg_ci_job (load gate $bg_mac_gate); running locally through bg." >&2
