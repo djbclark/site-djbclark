@@ -269,12 +269,9 @@ open-webui-check *args:
     ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check playbooks/open_webui.yml --limit "{{ open_webui_hosts }}" {{ args }}
 
 open-webui-status:
-    @if launchctl print "gui/$(id -u)/com.djbclark.open-webui" >/dev/null 2>&1; then \
-      echo "launchd: loaded (com.djbclark.open-webui)"; \
-    else \
-      echo "service: not loaded on this host"; \
-    fi
-    @curl -fsS --max-time 5 http://127.0.0.1:8085/health || echo "HTTP 8085 not responding"
+    @ow status
+
+# On-demand control (stop/start/restart/open): `ow` in site-private-djbclark/bin.
 
 # Tailnet DNS plumbing for this Mac (roles/mac_dns): /etc/resolver/<tailnet>,
 # Wi-Fi search domains, `tailscale set --accept-dns`. Data: group_vars/all.yml

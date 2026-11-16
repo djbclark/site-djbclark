@@ -55,6 +55,14 @@
   ansible.builtin.include_tasks: service_darwin.yml
   when: ansible_facts.os_family == 'Darwin'
 
+- name: Link ow control script on PATH
+  ansible.builtin.file:
+    src: "{{ open_webui_home }}/ops/site-private-djbclark/bin/ow"
+    dest: "{{ open_webui_home }}/.local/bin/ow"
+    state: link
+    force: true
+  when: ansible_facts.os_family == 'Darwin'
+
 - name: Wait for Open WebUI health endpoint
   ansible.builtin.uri:
     url: "{{ open_webui_health_url }}"
@@ -63,7 +71,9 @@
   until: _open_webui_health.status == 200
   retries: 60
   delay: 2
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - open_webui_run_at_load | bool
 
 - name: Check current tailscale serve configuration
   ansible.builtin.command:

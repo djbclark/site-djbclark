@@ -24,3 +24,6 @@ open_webui_openai_api_base_url: "http://127.0.0.1:4000/v1"
 # authenticates; the old "sk-dummy" placeholder started returning 401. Not a
 # secret -- see the rationale block in roles/litellm/defaults/main.yml.
 open_webui_openai_api_key: "sk-litellm-open-webui"
+# On-demand only — use `ow start` / `ow open` (com.djbclark.open-webui). Login must
+# not auto-start; registry/ports.yml marks :8085 must_be_up: false for the same reason.
+open_webui_run_at_load: false

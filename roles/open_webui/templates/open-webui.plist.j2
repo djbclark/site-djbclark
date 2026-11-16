@@ -29,7 +29,7 @@
         <string>{{ lookup('env', 'WEBUI_SECRET_KEY') }}</string>
     </dict>
     <key>RunAtLoad</key>
-    <true/>
+    {% if open_webui_run_at_load | bool %}<true/>{% else %}<false/>{% endif %}
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
