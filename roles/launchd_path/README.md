@@ -14,7 +14,7 @@ The old `/etc/launchd.conf` mechanism has been gone since macOS 10.10.
 | Piece | What it does |
 |---|---|
 | `bin/launchd-path-sync` | `desired` prints the PATH a clean `$SHELL -lic` sets, deduplicated; `status` compares it with the stored value (exit 3 = out of sync); `apply` stores it through the applier. |
-| `files/launchd-path-apply` | The only privileged step. Root-owned at `/usr/local/libexec/launchd-path-apply`, NOPASSWD via `/etc/sudoers.d/launchd-path`. Validates the PATH (absolute plain directories, no duplicates, must keep `/usr/bin /bin /usr/sbin /sbin`) and runs `launchctl config user path`. |
+| `files/launchd-path-apply` | The only privileged step. Root-owned at `/usr/local/libexec/launchd-path-apply`, NOPASSWD via `/etc/sudoers.d/launchd-path`. Validates the PATH (absolute plain directories, no duplicates, must keep `/usr/bin /bin /usr/sbin /sbin`; any control character, newline included, is refused) and runs `launchctl config user path`. Its first code line pins `PATH=/usr/bin:/bin:/usr/sbin:/sbin` (root script: never `/opt/homebrew/bin`, no `g*` tool) and the checks are whole-string `case` globs, not a line-oriented `grep`; `tests/test_launchd_path.py` pins both. |
 | `files/launchd-path-setup.sh` | One-time privileged install of the applier and sudoers rule (Touch ID via `sudo-ask`). Re-run after any change to the applier; the role refuses to run while the installed copy differs. |
 
 ## Use
