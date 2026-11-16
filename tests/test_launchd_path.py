@@ -111,6 +111,7 @@ class ApplierTests(unittest.TestCase):
             with self.subTest(value=value):
                 p = self.run_applier("--check", value)
                 self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+                self.assertIn("no // and no trailing /", p.stderr)
 
     def test_imported_shell_functions_cannot_replace_tools(self) -> None:
         # `sh -p`: a BASH_FUNC_id%% in the environment must not override /usr/bin/id.
@@ -125,7 +126,7 @@ class ApplierTests(unittest.TestCase):
         self.assertEqual((p.returncode, p.stdout.strip()), (0, "would-change"), p.stderr)
 
     def test_a_clean_path_still_passes(self) -> None:
-        p = self.run_applier("--check", f"/opt/homebrew/bin:/a_b/c-d.e+f@g:{BASE}")
+        p = self.run_applier("--check", f"/:/opt/homebrew/bin:/a_b/c-d.e+f@g:{BASE}")
         self.assertEqual((p.returncode, p.stdout.strip()), (0, "would-change"), p.stderr)
 
     def test_stored_value_compare_is_exact(self) -> None:
@@ -203,6 +204,9 @@ class SyncTests(unittest.TestCase):
             sync.dedupe("/a/bin:/b/:.:/a/bin:relative:/b:/usr/bin::/bin"),
             "/a/bin:/b:/usr/bin:/bin",
         )
+
+    def test_dedupe_output_always_passes_the_applier_slash_rules(self) -> None:
+        self.assertEqual(sync.dedupe("/opt//bin:/opt/bin/:/a///b//:/"), "/opt/bin:/a/b:/")
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS login shell")
     def test_desired_path_passes_the_applier(self) -> None:
