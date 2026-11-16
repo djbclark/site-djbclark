@@ -96,7 +96,8 @@ serverapp_victoriametrics_blackbox_targets:
 
 # Tailnet DNS facts — the canonical source for this Mac's resolver plumbing.
 # roles/mac_dns renders /etc/resolver/<tailnet_magicdns_suffix>, pins the
-# search domains on Wi-Fi and keeps `tailscale set --accept-dns` as declared;
+# search domains on Wi-Fi and keeps Tailscale DNS acceptance on
+# (mac_dns_tailscale_accept_dns: true; false broke public DNS with the exit node offline);
 # Jobber re-applies it daily at 03:30 (site_agents jobber.yaml.j2). Change the
 # tailnet or MagicDNS address here, nowhere else. Why the role exists:
 # roles/mac_dns/README.md (Tailscale macOS forwarder bugs #20417/#21154).

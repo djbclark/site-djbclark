@@ -10,7 +10,7 @@ Keeps three things in sync with the canonical host facts in
 | MagicDNS resolver file | `/etc/resolver/<tailnet_magicdns_suffix>` (`nameserver 100.100.100.100`, …) | `tailnet_magicdns_*` |
 | Manual DNS servers | cleared (`networksetup -setdnsservers <service> Empty`) on every service except Tailscale's (`mac_dns_services`/`mac_dns_exclude_services`) | fixed: DHCP only |
 | Search domains | `networksetup -setsearchdomains <service> …` on the same services | `tailnet_search_domains` |
-| Tailscale OS DNS takeover | `tailscale set --accept-dns=false` | `mac_dns_tailscale_accept_dns` |
+| Tailscale DNS acceptance | left on by default (`tailscale set --accept-dns=true`, a no-op when `CorpDNS` already matches); `false` only if no exit node is configured | `mac_dns_tailscale_accept_dns` |
 
 Then it probes the real system resolver for `mac.<tailnet>` and `example.com`
 and fails the run if either has no answer.
@@ -24,8 +24,13 @@ Tailscale's macOS DNS forwarder has two open upstream bugs:
 stalls for minutes after a link change). With "Use Tailscale DNS" on, either
 one takes down all name resolution on the Mac. The workaround from #20417 is
 to let the OS use its DHCP resolvers directly and route only `*.<tailnet>` to
-100.100.100.100 through an `/etc/resolver` file. Tailscale then stops
-supplying the tailnet search domains, so they are pinned on Wi-Fi.
+100.100.100.100 through an `/etc/resolver` file, which needs
+`--accept-dns=false`. That was applied on 2026-11-16 and broke public DNS: the
+configured Tailscale exit node was offline, so the default route and resolver
+sat on a dead `utun0` and the DHCP resolvers timed out over it. The role
+therefore leaves Tailscale DNS acceptance **on** (`mac_dns_tailscale_accept_dns:
+true`); it still keeps the `/etc/resolver` file, the pinned search domains and
+the probes. #20417/#21154 stay open and are not fixed by this.
 
 This was first applied by hand on 2026-10-02 after the Moshi daemon's log
 showed ~1-minute DNS outages at ~03:01 on most nights (a Wi-Fi link event) and
@@ -75,7 +80,7 @@ Schedule: `mac-dns-apply` in the Jobber config rendered by `site_agents`
 
 ## Revert
 
-Set `mac_dns_tailscale_accept_dns: true`, `tailnet_search_domains: []`, run
+Set `tailnet_search_domains: []` (acceptance is already on), run
 `just mac-dns-apply`, then `sudo /usr/local/libexec/mac-dns-apply
 resolver-remove <tailnet>` (or `sudo rm /etc/resolver/<tailnet>`). Remove
 `/etc/sudoers.d/mac-dns` and the applier if the role is retired.
