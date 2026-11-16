@@ -115,6 +115,38 @@ class MacDnsApplyTests(unittest.TestCase):
         self.assertEqual(run("resolver", "example.ts.net").returncode, 2)
         self.assertEqual(run("dnsservers", "Wi-Fi").returncode, 2)
 
+    def test_newline_embedded_args_cannot_bypass_the_allow_list(self) -> None:
+        # Review B1 (2026-11-16): grep matches if ANY line matches, so each of
+        # these used to print would-change. Now each must exit 2, no side effect.
+        cases = {
+            "B1a nameserver": ("resolver", "example.ts.net", "6.6.6.6\nnameserver 100.100.100.100"),
+            "B1b domain traversal": ("resolver", "/../../../tmp/zz\nresolver example.ts.net\nexample.ts.net", "100.100.100.100"),
+            "B1b remove": ("resolver-remove", "/../../../tmp/zz\nresolver example.ts.net\nexample.ts.net"),
+            "B1c domain directive": ("resolver", "example.ts.net", "100.100.100.100\ndomain google.com"),
+            "B1d search": ("searchdomains", "Wi-Fi", "evil.com\nsearch example.ts.net"),
+            "B1d service": ("searchdomains", "Wi-Fi\nWi-Fi", "example.ts.net"),
+            "CR": ("resolver", "example.ts.net", "100.100.100.100\r"),
+            "tab": ("resolver", "example.ts.net\t", "100.100.100.100"),
+            "leading dash service": ("searchdomains", "-setdnsservers", "example.ts.net"),
+        }
+        for name, args in cases.items():
+            with self.subTest(name):
+                p = run("--check", *args)
+                self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+                self.assertNotIn("would-change", p.stdout)
+
+    def test_path_is_pinned_to_system_dirs(self) -> None:
+        # Review B2: root runs this via NOPASSWD sudo; a user-owned brew dir on
+        # its PATH, or a g* tool, is a passwordless-root path.
+        code = [ln for ln in SCRIPT.read_text().splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+        self.assertEqual(code[0], "set -eu")
+        self.assertEqual(code[1], "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+        body = "\n".join(code)
+        self.assertEqual(body.count("PATH="), 1)
+        for brew in ("/opt/homebrew", "/usr/local/bin", "/usr/local/opt"):
+            self.assertNotIn(brew, body)
+        self.assertNotRegex(body, r"\bg(awk|date|sed|grep|tail|head|mktemp|stat|find|xargs|sort|cut|tr|wc|readlink|realpath|timeout|ls|touch|chmod|chown|ln|cp|mv|rm|base64)\b")
+
     @classmethod
     def tearDownClass(cls) -> None:
         ALLOW.unlink(missing_ok=True)

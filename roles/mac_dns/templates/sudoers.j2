@@ -1,4 +1,8 @@
 # Managed by site-djbclark roles/mac_dns (installed by `just mac-dns-setup`).
 # Lets the daily unattended `just mac-dns-apply` refresh /etc/resolver and the
 # tailnet search domains through ONE root-owned, input-validating script.
+# No argument spec on purpose: sudoers cannot pin variable arguments (a `*` there
+# also matches spaces, dashes and newlines, so it would fence nothing). The fence
+# is the script itself: charset checks, single-line check and the root-owned
+# allow-list /etc/mac-dns.allow, all before any match (tests/test_mac_dns_apply.py).
 {{ mac_dns_operator }} ALL=(root) NOPASSWD: {{ mac_dns_apply_bin }}
