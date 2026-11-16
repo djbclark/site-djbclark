@@ -17,12 +17,15 @@
 # Output: one line per kill ("TERM system/<label> pid <n>"), for the caller's
 # log. Exit 0 always — a job that is not running is not an error.
 
-export PATH="/opt/homebrew/bin:$PATH"
+# Fixed system PATH, no /opt/homebrew/bin: root runs this through NOPASSWD sudo,
+# and brew binaries are owned by djbclark, so a g* tool here is a root path.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 set -u
 
 # job_pid <label>: the pid launchd reports for the system-domain job, or empty.
 job_pid() {
-  launchctl print "system/$1" 2>/dev/null | gawk '/^\tpid =/{print $3; exit}'
+  launchctl print "system/$1" 2>/dev/null | awk '/^\tpid =/{print $3; exit}'
 }
 
 # kill_pid <label>: TERM, then KILL if the same pid survives 1 s.
@@ -34,9 +37,9 @@ kill_pid() {
   sleep 1
   if [ "$(job_pid "$label")" = "$pid" ]; then
     kill -KILL "$pid" 2>/dev/null
-    echo "$(gdate '+%F %T') KILL  system/$label pid $pid (ignored TERM)"
+    echo "$(date '+%F %T') KILL  system/$label pid $pid (ignored TERM)"
   else
-    echo "$(gdate '+%F %T') TERM  system/$label pid $pid"
+    echo "$(date '+%F %T') TERM  system/$label pid $pid"
   fi
 }
 

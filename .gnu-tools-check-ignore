@@ -21,5 +21,7 @@ docs/plans/*
 # commit 5c01b93 did exactly that; reverted). Root scripts keep /usr/bin tools.
 macos/neofinder/neofinder-spotlight-index
 roles/watchdogd/files/auxkc_heal_root.sh
+# Root half of the apple-daemons rule, NOPASSWD sudo: same reason, fixed /usr/bin PATH.
+roles/watchdogd/files/apple_daemon_ban_root.sh
 # Shows the old find/grep habits it replaces (moved from djbclark-ade with the skill, 2026-11-06)
 skills/setup-modern-cli/*

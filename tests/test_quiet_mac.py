@@ -100,6 +100,25 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(set(qm.SEMANTIC_STORES), stores)
 
 
+class RootHelperPathTests(unittest.TestCase):
+    """The root helper runs through NOPASSWD sudo: no user-owned brew tools."""
+
+    def test_root_helper_uses_only_system_tools(self) -> None:
+        root = BAN_ROOT.read_text(encoding="utf-8")
+        self.assertIn("\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\n", root)
+        code = "\n".join(
+            line for line in root.splitlines() if not line.lstrip().startswith("#")
+        )
+        self.assertNotIn("/opt/homebrew", code)
+        lines = [ln for ln in code.splitlines() if ln.strip()]
+        self.assertEqual(lines[0], "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+        self.assertEqual(sum("PATH=" in ln for ln in lines), 1, "PATH set twice")
+        self.assertIsNone(
+            re.search(r"\bg(awk|date|sed|grep|tail|head|mktemp|stat|find|xargs|sort|cut|tr|wc|readlink|realpath|timeout|ls|touch|chmod|chown|ln|cp|mv|rm|base64)\b", code),
+            "a g* tool in a root-run script",
+        )
+
+
 class DecisionTests(unittest.TestCase):
     def job(self, action: str, domain: str = "gui") -> qm.Job:
         return qm.Job(action, domain, "com.apple.example", "because")
