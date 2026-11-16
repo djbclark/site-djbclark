@@ -579,7 +579,7 @@ def test_the_helper_sees_only_the_allow_listed_environment(repo, tmp_path_factor
     assert seen["HOME"] == str(home)
     assert (seen["LANG"], seen["TERM"], seen["USER"]) == ("de_DE.UTF-8", "xterm-256color", "someone")
     assert str(home) not in seen["PATH"] and "fakebin" not in seen["PATH"]  # a fixed trusted PATH, not the caller's
-    assert seen["PATH"].split(":")[:2] == ["/opt/homebrew/bin", "/usr/bin"]
+    assert seen["PATH"] == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     # the helper's own interpreter still resolves, and what survives is the allow-list plus the shell's own PWD/SHLVL/_
     assert set(seen) - {"PWD", "SHLVL", "_", "OLDPWD", "__CF_USER_TEXT_ENCODING"} == {"HOME", "USER", "LANG", "TERM", "PATH"}
 
