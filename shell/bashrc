@@ -578,7 +578,20 @@ claude()       { __agent_default_flag claude       --dangerously-skip-permission
 # cursor-agent: YOLO for sessions, and always start on Auto unless the caller
 # already picked a model or is resuming (last /model choice persists in
 # ~/.cursor/cli-config.json and would otherwise stick across launches).
+# shell/cursor-agent-auto is what ~/.local/bin/cursor-agent points at, so a
+# herdr zsh that loaded an older function (it only injects --yolo) still
+# starts on Auto. `cursor-agent update` replaces that symlink; put it back.
+__cursor_agent_ensure_wrapper() {
+  local link="${HOME}/.local/bin/cursor-agent"
+  local wrapper="${OPS_ROOT:-$HOME/ops}/site-public-djbclark/shell/cursor-agent-auto"
+  local current=""
+  [[ -x "$wrapper" ]] || return 0
+  [[ -L "$link" ]] && current="$(readlink "$link")"
+  [[ "$current" == "$wrapper" ]] && return 0
+  ln -sfn "$wrapper" "$link"
+}
 cursor-agent() {
+  __cursor_agent_ensure_wrapper
   case "${1:-}" in
     help|--help|-h|--version|-v|login|logout|mcp|plugin|worker|status|whoami|models|team|bedrock|about|update|create-chat|generate-rule|rule|install-shell-integration|uninstall-shell-integration|ls|persist)
       command cursor-agent "$@" ;;

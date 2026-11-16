@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# ~/.local/bin/cursor-agent points here. The real launcher stays
+# ~/.local/bin/agent (the versioned Cursor script).
+#
+# ~/.bashrc and ~/.zshrc also inject --model auto, but a herdr pane keeps the
+# function it loaded at startup. A pane opened before that function existed
+# still runs `cursor-agent --yolo` only, and the last /model choice in
+# ~/.cursor/cli-config.json sticks. `command cursor-agent` is hashed to this
+# path, so replacing the path fixes those panes on the next launch.
+set -euo pipefail
+
+real="${CURSOR_AGENT_BIN:-}"
+if [[ -z "$real" ]]; then
+  agent_link="${HOME}/.local/bin/agent"
+  if [[ ! -L "$agent_link" ]]; then
+    echo "cursor-agent-auto: ${agent_link} is not a symlink to the Cursor launcher" >&2
+    exit 127
+  fi
+  real="$(readlink "$agent_link")"
+  if [[ "$real" != /* ]]; then
+    real="${HOME}/.local/bin/${real}"
+  fi
+fi
+case "$real" in
+  *cursor-agent-auto)
+    echo "cursor-agent-auto: refusing to exec itself ($real)" >&2
+    exit 127
+    ;;
+esac
+if [[ ! -x "$real" ]]; then
+  echo "cursor-agent-auto: real launcher not executable: $real" >&2
+  exit 127
+fi
+
+passthrough() {
+  if [[ "${CURSOR_AGENT_AUTO_DRY:-}" == 1 ]]; then
+    printf '%s\n' "$real"
+    printf '%s\n' "$@"
+    exit 0
+  fi
+  exec "$real" "$@"
+}
+
+# First positional command, and whether the caller already chose a model.
+# Flags may precede the command (`--yolo update` from an old shell function).
+have_model=0
+positional=""
+skip_next=0
+for a in "$@"; do
+  if [[ "$skip_next" -eq 1 ]]; then
+    skip_next=0
+    continue
+  fi
+  case "$a" in
+    --version|-v|--help|-h)
+      passthrough "$@"
+      ;;
+    --model|--resume|--print)
+      have_model=1
+      skip_next=1
+      ;;
+    --model=*|--resume=*|--print=*|--continue|-p)
+      have_model=1
+      ;;
+    --)
+      break
+      ;;
+    -*)
+      ;;
+    *)
+      positional="$a"
+      break
+      ;;
+  esac
+done
+
+case "$positional" in
+  help|login|logout|mcp|plugin|worker|status|whoami|models|team|bedrock|about|update|create-chat|generate-rule|rule|install-shell-integration|uninstall-shell-integration|ls|persist|acp|shell-integration)
+    passthrough "$@"
+    ;;
+esac
+
+if [[ "$have_model" -eq 0 ]]; then
+  passthrough --model auto "$@"
+else
+  passthrough "$@"
+fi
