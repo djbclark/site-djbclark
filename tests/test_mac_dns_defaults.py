@@ -16,6 +16,11 @@ class MacDnsDefaultsTests(unittest.TestCase):
         data = yaml.safe_load(DEFAULTS.read_text())
         self.assertEqual(data["mac_dns_tailscale_bin"], "/usr/local/bin/tailscale")
 
+    def test_accept_dns_stays_on(self) -> None:
+        # 2026-11-16: accept-dns=false with the exit node offline broke public DNS.
+        data = yaml.safe_load(DEFAULTS.read_text())
+        self.assertIs(data["mac_dns_tailscale_accept_dns"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

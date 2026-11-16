@@ -4,10 +4,10 @@
 #
 # Why this exists: Tailscale's macOS forwarder has two open upstream bugs
 # (tailscale/tailscale#20417 persistent SERVFAIL per boot, #21154 stall after
-# a link change). The workaround keeps MagicDNS for *.<tailnet> via an
-# /etc/resolver file while the OS uses its DHCP resolvers for everything else
-# (`tailscale set --accept-dns=false`). Tailscale then no longer supplies the
-# tailnet search domains, so they are pinned on the Wi-Fi service instead.
+# a link change). The role keeps MagicDNS for *.<tailnet> reachable via an
+# /etc/resolver file and pins the tailnet search domains on the network
+# services. It does NOT turn off Tailscale DNS acceptance (see
+# mac_dns_tailscale_accept_dns below), so the two upstream bugs stay open.
 
 # Root-owned applier + its sudoers rule, installed once by `just mac-dns-setup`
 # (Touch ID). The role refuses to run until both match the repo copy, so an
@@ -33,7 +33,15 @@ mac_dns_services: all
 mac_dns_exclude_services: ["Tailscale"]
 # Manual DNS servers are always cleared ("Empty" = DHCP): the applier accepts
 # nothing else, by design.
-mac_dns_tailscale_accept_dns: false
+#
+# true = leave Tailscale DNS acceptance on (the role never changes it when
+# CorpDNS already matches). It was false by design until 2026-11-16: applying
+# `tailscale set --accept-dns=false` broke public DNS, because the configured
+# Tailscale exit node was offline, so the default route and resolver sat on a
+# dead utun0 and the DHCP resolvers timed out over it (MagicDNS kept working via
+# the /etc/resolver file). Accepting DNS does not fix tailscale#20417/#21154;
+# they remain open. Set false only when no exit node is configured.
+mac_dns_tailscale_accept_dns: true
 
 # Tailscale CLI: the root-owned wrapper /usr/local/bin/tailscale (execs the
 # Tailscale.app binary). Not a Homebrew path: no brew tailscale is installed
