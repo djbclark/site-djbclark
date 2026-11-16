@@ -12,7 +12,9 @@
 #
 # modelmanagerd/modelcatalogd are deliberately NOT here (2026-10-13): coreaudiod
 # re-activates them within ~1 s of a kill, so they are flag-only in
-# macos/sip-doit-with-sudo.sh (FLAG_ONLY_DAEMONS).
+# macos/sip-doit-with-sudo.sh (FLAG_ONLY_DAEMONS). Same for coreduetd (2026-11-15):
+# Mach IPC clients respawn it within seconds of a SIGKILL, so killing it every
+# minute only churns.
 #
 # Output: one line per kill ("TERM system/<label> pid <n>"), for the caller's
 # log. Exit 0 always — a job that is not running is not an error.
@@ -46,7 +48,6 @@ kill_pid() {
 SYSTEM_LABELS=(
   "com.apple.cloudd"
   "com.apple.triald.system"
-  "com.apple.coreduetd"   # root half of CoreDuet, duetexpertd's sibling (2026-10-15)
   "com.apple.spindump"
   "com.apple.tailspind"
 )

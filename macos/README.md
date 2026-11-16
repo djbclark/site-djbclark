@@ -59,8 +59,8 @@ The full list, with the reason on each line, is
 | Action | Meaning | Examples |
 | --- | --- | --- |
 | `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `chronod`, `weatherd`, `contactsd` |
-| `term` | `SIGTERM`, then `SIGKILL`. RAM is released. Used for short jobs. | `triald`, `helpd`, `sirittsd`, `knowledgeconstructiond`, and the root jobs `cloudd`, `coreduetd`, `spindump`, `tailspind` |
-| `flag` | Disable flag only. Killing them comes back within about a second, or `SIGSTOP` is refused. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `modelmanagerd`, `modelcatalogd`, `UsageTrackingAgent` |
+| `term` | `SIGTERM`, then `SIGKILL`. RAM is released. Used for short jobs. | `triald`, `helpd`, `sirittsd`, `knowledgeconstructiond`, and the root jobs `cloudd`, `spindump`, `tailspind` |
+| `flag` | Disable flag only. Killing them comes back within about a second, or `SIGSTOP` is refused. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `coreduetd`, `modelmanagerd`, `modelcatalogd`, `UsageTrackingAgent` |
 
 Root jobs are never frozen. A stopped root process stalls shutdown, and the
 thaw agent only sees this user's processes.
@@ -347,7 +347,7 @@ stops with it. `SIGSTOP` does not free RAM the process already holds.
 | `com.apple.contactsd` | freeze user | The Contacts store lives in the user domain and stays resident. | Contacts, and Mail address lookup, stop. A lookup that hangs is this freeze. |
 | `com.apple.cloudd` | term system | The system iCloud daemon is TERM'd, which releases its RAM. It is never frozen: a stopped root process stalls shutdown. | System-side iCloud sync stops, on top of the user `cloudd` freeze. |
 | `com.apple.triald.system` | term system | System half of experiment treatments. TERM releases its RAM. | System-side experiment treatments stop. |
-| `com.apple.coreduetd` | term system | Root half of CoreDuet. TERM releases its RAM. | Root-side CoreDuet suggestions stop. |
+| `com.apple.coreduetd` | flag system | Root half of CoreDuet; Mach IPC clients respawn a kill, so killing it only churns. | Root-side CoreDuet stays disabled at boot, but runs (~12 MB) when poked by XPC. |
 | `com.apple.spindump` | term system | Hang reports spike CPU and RAM. TERM releases that. | Hang reports are not written, so a later diagnosis has less to read. |
 | `com.apple.tailspind` | term system | Stall reports spike CPU and RAM. | Stall reports are not written. Same diagnostic loss as spindump. |
 | `com.apple.modelmanagerd` | flag system | `coreaudiod` respawns a kill immediately, so the flag is the only lever. | On-device model loads that need this daemon do not start. Audio still plays. |
