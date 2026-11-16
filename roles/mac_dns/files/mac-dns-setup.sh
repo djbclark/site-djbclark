@@ -18,6 +18,8 @@ cat > "$tmp/sudoers" <<SUDO
 # Managed by site-djbclark roles/mac_dns (installed by \`just mac-dns-setup\`).
 # Lets the daily unattended \`just mac-dns-apply\` refresh /etc/resolver and the
 # tailnet search domains through ONE root-owned, input-validating script.
+# No argument spec on purpose: sudoers cannot pin variable arguments (a * there
+# also matches spaces, dashes and newlines). The fence is the script itself.
 $operator ALL=(root) NOPASSWD: $bin
 SUDO
 visudo -cf "$tmp/sudoers" >/dev/null || { echo "sudoers rule failed visudo -c" >&2; exit 1; }
