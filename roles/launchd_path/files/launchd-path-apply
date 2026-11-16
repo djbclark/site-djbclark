@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -p
 # launchd-path-apply — the ONLY privileged step of site-djbclark roles/launchd_path.
 #
 # Installed root-owned at /usr/local/libexec/launchd-path-apply by
@@ -10,7 +10,7 @@
 # The one thing it does is `launchctl config user path <PATH>` (persistent; takes
 # effect at the next reboot; applies to every user domain on this Mac, and a job
 # whose plist sets its own PATH keeps that one). It never takes a file path when
-# run as root, never reads the environment, and refuses a PATH that is not a
+# run as root, never reads the environment (`sh -p`: bash imports no exported functions and ignores SHELLOPTS, ENV and BASH_ENV), and refuses a PATH that is not a
 # plain list of absolute directories or that drops /usr/bin, /bin, /usr/sbin or
 # /sbin, so the NOPASSWD rule cannot be used to brick the session or write
 # anywhere else.
@@ -23,10 +23,12 @@
 #
 # Prints exactly one of "changed" / "unchanged" on stdout (with --check:
 # "would-change" / "unchanged"). Exit 2 = invalid input, 1 = runtime failure.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+LC_ALL=C
+export LC_ALL
 set -eu
 set -f # no globbing: PATH entries are split on ':' below and must stay literal
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
-export PATH
 CONFIG_FILE=/private/var/db/com.apple.xpc.launchd/config/user.plist
 
 die() { printf 'launchd-path-apply: %s\n' "$1" >&2; exit "${2:-1}"; }
@@ -48,14 +50,22 @@ want=$1
 
 [ -n "$want" ] || die "invalid PATH: empty" 2
 [ "${#want}" -le 4096 ] || die "invalid PATH: longer than 4096 characters" 2
+# Whole-string checks first: a newline or CR inside an entry lets a line-oriented
+# matcher (printf | grep) pass on any ONE line, so reject control characters up
+# front. The per-entry `case` globs below also match the whole entry.
+case "$want" in *[[:cntrl:]]*) die "invalid PATH: control character (newline, CR, tab, ...)" 2 ;; esac
 case "$want" in :*|*:|*::*) die "invalid PATH: empty entry" 2 ;; esac
 
 seen=:
 old_ifs=$IFS
 IFS=:
 for entry in $want; do
-  printf '%s' "$entry" | ggrep -Eq '^/[A-Za-z0-9._@+/-]*$' \
-    || die "invalid PATH entry '$entry': must be an absolute path of [A-Za-z0-9._@+/-]" 2
+  case "$entry" in
+    /*[!A-Za-z0-9._@+/-]*|[!/]*|"")
+      die "invalid PATH entry '$entry': must be an absolute path of [A-Za-z0-9._@+/-]" 2 ;;
+    *//*|?*/)
+      die "invalid PATH entry '$entry': no // and no trailing /" 2 ;;
+  esac
   case "/$entry/" in */../*|*/./*) die "invalid PATH entry '$entry': no . or .. components" 2 ;; esac
   case "$seen" in *":$entry:"*) die "invalid PATH: duplicate entry '$entry'" 2 ;; esac
   seen="$seen$entry:"

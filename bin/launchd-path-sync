@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import plistlib
 import pwd
+import re
 import subprocess
 import sys
 
@@ -32,7 +33,7 @@ def dedupe(path: str) -> str:
     for entry in path.split(":"):
         if not entry.startswith("/"):
             continue  # empty ("::") or relative entries never belong in launchd's PATH
-        entry = entry.rstrip("/") or "/"
+        entry = re.sub("/+", "/", entry).rstrip("/") or "/"  # the applier refuses // and a trailing /
         if entry not in seen:
             seen.append(entry)
     return ":".join(seen)
