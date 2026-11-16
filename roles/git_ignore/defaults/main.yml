@@ -1,0 +1,6 @@
+---
+# Global git excludes file. XDG default; git reads it when core.excludesFile is unset.
+git_ignore_dest: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/git/ignore"
+# Set true (-e git_ignore_adopt=true) to replace a live file that differs from
+# the repo copy. Ansible keeps a timestamped backup beside it.
+git_ignore_adopt: false

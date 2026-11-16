@@ -325,6 +325,14 @@ container-route-setup:
 tart-route-setup:
     roles/tart_route/files/tart-route-setup.sh
 
+# Global git excludes file (roles/git_ignore): installs ~/.config/git/ignore from
+# roles/git_ignore/files/ignore; refuses to overwrite a differing live file.
+git-ignore-apply *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook playbooks/git_ignore.yml {{ args }}
+
+git-ignore-check *args:
+    ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-$PWD/ansible.cfg}" ansible-playbook --check --diff playbooks/git_ignore.yml {{ args }}
+
 # Control-node maintenance LaunchAgents (Phase F1): system-state-backup +
 # hibernate-disk-check. No secrets; localhost only.
 site-agents-apply *args:
