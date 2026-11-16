@@ -361,9 +361,23 @@ func waitExit(_ a: NSRunningApplication) -> Bool {
     return a.isTerminated
 }
 
+/// Dismiss a frozen screenshot preview without touching other apps.
+func dismissScreenshotUI() {
+    for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.screencaptureui") {
+        let pid = app.processIdentifier
+        // SIGTERM cleared the stuck preview in the live incident; escalate
+        // only if the same application is still running after a short wait.
+        let sent = kill(pid, SIGTERM) == 0
+        let exited = waitExit(app)
+        let forced = !exited && app.forceTerminate()
+        log("screenshot UI pid \(pid): TERM=\(sent) exited=\(exited) forceTerminate=\(forced)")
+    }
+}
+
 func fix() {
     snapshot()
     DispatchQueue.global(qos: .utility).async { captureIncident() }  // never let evidence-gathering block the fix
+    dismissScreenshotUI()
     // 1. Karabiner Settings app left open drives config-reload storms.
     for a in NSRunningApplication.runningApplications(withBundleIdentifier: "org.pqrs.Karabiner-Elements.Settings") {
         if !a.terminate() || !waitExit(a) { a.forceTerminate() }  // it ignores SIGTERM
@@ -444,7 +458,7 @@ final class Controller: NSObject {
     }
 
     func text() -> String {
-        "Input rescue ran (Karabiner reset, stuck buttons released).\n"
+        "Rescue ran (screenshot UI cleared, input reset).\n"
             + "Logging out in \(remaining) s.\n"
             + "If input works now: click Cancel or press Esc.\n"
             + "If clicks still dead: move pointer to TOP-RIGHT corner to cancel."
