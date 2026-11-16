@@ -210,7 +210,7 @@ fi
 # unknown runner) consumes the token (renamed away, then deleted, before the load gate and any slot wait) and runs here; a run
 # that then gives up (exit 75) or is killed has spent it, and djbclark is asked again. A run that is
 # targeted anyway never consumes it. Authentication: djbclark's Touch ID helper `sudo-ask` (an Allow dialog that shows the
-# command and directory, then sudo's Touch ID/password), else `sudo -k /usr/bin/true`. Each approval and each consumption is
+# command and directory, then sudo's Touch ID/password), else `sudo -k /usr/bin/true`; both run under `env -i` with only a fixed PATH, HOME, USER, LANG and TERM (bg_scrub_run), so a caller's BASH_ENV/ENV/DYLD_* never reaches them. Each approval and each consumption is
 # appended to ~/.local/state/bg/approvals.log (time, event, hash prefix, directory, program name; never the arguments). The
 # command itself is shown to djbclark (that is the point) and so lands in sudo-ask's own log (~/.local/state/sudo-ask/log) and in
 # the system log's record of the sudo call: never put a secret in an argument (secretspec injects environment instead).
@@ -251,6 +251,20 @@ bg_approval_consume() {
   bg_appr_log refused-expired-or-damaged "$key" "$1"
   return 1
 }
+# bg_scrub_run CMD ARGV...: run CMD under `env -i` with ONLY an allow-list (operator 2026-11-15): a fixed trusted PATH (never the
+# caller's), HOME, USER, LANG, TERM. Everything else the caller exported (BASH_ENV, ENV, PYTHONSTARTUP, LD_*/DYLD_*, IFS, LC_*,
+# PATH entries, XDG_STATE_HOME, SUDO_ASK_MAX_WAIT...) is dropped, so it cannot reach sudo-ask or sudo, the
+# helper that decides whether djbclark approved (as root they run only /usr/bin/printf; the approved command itself runs later, unprivileged,
+# with the caller's environment). This protects sudo-ask's shell, not bg's own: a BASH_ENV or exported function runs inside bg before this
+# point (same user, no privilege boundary: honest mistakes only, as below). LANG, TERM and USER pass only if they are plain names ([A-Za-z0-9_.@-]), else a safe default. HOME is
+# the caller's (the helper is found under it, and it is on the allow-list). Both authentication calls below go through here.
+bg_scrub_run() {
+  local lang=${LANG-} term=${TERM-} user=${USER-}
+  [[ "$lang" =~ ^[A-Za-z0-9_.@-]+$ ]] || lang=en_US.UTF-8
+  [[ "$term" =~ ^[A-Za-z0-9_.@-]+$ ]] || term=dumb
+  [[ "$user" =~ ^[A-Za-z0-9_.@-]+$ ]] || user=$(/usr/bin/id -un)
+  /usr/bin/env -i PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" USER="$user" LANG="$lang" TERM="$term" "$@"
+}
 # bg_approve_local [--ttl T] -- CMD...
 bg_approve_local() {
   local ttl=1h secs unit key tmp now sa="$HOME/.local/bin/sudo-ask" shown
@@ -279,12 +293,12 @@ bg_approve_local() {
   if [ -x "$sa" ]; then
     # The Allow dialog shows the command and directory (mouse click only); sudo then asks for Touch ID or the password.
     # -k: sudo ignores any cached credential for this one command (the machine's sudo timestamp is global), so Touch ID is asked
-    "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
+    bg_scrub_run "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
       echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
   else
     # -k with a command: ask afresh, run /usr/bin/true, and leave the machine's sudo ticket neither cleared nor refreshed
     # (`sudo -k` then `sudo -v` would cache a new global ticket for every session; lead adversary B4)
-    /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+    bg_scrub_run /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
   fi
   mkdir -p "$bg_appr_dir" && chmod 700 "$bg_appr_dir" || return 1
   tmp=$(mktemp "$bg_appr_dir/.tmp.XXXXXX") || return 1
