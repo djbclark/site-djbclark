@@ -35,12 +35,10 @@ mac_dns_exclude_services: ["Tailscale"]
 # nothing else, by design.
 mac_dns_tailscale_accept_dns: false
 
-# Homebrew tailscale CLI (same arch rule as site_agents_homebrew_prefix).
-mac_dns_tailscale_bin: >-
-  {{
-    ('/opt/homebrew' if ansible_facts.get('architecture', 'arm64') in ['arm64', 'aarch64'] else '/usr/local')
-    ~ '/bin/tailscale'
-  }}
+# Tailscale CLI: the root-owned wrapper /usr/local/bin/tailscale (execs the
+# Tailscale.app binary). Not a Homebrew path: no brew tailscale is installed
+# here, and the wrapper is the same location on both architectures.
+mac_dns_tailscale_bin: /usr/local/bin/tailscale
 
 # Post-apply probes through the real system resolver. The tailnet probe uses
 # this host's own MagicDNS name (always present); the public probe catches the
