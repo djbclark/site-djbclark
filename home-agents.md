@@ -2,7 +2,7 @@
 
 `~` is no git repo; `~/AGENTS.md`, `~/CLAUDE.md` point here (`site-public-djbclark`).
 
-**Only Claude Opus 5.5+ edits this file or `cursor/home-agents.mdc`**, item-11 fixes too; others: native `paseo run` (`skills/model-routing`). **Unavailable required agent → capable available agent** (2026-11-10). Tight quota: wait/ask; no other Anthropic route.
+**Only Claude Opus 5.5+ or Codex Astra (gpt-6-astra) edits this file or `cursor/home-agents.mdc`**, item-11 fixes too; others: native `paseo run` (`skills/model-routing`). **Unavailable required agent → capable available agent** (2026-11-10). Tight quota: wait/ask; no other Anthropic route.
 **Both files load every session: each under 200 lines, 14,000 bytes; target ≤13,000, prune at most weekly** (`memory/reference_instruction_file_size.md`).
 Rule plus pointer: detail in the named `site-private-djbclark/memory/` file, else `reference_agent_rules_*.md`.
 **Agents keep both files in step, unasked.** A condense keeps every active rule and needed `memory/*.md` pointer
@@ -21,7 +21,7 @@ for _code discovery_; **relay its "tokens saved ≈ N" banner** as a total. `rtk
 5. **New tool, MCP server or plugin? Document it in its repo's README; the apply-toolchain prompt is archived (2026-11-06): add nothing. New skills go in unasked unless sensitive** (`memory/feedback_ask_update_apply_toolchain_prompt.md`). **Nothing is version-pinned: upgrade agent TUIs, CLIs, ACP servers unasked; no hard-coded version paths** (`memory/feedback_ai_tuis_always_latest.md`).
 6. **No `--help` on live-service CLI subcommands. Secrets: `sudo-secretspec` only, skill first; configs: key names only, never raw** (`memory/feedback_no_help_flag_on_live_service_cli.md`, `memory/feedback_always_use_secretspec.md`)
 7. **Web search/fetch: search first with the shared `mcp__firecrawl__*`** (Hyades); **never the paid `mcp__claude_ai_Firecrawl__*`** unless asked. **Every needed page gets fetched**: fall back, fix the tool or pause for djbclark; never "unfetchable" (`memory/feedback_web_failover_pause.md`).
-8. **Reply lists: labels, never `-`/`*` bullets. Headings `A.`, `B.`; items `A1` (sub-items `A1a`), each labelled once; one label per paragraph, blank lines between (else Markdown merges them); no headings: `1.`, `2.`; question-card options too** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card** (`memory/feedback_links_clickable_markdown.md`).
+8. **Replies: follow `~/src/djbclark-ade/docs/ref-labels.md` Parts A/B: Roman sections, bold-italic item labels, blank lines; script-issued `Ref:` last line. Question-card options: `1.`, `2.`, …** (`memory/feedback_numbered_bullets.md`). **URLs as markdown links; copyables in prose before a question card** (`memory/feedback_links_clickable_markdown.md`).
 42. **ELI5 or plain-language ask: the `eli5` skill.**
 9. **Never discard paid-for work unasked**: never stop agents/workflows partway or rerun finished work. **Interrupted (restart, crash, session end)? Resume from its transcript, never relaunch**: sub-agent `SendMessage` its id, Paseo `paseo send`; stateless pollers may restart (`memory/feedback_resume_not_relaunch.md`). Quota tight or pause asked: stop scheduling, let running work finish. **Accidental breakage: ask djbclark whether to fix it, last in queue.**
 10. **Run every command yourself**, Touch ID/`sudo-ask` and confirmations included; never have djbclark type `! <command>` (`memory/feedback_run_commands_yourself.md`).
