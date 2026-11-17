@@ -5,8 +5,9 @@ set -euo pipefail
 # Upgrades every Homebrew formula and cask (--greedy: auto_updates casks too),
 # globally-installed npm packages (both the user ~/.local npm tree and
 # Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
-# ~/.dsh/profiles/<name> plugin tree), native Codex, uv tools and Kiri
-# (`kiri update`), under the
+# ~/.dsh/profiles/<name> plugin tree), native Codex, uv tools, Kiri
+# (`kiri update`) and chrome-use (`chrome-use upgrade` + a fast-forward pull of
+# ~/src/chrome-use, the skill-everywhere skill-data root), under the
 # exclusive site advisory lock (Phase F4). Paseo plugins are left to Cafe
 # (auto-update on by default: ~30s after daemon start, then every six hours;
 # failures stay isolated per plugin). zcode-app-cli and
@@ -367,6 +368,25 @@ run_venicecode_pass() {
   "$script"
 }
 
+# chrome-use (leeguooooo/chrome-use) drives the real logged-in Chrome. `chrome-use
+# upgrade` self-updates the CLI and its version-matched skills; the ~/src/chrome-use
+# checkout is the skill-everywhere skill-data root, so it tracks upstream with a
+# fast-forward git pull. Both skipped until installed. stdin from /dev/null so an
+# upgrade can never wait on a prompt.
+run_chrome_use_pass() {
+  local cli
+  cli="$(command -v chrome-use 2>/dev/null || true)"
+  if [ -n "$cli" ]; then
+    echo "[brew-fast-upgrade] chrome-use: upgrading CLI + skills"
+    "$cli" upgrade </dev/null || return 1
+  fi
+  if [ -d "$HOME/src/chrome-use/.git" ]; then
+    echo "[brew-fast-upgrade] chrome-use: git pull ~/src/chrome-use"
+    git -C "$HOME/src/chrome-use" pull --ff-only --quiet || return 1
+  fi
+  return 0
+}
+
 # Outdated uv tools, one "name vX [required: …] [latest: Y]" line each (empty
 # when clean). An exact `==` pin shows up here on purpose (nothing may be
 # pinned). Tools installed from a local path or git (e.g. pytgcli from
@@ -604,6 +624,9 @@ run_upgrade_and_restart_apps() {
     if ! run_venicecode_pass; then
       echo "[brew-fast-upgrade] venicecode pass failed on attempt $attempt"
     fi
+    if ! run_chrome_use_pass; then
+      echo "[brew-fast-upgrade] chrome-use pass failed on attempt $attempt"
+    fi
 
     if verify_clean && [ "$codex_rc" -eq 0 ]; then
       echo "[brew-fast-upgrade] Verification passed: nothing outdated remains (attempt $attempt)."
@@ -622,7 +645,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_kiri_pass run_venicecode_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_kiri_pass run_venicecode_pass run_chrome_use_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
