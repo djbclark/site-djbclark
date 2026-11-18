@@ -82,8 +82,22 @@ jobs:
   deployment-package-conformance:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      BUILD_SOURCE: ${{ inputs.published_master && './build-source' || '.' }}
+      TARGET_HOST: ${{ inputs.target_host || 'vps-hub' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        if: inputs.published_master != ''
+        with:
+          ref: ${{ inputs.published_master }}
+          path: build-source
+      - name: Validate bounded deployment target
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          assert os.environ['TARGET_HOST'] in {'vps-hub', 'vps-primary'}
+          PYCODE
       - uses: actions/checkout@v7
         with:
           repository: djbclark/djbclark-ade
@@ -97,9 +111,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: lts/*
-      - name: Build the broker package used by the hub configuration
+      - name: Build the broker package from the selected deployment source
         run: |
-          nix build --print-build-logs './nixos#nixosConfigurations.vps-hub.pkgs.nats-server' --out-link "$RUNNER_TEMP/hub-nats-package"
+          nix build --print-build-logs "$BUILD_SOURCE/nixos#nixosConfigurations.$TARGET_HOST.pkgs.nats-server" --out-link "$RUNNER_TEMP/hub-nats-package"
           "$RUNNER_TEMP/hub-nats-package/bin/nats-server" --version
           git -C coordination-proof rev-parse HEAD
       - name: Test role and receipt fences on the actual deployment package
