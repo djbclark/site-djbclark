@@ -662,7 +662,7 @@ def do_apply(ctx: Ctx, args) -> int:
         maintenance(ctx, "begin")
         save_state(ctx, "last-attempt.json", phase="reserved")
         boundary(ctx)
-    except Hold as exc:
+    except (Exception, KeyboardInterrupt) as exc:
         ctx.log(f"HOLD: {exc}")
         save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
         return 4

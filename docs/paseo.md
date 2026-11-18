@@ -87,14 +87,40 @@ and never restores writable state or restarts a revoked baseline. Existing
 codesign, daemon PID/executable vnode, sessions/plugins and absolute old-bundle
 CLI checks remain; idle observations and the local installer lock are not a drain.
 
-**Integration gap:** native maintenance is presently a proposal, not installed
-support. In particular an independently verifiable offline status API is needed
-between daemon shutdown and restart. The adapter holds when that status cannot
-be read. First adoption remains a separately reviewed manual operation. A held
-reservation after interruption requires explicit native recovery; the installer
-does not pretend a lost owner token means success or clear the reservation.
-Native admission must check all agents/permissions without CLI pagination gaps.
+The native source interface includes `daemon maintenance verify-offline --generation
+N --transaction-id ID --json`. It reads only protected canonical real-account
+`~/.paseo` enrollment/reservation state. Installer passes no home override to this
+command, and requires the selected daemon home to match that canonical home.
+An online native maintenance response comes from client methods that require
+`maintenanceReservationV1=true`; the separately qualified old bundle hash binds
+that CLI implementation. A live status failure is never an excuse to use an
+offline file. Offline verification is used only after existing daemon/PID-lock
+checks independently prove shutdown, and its generation/transaction must match
+the retained BEGIN reservation. Native source implementation still requires its
+own CI/adversary/security qualification; source presence is not live support.
+First adoption on an unsupported old daemon remains separately operator-approved.
 
-Qualification tests run on Linux in `paseo-qualified-upgrade`; existing legacy
-swap tests still need explicit policy/reservation fixtures before they can cover
-the newly authorized happy path. No local pytest or Mac build is part of this change.
+END releases admission. Its atomic idle-tombstone rename is the native logical
+commit point, directory fsync establishes durability, and response acknowledgment
+is not the commit point. The installer persists `verified-held`, then
+`release-intent`, before END. Lost/uncertain END response records
+`release-uncertain`, holds, and never automatically retries END, rolls back a
+binary or restarts a daemon after a possible release. Reconciliation requires an
+independent status observation and controller decision. Tokens remain only in
+memory and private stdin, never argv/logs/journal. An interrupted holder that
+loses its once-only token stays held for explicit native recovery; a new
+invocation cannot invent fallback permission or silently acquire that hold.
+
+Both legacy swap and new qualification suites run on Linux in
+`paseo-qualified-upgrade`. Legacy tests inject an explicit fake controller and
+native reservation in process, while using the real production authorization
+checks. Former assumptions that confirmation/terminal flags, same-version cached
+ZIPs or a lost native owner allow progress now assert holds. Tests cover protected
+reader ownership/permissions, symlinks, hardlinks, FIFOs, stable file and ancestor
+identity, missing/malformed/duplicate/oversized policy, offline continuity,
+revocation, retained artifacts, recovery and END response uncertainty. Shared
+Unicode hash parity runs the installer Python encoder, the desktop Python
+reference and a snapshot of the actual desktop TypeScript encoder against the
+same fixture (including astral/private-use characters, links and empty dirs).
+No local pytest or Mac build is part of this change. Dry-run creates no state,
+logs or lock directory and never reserves or mutates the application.

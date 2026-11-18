@@ -199,7 +199,7 @@ def native_runner(ctx, fake, *, offline=True, fail_runtime=False, recover=False,
                     "transactionId": "test-controller", "ownerToken": "T" * 43, "recoveryRequired": False}))
             if action == "end":
                 assert "T" * 43 not in argv
-                assert input_text == "PRIVATE-TOKEN\n"
+                assert input_text == "T" * 43 + "\n"
                 return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "idle", "generation": 1, "recoveryRequired": False}))
             if action == "verify-offline":
                 assert "--home" not in argv
@@ -403,3 +403,68 @@ def test_shared_desktop_python_typescript_unicode_parity(tmp_path):
     original = reference
     (tmp_path / "manifest.json").write_text("changed", encoding="utf-8")
     assert bundle_sha256(tmp_path) != original
+
+
+@pytest.mark.parametrize("when", ["begin", "quit", "swapped", "open"])
+def test_revocation_after_reservation_at_each_mutation_boundary(qualified, monkeypatch, when):
+    ctx, fake, value = qualified
+    native = native_runner(ctx, fake)
+    def revoke():
+        value["operations"]["activate"]["allowed"] = False
+    def runner(argv, timeout=60, input_text=None):
+        result = native(argv, timeout, input_text)
+        if (when == "begin" and "maintenance" in argv and "begin" in argv) or (when == "quit" and argv[0] == "osascript" and "to quit" in argv[2]) or (when == "open" and argv[0] == "open"):
+            revoke()
+        return result
+    ctx.runner = runner
+    save = plu.save_state
+    def journal(c, name="last-run.json", **data):
+        save(c, name, **data)
+        if when == "swapped" and data.get("phase") == "swapped":
+            revoke()
+    monkeypatch.setattr(plu, "save_state", journal)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.reservation and not ctx.swapped_back
+    if when in ("begin", "quit"):
+        assert not ctx.swapped and ctx.staged.exists()
+    if when != "open":
+        assert not any(c[0] == "open" for c in fake.calls)
+    if when == "begin":
+        assert not touched(fake)
+
+
+@pytest.mark.parametrize("failure", ["refused", "lost-response", "interrupt"])
+def test_begin_failure_never_mints_fallback_permission(qualified, failure):
+    ctx, fake, _ = qualified
+    original = fake.__call__
+    def runner(argv, timeout=60):
+        if "maintenance" in argv and "begin" in argv:
+            if failure == "interrupt":
+                raise KeyboardInterrupt()
+            return plu.Result(1, "", "begin refused") if failure == "refused" else plu.Result(0, "invalid-json")
+        return original(argv, timeout)
+    ctx.runner = runner
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert not touched(fake) and ctx.installed.exists() and ctx.staged.exists()
+    assert not ctx.reservation
+    assert json.loads((ctx.state_dir / "last-attempt.json").read_text())["phase"] == "recovery-required"
+
+
+@pytest.mark.parametrize("mutation", [lambda d: d.update(generation=2), lambda d: d.update(transactionId="other"), lambda d: d.update(recoveryRequired=False), lambda d: d.update(state="idle"), lambda d: d.update(schemaVersion=True)])
+def test_offline_proof_must_match_exact_native_hold(qualified, mutation):
+    ctx, fake, _ = qualified
+    plu.authorize(ctx, capture=True)
+    ctx.reservation = {"generation": 1, "transactionId": "test-controller", "ownerToken": "T" * 43}
+    fake.daemon_up = False
+    original = fake.__call__
+    def runner(argv, timeout=60):
+        if "verify-offline" in argv:
+            value = {"schemaVersion": 1, "state": "recovery-required", "generation": 1,
+                     "transactionId": "test-controller", "recoveryRequired": True}
+            mutation(value)
+            return plu.Result(0, json.dumps(value))
+        return original(argv, timeout)
+    ctx.runner = runner
+    with pytest.raises(Hold):
+        plu.swap_in(ctx)
+    assert not ctx.swapped and ctx.staged.exists() and ctx.installed.exists()
