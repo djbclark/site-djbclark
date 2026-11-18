@@ -787,3 +787,39 @@ def test_backup_prefix_cannot_release_even_with_expected_mapped_library(qualifie
     assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
     assert "end" not in actions and ctx.swapped and not ctx.swapped_back and ctx.reservation
     assert ctx.backup.exists()
+
+
+@pytest.mark.parametrize("failure", [None, "missing-path", "truncated-path", "invalid-unicode", "short-info", "wrong-pid", "invalid-start", "changed-start", "library-error"])
+def test_kernel_executable_reader_contract_without_native_calls(monkeypatch, failure):
+    import types
+    calls = {"info": 0}
+    def info(pid, flavor, arg, pointer, size):
+        assert flavor == 3 and arg == 0 and size == 136
+        calls["info"] += 1
+        result = pointer._obj
+        result.pid = pid + 1 if failure == "wrong-pid" else pid
+        result.start_sec = 1000000 + (calls["info"] if failure == "changed-start" else 0)
+        result.start_usec = 1000000 if failure == "invalid-start" else 123
+        return size - 1 if failure == "short-info" else size
+    def path(pid, buffer, size):
+        assert size == 4096
+        if failure == "missing-path":
+            return 0
+        if failure == "truncated-path":
+            return size
+        buffer.value = b"/invalid-\xff" if failure == "invalid-unicode" else b"/Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+        return len(buffer.value)
+    def library(name, use_errno):
+        assert name == "/usr/lib/libproc.dylib" and use_errno is True
+        if failure == "library-error":
+            raise OSError("unsupported")
+        return types.SimpleNamespace(proc_pidinfo=info, proc_pidpath=path)
+    monkeypatch.setattr(plu.sys, "platform", "darwin")
+    monkeypatch.setattr(plu.ctypes, "CDLL", library)
+    if failure is None:
+        result = plu.process_executable(123)
+        assert result["pid"] == 123 and result["start"] == (1000000, 123)
+        assert result["path"].endswith(HELPER_REL)
+    else:
+        with pytest.raises(Hold):
+            plu.process_executable(123)

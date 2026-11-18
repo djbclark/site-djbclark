@@ -148,3 +148,22 @@ launch facts, not precomputed candidate identity. The journal records PID/time a
 a SHA256 of the process token, never its raw value; the native reservation owner
 token is neither logged nor journaled. Receipt failure before END keeps admission
 held and records recovery-required, not successful release or rollback.
+
+### Exact daemon executable identity
+
+Runtime verification does not infer the executable from any mapped library.
+The macOS kernel `proc_pidpath` API supplies the actual executable vnode path;
+`proc_pidinfo(PROC_PIDTBSDINFO)` binds PID and process start seconds/microseconds
+before and after that lookup. The installer then requires a canonical regular
+executable strictly under the exact installed bundle's `Contents` component.
+Backup-prefix lookalikes, sibling bundles, dot/dotdot paths, symlink escapes,
+missing/deleted paths and ambiguous evidence hold.
+
+NUL-delimited `lsof -F0pfinD -d txt` records must name that same executable exactly
+once under the requested PID, with device/inode matching the qualified on-disk
+file. Expected mapped libraries cannot satisfy this check. Kernel PID/start/path,
+file metadata, daemon status and both qualified bundle hashes are checked again
+after observation waits; process start identity must also remain stable across
+settling and the pre-END check. Any uncertain executable identity keeps admission
+held, retains artifacts and prevents release. Linux tests inject the kernel reader
+only in process; source validation is not a macOS runtime qualification.
