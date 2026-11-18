@@ -37,7 +37,7 @@ def bundle_sha256(root):
                 if stat.S_ISLNK(s.st_mode):
                     target = os.readlink(p)
                     target.encode("utf-8", errors="strict")
-                    if not p.resolve().is_relative_to(base):
+                    if not p.resolve(strict=True).is_relative_to(base):
                         raise Hold("bundle link escapes closure")
                     records.append(["l", rel, mode, target])
                 elif stat.S_ISDIR(s.st_mode):
@@ -77,28 +77,44 @@ def bundle_sha256(root):
 def read_policy():
     """Fixed real-account path, verified parents and regular owned private file."""
     path = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".local/state/djbclark-ade/forks/paseo-desktop-policy.json"
-    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    fds, links = [], []
     try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fds.append(fd)
         for part in path.parts[1:-1]:
             nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = nxt
-            s = os.fstat(fd)
+            fds.append(nxt)
+            s = os.fstat(nxt)
             if s.st_uid not in (0, os.getuid()) or s.st_mode & 0o022:
                 raise Hold("unprotected policy parent")
+            links.append((fd, part, fingerprint(s)))
+            fd = nxt
         leaf = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         with os.fdopen(leaf, "rb") as f:
             s = os.fstat(f.fileno())
-            if not stat.S_ISREG(s.st_mode) or s.st_uid != os.getuid() or s.st_mode & 0o077:
+            if not stat.S_ISREG(s.st_mode) or s.st_uid != os.getuid() or s.st_mode & 0o077 or s.st_nlink != 1:
                 raise Hold("unprotected policy file")
             raw = f.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024 or fingerprint(s) != fingerprint(os.fstat(f.fileno())):
                 raise Hold("unstable policy file")
-        return json.loads(raw)
+        if fingerprint(os.stat(path.name, dir_fd=fd, follow_symlinks=False)) != fingerprint(s):
+            raise Hold("policy path changed during read")
+        for parent, name, expected in links:
+            if fingerprint(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected:
+                raise Hold("policy ancestor changed during read")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise Hold("duplicate policy key")
+                result[key] = value
+            return result
+        return json.loads(raw, object_pairs_hook=unique)
     except (OSError, ValueError) as exc:
         raise Hold("protected controller policy unavailable") from exc
     finally:
-        os.close(fd)
+        for fd in reversed(fds):
+            os.close(fd)
 
 
 def grant(policy, operation):

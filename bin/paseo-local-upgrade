@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import plistlib
+import pwd
 import re
 import signal
 import subprocess
@@ -101,6 +102,7 @@ class Ctx:
     authorization: dict = field(default_factory=dict)
     operation: str = "activate"
     reservation: dict = field(default_factory=dict)
+    native_home: object = lambda: str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".paseo")
 
     def log(self, msg: str) -> None:
         line = f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}"
@@ -168,9 +170,15 @@ def maintenance(ctx, action):
     """Native drain only; unknown/unsupported/busy is a hold, never a lock substitute."""
     op = authorize(ctx)
     generation = ctx.authorization["generation"]
-    args = ["daemon", "maintenance", action, "--json", "--home", ctx.home]
+    if Path(ctx.home).resolve() != Path(ctx.native_home()).resolve():
+        raise Hold("native maintenance requires canonical real-account daemon home")
+    args = ["daemon", "maintenance", action, "--json"]
+    if action != "verify-offline":
+        args += ["--home", ctx.home]
     if action == "begin":
         args += ["--generation", str(generation), "--transaction-id", op["transactionId"]]
+    elif action == "verify-offline":
+        args += ["--generation", str(ctx.reservation["generation"]), "--transaction-id", ctx.reservation["transactionId"]]
     elif action == "end":
         args += ["--generation", str(ctx.reservation["generation"]), "--owner-token-fd", "0"]
     # Do not send the token through cmd(), which logs argv.
@@ -179,18 +187,20 @@ def maintenance(ctx, action):
     ctx.log(f"native maintenance {action}: exit {res.code}")
     try:
         data = json.loads(res.out)
-        if res.code or not isinstance(data, dict) or data.get("schemaVersion") != 1:
+        if res.code or not isinstance(data, dict) or type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or type(data.get("recoveryRequired")) is not bool:
             raise Hold("native maintenance unsupported or failed")
         if action == "end":
-            if data.get("state") != "idle" or data.get("generation") != ctx.reservation["generation"]:
+            if data["recoveryRequired"] is not False or data.get("state") != "idle" or data.get("generation") != ctx.reservation["generation"]:
                 raise Hold("native maintenance release uncertain")
             ctx.reservation = {}
             return
+        if action == "verify-offline" and (data.get("state") != "recovery-required" or data["recoveryRequired"] is not True):
+            raise Hold("offline reservation proof uncertain")
         expected = ctx.reservation or {"generation": generation, "transactionId": op["transactionId"]}
-        if data.get("state") not in ("held", "recovery-required") or any(data.get(k) != expected[k] for k in ("generation", "transactionId")):
+        if type(data.get("generation")) is not int or data.get("state") not in ("held", "recovery-required") or any(data.get(k) != expected[k] for k in ("generation", "transactionId")):
             raise Hold("native maintenance not held by this transaction")
         if action == "begin":
-            if data.get("state") != "held" or not isinstance(data.get("ownerToken"), str) or not data["ownerToken"]:
+            if data.get("state") != "held" or data["recoveryRequired"] is not False or not isinstance(data.get("ownerToken"), str) or not re.fullmatch("[A-Za-z0-9_-]{43}", data["ownerToken"]):
                 raise Hold("native reservation grant uncertain")
             ctx.reservation = data
     except (ValueError, TypeError, KeyError) as exc:
@@ -201,7 +211,29 @@ def boundary(ctx):
     authorize(ctx)
     if not ctx.reservation:
         raise Hold("native maintenance reservation required")
-    maintenance(ctx, "status")
+    # Never use an offline file as a fallback for an unknown/running daemon.
+    # Live status methods in the qualified native CLI require server_info's
+    # maintenanceReservationV1=true; unsupported old daemons fail closed there.
+    maintenance(ctx, "verify-offline" if daemon_is_stopped(ctx) else "status")
+
+
+def release_verified(ctx, phase, error=None):
+    """END's durable idle tombstone is commit; a lost response is never rollback permission."""
+    try:
+        boundary(ctx)
+        save_state(ctx, phase="verified-held", error=error)
+        authorize(ctx)
+        save_state(ctx, phase="release-intent", error=error)
+        maintenance(ctx, "end")
+        save_state(ctx, phase=phase, error=error)
+        return True
+    except (Exception, KeyboardInterrupt) as exc:
+        ctx.log("release uncertain; no automatic retry, rollback or restart")
+        try:
+            save_state(ctx, phase="release-uncertain", error=type(exc).__name__)
+        except OSError:
+            ctx.log("release uncertainty record could not be persisted; inspect release-intent")
+        return False
 
 
 def bundle_info(app: Path) -> dict:
@@ -352,26 +384,31 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
     status = daemon_status(ctx)
     if not status or status.get("localDaemon") != "running":
         raise Fail(f"daemon not running: {status}")
+    if type(status.get("pid")) is not int or status["pid"] <= 0:
+        raise Fail("daemon PID identity unavailable")
     if status.get("pid") == old_pid:
         raise Fail("daemon pid unchanged: the new app did not start a new daemon")
+    signature = ctx.cmd(["codesign", "--verify", "--deep", "--strict", str(ctx.installed)])
+    if signature.code:
+        raise Fail("installed bundle signature verification failed")
     if expect_fork:
         sig = ctx.cmd(["codesign", "-dv", str(ctx.installed)])
         if "Signature=adhoc" not in sig.err + sig.out:
             raise Fail("installed app is not the ad-hoc signed fork build")
         if (ctx.installed / "Contents/Resources/app-update.yml").exists():
             raise Fail("installed app still has app-update.yml (upstream updater config)")
-        # The daemon's executable path comes from its vnode, which follows a bundle rename (ps argv does not).
-        # If it lives in some .app, that must be the installed one. A daemon outside any bundle cannot be judged.
-        txt = ctx.cmd(["lsof", "-a", "-p", str(status.get("pid")), "-d", "txt", "-Fn"])
-        in_bundles = [ln[1:] for ln in txt.out.splitlines() if ln.startswith("n") and ".app/Contents/" in ln]
-        if any(str(ctx.backup) in p for p in in_bundles) or (
-            in_bundles and not any(str(ctx.installed) in p for p in in_bundles)
-        ):
-            raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
-        if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
-            raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
+    # The daemon's executable path comes from its vnode, which follows a bundle rename (ps argv does not).
+    # If it lives in some .app, that must be the installed one. A daemon outside any bundle cannot be judged.
+    txt = ctx.cmd(["lsof", "-a", "-p", str(status.get("pid")), "-d", "txt", "-Fn"])
+    in_bundles = [ln[1:] for ln in txt.out.splitlines() if ln.startswith("n") and ".app/Contents/" in ln]
+    if any(str(ctx.backup) in p for p in in_bundles) or (
+        in_bundles and not any(str(ctx.installed) in p for p in in_bundles)
+    ):
+        raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
+    if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
+        raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
     plugins = {p["id"]: p for p in ctx.paseo_list("plugin", "ls")}
-    need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins))
+    need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins if expect_fork else []))
     missing = [pid for pid in need if not (pid in plugins and plugins[pid].get("status") == "running")]
     if missing:
         raise Fail(f"plugins not running: {', '.join(missing)}")
@@ -450,6 +487,7 @@ def swap_in(ctx: Ctx) -> None:
         ctx.upstream_bundle = ctx.backup  # the upstream app is the backup now
         save_state(ctx, phase="swapped", old_pid=ctx.old_pid)
 
+    save_state(ctx, phase="swap-intent", old_pid=ctx.old_pid)
     swap(ctx.installed, ctx.backup, ctx.staged, ctx.installed, done)
     ctx.log(f"swapped: {ctx.installed} is now the staged build; previous app at {ctx.backup}")
 
@@ -585,16 +623,16 @@ def relaunch(ctx: Ctx) -> None:
 
 
 def do_apply(ctx: Ctx, args) -> int:
-    try:
-        authorize(ctx, "activate", capture=True)
-    except (Hold, OSError, ValueError) as exc:
-        ctx.log(f"HOLD: {exc}")
-        return 4
     errs = preflight(ctx, rollback=False)
     if errs:
         for e in errs:
             ctx.log(f"preflight: {e}")
         return 2
+    try:
+        authorize(ctx, "activate", capture=True)
+    except (Hold, OSError, ValueError) as exc:
+        ctx.log(f"HOLD: {exc}")
+        return 4
     if (code := run_gate(ctx)) is not None:
         return code
     try:
@@ -622,6 +660,7 @@ def do_apply(ctx: Ctx, args) -> int:
         return code
     try:
         maintenance(ctx, "begin")
+        save_state(ctx, "last-attempt.json", phase="reserved")
         boundary(ctx)
     except Hold as exc:
         ctx.log(f"HOLD: {exc}")
@@ -665,13 +704,8 @@ def do_apply(ctx: Ctx, args) -> int:
             return 3
         code = rollback_core(ctx, str(exc), skip_if_stopped=True)
         return 1 if code == 0 else code
-    try:
-        boundary(ctx)
-        maintenance(ctx, "end")
-    except Hold as exc:
-        save_state(ctx, phase="recovery-required", error=str(exc))
+    if not release_verified(ctx, "done"):
         return 4
-    save_state(ctx, phase="done")
     ctx.log("done: the staged build is installed and verified")
     return 0
 
@@ -682,6 +716,7 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
         authorize(ctx, "recover", capture=True)
         if not ctx.reservation:
             maintenance(ctx, "begin")
+        save_state(ctx, "last-attempt.json", phase="reserved")
         boundary(ctx)
     except (Hold, OSError, ValueError) as exc:
         ctx.log(f"HOLD recovery: {exc}")
@@ -717,28 +752,23 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
         ctx.log("relaunch held: recovery uncertain")
         save_state(ctx, phase="rollback-failed", error=f"{error}; rollback: {exc}")
         return 3
-    try:
-        boundary(ctx)
-        maintenance(ctx, "end")
-    except Hold as exc:
-        save_state(ctx, phase="recovery-required", error=str(exc))
+    if not release_verified(ctx, "rolled-back" if after_upgrade_failure else "rolled-back-manually", error):
         return 4
-    save_state(ctx, phase="rolled-back" if after_upgrade_failure else "rolled-back-manually", error=error)
     ctx.log("rolled back to the previous app; it is running")
     return 0
 
 
 def do_rollback(ctx: Ctx, args) -> int:
-    try:
-        authorize(ctx, "recover", capture=True)
-    except (Hold, OSError, ValueError) as exc:
-        ctx.log(f"HOLD recovery: {exc}")
-        return 4
     errs = preflight(ctx, rollback=True)
     if errs:
         for e in errs:
             ctx.log(f"preflight: {e}")
         return 2
+    try:
+        authorize(ctx, "recover", capture=True)
+    except (Hold, OSError, ValueError) as exc:
+        ctx.log(f"HOLD recovery: {exc}")
+        return 4
     if (code := run_gate(ctx, skip_if_stopped=True)) is not None:
         return code
     if not args.apply:
@@ -785,7 +815,8 @@ def _abs(path: str) -> str:
 
 def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     state_dir = Path(args.state_dir).expanduser()
-    state_dir.mkdir(parents=True, exist_ok=True)
+    if args.apply:
+        state_dir.mkdir(parents=True, exist_ok=True)
     installed, staged, backup, home = args.installed, args.staged, args.backup, args.home
     notes: list[str] = []
     if args.rollback:
@@ -830,7 +861,7 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
         home=_abs(home or "~/.paseo"), settle=args.settle, timeout=args.timeout,
         require_plugins=args.require_plugin,
         allow_terminals=args.allow_terminals, updater_cache=Path(args.updater_cache).expanduser(),
-        runner=runner, sleep=sleep, log_path=state_dir / f"{stamp}-{mode}.log",
+        runner=runner, sleep=sleep, log_path=(state_dir / f"{stamp}-{mode}.log") if args.apply else None,
         shipit_cache=Path(args.shipit_cache).expanduser(),
     )
     # The CLI to trust is the upstream app's: the backup for a rollback (installed is then the fork), else installed.
@@ -886,6 +917,8 @@ def main(argv: list[str] | None = None, runner=run, sleep=time.sleep) -> int:
     except SystemExit as exc:
         print(exc, file=sys.stderr)
         return 2
+    if not args.apply:
+        return do_rollback(ctx, args) if args.rollback else do_apply(ctx, args)
     try:
         fd = open_lock()
     except OSError as exc:

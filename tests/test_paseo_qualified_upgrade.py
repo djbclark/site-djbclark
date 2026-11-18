@@ -27,6 +27,7 @@ def qualified(tmp_path):
     fake = Fake(tmp_path)
     ctx = plu.Ctx(old, target, tmp_path / "previous.app", tmp_path / "journal", str(tmp_path / "home"), 0, 1, [],
                   runner=fake, sleep=lambda _: None, updater_cache=tmp_path / "cache", shipit_cache=tmp_path / "shipit")
+    ctx.native_home = lambda: ctx.home
     value = policy(target, old)
     ctx.policy_reader = lambda: copy.deepcopy(value)
     return ctx, fake, value
@@ -89,7 +90,7 @@ def test_unsupported_reservation_never_quits(qualified):
 
 
 @pytest.mark.parametrize("response", [{}, {"schemaVersion": 1, "state": "busy"},
-    {"schemaVersion": 1, "state": "held", "generation": 999, "transactionId": "test-controller", "ownerToken": "secret"}])
+    {"schemaVersion": 1, "state": "held", "generation": 999, "transactionId": "test-controller", "ownerToken": "T" * 43}])
 def test_failed_busy_mismatched_maintenance(qualified, response):
     ctx, fake, _ = qualified
     plu.authorize(ctx, capture=True)
@@ -102,7 +103,7 @@ def test_failed_busy_mismatched_maintenance(qualified, response):
 def test_revoked_before_swap_retains_artifacts(qualified):
     ctx, _, value = qualified
     plu.authorize(ctx, capture=True)
-    ctx.reservation = {"generation": 1, "transactionId": "test-controller", "ownerToken": "secret"}
+    ctx.reservation = {"generation": 1, "transactionId": "test-controller", "ownerToken": "T" * 43}
     value["generation"] = 2
     with pytest.raises(Hold):
         plu.swap_in(ctx)
@@ -195,11 +196,17 @@ def native_runner(ctx, fake, *, offline=True, fail_runtime=False, recover=False,
             action = argv[argv.index("maintenance") + 1]
             if action == "begin":
                 return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "held", "generation": 1,
-                    "transactionId": "test-controller", "ownerToken": "PRIVATE-TOKEN", "recoveryRequired": False}))
+                    "transactionId": "test-controller", "ownerToken": "T" * 43, "recoveryRequired": False}))
             if action == "end":
-                assert "PRIVATE-TOKEN" not in argv
+                assert "T" * 43 not in argv
                 assert input_text == "PRIVATE-TOKEN\n"
                 return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "idle", "generation": 1, "recoveryRequired": False}))
+            if action == "verify-offline":
+                assert "--home" not in argv
+                if not offline:
+                    return plu.Result(1, "", "offline status unsupported")
+                return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "recovery-required", "generation": 1,
+                    "transactionId": "test-controller", "recoveryRequired": True}))
             if not offline and not fake.daemon_up:
                 return plu.Result(1, "", "offline status unsupported")
             return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "held", "generation": 1,
@@ -248,3 +255,151 @@ def test_failed_runtime_without_recovery_grant_stays_uncertain(qualified):
     assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
     assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists()
     assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"
+
+
+@pytest.fixture
+def protected_policy(tmp_path, monkeypatch):
+    """Virtual protected root: only in-process syscall/account-reader substitution."""
+    import types
+    import paseo_upgrade_policy as pp
+    home = tmp_path / "account"
+    folder = home / ".local/state/djbclark-ade/forks"
+    folder.mkdir(parents=True)
+    for directory in (home, *home.rglob("*")):
+        if directory.is_dir():
+            directory.chmod(0o700)
+    file = folder / "paseo-desktop-policy.json"
+    file.write_text('{"schemaVersion":1}')
+    file.chmod(0o600)
+    original_open = os.open
+    def virtual_root(path, flags, *args, **kwargs):
+        return original_open(tmp_path if path == "/" else path, flags, *args, **kwargs)
+    monkeypatch.setattr(pp.os, "open", virtual_root)
+    monkeypatch.setattr(pp.pwd, "getpwuid", lambda uid: types.SimpleNamespace(pw_dir="/account"))
+    return pp, file, home
+
+
+def test_protected_reader_ignores_home_and_accepts_private_stable_file(protected_policy, monkeypatch):
+    pp, _, _ = protected_policy
+    monkeypatch.setenv("HOME", "/forged/candidate")
+    assert pp.read_policy() == {"schemaVersion": 1}
+
+
+@pytest.mark.parametrize("kind", ["missing", "symlink", "fifo", "hardlink", "public", "parent-public", "parent-link", "duplicate", "malformed", "oversized"])
+def test_protected_reader_rejects_unsafe_file(protected_policy, kind):
+    pp, file, home = protected_policy
+    if kind in ("missing", "symlink", "fifo"):
+        file.unlink()
+    if kind == "symlink":
+        file.symlink_to(home / "candidate.json")
+        (home / "candidate.json").write_text('{}')
+    elif kind == "fifo":
+        os.mkfifo(file, 0o600)
+    elif kind == "hardlink":
+        os.link(file, file.with_name("other.json"))
+    elif kind == "public":
+        file.chmod(0o640)
+    elif kind == "parent-public":
+        file.parent.chmod(0o777)
+    elif kind == "parent-link":
+        real = file.parent.with_name("real")
+        file.parent.rename(real)
+        file.parent.symlink_to(real)
+    elif kind == "duplicate":
+        file.write_text('{"generation":1,"generation":2}')
+    elif kind == "malformed":
+        file.write_text('{')
+    elif kind == "oversized":
+        file.write_bytes(b' ' * (1024 * 1024 + 1))
+    with pytest.raises(Hold):
+        pp.read_policy()
+
+
+@pytest.mark.parametrize("kind", ["uid", "changed-content", "replaced-file", "replaced-parent"])
+def test_protected_reader_rejects_owner_and_read_races(protected_policy, monkeypatch, kind):
+    import types
+    pp, file, home = protected_policy
+    if kind == "uid":
+        original = os.fstat
+        def wrong_owner(fd):
+            result = original(fd)
+            import stat
+            if stat.S_ISREG(result.st_mode):
+                fields = {name: getattr(result, name) for name in dir(result) if name.startswith("st_")}
+                fields["st_uid"] = os.getuid() + 1
+                return types.SimpleNamespace(**fields)
+            return result
+        monkeypatch.setattr(pp.os, "fstat", wrong_owner)
+    else:
+        original = os.fdopen
+        class MutatingRead:
+            def __init__(self, fd, mode):
+                self.file = original(fd, mode)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return self.file.__exit__(*args)
+            def fileno(self):
+                return self.file.fileno()
+            def read(self, count):
+                raw = self.file.read(count)
+                if kind == "changed-content":
+                    file.write_bytes(b'{}')
+                elif kind == "replaced-file":
+                    other = file.with_name('replacement')
+                    other.write_bytes(raw)
+                    other.chmod(0o600)
+                    os.replace(other, file)
+                else:
+                    parent = file.parent
+                    parent.rename(parent.with_name('moved'))
+                    parent.mkdir()
+                return raw
+        monkeypatch.setattr(pp.os, "fdopen", MutatingRead)
+    with pytest.raises(Hold):
+        pp.read_policy()
+
+
+def test_end_lost_ack_records_uncertain_and_never_rolls_back(qualified):
+    ctx, fake, _ = qualified
+    native = native_runner(ctx, fake)
+    def lost_end(argv, timeout=60, input_text=None):
+        if "end" in argv and "maintenance" in argv:
+            # Native may already have committed idle tombstone before response loss.
+            assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "release-intent"
+            native(argv, timeout, input_text)
+            return plu.Result(1, "", "lost acknowledgment")
+        return native(argv, timeout, input_text)
+    ctx.runner = lost_end
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists()
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "release-uncertain"
+    assert sum(c[0] == "open" for c in fake.calls) == 1
+
+
+def test_noncanonical_home_cannot_use_offline_authority(qualified):
+    ctx, fake, _ = qualified
+    ctx.native_home = lambda: "/real/account/.paseo"
+    plu.authorize(ctx, capture=True)
+    with pytest.raises(Hold, match="canonical"):
+        plu.maintenance(ctx, "begin")
+    assert not touched(fake)
+
+
+def test_shared_desktop_python_typescript_unicode_parity(tmp_path):
+    import subprocess
+    import sys
+    fixture = Path(__file__).parent / "fixtures/paseo_bundle_hash_v1"
+    (tmp_path / "empty").mkdir(mode=0o755)
+    (tmp_path / "empty").chmod(0o755)
+    for name in ["é.txt", "😀.txt", "\uE000.txt", "manifest.json"]:
+        (tmp_path / name).write_text(name, encoding="utf-8")
+        (tmp_path / name).chmod(0o644)
+    (tmp_path / "link").symlink_to("é.txt")
+    reference = subprocess.run([sys.executable, str(fixture / "bundle-hash-v1.py"), str(tmp_path)], capture_output=True, text=True, check=True).stdout.strip()
+    code = "import {bundleSha256} from " + json.dumps((fixture / "managed-bundle.ts").resolve().as_uri()) + "; console.log(bundleSha256(process.argv[1]));"
+    typescript = subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", code, str(tmp_path)], capture_output=True, text=True, check=True).stdout.strip()
+    assert bundle_sha256(tmp_path) == reference == typescript
+    original = reference
+    (tmp_path / "manifest.json").write_text("changed", encoding="utf-8")
+    assert bundle_sha256(tmp_path) != original
