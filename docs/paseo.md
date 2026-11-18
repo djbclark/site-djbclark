@@ -49,3 +49,52 @@ the plain "handoff" and "second opinion" stay with the `handoff` skill and `acp-
    deploy with `scripts/deploy`). Deploy only the pushed branch head (`~/CLAUDE.md` 36: rebuilds are shared).
 4. The Mac app updates itself (or `brew upgrade --cask paseo`). Keep the daemons on one version: the apps talk
    to all three.
+
+## Qualified local fork installer (source adapter)
+
+`bin/paseo-local-upgrade` requires controller-owned authorization at the fixed
+real account home path `.local/state/djbclark-ade/forks/paseo-desktop-policy.json`.
+Caller `HOME`, `--home`, `--state-dir`, a candidate marker and confirmation flags
+cannot replace that policy. The file must be owned by the account, private to it,
+regular and reached through protected nonsymlink parents. Missing/revoked policy
+holds, including dry runs. No live installation is performed by CI.
+
+Schema v1 requires `component: paseo-desktop`, positive integer `generation`,
+`stateCompatibility: binary-only` and a literal-true `operations.activate` or
+`operations.recover` grant. Each binds `transactionId`, `receiptSha256`, exact
+`version`, `bundleSha256` and `previousBundleSha256`; activation also requires
+`archiveSha256` and the exact CI-stamped `Contents/Resources/managed-release.json`
+object `{"schemaVersion":1,"component":"paseo-desktop"}`. The marker selects managed
+code but grants no authority. This installer accepts already-staged bundles, does
+not download packages, and refuses pending updater archives even at the same
+version (another updater's cached identity is not this transaction).
+
+Bundle identity is SHA256 of compact UTF8 JSONL records sorted by relative POSIX
+path in code-point order, excluding the root: `["d",path,mode]`,
+`["f",path,mode,size,contentSha256]`, `["l",path,mode,literalTarget]`.
+Mode is permission bits masked by 0777. Unicode is literal, records end in LF.
+Traversal never follows symlinks; external links, special files, invalid Unicode
+and unstable metadata/content/closure hold. Two complete observations include
+empty directories and all files; there is no candidate-controlled exclusion.
+
+The adapter consumes native `daemon maintenance begin/status/end --json` with
+transaction/generation and a private owner token. Tokens are never logged or
+journaled; end uses `--owner-token-stdin`. Unsupported/busy/malformed status holds.
+Reservation remains held across quit/swap/verification; each boundary revalidates
+the current controller policy and both exact bundles. Rollback requires a fresh,
+independent recover grant under a newer generation, retains both bundle artifacts,
+and never restores writable state or restarts a revoked baseline. Existing
+codesign, daemon PID/executable vnode, sessions/plugins and absolute old-bundle
+CLI checks remain; idle observations and the local installer lock are not a drain.
+
+**Integration gap:** native maintenance is presently a proposal, not installed
+support. In particular an independently verifiable offline status API is needed
+between daemon shutdown and restart. The adapter holds when that status cannot
+be read. First adoption remains a separately reviewed manual operation. A held
+reservation after interruption requires explicit native recovery; the installer
+does not pretend a lost owner token means success or clear the reservation.
+Native admission must check all agents/permissions without CLI pagination gaps.
+
+Qualification tests run on Linux in `paseo-qualified-upgrade`; existing legacy
+swap tests still need explicit policy/reservation fixtures before they can cover
+the newly authorized happy path. No local pytest or Mac build is part of this change.
