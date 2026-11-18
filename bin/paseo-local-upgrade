@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from paseo_upgrade_policy import Hold, bundle_sha256, grant, marker, read_policy
+from paseo_upgrade_policy import Hold, bundle_sha256, grant, marker, read_policy, runtime_plugins
 
 DEFAULT_INSTALLED = "/Applications/Paseo.app"
 DEFAULT_STAGED = "/Applications/Paseo-local-beta2.app"
@@ -102,6 +102,7 @@ class Ctx:
     authorization: dict = field(default_factory=dict)
     operation: str = "activate"
     reservation: dict = field(default_factory=dict)
+    runtime_observations: list = field(default_factory=list)
     native_home: object = lambda: str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".paseo")
 
     def log(self, msg: str) -> None:
@@ -221,18 +222,21 @@ def boundary(ctx):
 
 def release_verified(ctx, phase, error=None):
     """END's durable idle tombstone is commit; a lost response is never rollback permission."""
+    release_attempted = False
     try:
         boundary(ctx)
+        verify_runtime_plugins(ctx)
         save_state(ctx, phase="verified-held", error=error)
         authorize(ctx)
         save_state(ctx, phase="release-intent", error=error)
+        release_attempted = True
         maintenance(ctx, "end")
         save_state(ctx, phase=phase, error=error)
         return True
     except (Exception, KeyboardInterrupt) as exc:
-        ctx.log("release uncertain; no automatic retry, rollback or restart")
+        ctx.log("release uncertain; no automatic retry, rollback or restart" if release_attempted else "verified release held; no END sent")
         try:
-            save_state(ctx, phase="release-uncertain", error=type(exc).__name__)
+            save_state(ctx, phase="release-uncertain" if release_attempted else "recovery-required", error=type(exc).__name__)
         except OSError:
             ctx.log("release uncertainty record could not be persisted; inspect release-intent")
         return False
@@ -383,6 +387,42 @@ def start_app_and_wait(ctx: Ctx, old_pid) -> dict:
     return daemon_status(ctx) or {}
 
 
+def verify_runtime_plugins(ctx, plugins=None):
+    """Exact managed cohort from protected consent, never from candidate/CLI flags."""
+    expected = runtime_plugins(grant(ctx.authorization, ctx.operation))
+    try:
+        entries = ctx.paseo_list("plugin", "ls") if plugins is None else plugins
+    except Fail as exc:
+        raise Hold("runtime plugin receipt schema unavailable") from exc
+    observations = []
+    for row in expected:
+        matches = [p for p in entries if p.get("id") == row["pluginId"]]
+        if len(matches) != 1:
+            raise Hold("enrolled runtime plugin missing or duplicated")
+        entry = matches[0]
+        loaded = entry.get("loaded")
+        if entry.get("enabled") is not True or entry.get("status") != "running" or entry.get("path") != row["sourcePath"] or not isinstance(loaded, dict):
+            raise Hold("enrolled runtime plugin has no running loaded receipt")
+        if any(type(loaded.get(key)) is not type(value) or loaded.get(key) != value for key, value in row.items()):
+            raise Hold("loaded runtime plugin identity differs from protected cohort")
+        pid, token, started = loaded.get("pid"), loaded.get("processStartToken"), loaded.get("startedAt")
+        if type(pid) is not int or not 0 < pid <= 2147483647 or not isinstance(token, str) or not token or len(token) > 1024 or any(ord(c) < 33 or ord(c) > 126 for c in token):
+            raise Hold("loaded runtime plugin process observation unavailable")
+        try:
+            if not isinstance(started, str) or "T" not in started:
+                raise ValueError("invalid start time")
+            stamp = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            if stamp.tzinfo is None or stamp.timestamp() <= 0:
+                raise ValueError("invalid start time")
+        except (ValueError, OverflowError) as exc:
+            raise Hold("loaded runtime plugin start time unavailable") from exc
+        observations.append({**row, "pid": pid, "startedAt": started,
+            "processStartTokenSha256": hashlib.sha256(token.encode("ascii")).hexdigest()})
+    ctx.runtime_observations = observations
+    authorize(ctx)  # the plugin listing is an external wait too
+    return entries
+
+
 def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
     status = daemon_status(ctx)
     if not status or status.get("localDaemon") != "running":
@@ -413,7 +453,7 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
         raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
     if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
         raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
-    plugins = {p["id"]: p for p in ctx.paseo_list("plugin", "ls")}
+    plugins = {p["id"]: p for p in verify_runtime_plugins(ctx)}
     need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins if expect_fork else []))
     missing = [pid for pid in need if not (pid in plugins and plugins[pid].get("status") == "running")]
     if missing:
@@ -429,6 +469,7 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
 def save_state(ctx: Ctx, name: str = "last-run.json", **kw) -> None:
     ctx.state_dir.mkdir(parents=True, exist_ok=True)
     data = {
+        "runtimePluginObservations": ctx.runtime_observations,
         "qualification": {"generation": ctx.authorization.get("generation"), "operation": ctx.operation,
             "grant": ctx.authorization.get("operations", {}).get(ctx.operation),
             "reservationHeld": bool(ctx.reservation)},
@@ -689,6 +730,8 @@ def do_apply(ctx: Ctx, args) -> int:
     except Hold as exc:
         ctx.log(f"HOLD: {exc}")
         save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
+        if ctx.swapped:
+            save_state(ctx, phase="recovery-required", error=str(exc))
         return 4
     except Stuck as exc:
         ctx.log(f"STUCK: {exc}")
@@ -745,6 +788,8 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
     except Hold as exc:
         ctx.log(f"HOLD: {exc}")
         save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
+        if ctx.swapped:
+            save_state(ctx, phase="recovery-required", error=str(exc))
         return 4
     except Stuck as exc:
         ctx.log(f"STUCK: {exc}")

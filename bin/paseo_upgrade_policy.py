@@ -5,7 +5,7 @@ import os
 import pwd
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 class Hold(Exception):
@@ -132,7 +132,46 @@ def grant(policy, operation):
     for key in ("receiptSha256", "bundleSha256", "previousBundleSha256") + (("archiveSha256",) if operation == "activate" else ()):
         if not isinstance(op.get(key), str) or not re.fullmatch("[0-9a-f]{64}", op[key]):
             raise Hold("invalid policy digest")
+    runtime_plugins(op)
     return op
+
+
+def runtime_plugins(op):
+    """Controller-derived whole enrolled cohort; empty is an explicit enrollment decision."""
+    rows = op.get("runtimePlugins")
+    if not isinstance(rows, list):
+        raise Hold("protected runtime plugin cohort missing")
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"pluginId", "sourcePath", "snapshotRoot", "snapshotSha256", "serverBundleSha256", "activationGeneration"}:
+            raise Hold("invalid runtime plugin cohort record")
+        plugin_id = row["pluginId"]
+        if not isinstance(plugin_id, str) or not plugin_id.strip() or plugin_id in seen:
+            raise Hold("invalid or duplicate runtime plugin ID")
+        try:
+            plugin_id.encode("utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise Hold("invalid runtime plugin Unicode") from exc
+        seen.add(plugin_id)
+        for key in ("sourcePath", "snapshotRoot"):
+            value = row[key]
+            if not isinstance(value, str) or "\x00" in value:
+                raise Hold("invalid plugin snapshot path")
+            try:
+                value.encode("utf-8", errors="strict")
+            except UnicodeError as exc:
+                raise Hold("invalid plugin snapshot Unicode") from exc
+            path = PurePosixPath(value)
+            if not value.startswith("/") or value.startswith("//") or str(path) != value or ".." in path.parts:
+                raise Hold("plugin snapshot path must be canonical absolute POSIX")
+        if not PurePosixPath(row["sourcePath"]).is_relative_to(PurePosixPath(row["snapshotRoot"])):
+            raise Hold("plugin source is outside enrolled snapshot")
+        for key in ("snapshotSha256", "serverBundleSha256"):
+            if not isinstance(row[key], str) or not re.fullmatch("[0-9a-f]{64}", row[key]):
+                raise Hold("invalid runtime plugin digest")
+        if type(row["activationGeneration"]) is not int or row["activationGeneration"] <= 0:
+            raise Hold("invalid runtime plugin activation generation")
+    return rows
 
 
 def marker(bundle):

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_paseo_local_upgrade import plu, make_app, Fake, touched
+from test_paseo_local_upgrade import plu, make_app, Fake, touched, expected_managed_plugins
 from paseo_upgrade_policy import Hold, bundle_sha256, grant, marker
 
 
@@ -15,7 +15,8 @@ def policy(target, old, generation=1, operation="activate"):
             "stateCompatibility": "binary-only", "operations": {operation: {
                 "allowed": True, "transactionId": "test-controller", "receiptSha256": "a" * 64,
                 "archiveSha256": "b" * 64, "version": "0.16.0-beta.2",
-                "bundleSha256": bundle_sha256(target), "previousBundleSha256": bundle_sha256(old)}}}
+                "bundleSha256": bundle_sha256(target), "previousBundleSha256": bundle_sha256(old),
+                "runtimePlugins": expected_managed_plugins()}}}
 
 
 @pytest.fixture
@@ -484,3 +485,141 @@ def test_loaded_daemon_version_mismatch_is_not_runtime_verified(qualified):
     assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
     assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists()
     assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda op: op.pop("runtimePlugins"), lambda op: op.update(runtimePlugins=None),
+    lambda op: op.update(runtimePlugins={}),
+    lambda op: op["runtimePlugins"].append(copy.deepcopy(op["runtimePlugins"][0])),
+    lambda op: op["runtimePlugins"][0].update(pluginId=""),
+    lambda op: op["runtimePlugins"][0].update(snapshotSha256="A" * 64),
+    lambda op: op["runtimePlugins"][0].update(serverBundleSha256="bad"),
+    lambda op: op["runtimePlugins"][0].update(activationGeneration=True),
+    lambda op: op["runtimePlugins"][0].update(activationGeneration=0),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="relative/plugin"),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/../elsewhere"),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/./ade-yolo"),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/ade-yolo/"),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="//immutable/ade/ade-yolo"),
+    lambda op: op["runtimePlugins"][0].update(sourcePath="/outside/ade-yolo"),
+    lambda op: op["runtimePlugins"][0].update(snapshotRoot="/immutable/ade\x00"),
+    lambda op: op["runtimePlugins"][0].update(snapshotRoot="/immutable/\ud800"),
+])
+def test_runtime_cohort_grant_schema_holds_before_mutation(qualified, mutation):
+    ctx, fake, value = qualified
+    mutation(value["operations"]["activate"])
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes", "--want-broken", "--allow-terminals"])) == 4
+    assert not touched(fake)
+
+
+def altered_plugin_runner(ctx, fake, mutate):
+    native = native_runner(ctx, fake)
+    def runner(argv, timeout=60, input_text=None):
+        result = native(argv, timeout, input_text)
+        if "plugin" in argv and "ls" in argv and ctx.swapped:
+            entries = json.loads(result.out)
+            mutate(entries)
+            return plu.Result(0, json.dumps(entries))
+        return result
+    return runner
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda p: p.pop("loaded"), lambda p: p.update(loaded=[]),
+    lambda p: p.update(enabled="true"), lambda p: p.update(status="disabled"),
+    lambda p: p.update(path="/mutable/plugin"),
+    lambda p: p["loaded"].update(pluginId="other"),
+    lambda p: p["loaded"].update(sourcePath="/mutable/plugin"),
+    lambda p: p["loaded"].update(snapshotRoot="/other/snapshot"),
+    lambda p: p["loaded"].update(snapshotSha256="0" * 64),
+    lambda p: p["loaded"].update(serverBundleSha256="0" * 64),
+    lambda p: p["loaded"].update(activationGeneration=8),
+    lambda p: p["loaded"].update(activationGeneration=True),
+    lambda p: p["loaded"].pop("pid"), lambda p: p["loaded"].update(pid=0),
+    lambda p: p["loaded"].update(pid=True), lambda p: p["loaded"].update(pid="501"),
+    lambda p: p["loaded"].update(processStartToken=""),
+    lambda p: p["loaded"].update(processStartToken="has whitespace"),
+    lambda p: p["loaded"].update(startedAt="not-a-time"),
+    lambda p: p["loaded"].update(startedAt="2026-11-18T12:00:00"),
+])
+def test_missing_or_mismatched_loaded_receipt_holds_without_end(qualified, mutation):
+    ctx, fake, _ = qualified
+    ctx.runner = altered_plugin_runner(ctx, fake, lambda rows: mutation(rows[0]))
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes", "--want-broken"])) == 4
+    assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists() and ctx.reservation
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"
+
+
+@pytest.mark.parametrize("kind", ["unrelated-substitute", "duplicate-entry"])
+def test_unrelated_or_duplicate_entries_cannot_fulfill_enrolled_cohort(qualified, kind):
+    ctx, fake, _ = qualified
+    def mutate(entries):
+        if kind == "unrelated-substitute":
+            entries[0]["id"] = "unmanaged-other"
+        else:
+            entries.append(copy.deepcopy(entries[0]))
+    ctx.runner = altered_plugin_runner(ctx, fake, mutate)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.reservation and not ctx.swapped_back
+
+
+def test_explicit_empty_enrolled_cohort_is_a_controller_decision(qualified):
+    ctx, fake, value = qualified
+    value["operations"]["activate"]["runtimePlugins"] = []
+    ctx.runner = native_runner(ctx, fake)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 0
+
+
+def test_unmanaged_plugins_do_not_need_managed_receipts(qualified):
+    ctx, fake, _ = qualified
+    ctx.runner = altered_plugin_runner(ctx, fake, lambda rows: rows.append({"id": "unmanaged", "enabled": True, "status": "running", "path": "/unmanaged"}))
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 0
+
+
+def test_new_process_observations_are_checked_but_not_precomputed(qualified):
+    ctx, fake, _ = qualified
+    def mutate(entries):
+        entries[0]["loaded"].update(pid=9001, processStartToken="fresh-process", startedAt="2026-11-18T13:00:00Z")
+    ctx.runner = altered_plugin_runner(ctx, fake, mutate)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 0
+    record = json.loads((ctx.state_dir / "last-run.json").read_text())
+    observed = record["runtimePluginObservations"]
+    assert observed[0]["pid"] == 9001 and observed[0]["processStartTokenSha256"] == hashlib.sha256(b"fresh-process").hexdigest()
+    assert "fresh-process" not in json.dumps(record)
+
+
+def test_runtime_receipts_checked_again_before_end(qualified):
+    ctx, fake, _ = qualified
+    native = native_runner(ctx, fake)
+    count, actions = {"plugins": 0}, []
+    def runner(argv, timeout=60, input_text=None):
+        if "maintenance" in argv:
+            actions.append(argv[argv.index("maintenance") + 1])
+        result = native(argv, timeout, input_text)
+        if "plugin" in argv and "ls" in argv:
+            count["plugins"] += 1
+            if count["plugins"] == 4:
+                rows = json.loads(result.out)
+                rows[0].pop("loaded")
+                return plu.Result(0, json.dumps(rows))
+        return result
+    ctx.runner = runner
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert "end" not in actions and ctx.reservation and not ctx.swapped_back
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"
+
+
+def test_recovery_receipt_mismatch_cannot_claim_success(qualified):
+    ctx, fake, value = qualified
+    native = native_runner(ctx, fake, fail_runtime=True, recover=True, value=value)
+    def runner(argv, timeout=60, input_text=None):
+        result = native(argv, timeout, input_text)
+        if "plugin" in argv and "ls" in argv and ctx.swapped_back:
+            rows = json.loads(result.out)
+            rows[0]["loaded"]["activationGeneration"] = 6
+            return plu.Result(0, json.dumps(rows))
+        return result
+    ctx.runner = runner
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.swapped_back and ctx.reservation and ctx.staged.exists()
+    assert json.loads((ctx.state_dir / "last-attempt.json").read_text())["phase"] == "recovery-required"

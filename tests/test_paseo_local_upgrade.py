@@ -25,6 +25,13 @@ UNSET = object()
 IDLE = {"id": "a" * 32, "shortId": "aaaaaaa", "status": "idle", "name": "x", "cwd": "/w"}
 
 
+def expected_managed_plugins():
+    return [{"pluginId": plugin_id, "sourcePath": f"/immutable/ade/{plugin_id}",
+        "snapshotRoot": "/immutable/ade", "snapshotSha256": "c" * 64,
+        "serverBundleSha256": "d" * 64, "activationGeneration": 7}
+        for plugin_id in ("ade-yolo", "ade-claim", "baton")]
+
+
 def make_app(path: Path, version="0.16.0-beta.2", updater=False):
     (path / "Contents" / "Resources").mkdir(parents=True)
     with (path / "Contents" / "Info.plist").open("wb") as fh:
@@ -152,7 +159,9 @@ class Fake:
             return plu.Result(0, json.dumps(self.perms))
         if sub[:2] == ["plugin", "ls"]:
             ids = ["ade-yolo", "ade-claim", "baton"]
-            plugins = [{"id": i, "enabled": True, "status": "running"} for i in ids]
+            plugins = [{"id": i, "enabled": True, "status": "running", "path": f"/immutable/ade/{i}",
+                "loaded": {**next(row for row in expected_managed_plugins() if row["pluginId"] == i),
+                    "pid": 501, "processStartToken": f"process-{i}", "startedAt": "2026-11-18T12:00:00.000Z"}} for i in ids]
             plugins.append({"id": "paseo-screen", "enabled": False, "status": "disabled"})
             if self.fork_installed() and self.bad_plugin:
                 plugins = [p for p in plugins if p["id"] != self.bad_plugin]
@@ -192,7 +201,8 @@ def env(tmp_path, monkeypatch):
             "generation": controller["generation"], "stateCompatibility": "binary-only",
             "operations": {operation: {"allowed": True, "transactionId": "legacy-controller",
                 "receiptSha256": "a" * 64, "archiveSha256": "b" * 64, "version": version,
-                "bundleSha256": identity(target), "previousBundleSha256": identity(previous)}}}
+                "bundleSha256": identity(target), "previousBundleSha256": identity(previous),
+                "runtimePlugins": expected_managed_plugins()}}}
 
     def authorized(ctx, operation=None, capture=False):
         if capture and operation == "recover" and ctx.operation != "recover" and ctx.authorization:
@@ -336,16 +346,16 @@ def test_disabled_plugin_is_not_a_failure(env):
     assert run_main(env, fake, "--apply") == 0  # paseo-screen is disabled before and after
 
 
-def test_missing_plugin_rolls_back(env):
+def test_missing_managed_plugin_holds_for_recovery(env):
     fake = Fake(env, bad_plugin="ade-yolo")
-    assert run_main(env, fake, "--apply") == 1
-    assert upstream_in_place(env) and (env / "Paseo-local.app").exists() and not (env / "Paseo-prev.app").exists()
-    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env) and (env / "Paseo-prev.app").exists()
+    assert json.loads((env / "state/last-attempt.json").read_text())["phase"] == "recovery-required"
 
 
 def test_want_broken_keeps_new_build(env):
     fake = Fake(env, bad_plugin="ade-yolo")
-    assert run_main(env, fake, "--apply", "--want-broken") == 3
+    assert run_main(env, fake, "--apply", "--want-broken") == 4
     assert not upstream_in_place(env) and (env / "Paseo-prev.app").exists()
 
 
@@ -361,19 +371,19 @@ def test_open_failure_rolls_back(env):
     assert upstream_in_place(env)
 
 
-def test_unexpected_json_after_swap_rolls_back(env):
+def test_unexpected_receipt_schema_after_swap_holds(env):
     fake = Fake(env, plugin_item_without_id=True)
-    assert run_main(env, fake, "--apply") == 1
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 def test_auto_rollback_is_gated(env):
-    fake = Fake(env, busy_after_swap=True, bad_plugin="ade-yolo")
+    fake = Fake(env, busy_after_swap=True, lsof_fails=True)
     assert run_main(env, fake, "--apply") == 4  # a gate refusal is 4, even for the automatic rollback
     stops = [c for c in fake.calls if c[:3] == ["paseo", "daemon", "stop"]]
     assert len(stops) <= 1  # the rollback never stopped the busy daemon
     assert not upstream_in_place(env)
-    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "failed-gated"
+    assert json.loads((env / "state/last-attempt.json").read_text())["phase"] == "failed-gated"
 
 
 def test_unreadable_status_is_not_stopped(env):
