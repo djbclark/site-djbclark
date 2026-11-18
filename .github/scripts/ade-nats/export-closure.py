@@ -50,6 +50,9 @@ def public_cache(path):
 
 
 def main():
+    target_host = os.environ.get("TARGET_HOST", "vps-hub")
+    if target_host not in {"vps-hub", "vps-primary"}:
+        raise ValueError("unsupported deployment host")
     head = os.environ["PUBLISHED_MASTER"]
     if not re.fullmatch(r"[0-9a-f]{40}", head):
         raise ValueError("published source revision required")
@@ -67,6 +70,8 @@ def main():
     if baseline_system not in present:
         raise ValueError("baseline does not include running system")
     system = store_path(str(Path(os.environ["RUNNER_TEMP"], "hub-system").resolve()))
+    if f"-nixos-system-{target_host}-" not in Path(system).name:
+        raise ValueError("built system does not match deployment host")
     closure = {
         store_path(value)
         for value in subprocess.check_output(
@@ -83,25 +88,25 @@ def main():
     archive = output / "custom.nar.gz"
     exported = 0
     with gzip.open(archive, "wb", compresslevel=6) as target:
-        if custom:
-            child = subprocess.Popen(
-                ["nix-store", "--export", *custom], stdout=subprocess.PIPE
-            )
-            try:
-                while chunk := child.stdout.read(1024 * 1024):
-                    exported += len(chunk)
-                    target.write(chunk)
-                if child.wait() != 0:
-                    raise RuntimeError("NAR export failed")
-            finally:
-                child.stdout.close()
-                if child.poll() is None:
-                    child.terminate()
-                    child.wait(timeout=30)
+        child = subprocess.Popen(
+            ["nix-store", "--export", *custom], stdout=subprocess.PIPE
+        )
+        try:
+            while chunk := child.stdout.read(1024 * 1024):
+                exported += len(chunk)
+                target.write(chunk)
+            if child.wait() != 0:
+                raise RuntimeError("NAR export failed")
+        finally:
+            child.stdout.close()
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=30)
     with archive.open("rb") as content:
         checksum = hashlib.file_digest(content, "sha256").hexdigest()
     manifest = {
         "schema": 1,
+        "target_host": target_host,
         "source_head": head,
         "system": system,
         "baseline_system": baseline_system,
