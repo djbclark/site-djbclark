@@ -312,6 +312,8 @@ hosts:
          note: "ADE issue 779 coordination broker; authenticated JetStream over Tailscale only. Disabled until reviewed activation; data /var/lib/nats."}
       - {port: 8222, bind: "127.0.0.1", owner: site, service: ade-nats-monitor, status: planned,
          note: "Local NATS health and monitoring endpoint; no public or tailnet listener."}
+      - {port: 4422, bind: "127.0.0.1", owner: site, service: ade-nats-recovery-proof, status: planned,
+         note: "Disposable isolated restore proof only, separate private store and credential; never production authority or an SSH forward to production."}
 
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:
