@@ -10,6 +10,7 @@
 #   fleet-watch dann      only the dann.dclark.us check (ssh: last pool verification, gateway, units)
 #   fleet-watch getbackup  only the get-backup staleness check (defeat's last pull backup of get)
 #   fleet-watch phantom [--dry-run]  only the phantom-running check: Paseo agents stuck "running" (see Phantom "running" Paseo agents)
+#   fleet-watch upstream-release [--registry PATH] [--dry-run] [--once]  registry-driven release alert issues
 #   fleet-watch upstream [--profile cfengine|paseo] [--dry-run] [--once]  only the upstream watcher (see Upstream PR watcher)
 #   fleet-watch upstream [--profile P] --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
 #   fleet-watch install   write the launchd agent (every 5 min) and load it; a FLEET_WATCH_UPSTREAM set at install time (e.g. off) is baked into the job's environment
@@ -1824,6 +1825,7 @@ check() {
   phantom_watch check
   local p
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
+  "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" --scheduled || echo "upstream-release: check failed" >&2
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   [[ "$DANN_STATE" == off ]] || parts+=("dann=$DANN_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
@@ -1884,6 +1886,7 @@ check() {
 
 case "${1:-check}" in
   check) check ;;
+  upstream-release) shift; exec "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" "$@" ;;
   status)
     if [[ -f "$LAST" ]]; then cat "$LAST"; else echo "no check has run yet"; fi
     ;;
