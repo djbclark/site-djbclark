@@ -129,15 +129,27 @@ class Harness(unittest.TestCase):
         self.set(f"{base}/pulls/{n}/comments", list(rcomments))
         self.set(f"{base}/issues/{n}/comments", list(icomments))
 
-    def run_fw(self, *args: str, **env: str) -> subprocess.CompletedProcess:
-        full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix),
+    def environment(self, **overrides: str) -> dict[str, str]:
+        # Do not inherit agent identity or watcher knobs from the invoking session.
+        # PASEO_AGENT_ID adds an acknowledgement paragraph to real sends; tests
+        # that exercise that behavior opt in explicitly in run_fw(...).
+        full = dict(HOME=str(self.home), FIX=str(self.fix),
                     FLEET_WATCH_GH=str(self.bin / "gh"), FLEET_WATCH_AIUSE=str(self.bin / "aiuse"),
                     FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"), ACP_DISPATCH_STATE=str(self.bigteam),
                     FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_UPSTREAM_CHAIN=str(self.home / "chain"),
-                    FLEET_WATCH_PASEO=str(self.bin / "paseo"), PATH=str(self.bin) + os.pathsep + os.environ["PATH"], FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT))
-        full.pop("RELAY_SENDER_NAME", None)
-        full.update(env)
-        return subprocess.run(["bash", str(FLEET_WATCH), "upstream", *args], env=full,
+                    FLEET_WATCH_PASEO=str(self.bin / "paseo"), PATH=str(self.bin) + os.pathsep + os.defpath,
+                    FLEET_WATCH_PASEO_PROMPT=str(PASEO_PROMPT),
+                    FLEET_WATCH_UPSTREAM="on", FLEET_WATCH_UPSTREAM_PROFILES="cfengine paseo")
+        # Keep the tools needed on macOS/Linux, without session-specific PATH shims.
+        full["PATH"] = str(self.bin) + os.pathsep + os.pathsep.join(
+            dict.fromkeys(str(Path(shutil.which(tool)).parent)
+                          for tool in ("bash", "python3", "jq") if shutil.which(tool))
+        ) + os.pathsep + os.defpath
+        full.update(overrides)
+        return full
+
+    def run_fw(self, *args: str, **env: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(FLEET_WATCH), "upstream", *args], env=self.environment(**env),
                               capture_output=True, text=True, timeout=120)
 
     def pings(self) -> list[str]:
@@ -491,12 +503,20 @@ class PaseoWatch(Harness):
     def test_the_scheduled_check_runs_every_profile(self) -> None:
         self.set("notifications", [note("9001", T0, REPO_NAME, "PullRequest", 6412),
                                    note("9100", T0, "getpaseo/paseo", "Discussion", 7828)])
-        full = dict(os.environ, HOME=str(self.home), FIX=str(self.fix), FLEET_WATCH_GH=str(self.bin / "gh"),
-                    FLEET_WATCH_AIUSE=str(self.bin / "aiuse"), FLEET_WATCH_DISPATCH=str(self.bin / "acp-dispatch"),
-                    PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
-                    FLEET_WATCH_HOSTS="", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off", FLEET_WATCH_S1="0",
-                    FLEET_WATCH_UPSTREAM_PROMPT=str(PROMPT), FLEET_WATCH_HELM=str(self.bin / "nohelm"))
-        subprocess.run(["bash", str(FLEET_WATCH), "check"], env=full, capture_output=True, text=True, timeout=120)
+        # A full tick must not probe real hosts, services, processes or load.
+        # Blank HOSTS means "use defaults" in the script, so whitespace is the
+        # explicit empty shell word-list. Other unrelated watchers are disabled.
+        for tool in ("pgrep", "sysctl"):
+            stub = self.bin / tool
+            stub.write_text("#!/bin/sh\nexit 1\n")
+            stub.chmod(0o755)
+        full = self.environment(
+            FLEET_WATCH_HOSTS=" ", FLEET_WATCH_REPOS="", FLEET_WATCH_VPS="off",
+            FLEET_WATCH_DANN="off", FLEET_WATCH_GETBACKUP="off", FLEET_WATCH_PHANTOM="off",
+            FLEET_WATCH_S1="0", FLEET_WATCH_HELM=str(self.bin / "nohelm"))
+        result = subprocess.run(["bash", str(FLEET_WATCH), "check"], env=full,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(list(json.loads((self.state / "upstream-pr.json").read_text())["threads"].values())[0]["n"], 6412)
         self.assertEqual(list(self.pstate()["threads"].values())[0]["n"], 7828)
 
