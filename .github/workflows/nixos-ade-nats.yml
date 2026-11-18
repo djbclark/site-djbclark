@@ -1,0 +1,32 @@
+name: ADE NATS NixOS
+
+on:
+  push:
+    branches: ["feat/nats-hub-*"]
+  pull_request:
+    paths:
+      - nixos/**
+      - .github/workflows/nixos-ade-nats.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ade-nats-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  broker-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Build and exercise isolated broker VM
+        run: nix build --no-link --print-build-logs './nixos#checks.x86_64-linux.ade-nats'
+      - name: Build the exact hub configuration
+        run: nix build --no-link --print-build-logs './nixos#nixosConfigurations.vps-hub.config.system.build.toplevel'

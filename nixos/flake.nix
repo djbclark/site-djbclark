@@ -68,6 +68,10 @@
       ...
     }:
     {
+      checks.x86_64-linux.ade-nats = import ./tests/ade-nats.nix {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      };
+
       # The tendcf CFEngine fork, built from source (pkgs/cfengine-tendcf.nix). Built by
       # .github/workflows/nixos-cfengine-build.yml.
       packages.x86_64-linux.cfengine-tendcf =
