@@ -172,7 +172,7 @@ def maintenance(ctx, action):
     if action == "begin":
         args += ["--generation", str(generation), "--transaction-id", op["transactionId"]]
     elif action == "end":
-        args += ["--generation", str(ctx.reservation["generation"]), "--owner-token-stdin"]
+        args += ["--generation", str(ctx.reservation["generation"]), "--owner-token-fd", "0"]
     # Do not send the token through cmd(), which logs argv.
     res = (ctx.runner(ctx.paseo(*args), 60, input_text=ctx.reservation["ownerToken"] + "\n")
            if action == "end" else ctx.runner(ctx.paseo(*args), 60))

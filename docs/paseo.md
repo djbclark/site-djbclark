@@ -79,7 +79,7 @@ empty directories and all files; there is no candidate-controlled exclusion.
 
 The adapter consumes native `daemon maintenance begin/status/end --json` with
 transaction/generation and a private owner token. Tokens are never logged or
-journaled; end uses `--owner-token-stdin`. Unsupported/busy/malformed status holds.
+journaled; end uses `--owner-token-fd 0`. Unsupported/busy/malformed status holds.
 Reservation remains held across quit/swap/verification; each boundary revalidates
 the current controller policy and both exact bundles. Rollback requires a fresh,
 independent recover grant under a newer generation, retains both bundle artifacts,
