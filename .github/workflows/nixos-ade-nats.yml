@@ -8,6 +8,21 @@ on:
       - nixos/**
       - .github/workflows/nixos-ade-nats.yml
   workflow_dispatch:
+    inputs:
+      target_host:
+        description: 'Published NixOS host to build without compiling on the deployment host'
+        required: false
+        type: choice
+        default: vps-hub
+        options: [vps-hub, vps-primary]
+      published_master:
+        description: 'Exact reviewed published master revision to build for deployment'
+        required: false
+        type: string
+      baseline_gzip64:
+        description: 'Gzip/base64 JSON of the running hub closure; public paths only'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -20,21 +35,69 @@ jobs:
   broker-vm:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      BUILD_SOURCE: ${{ inputs.published_master && './build-source' || '.' }}
+      TARGET_HOST: ${{ inputs.target_host || 'vps-hub' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        if: inputs.published_master != ''
+        with:
+          ref: ${{ inputs.published_master }}
+          path: build-source
+      - name: Validate bounded deployment target
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          assert os.environ['TARGET_HOST'] in {'vps-hub', 'vps-primary'}
+          PYCODE
       - uses: cachix/install-nix-action@master
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - name: Verify empty NAR export/import contract
+        run: |
+          python3 - <<'PYCODE'
+          import subprocess
+          data = subprocess.check_output(['nix-store', '--export'], timeout=15)
+          assert data, 'empty path set still needs a Nix export terminator'
+          subprocess.run(['nix-store', '--import'], input=data, check=True, capture_output=True, timeout=15)
+          PYCODE
       - name: Build and exercise isolated broker VM
-        run: nix build --no-link --print-build-logs './nixos#checks.x86_64-linux.ade-nats'
-      - name: Build the exact hub configuration
-        run: nix build --no-link --print-build-logs './nixos#nixosConfigurations.vps-hub.config.system.build.toplevel'
+        run: nix build --no-link --print-build-logs "$BUILD_SOURCE/nixos#checks.x86_64-linux.ade-nats"
+      - name: Build the exact published host configuration
+        run: nix build --print-build-logs "$BUILD_SOURCE/nixos#nixosConfigurations.$TARGET_HOST.config.system.build.toplevel" --out-link "$RUNNER_TEMP/hub-system"
+      - name: Export custom CI-built closure for build-free deployment
+        if: inputs.published_master != '' && inputs.baseline_gzip64 != ''
+        env:
+          PUBLISHED_MASTER: ${{ inputs.published_master }}
+          BASELINE_GZIP64: ${{ inputs.baseline_gzip64 }}
+        run: python3 .github/scripts/ade-nats/export-closure.py
+      - uses: actions/upload-artifact@v6
+        if: inputs.published_master != '' && inputs.baseline_gzip64 != ''
+        with:
+          name: ${{ inputs.target_host || 'vps-hub' }}-nix-closure
+          path: ${{ runner.temp }}/hub-closure/
+          retention-days: 1
   deployment-package-conformance:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      BUILD_SOURCE: ${{ inputs.published_master && './build-source' || '.' }}
+      TARGET_HOST: ${{ inputs.target_host || 'vps-hub' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        if: inputs.published_master != ''
+        with:
+          ref: ${{ inputs.published_master }}
+          path: build-source
+      - name: Validate bounded deployment target
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          assert os.environ['TARGET_HOST'] in {'vps-hub', 'vps-primary'}
+          PYCODE
       - uses: actions/checkout@v7
         with:
           repository: djbclark/djbclark-ade
@@ -48,9 +111,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: lts/*
-      - name: Build the broker package used by the hub configuration
+      - name: Build the broker package from the selected deployment source
         run: |
-          nix build --print-build-logs './nixos#nixosConfigurations.vps-hub.pkgs.nats-server' --out-link "$RUNNER_TEMP/hub-nats-package"
+          nix build --print-build-logs "$BUILD_SOURCE/nixos#nixosConfigurations.$TARGET_HOST.pkgs.nats-server" --out-link "$RUNNER_TEMP/hub-nats-package"
           "$RUNNER_TEMP/hub-nats-package/bin/nats-server" --version
           git -C coordination-proof rev-parse HEAD
       - name: Test role and receipt fences on the actual deployment package
