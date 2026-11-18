@@ -18,6 +18,7 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.natscli pkgs.curl pkgs.iproute2 ];
   };
   testScript = ''
+    import base64
     import json
     import shlex
 
@@ -53,10 +54,14 @@ pkgs.testers.runNixOSTest {
     with subtest("file-backed stream survives a broker crash"):
         machine.succeed(cli + " stream add PROBE --subjects=probe --storage=file --replicas=1 --defaults --discard=new --max-msgs=100")
         machine.succeed(cli + " pub probe persist-me")
-        assert machine.succeed(cli + " stream get PROBE 1 --raw").strip() == "persist-me"
+        # stream get exposes JSON, not a --raw mode. Verify actual stored bytes.
+        message = json.loads(machine.succeed(cli + " stream get PROBE 1 --json"))
+        assert base64.b64decode(message["data"], validate=True) == b"persist-me"
         machine.succeed("systemctl kill --signal=KILL nats.service")
         machine.wait_until_succeeds("systemctl is-active --quiet nats.service")
-        assert machine.succeed(cli + " stream get PROBE 1 --raw").strip() == "persist-me"
+        machine.wait_until_succeeds(cli + " stream get PROBE 1 --json")
+        message = json.loads(machine.succeed(cli + " stream get PROBE 1 --json"))
+        assert base64.b64decode(message["data"], validate=True) == b"persist-me"
         machine.succeed("test $(stat -c %a /var/lib/nats) = 750")
 
     with subtest("invalid authentication cannot override listener policy"):
