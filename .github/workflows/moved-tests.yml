@@ -8,9 +8,12 @@ on:
       - "tests/test_barnowl_skill.py"
       - "tests/test_bigteam_prune.py"
       - "tests/test_change_hermes_*.py"
+      - "tests/test_fleet_watch_*.py"
       - "skills/barnowl/**"
       - "skills/diskfree/**"
       - "bin/change-hermes*"
+      - "bin/fleet*"
+      - "prompts/upstream-pr-review.md"
       - ".github/workflows/moved-tests.yml"
   pull_request:
   workflow_dispatch:
@@ -28,4 +31,5 @@ jobs:
         run: |
           python3 -m pip install --quiet pytest pyyaml
           PYTHONPATH=. python3 -m pytest -q tests/test_barnowl_skill.py tests/test_bigteam_prune.py \
-            tests/test_change_hermes_auto.py tests/test_change_hermes_lock.py
+            tests/test_change_hermes_auto.py tests/test_change_hermes_lock.py \
+            tests/test_fleet_watch_paseo.py tests/test_fleet_watch_upstream.py
