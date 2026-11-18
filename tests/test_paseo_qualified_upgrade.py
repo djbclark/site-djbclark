@@ -186,3 +186,65 @@ def test_journal_excludes_token_and_preserves_state(qualified):
     raw = (ctx.state_dir / "last-run.json").read_text()
     assert "NEVER-PERSIST" not in raw and "test-controller" in raw
     assert (state / "sessions").read_bytes() == b"unchanged"
+
+
+def native_runner(ctx, fake, *, offline=True, fail_runtime=False, recover=False, value=None):
+    """In-process test adapter, not a claim that the native API exists."""
+    def runner(argv, timeout=60, input_text=None):
+        if "maintenance" in argv:
+            action = argv[argv.index("maintenance") + 1]
+            if action == "begin":
+                return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "held", "generation": 1,
+                    "transactionId": "test-controller", "ownerToken": "PRIVATE-TOKEN", "recoveryRequired": False}))
+            if action == "end":
+                assert "PRIVATE-TOKEN" not in argv
+                assert input_text == "PRIVATE-TOKEN\n"
+                return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "idle", "generation": 1, "recoveryRequired": False}))
+            if not offline and not fake.daemon_up:
+                return plu.Result(1, "", "offline status unsupported")
+            return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "held", "generation": 1,
+                "transactionId": "test-controller", "recoveryRequired": False}))
+        if fail_runtime and argv[0] == "open" and ctx.swapped and not ctx.swapped_back:
+            if recover:
+                value.clear()
+                value.update(policy(ctx.backup, ctx.installed, generation=2, operation="recover"))
+            return plu.Result(1, "", "failed candidate launch")
+        return fake(argv, timeout)
+    return runner
+
+
+def test_authorized_replacement_retains_previous_and_releases_after_verification(qualified):
+    ctx, fake, _ = qualified
+    old = bundle_sha256(ctx.installed)
+    ctx.runner = native_runner(ctx, fake)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 0
+    assert bundle_sha256(ctx.backup) == old
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "done"
+    assert not ctx.reservation
+
+
+def test_offline_status_missing_holds_without_swap_or_relaunch(qualified):
+    ctx, fake, _ = qualified
+    ctx.runner = native_runner(ctx, fake, offline=False)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert not ctx.swapped and ctx.installed.exists() and ctx.staged.exists()
+    assert not any(c[0] == "open" for c in fake.calls)
+    assert ctx.reservation
+
+
+def test_failed_runtime_requires_separate_authorized_recovery(qualified):
+    ctx, fake, value = qualified
+    old = bundle_sha256(ctx.installed)
+    ctx.runner = native_runner(ctx, fake, fail_runtime=True, recover=True, value=value)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 1
+    assert bundle_sha256(ctx.installed) == old and ctx.staged.exists()
+    record = json.loads((ctx.state_dir / "last-run.json").read_text())
+    assert record["phase"] == "rolled-back" and record["qualification"]["generation"] == 2
+
+
+def test_failed_runtime_without_recovery_grant_stays_uncertain(qualified):
+    ctx, fake, _ = qualified
+    ctx.runner = native_runner(ctx, fake, fail_runtime=True)
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists()
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"
