@@ -162,7 +162,7 @@ def runtime_plugins(op):
             except UnicodeError as exc:
                 raise Hold("invalid plugin snapshot Unicode") from exc
             path = PurePosixPath(value)
-            if not value.startswith("/") or value.startswith("//") or str(path) != value or ".." in path.parts:
+            if value == "/" or not value.startswith("/") or value.startswith("//") or str(path) != value or ".." in path.parts:
                 raise Hold("plugin snapshot path must be canonical absolute POSIX")
         if not PurePosixPath(row["sourcePath"]).is_relative_to(PurePosixPath(row["snapshotRoot"])):
             raise Hold("plugin source is outside enrolled snapshot")

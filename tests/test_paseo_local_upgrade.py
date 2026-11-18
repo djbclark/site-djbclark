@@ -383,7 +383,7 @@ def test_auto_rollback_is_gated(env):
     stops = [c for c in fake.calls if c[:3] == ["paseo", "daemon", "stop"]]
     assert len(stops) <= 1  # the rollback never stopped the busy daemon
     assert not upstream_in_place(env)
-    assert json.loads((env / "state/last-attempt.json").read_text())["phase"] == "failed-gated"
+    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "failed-gated"
 
 
 def test_unreadable_status_is_not_stopped(env):

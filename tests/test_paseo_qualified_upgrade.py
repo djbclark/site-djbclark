@@ -497,6 +497,7 @@ def test_loaded_daemon_version_mismatch_is_not_runtime_verified(qualified):
     lambda op: op["runtimePlugins"][0].update(activationGeneration=True),
     lambda op: op["runtimePlugins"][0].update(activationGeneration=0),
     lambda op: op["runtimePlugins"][0].update(sourcePath="relative/plugin"),
+    lambda op: op["runtimePlugins"][0].update(snapshotRoot="/"),
     lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/../elsewhere"),
     lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/./ade-yolo"),
     lambda op: op["runtimePlugins"][0].update(sourcePath="/immutable/ade/ade-yolo/"),
