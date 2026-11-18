@@ -8,7 +8,8 @@ pkgs.testers.runNixOSTest {
     # Live acceptance separately exercises two actual tailnet hosts.
     systemd.services.tailscaled.serviceConfig = {
       Type = lib.mkForce "simple";
-      ExecStart = lib.mkForce "${pkgs.coreutils}/bin/sleep infinity";
+      # Tailscale ships an upstream unit: reset its ExecStart before replacing it.
+      ExecStart = lib.mkForce [ "" "${pkgs.coreutils}/bin/sleep infinity" ];
     };
     services.ade-nats = {
       enable = true;
