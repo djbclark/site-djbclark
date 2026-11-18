@@ -81,6 +81,30 @@ def test_baseline_and_new_tag_exact_contract(setup):
     assert str(reg.parent) not in body and 'token' not in body
 
 
+def test_shared_upstream_one_issue_all_fork_labels(setup):
+    reg, state, data, fake, watcher, pings, run = setup
+    def fork(owner, name, source, rid):
+        return {'id': rid, 'private': False, 'catalog_ids': [], 'upstream_repo': 'getpaseo/paseo', 'fork_repo': f'{owner}/{name}',
+                'upstream': 'https://github.com/getpaseo/paseo', 'fork': f'https://github.com/{owner}/{name}',
+                'base_tag': None, 'watch_releases': True, 'upstream_source': source}
+    data['components'] = [fork('frdminc', 'paseo-x', 'github-parent', 'b'), fork('djbclark', 'paseo-y', 'github-parent', 'c'),
+                          fork('djbclark', 'paseo', 'curated', 'a'), fork('frdminc', 'paseo', 'github-parent', 'd')]
+    reg.write_text(json.dumps(data))
+    run(); fake.tags.append('v2'); run(); run()
+    assert len(fake.created) == 1
+    title, body, labels = fake.created[0]
+    assert 'Fork: djbclark/paseo\n' in body
+    assert labels == ['radar', 'urgent', 'upstream-release', 'fork:paseo', 'fork:paseo-y', 'fork:paseo-x']
+
+
+def test_duplicate_component_id_rejected(setup):
+    reg, state, data, fake, watcher, pings, run = setup
+    data['components'].append(dict(data['components'][0]))
+    reg.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='registry'):
+        run()
+
+
 def test_crash_recovery_closed_title_prevents_duplicate(setup):
     reg, state, data, fake, watcher, pings, run = setup
     run(); before = state.read_bytes(); fake.tags.append('v2'); run()

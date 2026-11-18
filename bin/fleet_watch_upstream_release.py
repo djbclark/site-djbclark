@@ -34,7 +34,7 @@ def registry(path):
             assert re.fullmatch(r'[A-Za-z0-9-]+', owner)
             assert type(coverage['complete']) is bool
             assert coverage['scope'] == 'credential-visible'
-        pairs = set()
+        ids = set()
         for row in data['components']:
             assert isinstance(row['id'], str) and row['id']
             assert type(row['private']) is bool
@@ -45,8 +45,8 @@ def registry(path):
             assert row['fork_repo'].split('/')[0] in data['owners']
             assert type(row['watch_releases']) is bool
             assert row['base_tag'] is None or TAG.fullmatch(row['base_tag'])
-            assert row['upstream_repo'] not in pairs, 'ambiguous duplicate upstream'
-            pairs.add(row['upstream_repo'])
+            assert row['id'] not in ids, 'duplicate component id'
+            ids.add(row['id'])
             if row.get('installed_version') is not None:
                 assert VERSION.fullmatch(row['installed_version'])
         return data
@@ -136,7 +136,7 @@ class Watcher:
                            'url': f'https://github.com/{repo}/releases/tag/{quote(tag, safe="")}' }
         return result
 
-    def issue(self, row, tag, event, dry):
+    def issue(self, row, tag, event, dry, siblings=()):
         repo = row['upstream_repo']
         if event['published'] is None:
             # Annotated tags carry their tagger date; lightweight tags expose only
@@ -153,7 +153,13 @@ class Watcher:
                 raise ValueError('tag commit timestamp lacks timezone')
             event['published'] = date.astimezone(dt.timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         title = f'[radar][urgent] Upstream {repo} release {tag}'
-        labels = ['radar', 'urgent', 'upstream-release', 'fork:' + row['fork_repo'].split('/')[1]]
+        # One issue per (upstream, tag) even when several forks track the same upstream:
+        # the primary fork fills the body, every fork gets its own label.
+        labels = ['radar', 'urgent', 'upstream-release']
+        for fork in (row, *siblings):
+            label = 'fork:' + fork['fork_repo'].split('/')[1]
+            if label not in labels:
+                labels.append(label)
         body = '\n'.join([
             f'Upstream: {repo}', f'Fork: {row["fork_repo"]}', f'Tag: {tag}',
             f'Release URL: {event["url"]}', f'Published (UTC): {event["published"]}',
@@ -246,9 +252,14 @@ class Watcher:
         now = self.clock()
         opened = []
         errors = []
+        groups = {}
         for row in data['components']:
-            if not row['watch_releases']:
-                continue
+            if row['watch_releases']:
+                groups.setdefault(row['upstream_repo'], []).append(row)
+        for rows in groups.values():
+            # Curated rows lead, then fork name: the primary row is stable across runs.
+            rows.sort(key=lambda r: (r.get('upstream_source') != 'curated', r['fork_repo']))
+            row, siblings = rows[0], rows[1:]
             repo = row['upstream_repo']
             previous = state['upstreams'].get(repo)
             if previous and not force and now - previous.get('checked_at', 0) < interval:
@@ -262,7 +273,7 @@ class Watcher:
                         save(path, state)
                     continue
                 for tag in sorted(events.keys() - set(previous['seen'])):
-                    url, created = self.issue(row, tag, events[tag], dry)
+                    url, created = self.issue(row, tag, events[tag], dry, siblings)
                     if dry:
                         continue
                     previous['issues'][tag] = url
