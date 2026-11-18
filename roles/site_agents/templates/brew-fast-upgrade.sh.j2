@@ -118,14 +118,15 @@ missing_app_casks() {
 }
 
 # Casks never upgraded by this script, even by hand (BREW_FAST_UPGRADE_SKIP_CASKS
-# overrides, space-separated), plus the missing-app casks above. paseo (djbclark
+# adds optional space-separated casks), plus the missing-app casks above.
+# paseo is mandatory even with an empty or custom override. paseo (djbclark
 # 2026-10-24): every cask upgrade quits Paseo.app and runs `paseo daemon stop
 # --force`, killing every agent session on the production daemon, and three
 # upgrades on 2026-10-24 still left Paseo.app at 0.12.0 (cause unknown). The app
 # updates itself; take paseo back out of this list once the revert is explained
 # and a daemon stop is acceptable.
 held_casks() {
-  printf '%s\n' ${BREW_FAST_UPGRADE_SKIP_CASKS-paseo} ${MISSING_APP_CASKS:-}
+  printf '%s\n' ${BREW_FAST_UPGRADE_SKIP_CASKS:-} paseo ${MISSING_APP_CASKS:-}
 }
 
 # Outdated formulae and casks (greedy: auto_updates and :latest casks too),
