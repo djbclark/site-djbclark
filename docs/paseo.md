@@ -124,3 +124,27 @@ reference and a snapshot of the actual desktop TypeScript encoder against the
 same fixture (including astral/private-use characters, links and empty dirs).
 No local pytest or Mac build is part of this change. Dry-run creates no state,
 logs or lock directory and never reserves or mutates the application.
+
+### Managed plugin cohort release gate
+
+Unreleased schema v1 activate/recover grants also require `runtimePlugins`, the
+complete controller-enrolled managed cohort (an explicit empty array is allowed).
+Each record has exactly `pluginId`, `sourcePath`, `snapshotRoot`, `snapshotSha256`,
+`serverBundleSha256`, `activationGeneration`. IDs are unique and nonempty; paths
+are canonical absolute POSIX with source equal to/inside the snapshot root;
+digests are lowercase SHA256 and generation is a literal positive integer.
+The controller supplies immutable snapshot enrollment. Path syntax alone does
+not prove filesystem immutability, nor can candidate metadata or CLI flags choose
+a smaller cohort.
+
+Runtime verification and the final pre-END gate require one `plugin ls` entry per
+enrolled ID: enabled literal true, status running, entry path and ID bound to the
+exact `loaded` receipt's six enrolled fields. Missing/duplicate/mismatched entries
+or receipt schema hold, including during recovery. Unmanaged entries cannot
+substitute for enrolled ones and do not themselves need a managed receipt.
+The loaded receipt additionally needs positive integer PID, a nonempty printable
+process start token and timezone-qualified ISO start timestamp. Those are observed
+launch facts, not precomputed candidate identity. The journal records PID/time and
+a SHA256 of the process token, never its raw value; the native reservation owner
+token is neither logged nor journaled. Receipt failure before END keeps admission
+held and records recovery-required, not successful release or rollback.
