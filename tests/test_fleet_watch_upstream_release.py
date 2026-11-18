@@ -199,3 +199,65 @@ def test_paseo_status_semver_and_titles_only(setup, monkeypatch, capsys):
     assert result['installed_matches_base'] is True
     assert result['open_alert_count'] == 1
     assert 'UNTRUSTED BODY' not in str(result)
+
+
+def test_scheduled_missing_registry_daily_notice_only(setup, capsys):
+    reg, state, data, fake, watcher, pings, run = setup
+    reg.unlink()
+    now = [1800000000]
+    watcher.clock = lambda: now[0]
+    watcher.scheduled(reg, state)
+    assert len(pings) == 1 and 'registry is missing' in pings[0]
+    assert capsys.readouterr().err.count('WARNING:') == 1
+    assert not state.exists() and not fake.created
+    watcher.scheduled(reg, state)
+    now[0] += 86399
+    watcher.scheduled(reg, state)
+    assert len(pings) == 1 and not capsys.readouterr().err
+    now[0] += 1
+    watcher.scheduled(reg, state)
+    assert len(pings) == 2 and capsys.readouterr().err.count('WARNING:') == 1
+
+
+def test_scheduled_missing_registry_failed_ping_not_retried(setup, capsys):
+    reg, state, data, fake, watcher, pings, run = setup
+    reg.unlink()
+    def fail(text):
+        pings.append(text)
+        raise subprocess.TimeoutExpired('ping', 1)
+    watcher.ping = fail
+    watcher.scheduled(reg, state)
+    watcher.scheduled(reg, state)
+    assert len(pings) == 1 and not state.exists()
+
+
+@pytest.mark.parametrize('contents', [None, '{'])
+def test_explicit_cli_missing_or_bad_registry_fails_unchanged(setup, monkeypatch, capsys, contents):
+    reg, state, data, fake, watcher, pings, run = setup
+    run(); before = state.read_bytes()
+    if contents is None:
+        reg.unlink()
+    else:
+        reg.write_text(contents)
+    monkeypatch.setattr(m.sys, 'argv', ['upstream-release', '--registry', str(reg), '--state', str(state)])
+    assert m.main() == 1
+    assert 'registry' in capsys.readouterr().err
+    assert state.read_bytes() == before
+
+
+def test_scheduled_cli_missing_default_succeeds(setup, monkeypatch, capsys):
+    reg, state, data, fake, watcher, pings, run = setup
+    monkeypatch.setattr(m.Path, 'home', classmethod(lambda cls: reg.parent))
+    monkeypatch.setattr(m, 'Watcher', lambda: watcher)
+    monkeypatch.setattr(m.sys, 'argv', ['upstream-release', '--scheduled', '--state', str(state)])
+    assert m.main() == 0
+    assert len(pings) == 1 and 'registry is missing' in capsys.readouterr().err
+    assert not state.exists()
+
+
+def test_tick_runs_existing_profiles_before_nonfatal_release_check():
+    script = (Path(__file__).resolve().parents[1]/'bin/fleet-watch').read_text()
+    profiles = script.index('for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done')
+    release = script.index('"$REPO_ROOT/bin/fleet_watch_upstream_release.py" --scheduled')
+    assert profiles < release
+    assert '--scheduled || echo "upstream-release: check failed" >&2' in script

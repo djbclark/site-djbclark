@@ -1823,9 +1823,9 @@ check() {
   dann_watch
   getbackup_watch check
   phantom_watch check
-  "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" || echo "upstream-release: check failed" >&2
   local p
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
+  "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" --scheduled || echo "upstream-release: check failed" >&2
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   [[ "$DANN_STATE" == off ]] || parts+=("dann=$DANN_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")

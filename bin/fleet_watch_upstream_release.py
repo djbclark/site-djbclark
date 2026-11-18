@@ -191,6 +191,31 @@ class Watcher:
         issues.append({'title': title, 'html_url': url})
         return url, True
 
+    def scheduled(self, registry_path, state_path):
+        """A not-yet-generated production inventory is a daily notice, not a failure."""
+        if Path(registry_path).exists():
+            return self.run(registry_path, state_path)
+        path = Path(state_path).with_name('upstream-release-missing-registry.json')
+        message = 'upstream-release: production registry is missing; generate fork inventory'
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with path.with_suffix('.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                now = self.clock()
+                previous = json.loads(path.read_text()) if path.exists() else {}
+                if now - previous.get('last_notice_at', float('-inf')) < 86400:
+                    return
+                # Record the attempt first: a failed/uncertain ping must not spam.
+                save(path, {'last_notice_at': now})
+            print('WARNING: ' + message, file=sys.stderr)
+            try:
+                self.ping(message)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        except (OSError, ValueError, TypeError):
+            # Keep other scheduled profiles running even if the notice store fails.
+            print('WARNING: ' + message + '; daily notice state unavailable', file=sys.stderr)
+
     def run(self, registry_path, state_path, dry=False, force=False, interval=3600):
         data = registry(registry_path)  # Validate before any state/lock writes.
         self.remaining = None
@@ -294,15 +319,20 @@ def paseo_status(registry_path, state_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--registry', default=str(Path.home()/'.local/state/djbclark-ade/forks/registry.json'))
+    parser.add_argument('--registry', default=None)
+    parser.add_argument('--scheduled', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--state', default=str(Path.home()/'.local/state/fleet-watch/upstream-release.json'))
     parser.add_argument('--status', action='store_true', help='read-only Paseo terminal status')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--once', action='store_true', help='force an immediate single check, bypassing cache interval')
     parser.add_argument('--interval', type=int, default=3600)
     args = parser.parse_args()
+    explicit_registry = args.registry is not None
+    args.registry = args.registry or str(Path.home()/'.local/state/djbclark-ade/forks/registry.json')
     try:
-        if args.status:
+        if args.scheduled and not explicit_registry and not args.dry_run and not args.status:
+            Watcher().scheduled(args.registry, args.state)
+        elif args.status:
             paseo_status(args.registry, args.state)
         else:
             Watcher().run(args.registry, args.state, args.dry_run, args.once, args.interval)
