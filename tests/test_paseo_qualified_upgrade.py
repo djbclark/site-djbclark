@@ -468,3 +468,19 @@ def test_offline_proof_must_match_exact_native_hold(qualified, mutation):
     with pytest.raises(Hold):
         plu.swap_in(ctx)
     assert not ctx.swapped and ctx.staged.exists() and ctx.installed.exists()
+
+
+def test_loaded_daemon_version_mismatch_is_not_runtime_verified(qualified):
+    ctx, fake, _ = qualified
+    native = native_runner(ctx, fake)
+    def runner(argv, timeout=60, input_text=None):
+        result = native(argv, timeout, input_text)
+        if "daemon" in argv and "status" in argv and ctx.swapped:
+            data = json.loads(result.out)
+            data["daemonVersion"] = "different-loaded-code"
+            return plu.Result(0, json.dumps(data))
+        return result
+    ctx.runner = runner
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert ctx.swapped and not ctx.swapped_back and ctx.backup.exists()
+    assert json.loads((ctx.state_dir / "last-run.json").read_text())["phase"] == "recovery-required"

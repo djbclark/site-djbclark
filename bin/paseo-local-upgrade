@@ -193,6 +193,7 @@ def maintenance(ctx, action):
             if data["recoveryRequired"] is not False or data.get("state") != "idle" or data.get("generation") != ctx.reservation["generation"]:
                 raise Hold("native maintenance release uncertain")
             ctx.reservation = {}
+            authorize(ctx)  # END may have committed even if this fresh check now holds
             return
         if action == "verify-offline" and (data.get("state") != "recovery-required" or data["recoveryRequired"] is not True):
             raise Hold("offline reservation proof uncertain")
@@ -203,6 +204,7 @@ def maintenance(ctx, action):
             if data.get("state") != "held" or data["recoveryRequired"] is not False or not isinstance(data.get("ownerToken"), str) or not re.fullmatch("[A-Za-z0-9_-]{43}", data["ownerToken"]):
                 raise Hold("native reservation grant uncertain")
             ctx.reservation = data
+        authorize(ctx)  # policy/artifacts may change while the native command waits
     except (ValueError, TypeError, KeyError) as exc:
         raise Hold("native maintenance response uncertain") from exc
 
@@ -352,6 +354,7 @@ def quit_app_and_daemon(ctx: Ctx, check_update: bool = True) -> None:
     (it may outlive the app). Raises Gate then; the caller relaunches the app."""
     boundary(ctx)
     if app_running(ctx):  # a quit sent to a closed app may launch it first, and fails on some macOS versions
+        boundary(ctx)  # app_running waited on an external process
         quit_res = ctx.cmd(["osascript", "-e", f'tell application id "{BUNDLE_ID}" to quit'], timeout=30)
         if quit_res.code != 0:
             raise Fail(f"the quit request failed (Automation permission?): "
@@ -388,6 +391,9 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
         raise Fail("daemon PID identity unavailable")
     if status.get("pid") == old_pid:
         raise Fail("daemon pid unchanged: the new app did not start a new daemon")
+    expected = grant(ctx.authorization, ctx.operation)["version"]
+    if status.get("daemonVersion") != expected:
+        raise Fail("loaded daemon version does not match qualified bundle")
     signature = ctx.cmd(["codesign", "--verify", "--deep", "--strict", str(ctx.installed)])
     if signature.code:
         raise Fail("installed bundle signature verification failed")
@@ -488,6 +494,7 @@ def swap_in(ctx: Ctx) -> None:
         save_state(ctx, phase="swapped", old_pid=ctx.old_pid)
 
     save_state(ctx, phase="swap-intent", old_pid=ctx.old_pid)
+    boundary(ctx)  # journal fsync may have waited
     swap(ctx.installed, ctx.backup, ctx.staged, ctx.installed, done)
     ctx.log(f"swapped: {ctx.installed} is now the staged build; previous app at {ctx.backup}")
 
@@ -498,6 +505,8 @@ def swap_back(ctx: Ctx) -> None:
         ctx.swapped_back = True
         ctx.upstream_bundle = ctx.installed  # the upstream app is installed again
 
+    save_state(ctx, phase="recovery-swap-intent", old_pid=ctx.old_pid)
+    boundary(ctx)
     swap(ctx.installed, ctx.staged, ctx.backup, ctx.installed, done)
     ctx.log(f"restored previous app to {ctx.installed}; fork build back at {ctx.staged}")
 
