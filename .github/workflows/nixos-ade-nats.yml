@@ -1,0 +1,66 @@
+name: ADE NATS NixOS
+
+on:
+  push:
+    branches: ["feat/nats-hub-*"]
+  pull_request:
+    paths:
+      - nixos/**
+      - .github/workflows/nixos-ade-nats.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ade-nats-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  broker-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Build and exercise isolated broker VM
+        run: nix build --no-link --print-build-logs './nixos#checks.x86_64-linux.ade-nats'
+      - name: Build the exact hub configuration
+        run: nix build --no-link --print-build-logs './nixos#nixosConfigurations.vps-hub.config.system.build.toplevel'
+  deployment-package-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: djbclark/djbclark-ade
+          # Provenance for this conformance run, not a runtime dependency pin.
+          ref: 888a016342e49209931407cf6bc8aa85ec6b26a8
+          path: coordination-proof
+      - uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+      - name: Build the broker package used by the hub configuration
+        run: |
+          nix build --print-build-logs './nixos#nixosConfigurations.vps-hub.pkgs.nats-server' --out-link "$RUNNER_TEMP/hub-nats-package"
+          "$RUNNER_TEMP/hub-nats-package/bin/nats-server" --version
+          git -C coordination-proof rev-parse HEAD
+      - name: Test role and receipt fences on the actual deployment package
+        working-directory: coordination-proof/lib/ade-coord
+        run: |
+          timeout 180 npm install --ignore-scripts
+          npm ls --all
+          NATS_SERVER="$RUNNER_TEMP/hub-nats-package/bin/nats-server" timeout 180 npm test
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: hub-coordination-dependencies
+          path: coordination-proof/lib/ade-coord/package-lock.json

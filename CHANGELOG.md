@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Prepared an opt-in ADE NATS JetStream module for vps-hub with tailnet-only authenticated clients, local monitoring, runtime-only credentials, synchronous persistent storage, and isolated NixOS VM/host CI. Activation remains disabled pending review and live acceptance. (2026-11-18; https://github.com/djbclark/djbclark-ade/issues/779)
+
 - `bin/bg approve-local`: the authentication call (`sudo-ask`, or `sudo -k` without it) now runs under `env -i` with only a fixed PATH, HOME, USER, LANG and TERM, so a caller's `BASH_ENV`, `ENV`, `PYTHONSTARTUP`, `LD_*`/`DYLD_*`, `IFS`, `LC_*` or PATH entries no longer reach sudo-ask or sudo (bg's own shell still honours BASH_ENV, same user); LANG, TERM and USER are forwarded only when they are plain names. (2026-11-15)
 - Added `roles/git_ignore` (`just git-ignore-check` / `git-ignore-apply`): the global git excludes file `~/.config/git/ignore` is now tracked and installed from the repo; a differing live file is shown as a diff and refused unless `-e git_ignore_adopt=true`. (2026-11-15)
 - nixos(vps-hub): turn off `GSSAPIAuthentication` in `services.openssh.settings` so it wins over nixathena's later `extraConfig` yes (this GSSAPI OpenSSH build uses the first occurrence). (2026-11-12)

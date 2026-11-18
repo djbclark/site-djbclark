@@ -306,6 +306,13 @@ hosts:
          tailscale_serve_port: 7263,
          note: "2026-10-18: Paseo daemon + web UI as user djbclark (services.paseo from forgejo.mit.edu/djbclark/paseo-nix, nixos/vps-primary/configuration.nix), using the agent logins in djbclark's home (/home/djbclark, a Hetzner Volume) and an agents.slice memory cap. UNAUTHENTICATED and permits command execution: tailnet-only, never funnel. See docs/paseo.md."}
 
+  vps-hub:
+    ports:
+      - {port: 4222, bind: "100.82.208.87", owner: site, service: ade-nats, status: planned,
+         note: "ADE issue 779 coordination broker; authenticated JetStream over Tailscale only. Disabled until reviewed activation; data /var/lib/nats."}
+      - {port: 8222, bind: "127.0.0.1", owner: site, service: ade-nats-monitor, status: planned,
+         note: "Local NATS health and monitoring endpoint; no public or tailnet listener."}
+
 # ── Fleet device ports (android; stayturgid product defaults, for reference)
 fleet_defaults:
   - {port: 5555,  service: adb-wireless}

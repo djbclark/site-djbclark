@@ -16,6 +16,7 @@
     ./gradle-cache.nix
     ./sudo-secretspec.nix
     ./briefs.nix
+    ./ade-nats.nix
     ../modules/google-proxy.nix
   ];
 
