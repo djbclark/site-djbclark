@@ -32,6 +32,22 @@ def expected_managed_plugins():
         for plugin_id in ("ade-yolo", "ade-claim", "baton")]
 
 
+HELPER_REL = "Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+
+
+def fake_process_observation(ctx, pid):
+    return {"pid": pid, "path": str((ctx.installed / HELPER_REL).resolve()), "start": (1000000 + pid, 0)}
+
+
+def vnode_output(pid, paths):
+    result = f"p{pid}\0\n"
+    for path in paths:
+        path = Path(path)
+        value = path.stat()
+        result += f"ftxt\0D{value.st_dev:#x}\0i{value.st_ino}\0n{path.resolve()}\0\n"
+    return result
+
+
 def make_app(path: Path, version="0.16.0-beta.2", updater=False):
     (path / "Contents" / "Resources").mkdir(parents=True)
     with (path / "Contents" / "Info.plist").open("wb") as fh:
@@ -39,6 +55,10 @@ def make_app(path: Path, version="0.16.0-beta.2", updater=False):
     (path / "Contents/Resources/bin").mkdir()
     (path / "Contents/Resources/bin/paseo").write_text("#!/bin/sh\n")
     (path / "Contents/Resources/managed-release.json").write_text(json.dumps({"schemaVersion": 1, "component": "paseo-desktop"}))
+    helper = path / HELPER_REL
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes(b"qualified fake helper executable")
+    helper.chmod(0o755)
     if updater:
         (path / "Contents/Resources/app-update.yml").write_text("provider: github\n")
 
@@ -51,7 +71,7 @@ class Fake:
                  busy_after_swap=False, ls_shape=UNSET, terminals=None, keeps_daemon_on_quit=False,
                  busy_after_quit=False, interrupt_on_open=False, plugin_item_without_id_always=False,
                  osascript_running_errors=False, fork_cli_broken=False, lsof_fails=False,
-                 quit_request_fails=False, shipit_stays=False,
+                 quit_request_fails=False, shipit_stays=False, bad_signature_after_swap=False,
                  quit_needs_running=False):
         self.agents = agents if agents is not None else [dict(IDLE)]
         self.perms = perms or []
@@ -70,6 +90,7 @@ class Fake:
         self.osascript_running_errors = osascript_running_errors
         self.fork_cli_broken = fork_cli_broken  # the staged build's own CLI (and daemon start) does not work
         self.lsof_fails = lsof_fails
+        self.bad_signature_after_swap = bad_signature_after_swap
         self.quit_request_fails = quit_request_fails
         self.shipit_stays = shipit_stays
         self.quit_needs_running = quit_needs_running  # a quit sent to a closed app errors (-600)
@@ -102,13 +123,15 @@ class Fake:
                 return plu.Result(0, "  77 /Users/x/Library/Caches/sh.paseo.desktop.ShipIt/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
             return plu.Result(0, "")
         if head == "codesign":
+            if self.bad_signature_after_swap and self.fork_installed() and argv[1] == "--verify":
+                return plu.Result(1, "", "invalid candidate signature")
             if argv[1] == "-dv":
                 return plu.Result(0, "", "Signature=adhoc\n" if self.fork_installed() else "Authority=Developer ID\n")
             return plu.Result(0)
         if head == "lsof":
             if self.lsof_fails:
                 return plu.Result(1, "", "lsof: boom")
-            return plu.Result(0, f"p{self.pid}\nn{self.installed}/Contents/MacOS/Paseo\n")
+            return plu.Result(0, vnode_output(self.pid, [self.installed / HELPER_REL]))
         if head == "osascript":
             if "is running" in argv[2]:
                 if self.osascript_running_errors:
@@ -215,6 +238,7 @@ def env(tmp_path, monkeypatch):
         approve(ctx, "recover" if args.rollback else "activate")
         ctx.policy_reader = lambda: copy.deepcopy(controller["policy"])
         ctx.native_home = lambda: ctx.home
+        ctx.executable_reader = lambda pid: fake_process_observation(ctx, pid)
         def native_runner(argv, timeout=60, input_text=None):
             if "maintenance" not in argv:
                 return runner(argv, timeout)
@@ -378,7 +402,7 @@ def test_unexpected_receipt_schema_after_swap_holds(env):
 
 
 def test_auto_rollback_is_gated(env):
-    fake = Fake(env, busy_after_swap=True, lsof_fails=True)
+    fake = Fake(env, busy_after_swap=True, bad_signature_after_swap=True)
     assert run_main(env, fake, "--apply") == 4  # a gate refusal is 4, even for the automatic rollback
     stops = [c for c in fake.calls if c[:3] == ["paseo", "daemon", "stop"]]
     assert len(stops) <= 1  # the rollback never stopped the busy daemon
@@ -630,8 +654,8 @@ def test_daemon_from_the_backup_bundle_fails_verification(env):
             return plu.Result(0, f"p1\nn{env}/Paseo-prev.app/Contents/MacOS/Paseo\n")
         return real(argv, timeout)
 
-    assert run_main(env, lsof_from_backup, "--apply") == 1
-    assert upstream_in_place(env)
+    assert run_main(env, lsof_from_backup, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 # --- third adversary check (ef3d042) -------------------------------------------------------------------------
@@ -782,8 +806,8 @@ def test_a_keyboard_interrupt_in_the_gate_is_a_refusal(env, monkeypatch):
 def test_lsof_failure_fails_verification(env):
     """F9"""
     fake = Fake(env, lsof_fails=True)
-    assert run_main(env, fake, "--apply") == 3
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 def test_a_denied_quit_request_fails_at_once(env):

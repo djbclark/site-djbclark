@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_paseo_local_upgrade import plu, make_app, Fake, touched, expected_managed_plugins
+from test_paseo_local_upgrade import plu, make_app, Fake, touched, expected_managed_plugins, HELPER_REL, fake_process_observation, vnode_output
 from paseo_upgrade_policy import Hold, bundle_sha256, grant, marker
 
 
@@ -29,6 +29,7 @@ def qualified(tmp_path):
     ctx = plu.Ctx(old, target, tmp_path / "previous.app", tmp_path / "journal", str(tmp_path / "home"), 0, 1, [],
                   runner=fake, sleep=lambda _: None, updater_cache=tmp_path / "cache", shipit_cache=tmp_path / "shipit")
     ctx.native_home = lambda: ctx.home
+    ctx.executable_reader = lambda pid: fake_process_observation(ctx, pid)
     value = policy(target, old)
     ctx.policy_reader = lambda: copy.deepcopy(value)
     return ctx, fake, value
@@ -624,3 +625,165 @@ def test_recovery_receipt_mismatch_cannot_claim_success(qualified):
     assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
     assert ctx.swapped_back and ctx.reservation and ctx.staged.exists()
     assert json.loads((ctx.state_dir / "last-attempt.json").read_text())["phase"] == "recovery-required"
+
+
+
+def observed_status(fake):
+    return {"localDaemon": "running", "pid": fake.pid, "daemonVersion": "0.16.0-beta.2"}
+
+
+def test_exact_nested_helper_vnode_is_accepted(qualified):
+    ctx, fake, _ = qualified
+    plu.authorize(ctx, capture=True)
+    plu.verify_executable(ctx, observed_status(fake))
+    assert ctx.verified_executable == fake_process_observation(ctx, fake.pid)
+    assert ctx.verified_executable["path"].endswith(HELPER_REL)
+
+
+@pytest.mark.parametrize("kind", ["backup-prefix", "sibling-bundle", "contents-prefix", "escaped-dotdot", "outside-symlink", "deleted-kernel-path", "missing-kernel-path"])
+def test_executable_must_have_exact_canonical_installed_bundle_ancestry(qualified, kind, tmp_path):
+    import shutil
+    ctx, fake, value = qualified
+    expected = ctx.installed / HELPER_REL
+    if kind == "backup-prefix":
+        actual = tmp_path / "Volumes/Backup" / expected.relative_to("/")
+    elif kind == "sibling-bundle":
+        actual = ctx.installed.with_name(ctx.installed.name + "-sibling.app") / HELPER_REL
+    elif kind == "contents-prefix":
+        actual = ctx.installed / "Contents-not-the-bundle" / "Paseo Helper"
+    else:
+        actual = tmp_path / "outside" / "Paseo Helper"
+    actual.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(expected, actual)
+    actual.chmod(0o755)
+    raw = str(actual)
+    if kind == "escaped-dotdot":
+        raw = str(ctx.installed / "Contents/../" / HELPER_REL)
+    elif kind == "outside-symlink":
+        alias = ctx.installed / "Contents/escaped-helper"
+        alias.symlink_to(actual)
+        raw = str(alias)
+    elif kind == "deleted-kernel-path":
+        raw = str(expected) + " (deleted)"
+    elif kind == "missing-kernel-path":
+        raw = str(tmp_path / "gone.app/Contents/MacOS/Paseo")
+    # Controller qualification is unaffected by external lookalikes. For tests
+    # adding entries inside the fixture, explicitly requalify those exact bytes.
+    if kind != "outside-symlink":
+        value["operations"]["activate"]["previousBundleSha256"] = bundle_sha256(ctx.installed)
+        plu.authorize(ctx, capture=True)
+    else:
+        # Direct executable-path boundary must independently reject symlink escape.
+        ctx.authorization = copy.deepcopy(value)
+    ctx.executable_reader = lambda pid: {"pid": pid, "path": raw, "start": (1000000 + pid, 0)}
+    original = fake.__call__
+    ctx.runner = lambda argv, timeout=60: plu.Result(0, vnode_output(fake.pid, [expected, actual])) if argv[0] == "lsof" else original(argv, timeout)
+    with pytest.raises(Hold):
+        plu.verify_executable(ctx, observed_status(fake))
+    assert not ctx.verified_executable
+
+
+@pytest.mark.parametrize("kind", ["expected-library-only", "deleted-vnode", "wrong-inode", "wrong-device", "duplicate-path", "duplicate-name-field", "wrong-pid", "second-process", "missing-inode", "missing-device", "newline-fields"])
+def test_actual_executable_requires_unambiguous_matching_vnode(qualified, kind):
+    ctx, fake, _ = qualified
+    plu.authorize(ctx, capture=True)
+    actual = ctx.installed / HELPER_REL
+    library = ctx.installed / "Contents/Resources/bin/paseo"
+    raw = vnode_output(fake.pid, [actual])
+    st = actual.stat()
+    if kind == "expected-library-only":
+        raw = vnode_output(fake.pid, [library])
+    elif kind == "deleted-vnode":
+        raw = raw.replace("n" + str(actual.resolve()), "n" + str(actual.resolve()) + " (deleted)")
+    elif kind == "wrong-inode":
+        raw = raw.replace(f"i{st.st_ino}\0", f"i{st.st_ino + 1}\0")
+    elif kind == "wrong-device":
+        raw = raw.replace(f"D{st.st_dev:#x}\0", f"D{st.st_dev + 1:#x}\0")
+    elif kind == "duplicate-path":
+        raw = vnode_output(fake.pid, [actual, actual])
+    elif kind == "duplicate-name-field":
+        raw = raw.replace("n" + str(actual.resolve()) + "\0", ("n" + str(actual.resolve()) + "\0") * 2)
+    elif kind == "wrong-pid":
+        raw = raw.replace(f"p{fake.pid}\0", f"p{fake.pid + 1}\0")
+    elif kind == "second-process":
+        raw += vnode_output(fake.pid + 1, [actual])
+    elif kind == "missing-inode":
+        raw = raw.replace(f"i{st.st_ino}\0", "")
+    elif kind == "missing-device":
+        raw = raw.replace(f"D{st.st_dev:#x}\0", "")
+    elif kind == "newline-fields":
+        raw = raw.replace("\0", "\n")
+    original = fake.__call__
+    ctx.runner = lambda argv, timeout=60: plu.Result(0, raw) if argv[0] == "lsof" else original(argv, timeout)
+    with pytest.raises(Hold):
+        plu.verify_executable(ctx, observed_status(fake))
+    assert not ctx.verified_executable
+
+
+@pytest.mark.parametrize("kind", ["process-start", "executable-path", "binary-content", "binary-inode", "policy-revoked", "daemon-pid"])
+def test_executable_observation_races_hold(qualified, kind, tmp_path):
+    ctx, fake, value = qualified
+    plu.authorize(ctx, capture=True)
+    actual = ctx.installed / HELPER_REL
+    original = fake.__call__
+    changed = {"done": False}
+    def observation(pid):
+        result = fake_process_observation(ctx, pid)
+        if changed["done"] and kind == "process-start":
+            result["start"] = (result["start"][0] + 1, 0)
+        elif changed["done"] and kind == "executable-path":
+            result["path"] = str(tmp_path / "other.app/Contents/MacOS/Other")
+        return result
+    ctx.executable_reader = observation
+    def runner(argv, timeout=60):
+        result = original(argv, timeout)
+        if argv[0] == "lsof":
+            changed["done"] = True
+            if kind == "binary-content":
+                actual.write_bytes(b"different code")
+            elif kind == "binary-inode":
+                other = actual.with_name("replacement")
+                other.write_bytes(actual.read_bytes())
+                other.chmod(0o755)
+                os.replace(other, actual)
+            elif kind == "policy-revoked":
+                value["operations"]["activate"]["allowed"] = False
+            elif kind == "daemon-pid":
+                fake.pid += 1
+        return result
+    ctx.runner = runner
+    with pytest.raises(Hold):
+        plu.verify_executable(ctx, observed_status(fake))
+    assert not ctx.verified_executable
+
+
+def test_same_pid_with_changed_start_since_previous_verification_holds(qualified):
+    ctx, fake, _ = qualified
+    plu.authorize(ctx, capture=True)
+    plu.verify_executable(ctx, observed_status(fake))
+    previous = ctx.verified_executable.copy()
+    ctx.executable_reader = lambda pid: {**previous, "start": (previous["start"][0] + 1, 0)}
+    with pytest.raises(Hold):
+        plu.verify_executable(ctx, observed_status(fake))
+
+
+def test_backup_prefix_cannot_release_even_with_expected_mapped_library(qualified, tmp_path):
+    import shutil
+    ctx, fake, _ = qualified
+    native = native_runner(ctx, fake)
+    wrong = tmp_path / "Volumes/Backup" / (ctx.installed / HELPER_REL).relative_to("/")
+    wrong.parent.mkdir(parents=True)
+    shutil.copyfile(ctx.installed / HELPER_REL, wrong)
+    wrong.chmod(0o755)
+    ctx.executable_reader = lambda pid: {"pid": pid, "path": str(wrong.resolve()), "start": (1000000 + pid, 0)}
+    actions = []
+    def runner(argv, timeout=60, input_text=None):
+        if "maintenance" in argv:
+            actions.append(argv[argv.index("maintenance") + 1])
+        if argv[0] == "lsof":
+            return plu.Result(0, vnode_output(fake.pid, [ctx.installed / HELPER_REL, wrong]))
+        return native(argv, timeout, input_text)
+    ctx.runner = runner
+    assert plu.do_apply(ctx, plu.parse(["--apply", "--yes"])) == 4
+    assert "end" not in actions and ctx.swapped and not ctx.swapped_back and ctx.reservation
+    assert ctx.backup.exists()

@@ -21,6 +21,7 @@ and last-attempt.json (every apply).
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -29,6 +30,7 @@ import plistlib
 import pwd
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -77,6 +79,48 @@ def run(argv: list[str], timeout: float = 60, input_text=None) -> Result:
     return Result(p.returncode, p.stdout, p.stderr)
 
 
+def process_executable(pid):
+    """Kernel executable vnode path and process start identity, never argv/first mapped image.
+
+    ABI: macOS SDK libproc.h / sys/proc_info.h, PROC_PIDTBSDINFO (3),
+    proc_bsdinfo (136 bytes), PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN).
+    Loaded lazily; Linux fixtures inject this reader only in process.
+    """
+    if sys.platform != "darwin" or type(pid) is not int or not 0 < pid <= 2147483647:
+        raise Hold("native process executable observation unsupported")
+    class BsdInfo(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_uint32) for name in (
+            "flags", "status", "xstatus", "pid", "ppid", "uid", "gid", "ruid", "rgid", "svuid", "svgid", "reserved")] + [
+            ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
+            ("nfiles", ctypes.c_uint32), ("pgid", ctypes.c_uint32), ("jobc", ctypes.c_uint32),
+            ("tdev", ctypes.c_uint32), ("tpgid", ctypes.c_uint32), ("nice", ctypes.c_int32),
+            ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
+    try:
+        if ctypes.sizeof(BsdInfo) != 136:
+            raise Hold("native process ABI uncertain")
+        lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidinfo.restype = ctypes.c_int
+        lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        lib.proc_pidpath.restype = ctypes.c_int
+        def identity():
+            info = BsdInfo()
+            if lib.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info) or info.pid != pid or info.start_sec <= 0 or info.start_usec >= 1000000:
+                raise Hold("kernel process start identity unavailable")
+            return (info.start_sec, info.start_usec)
+        before = identity()
+        buffer = ctypes.create_string_buffer(4096)
+        count = lib.proc_pidpath(pid, buffer, len(buffer))
+        if not 0 < count < len(buffer) or not buffer.value:
+            raise Hold("kernel executable path unavailable or truncated")
+        path = buffer.value.decode("utf-8", errors="strict")
+        if identity() != before:
+            raise Hold("process changed while reading executable path")
+        return {"pid": pid, "path": path, "start": before}
+    except (OSError, UnicodeError, AttributeError) as exc:
+        raise Hold("kernel executable identity unavailable") from exc
+
+
 @dataclass
 class Ctx:
     installed: Path
@@ -102,6 +146,8 @@ class Ctx:
     authorization: dict = field(default_factory=dict)
     operation: str = "activate"
     reservation: dict = field(default_factory=dict)
+    executable_reader: object = process_executable
+    verified_executable: dict = field(default_factory=dict)
     runtime_observations: list = field(default_factory=list)
     native_home: object = lambda: str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".paseo")
 
@@ -154,6 +200,7 @@ def authorize(ctx, operation=None, capture=False):
             raise Hold("recovery requires a new generation")
         ctx.authorization = json.loads(json.dumps(policy))
         ctx.operation = operation
+        ctx.verified_executable = {}
     elif policy != ctx.authorization:
         raise Hold("controller authorization changed or revoked")
     target = (ctx.installed if ctx.swapped and not ctx.swapped_back else ctx.staged) if operation == "activate" else (ctx.installed if ctx.swapped_back else ctx.backup)
@@ -225,6 +272,7 @@ def release_verified(ctx, phase, error=None):
     release_attempted = False
     try:
         boundary(ctx)
+        verify_executable(ctx, daemon_status(ctx))
         verify_runtime_plugins(ctx)
         save_state(ctx, phase="verified-held", error=error)
         authorize(ctx)
@@ -423,6 +471,92 @@ def verify_runtime_plugins(ctx, plugins=None):
     return entries
 
 
+def executable_path(raw):
+    """Reject deleted/escaped/noncanonical or unrepresentable path evidence."""
+    if not isinstance(raw, str) or not raw.startswith("/") or raw.startswith("//") or any(ord(c) < 32 or ord(c) == 127 for c in raw) or "(deleted)" in raw:
+        raise Hold("executable path is deleted, relative or ambiguous")
+    try:
+        raw.encode("utf-8", errors="strict")
+        path = Path(raw)
+        if str(path) != raw or ".." in path.parts or str(path.resolve(strict=True)) != raw:
+            raise Hold("executable path is not exact canonical evidence")
+        return path
+    except (OSError, UnicodeError, RuntimeError) as exc:
+        raise Hold("executable path unavailable or escaped") from exc
+
+
+def text_vnodes(output, pid):
+    """lsof NUL field output; never infer an executable from mapped-library ordering."""
+    if not isinstance(output, str) or "\0" not in output:
+        raise Hold("executable vnode records unavailable")
+    process, rows, row = None, [], None
+    for token in output.split("\0"):
+        token = token.lstrip("\n")  # lsof terminates process/file field sets with LF
+        if not token:
+            continue
+        key, value = token[0], token[1:]
+        if key == "p":
+            if process is not None or rows or row is not None or value != str(pid):
+                raise Hold("ambiguous executable process records")
+            process = pid
+        elif key == "f":
+            if process != pid or value != "txt":
+                raise Hold("ambiguous executable descriptor records")
+            if row is not None:
+                rows.append(row)
+            row = {}
+        elif key in ("D", "i", "n"):
+            if row is None or key in row:
+                raise Hold("ambiguous executable vnode fields")
+            row[key] = value
+        else:
+            raise Hold("unexpected executable vnode field")
+    if row is not None:
+        rows.append(row)
+    if process != pid or not rows:
+        raise Hold("executable vnode process missing")
+    return rows
+
+
+def verify_executable(ctx, status):
+    pid = status.get("pid") if isinstance(status, dict) else None
+    if type(pid) is not int or not 0 < pid <= 2147483647 or status.get("localDaemon") != "running":
+        raise Hold("daemon process identity unavailable")
+    try:
+        before = ctx.executable_reader(pid)
+        if not isinstance(before, dict) or type(before.get("pid")) is not int or before.get("pid") != pid or not isinstance(before.get("start"), tuple) or len(before["start"]) != 2 or any(type(n) is not int for n in before["start"]) or before["start"][0] <= 0 or not 0 <= before["start"][1] < 1000000:
+            raise Hold("kernel executable start observation malformed")
+        actual = executable_path(before.get("path"))
+        root = ctx.installed.resolve(strict=True)
+        if not root.is_dir() or ctx.installed.is_symlink() or not actual.is_relative_to(root / "Contents"):
+            raise Hold("kernel executable is outside exact installed bundle ancestry")
+        disk = actual.stat()
+        if not stat.S_ISREG(disk.st_mode) or not disk.st_mode & 0o111:
+            raise Hold("kernel executable is not a regular executable artifact")
+        txt = ctx.cmd(["lsof", "-a", "-p", str(pid), "-d", "txt", "-F0pfinD"])
+        if txt.code:
+            raise Hold("executable vnode observation unavailable")
+        rows = text_vnodes(txt.out, pid)
+        matching = [row for row in rows if row.get("n") == str(actual)]
+        if len(matching) != 1:
+            raise Hold("actual executable vnode missing or ambiguous")
+        row = matching[0]
+        if not re.fullmatch(r"0x[0-9a-fA-F]+", row.get("D", "")) or not re.fullmatch(r"[0-9]+", row.get("i", "")) or int(row["D"], 16) != disk.st_dev or int(row["i"]) != disk.st_ino:
+            raise Hold("loaded executable vnode differs from qualified disk artifact")
+        after = ctx.executable_reader(pid)
+        current = actual.stat()
+        stamp = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        if after != before or stamp(current) != stamp(disk) or (ctx.verified_executable and ctx.verified_executable != before):
+            raise Hold("executable or process start identity changed")
+        fresh = daemon_status(ctx)
+        if not fresh or any(fresh.get(key) != status.get(key) for key in ("pid", "localDaemon", "daemonVersion")):
+            raise Hold("daemon identity changed during executable verification")
+        authorize(ctx)  # re-hash exact installed/retained bundles after external observation waits
+        ctx.verified_executable = before.copy()
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        raise Hold("executable vnode identity uncertain") from exc
+
+
 def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
     status = daemon_status(ctx)
     if not status or status.get("localDaemon") != "running":
@@ -443,16 +577,7 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
             raise Fail("installed app is not the ad-hoc signed fork build")
         if (ctx.installed / "Contents/Resources/app-update.yml").exists():
             raise Fail("installed app still has app-update.yml (upstream updater config)")
-    # The daemon's executable path comes from its vnode, which follows a bundle rename (ps argv does not).
-    # If it lives in some .app, that must be the installed one. A daemon outside any bundle cannot be judged.
-    txt = ctx.cmd(["lsof", "-a", "-p", str(status.get("pid")), "-d", "txt", "-Fn"])
-    in_bundles = [ln[1:] for ln in txt.out.splitlines() if ln.startswith("n") and ".app/Contents/" in ln]
-    if any(str(ctx.backup) in p for p in in_bundles) or (
-        in_bundles and not any(str(ctx.installed) in p for p in in_bundles)
-    ):
-        raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
-    if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
-        raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
+    verify_executable(ctx, status)
     plugins = {p["id"]: p for p in verify_runtime_plugins(ctx)}
     need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins if expect_fork else []))
     missing = [pid for pid in need if not (pid in plugins and plugins[pid].get("status") == "running")]
