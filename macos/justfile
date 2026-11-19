@@ -82,6 +82,10 @@ hourly-updates:
 otp:
     "{{here}}/otp-to-clipboard/install.sh"
 
+# Optional. Build and install Copy URL.app (http/https handler that copies URLs to clipboard).
+copy-url:
+    "{{here}}/copy-url/install.sh"
+
 # Optional. Install the read-only mds XPC-peer helper. It does not stop mds.
 mds-clients:
     "{{here}}/mds-xpc-clients/mds-xpc-clients-setup.sh"
