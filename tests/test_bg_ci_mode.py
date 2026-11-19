@@ -1,4 +1,4 @@
-"""bin/bg in `ci` mode (load-watch ci): targeted test runs stay local, suites and builds go to CI (2026-10-18)."""
+"""bin/bgrun in `ci` mode (load-watch ci): targeted test runs stay local, suites and builds go to CI (2026-10-18)."""
 
 import os
 import re
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
+BG = Path(__file__).resolve().parent.parent / "bin" / "bgrun"
 
 
 def ci_targeted(tmp_path, *argv):
@@ -367,7 +367,7 @@ def test_approve_local_needs_a_command_after_double_dash(repo, tmp_path_factory)
     home = make_home(tmp_path_factory, "allow")
     for argv in (["approve-local"], ["approve-local", "--"], ["approve-local", "vitest", "run"]):
         r = subprocess.run([str(BG), *argv], cwd=repo, env=bg_env(home), capture_output=True, text=True, timeout=60)
-        assert r.returncode == 2 and "usage: bg approve-local" in r.stderr, argv
+        assert r.returncode == 2 and "usage: bgrun approve-local" in r.stderr, argv
     assert token_files(home) == []
 
 
@@ -595,3 +595,9 @@ def test_every_authentication_call_goes_through_the_scrub():
     for ln in code:
         if ('"$sa"' in ln and "-x" not in ln) or "/usr/bin/sudo" in ln:
             assert "bg_scrub_run" in ln, ln
+
+
+def test_renamed_wrapper_help():
+    result = subprocess.run([str(BG), "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "usage: bgrun <command>" in result.stderr

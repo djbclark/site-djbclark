@@ -115,7 +115,7 @@ in place with no cap enforcement**, and prints a note to run `--undo-all`.
    utility clamp, so "E-cores but still fair" cannot be had for an already-running
    process. The governor approximates it in time rather than in QoS: background while
    overloaded (E-cores, lowest priority), normal during the grace window. For new commands
-   `bin/bg` (`-c utility`) remains the right thing. `bin/verify-ecores.sh` (needs `sudo`)
+   `bin/bgrun` (`-c utility`) remains the right thing. `bin/verify-ecores.sh` (needs `sudo`)
    measures which clusters none/utility/background actually land on.
 6. **Release is all-at-once** on calm rather than one pid per calm sample. Simple, and
    the 6-sample calm requirement already damps it.

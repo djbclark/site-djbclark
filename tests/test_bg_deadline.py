@@ -1,4 +1,4 @@
-"""bin/bg's deadline records (2026-11-02): the run record exists only for a run that started, and both carry a --holder.
+"""bin/bgrun's deadline records (2026-11-02): the run record exists only for a run that started, and both carry a --holder.
 
 A gate-refused bg must leave no `bg-run-*` record (the sweep would otherwise announce "expired, recover" for work that never ran);
 a started run registers `bg-run-PID-T` from its detached watcher with `--holder` = the watcher's pid, never bg's own. The real
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
+BG = Path(__file__).resolve().parent.parent / "bin" / "bgrun"
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",

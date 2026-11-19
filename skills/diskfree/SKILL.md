@@ -30,7 +30,7 @@ numbers.
    **Low-load rule (djbclark, 2026-10-25):** a `dust` of all of `~` indexed 5.2M
    files / 314 GiB logical (cow pastures count in full), ran 30+ min and added to a
    load of 24. Never scan `~` or `~/src`. Size one named directory at a time,
-   sequentially, each as `~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 15 <dir>
+   sequentially, each as `~/ops/site-private/bin/bgrun nice -n 19 dust -d 1 -n 15 <dir>
    > /tmp/diskfree-<name>.out 2>&1` (run in the background, output to a file; `bg`
    is the load gate and utility QoS). Run `load-watch admit` first and skip the step
    while it says hot. Run it from `cd /tmp` (2026-10-25: `bg` refused with exit 3 from inside a CI repo such as djbclark-ade). Never `BG_LOAD_WAIT=0`, never `taskpolicy -b`. Cheap numbers
@@ -66,14 +66,14 @@ cow stats                    # pastures: logical vs on-disk (cheap)
 s=~/.local/state/diskfree/cow-gc-dry-run; mkdir -p "${s%/*}"
 [ -z "$(find "$s" -mtime -1 2>/dev/null)" ] && cow gc --merged --dry-run && touch "$s"
 # Standing: always size Trash and the Homebrew cleanup, no ask (read-only):
-~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 10 ~/.Trash
+~/ops/site-private/bin/bgrun nice -n 19 dust -d 1 -n 10 ~/.Trash
 brew cleanup -s -n           # dry-run; the Homebrew cache may sit on an external volume, not Data
 tmutil listlocalsnapshots /System/Volumes/Data
 jobber list | rg 'apfs-compress|chrome-cache-trim'
 ~/src/djbclark-ade/bin/load-watch admit --json     # proceed only while status is ok
 # then ONE directory at a time (rule 1), e.g. ~/.cache, ~/Library/Caches,
 # ~/Library/Application\ Support, ~/.cargo, ~/Downloads, ~/Library:
-~/ops/site-private/bin/bg nice -n 19 dust -d 1 -n 15 ~/.cache > /tmp/diskfree-cache.out 2>&1
+~/ops/site-private/bin/bgrun nice -n 19 dust -d 1 -n 15 ~/.cache > /tmp/diskfree-cache.out 2>&1
 ```
 
 Present a table — path, size, reclaimable-by, risk — and get a go. If space is

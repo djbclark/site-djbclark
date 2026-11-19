@@ -248,7 +248,7 @@ All slices work in place on `master` of `~/ops/*` (home rule 21). They don't use
 
 1. `fleet-watch` is touched by S2 (target line) and S5 (check call). S5 runs strictly after S2.
 2. The TOML is S1's. S5 sends its seed rows to S1 through `relay.py`, or edits after S1's commit lands. It never edits concurrently.
-3. Tests run only through `~/ops/site-private/bin/bg`, one at a time, per the delivery contract.
+3. Tests run only through `~/ops/site-private/bin/bgrun`, one at a time, per the delivery contract.
 
 ## First steps, in order
 
