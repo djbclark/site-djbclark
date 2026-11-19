@@ -8,13 +8,13 @@
 # denies this, but agy, codex, cursor and the rest have no hooks. A shim on PATH covers every TUI
 # that runs the command by name.
 #
-# What: `swift build|test|run` and any `xcodebuild` re-exec through ~/ops/site-private/bin/bg, which
+# What: `swift build|test|run` and any `xcodebuild` re-exec through ~/ops/site-private/bin/bgrun, which
 # takes a machine-wide test slot, waits for low load and adds -j/-jobs BG_CPUS. Everything else
 # (`swift package`, `--version`, `--help`, xcodebuild -version/-help) goes straight to /usr/bin.
 # BG_SHIM=1 is set before calling bg so the `swift` bg launches does not loop back here.
 name="$(basename "$0")"
 real="/usr/bin/$name"
-bg="$HOME/ops/site-private/bin/bg"
+bg="$HOME/ops/site-private/bin/bgrun"
 
 heavy=0
 if [ -z "${BG_SHIM:-}" ] && [ -x "$bg" ]; then

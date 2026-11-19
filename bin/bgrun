@@ -142,7 +142,7 @@
 # stops the offload too (header of bin/bg-offload).
 # Not a way round the gate for local work: `local` repos and releases never offload.
 #
-# Agents must call `~/ops/site-private-djbclark/bin/bg`: bare `bg` is the shell job-control builtin.
+# Agents must call `~/ops/site-private-djbclark/bin/bgrun`: bare `bg` is the shell job-control builtin.
 #
 # JAVA_HOME: callers keep their own. ~/.bashrc (sourced via BASH_ENV) only sets its JDK 25
 # default when JAVA_HOME is unset; `bg env JAVA_HOME=<jdk> ./gradlew …` also works.
@@ -273,10 +273,10 @@ bg_approve_local() {
       --ttl) [ $# -ge 2 ] || { echo "bg approve-local: --ttl needs a value (30m, 1h, 90s)" >&2; return 2; }; ttl=$2; shift 2 ;;
       --ttl=*) ttl=${1#--ttl=}; shift ;;
       --) shift; break ;;
-      *) echo "usage: bg approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2 ;;
+      *) echo "usage: bgrun approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2 ;;
     esac
   done
-  if [ $# -eq 0 ]; then echo "usage: bg approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2; fi
+  if [ $# -eq 0 ]; then echo "usage: bgrun approve-local [--ttl 1h] -- <command> [args...]" >&2; return 2; fi
   if [[ "$ttl" =~ ^([0-9]+)([smhd]?)$ ]]; then
     secs=$((10#${BASH_REMATCH[1]})); unit=${BASH_REMATCH[2]}
     case "$unit" in m) secs=$((secs * 60)) ;; h) secs=$((secs * 3600)) ;; d) secs=$((secs * 86400)) ;; esac
@@ -314,18 +314,18 @@ bg_approve_local() {
 # `illegal option -- -` (seen 2026-10-22). Catch that before the QoS exec.
 bg_usage() {
   cat >&2 <<'EOF'
-usage: bg <command> [args...]
+usage: bgrun <command> [args...]
 
-Runs <command> at utility QoS (taskpolicy -c utility). No bg-owned flags:
-  right:  bg ./build-searxng-image
-  right:  bg pytest -q tests/
-  wrong:  bg --name job --log out.log -- ./build   # those args go to taskpolicy
+Runs <command> at utility QoS (taskpolicy -c utility). No bgrun-owned flags:
+  right:  bgrun ./build-searxng-image
+  right:  bgrun pytest -q tests/
+  wrong:  bgrun --name job --log out.log -- ./build   # those args go to taskpolicy
 
-Redirect or name the run yourself (bg does not take --log/--name):
-  bg bash -lc './build >out.log 2>&1'
+Redirect or name the run yourself (bgrun does not take --log/--name):
+  bgrun bash -lc './build >out.log 2>&1'
 
-One run that bg sends to CI but must run here: ask djbclark to approve exactly that run (his Touch ID):
-  bg approve-local [--ttl 1h] -- <the exact command>
+One run that bgrun sends to CI but must run here: ask djbclark to approve exactly that run (his Touch ID):
+  bgrun approve-local [--ttl 1h] -- <the exact command>
 EOF
 }
 if [ "$#" -eq 0 ]; then
@@ -343,7 +343,7 @@ case "$1" in
     exit 0
     ;;
   --)
-    echo "bg: lone -- is not supported; pass the command directly (see bg --help)" >&2
+    echo "bg: lone -- is not supported; pass the command directly (see bgrun --help)" >&2
     exit 2
     ;;
   --*)

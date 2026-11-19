@@ -1,4 +1,4 @@
-"""bin/bg's load gate asks `load-watch admit` for the memory side and waits while it exits 75 (2026-10-23).
+"""bin/bgrun's load gate asks `load-watch admit` for the memory side and waits while it exits 75 (2026-10-23).
 
 Since 2026-11-14 bg looks once with `admit --wait 0`; once held it calls `admit --wait CHUNK` (load-watch polls, staggers and applies
 its starvation valve) instead of polling `--wait 0` every 15 s itself, so the valve can reach bg. Every `--wait N` call of one hold also
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-BG = Path(__file__).resolve().parent.parent / "bin" / "bg"
+BG = Path(__file__).resolve().parent.parent / "bin" / "bgrun"
 
 STUB = """#!/bin/bash
 d={state}

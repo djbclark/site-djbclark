@@ -1,4 +1,4 @@
-"""bin/bg offloads a held targeted test run in a `ci` repo to CI (bin/bg-offload, 2026-10-23), and since 2026-11-01
+"""bin/bgrun offloads a held targeted test run in a `ci` repo to CI (bin/bg-offload, 2026-10-23), and since 2026-11-01
 a build or full suite at once, through routes (1)-(4) of bin/bg-offload's header, with the private-macOS guard and
 artifact download (tests at the end of this file).
 
@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 BIN = Path(__file__).resolve().parent.parent / "bin"
-BG = BIN / "bg"
+BG = BIN / "bgrun"
 OFFLOAD = BIN / "bg-offload"
 COMMIT = "a" * 40
 
