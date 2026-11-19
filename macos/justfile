@@ -86,6 +86,10 @@ otp:
 copy-url:
     "{{here}}/copy-url/install.sh"
 
+# Optional. Build and install Copy & Open URL.app (copies URL to clipboard and opens default browser).
+copy-and-open-url:
+    "{{here}}/copy-and-open-url/install.sh"
+
 # Optional. Install the read-only mds XPC-peer helper. It does not stop mds.
 mds-clients:
     "{{here}}/mds-xpc-clients/mds-xpc-clients-setup.sh"

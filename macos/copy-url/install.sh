@@ -9,13 +9,18 @@ stage="$HOME/Applications/.Copy URL.app.new.$$"
 
 mkdir -p "$HOME/Applications"
 rm -rf "$stage"
-mkdir -p "$stage/Contents/MacOS"
+mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
 cp "$here/Info.plist" "$stage/Contents/Info.plist"
 
 # ~/.bashrc may export DEVELOPER_DIR at a removed Xcode; CLT is enough here.
 dev=/Library/Developer/CommandLineTools
 [ -d "${DEVELOPER_DIR:-/nonexistent}" ] && dev="$DEVELOPER_DIR"
 DEVELOPER_DIR="$dev" swiftc -O "$here/CopyURL.swift" -o "$stage/Contents/MacOS/CopyURL"
+
+iconset="$stage/AppIcon.iconset"
+DEVELOPER_DIR="$dev" swift "$here/make-icon.swift" "$iconset"
+iconutil -c icns "$iconset" -o "$stage/Contents/Resources/AppIcon.icns"
+rm -rf "$iconset"
 
 codesign --force --deep --sign - "$stage"
 
