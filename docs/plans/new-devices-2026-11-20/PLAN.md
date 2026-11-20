@@ -188,3 +188,45 @@ All edits in a claimed workspace, small commits, `git-commit-own`:
 - `research-kob.md` — Kobo Clara Colour divergence-from-Android quirks.
 - `research-kob-android-conversion.md` — can it be made Android, ranked options, exact steps.
 - `research-g6c.md` — Galaxy Watch 6 Classic quirks.
+
+## X. Update 2026-11-20 (later): m11 reboot test result and decisions
+
+**Decisions from djbclark:** reboot test approved; **0° for now**. Later requirement (not now): **180° while on power, 0° otherwise** (see below).
+
+**Test run (adb, USB, no third-party app opened):**
+
+1. Applied: `settings put system accelerometer_rotation 0`; `wm user-rotation lock 0`; `wm fixed-to-user-rotation enabled`; `settings put secure camera_autorotate 0`. Read back: accel 0, user_rotation 0, fixed enabled, camera rotation 0, current rotation 0.
+2. `adb reboot`; adb back and `sys.boot_completed=1` after about 38 s.
+3. First reading at boot completion, and again at +25 s, +60 s and +2 min: **accelerometer_rotation=0, user_rotation=0, fixed-to-user-rotation=enabled, mCurrentRotation=ROTATION_0, locked.** No rewrite appeared in the lock history after boot; the lock screen was up (keyguard showing).
+4. **Result: the system-level lock survives a normal reboot.** Raw readings: `~/scratchpad` copy only (not committed: boot logcat contains account data).
+
+**Caveats (not yet tested):**
+
+- This was a software reboot (`adb reboot`), not a **battery-dead cold boot** and not a power-button reboot. The earlier boot reason was `shutdown,battery`, so the cold-boot case still needs a run (needs a person to press power).
+- The third-party rotation/automation apps (Tasker, Key Mapper, Rotation Control, MacroHandler) did not run a rotation write in this window, so their possible interference is still open; Rotation Control's WRITE_SETTINGS grant is the one to watch.
+- `ignoreOrientationRequest` read **true** right after boot completed and **false** about a minute later (it was true before the reboot). Unexplained; probably ZUI/Android 16 large-screen policy settling. With fixed-to-user-rotation enabled it should not matter for rotation, but re-check after the next boot.
+- Acceptance still needs the three-boot matrix in section III.B step 6.
+
+**Next for m11 (0° only):** record the four commands as the `model_idea_tab_11` desired state; add a healing-registry ID; decide whether to remove the third-party rotation apps' write access.
+
+**Later: 180° on power, 0° otherwise.** Not designed yet. Options: (a) a Mac-side adb watcher (`dumpsys battery` AC/USB powered → `wm user-rotation lock 2`, else `lock 0`) while USB-attached; (b) on-device Tasker/Key Mapper profile on the power-connected event with `WRITE_SECURE_SETTINGS` granted by `pm grant`; (c) Android 16 docked/charging-state rotation setting if ZUI has one (unknown). Note that `fixed-to-user-rotation` keeps the angle stable, so changing the user rotation is enough; the event source is the open piece.
+
+## XI. kob alternative: Android e-ink (research, 2026-11-20)
+
+Goal from djbclark: an alternative to the Kobo Clara Colour that runs Android and is easy to program and control.
+
+**Recommendation: a Boox colour ePaper device.** Onyx Boox ships full Android with the Google Play Store and sideloading (official store pages, fetched), which gives adb, Termux, Shizuku-style tooling and normal Kotlin apps. Onyx also publishes an e-ink SDK with sample code (`onyxsdk-device` `EpdController`, refresh/update modes, front-light control): https://github.com/onyx-intl/OnyxAndroidDemo.
+
+Candidates (prices as shown on shop.boox.com on 2026-11-20; verify before buying):
+
+| Model | Screen | Android (per store page) | Price | Note |
+| --- | --- | --- | --- | --- |
+| **Palma 3** | 6.13" colour, 300 PPI B&W / 150 PPI colour | Page lists several Android versions in a comparison table; **confirm 16 vs 15 before buying** | US$339.99 | Closest size to the Clara Colour; phone-shaped |
+| **Note Mini C** | 8.52" Kaleido 3 colour | **Android 16** | US$579.99 | "Available soon" on the shop page |
+| **Note Air6 C** | 10.3" colour, 6 GB RAM, 64 GB | **Android 16** | US$579.99 | Largest; keyboard cover via pogo pins |
+
+**Why it is easier to program and control than the Kobo:** normal Android toolchain (adb, Gradle on CI, Termux), Play Store, and the Onyx SDK for refresh control; the fleet's existing Android flow (Termux sshd, Shizuku, Tailscale) should apply.
+
+**Unverified / to check before buying** (could not confirm from fetched pages): whether Boox's wireless debugging and Shizuku behave normally; Boox's battery manager / app-freezing behaviour (known to exist from memory, not verified here); bootloader/root status; OTA behaviour; data-handling of the Onyx cloud services (Chinese vendor). Treat as a new m11-style host: run the same probe and quirk plan after the first boot.
+
+**Alternatives not researched in depth:** Bigme, Meebook, Hisense (Android e-ink); I could not fetch their spec pages.
