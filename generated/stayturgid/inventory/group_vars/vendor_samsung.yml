@@ -3,5 +3,5 @@
 # put SITE-specific overrides in the site's own inventory/group_vars/ (they win).
 ---
 # Samsung layer. Battery "optimization" kills background toggles aggressively;
-# Shizuku + AutoJs6 must be battery-unrestricted (see docs/hacking.md Part 5b).
+# Shizuku must be battery-unrestricted (see docs/hacking.md Part 5b).
 

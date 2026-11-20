@@ -172,7 +172,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "# Fleet Control Room (D5 scaffold)\\n\\n**Scope honesty:** edge metrics (battery, device up) land after D8 otelcol + Vector fleet push. This panel documents the site-owned O-V-G-O endpoints from the port registry.\\n\\n| Service | Port | URL |\\n| --- | --- | --- |\\n| Grafana | 3000 | http://127.0.0.1:3000/ |\\n| VictoriaMetrics | 8428 | http://127.0.0.1:8428/ |\\n| OpenObserve | 5080 | http://127.0.0.1:5080/ |\\n| OliveTin | 1337 | http://127.0.0.1:1337/ |\\n| Vector API | 8686 | http://127.0.0.1:8686/health |\\n| Landing | 8088 | http://127.0.0.1:8088/health |\\n\\nDatasource UID `stayturgid-victoriametrics` is pinned for D6 panel diffs.\\nInventory host count (render-time): **7**.",
+        "content": "# Fleet Control Room (D5 scaffold)\\n\\n**Scope honesty:** edge metrics (battery, device up) land after D8 otelcol + Vector fleet push. This panel documents the site-owned O-V-G-O endpoints from the port registry.\\n\\n| Service | Port | URL |\\n| --- | --- | --- |\\n| Grafana | 3000 | http://127.0.0.1:3000/ |\\n| VictoriaMetrics | 8428 | http://127.0.0.1:8428/ |\\n| OpenObserve | 5080 | http://127.0.0.1:5080/ |\\n| OliveTin | 1337 | http://127.0.0.1:1337/ |\\n| Vector API | 8686 | http://127.0.0.1:8686/health |\\n| Landing | 8088 | http://127.0.0.1:8088/health |\\n\\nDatasource UID `stayturgid-victoriametrics` is pinned for D6 panel diffs.\\nInventory host count (render-time): **9**.",
         "mode": "markdown"
       },
       "pluginVersion": "11.0.0",
@@ -380,6 +380,81 @@
             "type": "prometheus",
             "uid": "stayturgid-victoriametrics"
           },
+          "expr": "last_over_time(stayturgid_host_up{host=\"m11\"}[15m])",
+          "legendFormat": "m11",
+          "refId": "A"
+        }
+      ],
+      "title": "Lenovo Idea Tab 11 (TB336FU) (m11)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "stayturgid-victoriametrics"
+      },
+      "description": "Inventory-projected host panel (D6). Panel id = 100 + sorted host index, so a one-host inventory edit diffs as one panel block. Honest scope: D8 ships logs (edge otelcol → Vector → OpenObserve), not device metrics to VictoriaMetrics; no stayturgid_host_up producer exists yet, so noValue reads honestly.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "no metrics pipeline yet",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 12
+      },
+      "id": 102,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "stayturgid-victoriametrics"
+          },
           "expr": "last_over_time(stayturgid_host_up{host=\"mac\"}[15m])",
           "legendFormat": "mac",
           "refId": "A"
@@ -430,10 +505,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 12,
+        "x": 18,
         "y": 12
       },
-      "id": 102,
+      "id": 103,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -505,10 +580,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 18,
-        "y": 12
+        "x": 0,
+        "y": 16
       },
-      "id": 103,
+      "id": 104,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -580,10 +655,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 0,
+        "x": 6,
         "y": 16
       },
-      "id": 104,
+      "id": 105,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -655,10 +730,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 6,
+        "x": 12,
         "y": 16
       },
-      "id": 105,
+      "id": 106,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -730,10 +805,85 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 12,
+        "x": 18,
         "y": 16
       },
-      "id": 106,
+      "id": 107,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "stayturgid-victoriametrics"
+          },
+          "expr": "last_over_time(stayturgid_host_up{host=\"vps-hub\"}[15m])",
+          "legendFormat": "vps-hub",
+          "refId": "A"
+        }
+      ],
+      "title": "vps-hub (vps-hub)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "stayturgid-victoriametrics"
+      },
+      "description": "Inventory-projected host panel (D6). Panel id = 100 + sorted host index, so a one-host inventory edit diffs as one panel block. Honest scope: D8 ships logs (edge otelcol → Vector → OpenObserve), not device metrics to VictoriaMetrics; no stayturgid_host_up producer exists yet, so noValue reads honestly.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "no metrics pipeline yet",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 20
+      },
+      "id": 108,
       "options": {
         "colorMode": "background",
         "graphMode": "none",

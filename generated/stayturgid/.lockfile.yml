@@ -1,8 +1,8 @@
 contract_version: 1
 product: stayturgid
 product_version: '2.7'
-product_commit: f96d53fa8262855e20f67a9388ed9ad6266960d7
-synced: '2026-10-25T13:12:44Z'
+product_commit: 11198171df32053c22f017310865d6dfeb8490d1
+synced: '2026-11-20T16:25:06Z'
 files:
 - path: generated/stayturgid/README.md
   sha256: 2c25bc99ead97c585679ccf1dde469eb7f7a0fdc5d2476180e7957fa1d058a9d
@@ -17,17 +17,17 @@ files:
 - path: generated/stayturgid/fragments/grafana/datasources/stayturgid.yaml
   sha256: 74c0b37a064362652850192c4f0e840e324d13feddc73839ca112c90157d5a39
 - path: generated/stayturgid/fragments/grafana/dashboards/provider.yaml
-  sha256: 403b133fafc9db9100a2d96dd8e7837c50b692b106c8dc1df5ecc3c59ae6d60e
+  sha256: d8beca718972fc2dce28646f1aaf00e4d8564088ae7145471a70b33564f7b96f
 - path: generated/stayturgid/fragments/grafana/dashboards/json/stayturgid-fleet.json
-  sha256: 071224c91ce9c77dcc501849e212c55803a35f0f0364be37baa7ee18bf6120ff
+  sha256: 75768db38ca5c167f57cbf07a0d3255b25f4e072064dec6c978a291e1fbbe9c6
 - path: generated/stayturgid/fragments/grafana/alerting/rules.yaml
   sha256: 30a9f2c8ce7438fa6ed1b1c5a7b4acbd3d9821b0b6eca7d7279ca047216749b0
 - path: generated/stayturgid/fragments/olivetin/stayturgid_actions.yaml
-  sha256: 8a46990ff04d06b7778a459bd7c5f3478a9d4c1d608ad4170f9c354718267e95
+  sha256: b44699986f19aafac0e4a82e21d21eeab1db4eba88b458a963ffd3383e37f1bd
 - path: generated/stayturgid/inventory/placeholder_inventory.yml
   sha256: 170070f18a97b4f9134c9ed664184a8f31870b471ed357e316d43d90cecf606e
 - path: generated/stayturgid/inventory/group_vars/all.yml
-  sha256: 7f834213d43d008653162b9d0de3fb5458e9a1dee529d48a9c9ffbd1fa870611
+  sha256: d98a82d42d10cfb3872e7ea2dc83f3bd7e9b8f362593c26f211db804e89fefe3
 - path: generated/stayturgid/inventory/group_vars/android_11.yml
   sha256: 191239d2a39ff2815a89327fb5221e6c6e0613636568aa0fc7ca71e44e13e49a
 - path: generated/stayturgid/inventory/group_vars/android_16.yml
@@ -43,10 +43,10 @@ files:
 - path: generated/stayturgid/inventory/group_vars/oneui_7.yml
   sha256: ffcb194522b4bf7b9d676ed6b949e7323a571075b83a93ccb9fe0622a0824c11
 - path: generated/stayturgid/inventory/group_vars/vendor_amazon.yml
-  sha256: 4be7c766585d3793bc1075059f9c96b49e95558061950ad8340f019431bad60d
+  sha256: 7532e47bb93c5a36c6d33f9a54164c3751cc7d29b0f5dd9431fbd96afbf29ef7
 - path: generated/stayturgid/inventory/group_vars/vendor_google.yml
   sha256: 115718ca805a1a8e244abd05b53661a71af03655bb6af05484208202c79e5b84
 - path: generated/stayturgid/inventory/group_vars/vendor_samsung.yml
-  sha256: 23fabe3a273f02b51ebc3b1f1629770b7aa496e122cd4ec786b915b86131ee3e
+  sha256: 107233e5988737bebf59fbe1c73c31fba2dbf4b668be4abd481651c310e8cd44
 - path: generated/stayturgid/inventory/group_vars/stayturgid.yml
   sha256: 4efe1bebd8d7d439240b68de249d583ddbe2f048a19e36ec1ba8556b041aafee

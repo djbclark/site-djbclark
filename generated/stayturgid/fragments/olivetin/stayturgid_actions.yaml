@@ -19,7 +19,7 @@ actions:
     timeout: 300
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just health
   - id: stayturgid_fleet_deploy_check
     title: "Deploy check — all hosts (dry-run)"
@@ -27,7 +27,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy-check
   - id: stayturgid_fleet_deploy
     title: "Deploy fleet — all hosts"
@@ -35,7 +35,7 @@ actions:
     timeout: 3600
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy
 
   - id: stayturgid_deploy_hd8
@@ -44,8 +44,17 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy hd8
+
+  - id: stayturgid_deploy_m11
+    title: "Deploy Lenovo Idea Tab 11 (TB336FU) (m11)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
+      just deploy m11
 
   - id: stayturgid_deploy_mac
     title: "Deploy mac (mac)"
@@ -53,7 +62,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy mac
 
   - id: stayturgid_deploy_mac_mini_intel
@@ -62,7 +71,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy mac-mini-intel
 
   - id: stayturgid_deploy_p7a
@@ -71,7 +80,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy p7a
 
   - id: stayturgid_deploy_s24
@@ -80,7 +89,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy s24
 
   - id: stayturgid_deploy_t2e
@@ -89,8 +98,17 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy t2e
+
+  - id: stayturgid_deploy_vps_hub
+    title: "Deploy vps-hub (vps-hub)"
+    icon: "&#128640;"
+    timeout: 1800
+    shell: |
+      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
+      just deploy vps-hub
 
   - id: stayturgid_deploy_vps_primary
     title: "Deploy vps-primary (vps-primary)"
@@ -98,6 +116,6 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-m11-deploy
       just deploy vps-primary
 
