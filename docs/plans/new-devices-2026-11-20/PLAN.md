@@ -1,6 +1,6 @@
 # Plan: add m11, kob, g6c to the fleet and fix their quirks
 
-Date: 2026-11-20. Status: **plan only — nothing below has been changed on any device or in inventory yet.**
+Date: 2026-11-20. Status: **plan, with one executed step:** the m11 rotation lock was applied and reboot-tested on 2026-11-20 (section X). Everything else below, including inventory, Termux/Shizuku, debloat and the other devices, is still unchanged. (Earlier the same day the dead `cswap_quota_context.sh` SessionStart hook was also removed from `~/.claude/settings.json`; unrelated to the devices.)
 Where it lives: `site-public-djbclark/docs/plans/new-devices-2026-11-20/` (raw research reports beside it: `research-*.md`).
 Evidence tags: **[observed]** read from the m11 over USB today; **[doc]** fetched vendor/AOSP source; **[forum]** community report; **[inference]** reasoning, untested.
 
@@ -198,7 +198,7 @@ All edits in a claimed workspace, small commits, `git-commit-own`:
 1. Applied: `settings put system accelerometer_rotation 0`; `wm user-rotation lock 0`; `wm fixed-to-user-rotation enabled`; `settings put secure camera_autorotate 0`. Read back: accel 0, user_rotation 0, fixed enabled, camera rotation 0, current rotation 0.
 2. `adb reboot`; adb back and `sys.boot_completed=1` after about 38 s.
 3. First reading at boot completion, and again at +25 s, +60 s and +2 min: **accelerometer_rotation=0, user_rotation=0, fixed-to-user-rotation=enabled, mCurrentRotation=ROTATION_0, locked.** No rewrite appeared in the lock history after boot; the lock screen was up (keyguard showing).
-4. **Result: the system-level lock survives a normal reboot.** Raw readings: `~/scratchpad` copy only (not committed: boot logcat contains account data).
+4. **Result: the system-level lock survives a normal reboot.** Raw readings: `m11-rotation-test-readings.md` beside this file (the boot logcat is deliberately not kept: it holds account data).
 
 **Caveats (not yet tested):**
 
@@ -230,3 +230,7 @@ Candidates (prices as shown on shop.boox.com on 2026-11-20; verify before buying
 **Unverified / to check before buying** (could not confirm from fetched pages): whether Boox's wireless debugging and Shizuku behave normally; Boox's battery manager / app-freezing behaviour (known to exist from memory, not verified here); bootloader/root status; OTA behaviour; data-handling of the Onyx cloud services (Chinese vendor). Treat as a new m11-style host: run the same probe and quirk plan after the first boot.
 
 **Alternatives not researched in depth:** Bigme, Meebook, Hisense (Android e-ink); I could not fetch their spec pages.
+
+## XII. Brilliant Labs Halo (asked 2026-11-20; not a fleet device)
+
+From Brilliant Labs' own docs (https://docs.brilliant.xyz/halo/halo-sdk, fetched): Halo is **not Android**. It is a Bluetooth LE peripheral with a small low-power chip and no app launcher or app installation; a "host" app on a phone or computer drives it, optionally with Lua scripts run on the glasses. Official SDKs: Python (Mac/Linux/Windows), Flutter (iOS/Android), Web Bluetooth; firmware is open source at https://github.com/brilliantlabsAR/halo-firmware. The chip (reported as an Alif B1 by a secondary source) and its OS/RTOS were not confirmed. For this fleet it would be a Bluetooth-paired accessory of a host (m11 or the Mac), not an ssh/adb node; closer to "non-Android" like the Kobo, but with no shell at all.
