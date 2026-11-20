@@ -1,0 +1,116 @@
+STATUS: done (see DONE line)
+
+# Kobo Clara Colour: divergence-from-Android quirks for an adb/Termux/Shizuku/Tailscale ops fleet
+
+Research date 2026-11-20. Device: Rakuten Kobo Clara Colour (6" Kaleido 3, 2024). Tools: firecrawl_search / firecrawl_scrape / firecrawl_developer_search (shared Hyades server).
+
+## I. Bottom line
+
+1. **It is not Android.** Stock firmware is a Linux 4.9.77 system with Kobo's Qt "Nickel" UI (32-bit ARMv7l, BusyBox userland on glibc, MediaTek MT8113-family SoC, ~512 MB RAM; Nickel and nearly everything else run as root). No adb, no Shizuku, no Termux, no Doze, no developer-options/Wireless-debugging screen. No Android port found (see item 9). Sources: https://github.com/Lasciviens/Project_Daily/blob/6b5fa9497dd71aacf7639c7c8c2a48af1a90060b/docs/archive/kobo-PLAN.md (secondary; Clara BW but same MTK platform), https://github.com/koinsaari/kobo-netbird (tested on mt8113t Kobo, fw 4.45.23646). Confidence: high on "not Android"; medium on exact SoC/RAM figures for the Colour variant (sources describe Clara BW / MTK family).
+2. **Remote management that works:** stock OpenSSH (hidden vendor toggle, MTK Kobos), KOReader's dropbear SSH (port configurable, default seen as 2222), NickelMenu-launched telnet (older fw), USB mass storage (FAT32 onboard only). **Tailscale is feasible** as a root userspace/TUN daemon, via the KOReader Tailscale plugin (only while KOReader runs) or a hand-hooked boot script (rcS).
+3. **Biggest fleet risk (as of Nov 2026):** Kobo is rolling out a *different OS generation* (5.x/6.x, Qt6, Chromium renderer, Yocto, `update.tar` images) as an opt-in beta to Clara Colour. NickelMenu/KFMon/KOReader launchers and SSH toggles built for 4.x do not carry over cleanly. Pin the fleet to 4.x until validated.
+
+## II. Quirk table
+
+Format: **# Quirk** - symptom / cause / fix / source / confidence.
+
+### A. Platform, adb, root, bootloader
+
+**1. No adb, no Android tooling.** Symptom: `adb devices` shows nothing over USB or Wi-Fi; no Wireless debugging, Shizuku, Termux. Cause: Linux/Nickel, not Android. Fix: use SSH (item 4) instead of adb; Termux-style shell = root BusyBox `sh` over SSH. Source: https://www.reddit.com/r/kobo/comments/1ck1qdw/using_android_software_andor_browser_on_the_libra/ (search-result snippet only: "Kobo's e-readers don't run on Android"; page itself UNFETCHABLE, reddit blocked all scrape engines), corroborated by Project_Daily / kobo-netbird above. Confidence: high.
+
+**2. Root is already effectively exposed; bootloader is locked.** Symptom: you get a root shell without exploits, but cannot boot your own kernel. Cause: services run as root; MTK secure-boot chain (preloader/LK) verifies later stages; no public unlock or signed-BL2 exploit; stock kernel lacks kexec. Fix: none for custom kernels; do everything in userland. Source: https://news.ycombinator.com/item?id=46194337 (commenters; one commenter corrects another's BROM details, so the exact boot-chain claims are contested) and https://news.ycombinator.com/item?id=43074606. Confidence: medium (HN comments), high that userland root is available.
+
+**3. USB behaviour: mass storage only, FAT32 onboard partition.** Symptom: plug into Mac -> device asks "Connect"; onboard storage mounts as KOBOeReader; rootfs (ext4) is NOT visible. Cause: Nickel's USB gadget mode; real rootfs reachable only by SSH/telnet. Fix: for headless use, NickelMenu has `nickel_setting:enable:auto_usb_gadget`; (settings list from NickelMenu page). No MTP. Source: https://pgaskin.net/NickelMenu/ and https://github.com/koinsaari/kobo-netbird ("Onboard FAT32 ... is not the rootfs. Real rootfs is ext4, reachable only via SSH"). Confidence: medium-high (auto_usb_gadget behaviour on fw 4.4x/Clara Colour not tested by us).
+
+**4. Stock SSH toggle (MTK Kobos incl. Clara Colour per source) is undocumented and awkward.** Enable: mount via USB, rename `.kobo/ssh-disabled` -> `.kobo/ssh-enabled`, eject, reboot, then `ssh root@<ip>`; first login forces setting a root password. Quirks: (a) OpenSSH `Match User root ... ForceCommand /etc/ssh/initial_ssh_setup.sh` ignores `ssh host cmd`, scp and sftp never negotiate: pipe commands via stdin (`echo "cmd" | ssh root@host`) and move files via base64 over a stdin heredoc, or use KOReader's SFTP instead; (b) root home in /etc/passwd is `/`, and sshd's relative `AuthorizedKeysFile .ssh/authorized_keys` looks at `//.ssh/authorized_keys`, so key auth silently fails from /root/.ssh: put the key in `/.ssh/authorized_keys`; (c) `ssh-copy-id` fails (BusyBox sh); append the pubkey manually. Source: https://github.com/koinsaari/kobo-netbird (tested on an mt8113t Kobo, fw 4.45.23646; the Clara Colour claim is in https://github.com/Lasciviens/Project_Daily/blob/6b5fa9497dd71aacf7639c7c8c2a48af1a90060b/docs/archive/kobo-PLAN.md). Confidence: medium-high; verify on the actual unit and firmware before fleet rollout.
+
+**5. KOReader SSH (dropbear) is the easier file channel.** KOReader: Tools (cog) -> Network -> SSH server (checkbox, port, pubkey folder, "Login without password (DANGEROUS)"). Dropbear + OpenSSH sftp-server, so scp/sftp work (the Tailscale plugin docs use `scp -P 2222`). Only runs while KOReader runs. Source: https://github.com/koreader/koreader/wiki/SSH ; port 2222 appears in https://github.com/victoria-riley-barnett/koreader-tailscale . Confidence: high. Caveat: on 5.x/6.x "KOReader's SSH server is unsupported" per Project_Daily (secondary, Sep 2026).
+
+**6. Telnet via NickelMenu (older route).** On Libra Colour fw 4.39 (May 2024) a NickelMenu `cmd_spawn` entry started `tcpsvd -E 0.0.0.0 1023 telnetd -i -l /bin/login`; login is admin/admin because root has a password. Superseded by item 4 on current 4.4x. Source: https://www.mobileread.com/forums/showthread.php?t=361035&page=2 . Confidence: medium (Libra Colour, old fw). Also note: telnet is cleartext and unauthenticated-ish; do not expose beyond Tailscale.
+
+**7. Developer options / "devmode" are hidden Nickel features, not Android Developer options.** Type `devmodeon` in the Nickel search bar, exit search, Settings -> Device information -> Developer options (page 2: CFA Mode, i.e. colour-filter modes; "Chromium debugging" exists on 5.x), `devmodeoff` hides it. On 5.x there was no SSH/telnet switch in devmode (June 2024 report). Does not persist adb-like state; it is a UI setting. Source: https://blog.the-ebook-reader.com/2024/05/21/how-to-change-color-settings-on-kobos-colour-ereaders/ ; https://github.com/koreader/koreader/issues/12047 . Confidence: high for devmodeon/CFA; medium for what survives updates.
+
+**8. USB debugging/ownership model: no per-host RSA trust prompt.** SSH uses the root password or key from item 4; treat the root password as the fleet credential (store via sudo-secretspec, never in repo). Source: kobo-netbird above. Confidence: medium (inferred from the SSH design).
+
+**9. No supported Android build.** Searches ("Kobo Clara Colour Android adb", "Android port") returned no Android port for this model. The only Android-adjacent Kobo project found is "Kobo Arc 7 Freedom" (https://github.com/mob5824m-wq/Kobo-Arc-7-freedom/pull/11, search-snippet only), which targets the unrelated Kobo Arc 7 Android tablet. Confidence: medium (absence of evidence from search).
+
+### B. Remote management over Tailscale / mesh
+
+**10. Tailscale is feasible but not first-class.** Options: (a) KOReader plugin `tailscale.koplugin` (Network -> Tailscale VPN -> Install/Update; QR or `bin/auth.key` sign-in; supports Headscale, userspace mode with HTTP proxy 127.0.0.1:1056 when kernel TUN is unstable; Kobo "generally" supported though most testing is Kindle); runs only while KOReader runs and Wi-Fi is on. Source: https://github.com/victoria-riley-barnett/koreader-tailscale . (b) A boot-persistent daemon hooked into `/etc/init.d/rcS` (the pattern proven for NetBird on Kobo; a Kobo tailscale boot-starter exists in https://github.com/jdbway/ereader-customizations/issues/6 : tailscale v1.102.3 confirmed on a Kobo, uses BusyBox wget since curl is absent). Confidence: medium-high (plugin), medium (DIY boot hook, we did not read its scripts).
+
+**11. Persistence pitfalls for a boot-time VPN daemon.** `/var/lib`, `/var/log`, `/var/run` are tmpfs rebuilt every boot -> tailscaled/netbird state there is lost and the node returns NeedsLogin each reboot: point state dirs at ext4 paths (`/etc`, `/opt`, `/usr/local` persist; plugin PR #58 moves logtail into statedir: https://github.com/victoria-riley-barnett/koreader-tailscale/pull/58 , search snippet). Stock firmware ships NO CA bundle (static Go binaries fail TLS: `x509: certificate signed by unknown authority`): install /etc/ssl/certs/ca-certificates.crt. A hand-edited rcS can look "wiped on reboot" when it was merely not flushed: run `sync` after editing and reboot cleanly. No systemd/upstart; `<tool> service install` does not work, start via `nohup setsid`. `/dev/net/tun` exists. Source: https://github.com/koinsaari/kobo-netbird . Confidence: high for the NetBird case, medium-high that it transfers to tailscaled.
+
+**12. A firmware update may overwrite rcS hooks.** Boot is one monolithic rcS on the ext4 rootfs; official updates rewrite the rootfs, so hand edits and `/usr/local` hooks should be assumed lost after OTA (see item 21) and re-applied by a fleet script. Source: kobo-netbird (no revert mechanism for manual edits during normal operation; but update behaviour is inferred). Confidence: medium (inference).
+
+### C. Sleep, power, Wi-Fi, "background killing"
+
+**13. No Doze / battery whitelist; instead Nickel suspends the whole device and kills Wi-Fi on sleep.** Symptom: device unreachable by SSH/Tailscale once the screen sleeps (powers Wi-Fi down on suspend: `disable-wifi.sh`) and only returns on wake if "auto restore Wi-Fi" is enabled. Fix: in KOReader enable Network -> "Restore Wi-Fi connection on resume" (setting `auto_restore_wifi`); in Nickel/NickelMenu use `nickel_setting:enable:force_wifi` or keep device on a charger; there is no adb `dumpsys deviceidle whitelist`. Source: https://github.com/koreader/koreader/issues/16046 (Clara BW, MTK), https://pgaskin.net/NickelMenu/ . Confidence: medium-high.
+
+**14. MTK quirk: suspend while on charger hangs the kernel.** Symptom: device freezes needing hard reset. Cause: MediaTek Kobos hang if a suspend is attempted while plugged in; KOReader therefore refuses to suspend when charging. Impact: an always-powered kiosk/dashboard never sleeps by itself (battery wear, burn-in is not an issue on e-ink but heat/battery is). Fix: leave to KOReader; in Nickel a long sleep on charger may freeze: hard reset = hold power ~10-20 s. Source: Project_Daily (citing KOReader `frontend/device/kobo/device.lua`; secondary). Confidence: medium. Related user report of freeze-in-sleep and battery drain after months: https://www.reddit.com/r/kobo/comments/1tkd3wf/constant_battery_drain_kobo_clara/ (Clara 2021 model, not Colour; fetched OK).
+
+**15. Wi-Fi wedges after sleep/wake on MTK Kobos; restart can reboot the device.** Symptom: wpa_state=SCANNING forever with zero scan results; restarting KOReader in this state triggered a full reboot (hypothesis: hung `/dev/wmtWifi` power-down + hardware watchdog). Workaround: toggle Wi-Fi off/on, avoid restarting KOReader while Wi-Fi is wedged, enable auto-restore. Source: https://github.com/koreader/koreader/issues/16046 (open, Sep 2026). Related: Clara BW reboots turning on Wi-Fi first time from KOReader after boot (#13197, referenced inside #16046, not fetched). Confidence: medium (single-reporter, Clara BW, same platform).
+
+**16. KOReader's Wi-Fi interface detection can be wrong (INTERFACE=eth0).** Fix in koreader.sh / device.lua: force `wlan0`. Source: https://github.com/koreader/koreader/issues/16046 . Confidence: medium.
+
+**17. If KOReader runs without Nickel having enabled Wi-Fi, Wi-Fi can't start or the device reboots.** Cause: the MTK `wmt_launcher` / `wmt_loader` daemons are started by Nickel only when Wi-Fi is first turned on in Nickel; turning Wi-Fi on from KOReader when they are absent fails or reboots. Workaround: turn Wi-Fi on once in Nickel before launching KOReader, or start the daemons manually: `insmod .../mt66xx/wmt_drv.ko; /usr/bin/wmt_loader & /usr/bin/wmt_launcher -p /lib/firmware &`. Source: https://github.com/koreader/koreader/issues/16222 (Tolino 5.x and a Clara BW on 4.46.23852 comments; open Nov 2026). Confidence: medium-high.
+
+**18. Boot-time behaviour: launcher apps, bootcount.** On 5.x, `/etc/init.d/mount-userdata` increments a boot counter; if Nickel never runs `bootcount-ctl reset`, four boots show a factory-reset prompt that wipes on tap. Impact: any scheme that boots straight into KOReader/another app on 5.x must run `bootcount-ctl reset`. Source: https://github.com/koreader/koreader/issues/16222 . Confidence: medium (5.x, Tolino hardware; likely same on Kobo 5.x/6.x). No equivalent known on 4.x.
+
+**19. Screen rotation/orientation persistence.** Nickel stores orientation as a UI setting (per-book/reader); no `user_rotation`/`accelerometer_rotation` settings. No Clara-Colour-specific persistence bug was found in our sources; UNVERIFIED (no source fetched for this). Confidence: low. If needed, KOReader has its own rotation setting and the device has no accelerometer on the Clara line? (not verified).
+
+### D. Display (colour e-ink)
+
+**20. Kaleido 3 colour ghosting / refresh quirks.** Symptom: heavy ghosting, especially with dark UI themes in KOReader plugins, colour pages needing 2-3 full refreshes. Cause: colour filter array over e-ink. Fix: KOReader full refresh every page (refresh_on_pages_with_images; PR #16272 wires it for muPDF Kaleido panels), Kobo hidden devmode CFA Mode (colour saturation presets). Sources: https://github.com/EmirErtorer/CyberUI.koplugin/issues/17 (Libra Colour; a Clara Colour user confirms "latest KOReader"), https://github.com/koreader/koreader/pull/16272 , https://blog.the-ebook-reader.com/2024/05/21/how-to-change-color-settings-on-kobos-colour-ereaders/ . Confidence: medium-high. Refresh rate is slow; do not use for animated/ frequently updating dashboards. A KOReader dashboard plugin (tesserae) suspends between refreshes using the hardware alarm on Kobo: https://github.com/dmellok/tesserae-koreader (README only).
+
+### E. Vendor apps, launchers, mods
+
+**21. OTA updates (4.x) overwrite mods; Kobo ships several updates a year.** Symptom: after an official firmware update NickelMenu/KFMon menu entries vanish or the "generator" error appears; one Clara Colour owner reports every update broke KFMon and required a factory reset to restart the mod install. Fix: reinstall the KFMon package (mobileread thread t=274231) and NickelMenu `KoboRoot.tgz` (drop in `.kobo/`, eject, wait for reboot); NickelMenu persists across firmware upgrades per its docs but real-world reports differ; KOReader's own `.adds/koreader` survives. Keep config under `.adds/`. Source: https://github.com/NiLuJe/kfmon/issues/24 (fw 4.45.23684), https://pgaskin.net/NickelMenu/ . Confidence: medium-high.
+
+**22. NickelMenu failsafe and uninstall.** Create empty `.adds/nm/uninstall` and reboot; or power the Kobo off immediately after it starts booting (failsafe). Errors appear as a menu item; use `logread` over SSH/telnet. Source: https://github.com/pgaskin/NickelMenu . Confidence: high.
+
+**23. FW >= 4.17: Nickel indexes hidden directories (including KOReader's).** Fix: ensure `.kobo/Kobo/Kobo eReader.conf` has `[FeatureSettings] ExcludeSyncFolders=(\\.(?!kobo|adobe).+|([^.][^/]*/)+\\..+)`. Source: https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices . Confidence: high.
+
+**24. Bloat/vendor apps.** Nickel includes the Kobo store, Libby/OverDrive (OverDrive -> Libby; library card must be re-linked after beta updates), Dropbox/Google Drive, Pocket/Instapaper (6.x), beta browser, extras (games). Hide home-screen recommendations with NickelHome / kobopatch (4.x only: https://github.com/nicoverbruggen/kobopatch-webui). No disable-package mechanism comparable to `pm disable-user`. Source: https://help.kobo.com/hc/en-us/articles/43753873356055-Missing-books-reading-stats-or-notes-after-Kobo-software-update , https://github.com/nicoverbruggen/NickelMenu/releases . Confidence: medium.
+
+**25. Accessibility service handling.** There is no Android AccessibilityService API; Kobo's accessibility work (screen-reader, large-print) shipped first in 5.x (EU accessibility mandate) and was not backported to 4.x. UI automation by accessibility service is impossible; use SSH + files + KOReader plugins. Source: https://www.mobileread.com/forums/showthread.php?p=4620834 (Nov 2026 thread; forum opinion). Confidence: medium.
+
+### F. Firmware generations (the key 2026 risk)
+
+**26. 4.x (Qt5) vs 5.x/6.x (Qt6, Chromium renderer, Yocto) split.** Latest 4.x: 4.45.23697 (May 2026), 4.46.23836 / 4.46.23852 (Aug-Nov 2026). 6.0.274403 (Sep 2026) -> 6.0.276679 -> 6.0.279225 (Oct-Nov 2026) are "optional beta" for Clara BW, Clara Colour, Libra Colour; some regions (EU) and some new units ship 5.x by default; Kobo's update server was still offering 4.46.x to 4.45 Clara-class devices on 2026-09-29. Update images are `update.tar` rootfs (Zstd ext4), not `KoboRoot.tgz`. Fix/hardening: keep devices on 4.x; accept no beta prompts; do not tap "update to 6.0". Sources: https://github.com/Lasciviens/Project_Daily/blob/6b5fa9497dd71aacf7639c7c8c2a48af1a90060b/docs/archive/kobo-PLAN.md (secondary, Clara BW; claim "4.x firmware offered to Clara-class devices" is from the author's own query), https://github.com/open-source-arena/Nickelite/blob/dd70ef1a9b3ae416d31e5dd6c80c18c2bf6afd41/docs/firmware-6-analysis.md , https://www.mobileread.com/forums/showthread.php?p=4620834 . Confidence: medium-high. Whether the *Clara Colour* specifically is auto-prompted: not confirmed (the Kobo help text lists it as affected).
+
+**27. 6.0 data-loss bug (on 5.18.270971 / 6.0.274403).** Symptom: sideloaded books, highlights/notes, My Words and reading stats vanish on Libra Colour, Clara BW and Clara Colour. Official guidance: do NOT roll back, reinstall, factory reset or sign out (each permanently deletes the content); install 6.0.276679 then 6.0.279225; sideloaded-book highlights not yet recovered as of 2026-10-28; sideload to the top level, not hidden folders. Source (fetched): https://help.kobo.com/hc/en-us/articles/43753873356055-Missing-books-reading-stats-or-notes-after-Kobo-software-update . Confidence: high.
+
+**28. NickelMenu/KFMon/patches vs firmware 5.x/6.x.** pgaskin NickelMenu: "not compatible with firmware 5.x"; an unofficial Qt6 fork (nicoverbruggen/NickelMenu, "Kobo.tgz" for 5.18/6.0, v1.4 on 2026-11-17, Bluetooth controls back, some limits, "Kobo OS 6 is still in beta and updates may break it") and KFMon v5 builds exist; KOReader ships a separate `koreader-kobov5-*.zip` (2026.07+), OTA update unsupported there, SSH reported unsupported there, USB mass storage misbehaved on 5.18.264769. KoboPatch mods work only on 4.x. Sources: https://pgaskin.net/NickelMenu/ , https://github.com/nicoverbruggen/NickelMenu/releases , https://github.com/nicoverbruggen/kobopatch-webui/issues/19 , https://github.com/koreader/koreader/issues/12047 , Project_Daily doc above. Confidence: medium-high.
+
+**29. Downgrade path.** Opt-in devices have Settings -> Device information -> "Revert to previous version" (resets again; unsafe after the 6.0 data-loss bug); a community universal downgrade package exists for older codenames (spaBW; never on newer P365 revisions). Source: Project_Daily (secondary). Confidence: medium; do not run without a backup and verified model/hardware revision.
+
+### G. Accounts, sync, misc
+
+**30. Sideloaded books and Kobo Sync.** Kobo does not sync sideloaded books to the cloud (unlike Tolino); only store/library books sync; sideloaded mode is the default for non-signed-in devices. Source: https://www.reddit.com/r/kobo/comments/1d73o2x/kobo_please_let_your_users_sync_their_sideloaded/ (search-result snippet only; page UNFETCHED). Confidence: low-medium. For a managed fleet use a fleet account or leave unsigned-in and push content over SSH/OPDS.
+
+**31. OTA update server also checks that update is offered per product ID** (N365 = 391, P365 = 395 for Clara BW; the Clara Colour has its own codename). Only a hint: do not apply third-party "universal downgrade" packages without checking codename. Source: Project_Daily. Confidence: low-medium.
+
+**32. Battery/charging.** Charge via USB-C; the drain/freeze-in-sleep bug reported on older Clara units needed battery replacement or hard reset. Source: reddit r/kobo/comments/1tkd3wf (fetched; Clara 2021). Confidence: low for the Colour.
+
+## III. Suggested fleet runbook (derived, not sourced)
+
+1. Keep firmware on 4.x; disable Wi-Fi-triggered update prompts operationally (decline updates); record `Settings > Device information` version per unit.
+2. Bring up SSH: USB-mount, rename `.kobo/ssh-disabled` -> `.kobo/ssh-enabled`, reboot, set root password once on-device, put key at `/.ssh/authorized_keys`, pipe commands via stdin.
+3. Install KFMon + NickelMenu + KOReader; set `auto_restore_wifi`; add NickelMenu `force_wifi` entry; install the KOReader Tailscale plugin (or a rcS-hooked tailscaled with state under /etc and a CA bundle).
+4. After any firmware update: re-run the mod installer; re-verify SSH, KFMon/NickelMenu, Tailscale, then re-claim fleet status.
+5. Treat the device as always-on only if on a charger; expect Wi-Fi to die at sleep; expect colour ghosting on dashboards.
+
+## IV. Not fetched / gaps
+
+- UNFETCHABLE (reddit blocked all engines): r/kobo 1ck1qdw (Android), r/Tailscale 1psvkj5 (Tailscale on Kobo), r/kobo 1an4xtd (VPN client), r/kobo 1rghhye (fw 4.45.23640), r/kobo 1xzbiqi (KOReader on Clara BW), r/kobo 1cz2du6, r/kobo 1d73o2x (only search-result snippets seen). old.reddit.com returned a login wall.
+- GitHub page error (not loaded): https://github.com/jyliuu/rinky/blob/main/docs/kobo-port.md ; https://github.com/bkerler/mtkclient/issues/1332 returned a 404 page (HN claims about it unverified).
+- Not found/verified for the Clara Colour specifically: rotation persistence (item 19), exact current Kobo auto-update behaviour, and a Clara-Colour-model SSH toggle test. Most low-level evidence comes from Clara BW / Libra Colour / Tolino (same MediaTek platform); treat as medium confidence until tested on a unit.
+- The Kobo product page (https://ereader.kobo.com/en-ww/products/kobo-clara-colour) was fetched but returned only the cookie banner and generic content at our truncation point; no spec or OS claims taken from it.
+
+DECIDED: Wrote this report to both the agent-reports path and the scratchpad path named in the brief; treated "adb/Shizuku/Doze" rows as N/A and mapped each to the closest Kobo equivalent.
+
+Prior art / docs checked: firecrawl_search (6+6 queries), firecrawl_developer_search (9 queries), 40+ scrapes of KOReader wiki, NickelMenu, mobileread, Kobo help, GitHub issues.
+
+Closing search: ran the last searches on firmware 6.x and NickelMenu Qt6 (2026-11-20): NickelMenu fork v1.4 (2026-11-17), 6.0.279225 current, Kobo help data-loss article updated 2026-10-28; found nothing contradicting the table.
+
+DONE
