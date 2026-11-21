@@ -33,7 +33,7 @@ python3 ~/.hermes/gmail_search_engine.py search --query "<terms>" --limit 5
   incremental sync (≤5 min old).
 - Freshness/stats: `python3 ~/.hermes/gmail_search_engine.py stats` →
   message/thread counts + Gmail `history_id`.
-- **The index can go stale; don't trust the cron claim above blindly.** From
+- **The index can go stale, even while the sync job below is scheduled.** From
   2026-08-18 to 2026-10-10 it silently stopped updating (Google OAuth token
   revoked, then the `google_api` skill archived). Before relying on "no
   such mail", check that the newest message is recent
