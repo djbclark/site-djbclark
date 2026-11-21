@@ -52,6 +52,8 @@ case "$FAKE_RUN" in
   exit5) echo "boom" >&2; exit 5 ;;
   cat) cat; exit 0 ;;
   sleep) echo $$ > "$S/childpid"; exec sleep 30 ;;
+  slowdone) echo $$ > "$S/childpid"; /bin/sleep 2; : > "$S/finished"; exit 0 ;;
+  bigxpc) /usr/bin/head -c 150000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; exit 0 ;;
   flood) echo $$ > "$S/childpid"; exec /usr/bin/yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2 ;;
   *) echo "ran: $*"; echo "diag line" >&2; exit 0 ;;
 esac
@@ -81,6 +83,7 @@ def box(tmp_path):
         "BG_PING_CMD": "/usr/bin/true",
         "BG_NO_DEADLINE": "1",
         "FAKE_STATE": str(state),
+        "BG_CONTAINER_TEST_CLI": str(fake),  # the fake is not the PATH's container or a Cellar keg: the test seam names it
     }
     for k in ("BG_LOAD_WAIT", "DEADLINE_NAME", "PASEO_AGENT_ID", "BG_CONTAINER_AUTOSTART", "BG_CONTAINER_STATUS_TIMEOUT", "FAKE_RUN", "FAKE_START", "FAKE_STATUS",
               "BGRUN_RUN_ID", "BGRUN_RUN_START"):
@@ -265,3 +268,41 @@ def test_the_guard_ignores_the_callers_pythonpath(box, tmp_path):
     (poison / "signal.py").write_text("raise SystemExit(99)\n")
     r = bg(box, "container", "run", "img", extra={"FAKE_RUN": "xpc0", "PYTHONPATH": str(poison)})
     assert r.returncode == 70, r.stderr
+
+
+def test_a_hangup_that_was_already_ignored_stays_ignored(box):
+    # `nohup bgrun container build ...`: the guard must not turn nohup's ignored SIGHUP into a forwarded one (rc 129 before the fix)
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "slowdone"},
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
+    deadline = time.monotonic() + 20
+    while not (state / "childpid").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    p.send_signal(signal.SIGHUP)
+    p.communicate(timeout=30)
+    assert p.returncode == 0 and (state / "finished").exists()
+
+
+def test_an_absolute_path_script_named_container_is_never_run_twice(box):
+    # a script named container is not Apple's CLI; testing it with --version would run it once more (deploy scripts, migrations)
+    work = box[0]
+    (work / "scripts").mkdir()
+    s = work / "scripts" / "container"
+    s.write_text(f'#!/bin/bash\necho "ran $*" >> "{work}/ran.log"\n')
+    s.chmod(0o755)
+    r = subprocess.run([str(BG), str(s), "deploy"], cwd=work, env=box[1], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert (work / "ran.log").read_text().splitlines() == ["ran deploy"]
+
+
+def test_a_slow_stderr_reader_does_not_hide_the_xpc_error(box):
+    # 150 KB of stderr read at ~20 KB/s: the relay is still behind (> 2 s) when the child exits 0 having printed the error last
+    up(box)
+    work, env, _ = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "bigxpc"},
+                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    while p.stderr.read(2048):
+        time.sleep(0.1)
+    p.wait(timeout=30)
+    assert p.returncode == 70

@@ -45,17 +45,22 @@
 # killed by bg.
 #
 # Apple `container` (2026-11-21, ADE queue 85 (a)-(c), cfengine lead 4c788430): a command whose key is `container ...` is not
-# exec'd but run as a child so bg can (1) start the apiserver if it is down (`container system status` must read `status
-# running`; else `container system start --disable-kernel-install`, the same command the sh.brew.container login job runs;
-# BG_CONTAINER_AUTOSTART=0 turns it off; exit 72 if it still is not up), and (2) fail a run whose stderr carries an
+# exec'd but run as a child so bg can (1) start the apiserver if it is down (`container system status --format json` exits 0 when it
+# runs; a definite "down" runs `container system start --disable-kernel-install`, the same command the sh.brew.container login job
+# runs; a status call that does not answer within BG_CONTAINER_STATUS_TIMEOUT, default 20 s, is "unknown": warn and run anyway;
+# BG_CONTAINER_AUTOSTART=0 turns it off; exit 72 if it is still definitely down), and (2) fail a run whose stderr carries an
 # `Error: ... XPC connection error ... Connection invalid` line even though the CLI exited 0 (exit 70; any other nonzero status
 # is passed through unchanged). The apiserver is an on-demand LaunchAgent that `container system start` registers itself
 # (RunAtLoad, no KeepAlive; the plist is rewritten on each start and pins the keg path), so launchd cannot be told to keep it up.
 # The key must be the command itself: `bgrun container run ...`, not `bgrun bash lane.sh` whose script calls `container run` inside
-# (that gets neither the preflight nor the XPC check); only Apple's CLI qualifies (absolute path or bare name, `--version` checked).
+# (that gets neither the preflight nor the XPC check); only Apple's CLI qualifies (bare name, or an absolute path to the PATH's
+# `container` or a Cellar keg, `--version` checked). The guard is the command's PARENT, not an exec: the slot file holds the guard's
+# pid, and a SIGKILL of the guard frees the slot while the command runs on, so stop a container run with TERM/INT (forwarded) or
+# kill its whole process group. SIGHUP/SIGINT/SIGTERM already ignored when the guard starts (nohup, `cmd &`) stay ignored.
 # Every command also gets BGRUN_RUN_ID (UTC time + bg's pid) and BGRUN_RUN_START (epoch seconds) in its environment: a gate that
 # writes `out/<sha>` should write `out/<sha>-$BGRUN_RUN_ID` and judge only that directory (a gate that never launched leaves an
-# older sha-only directory that looks like a pass).
+# older sha-only directory that looks like a pass). Caveat: read $BGRUN_RUN_ID INSIDE the run; `bgrun cmd -e X=$BGRUN_RUN_ID` expands
+# in the caller's shell, before bgrun sets it, to nothing (a gate script that mints its own id, as the PR body proposes, avoids that).
 #
 # Long-run ping (2026-10-18): a small watcher, forked just before the exec and detached from the
 # caller's output, records each run's duration in ~/.local/state/bg/history.tsv, keyed by repo and
@@ -1103,10 +1108,12 @@ if [ "$is_test" = 1 ] && [ "$tslots" -gt 0 ]; then
 fi
 
 # bg_container_exe ARGS...: Apple's `container` CLI named in the command. Past the wrappers bg_key skips (nice -n N, env, VAR=x,
-# flags) the first word must be `container` or an absolute path ending in /container (never ./container or scripts/container) and
-# must answer `--version` with "container CLI version"; prints it, else fails (the command then runs as before, unguarded).
+# flags) the first word must be `container` or an absolute path that resolves to the `container` on bgrun's PATH or into a
+# .../Cellar/container/... keg (decided before anything runs: any other script named container is never executed to be tested; never
+# ./container or scripts/container either) and must answer `--version` with "container CLI version"; prints it, else fails (the
+# command then runs as before, unguarded). BG_CONTAINER_TEST_CLI=PATH adds one more accepted path, for tests.
 bg_container_exe() {
-  local a skip=0 ver
+  local a skip=0 ver real std tst
   for a in "$@"; do
     if [ "$skip" -gt 0 ]; then skip=$((skip - 1)); continue; fi
     case "$a" in
@@ -1114,7 +1121,15 @@ bg_container_exe() {
       -n) skip=1; continue ;;
       -*) continue ;;
     esac
-    case "$a" in container|/*/container) ;; *) return 1 ;; esac
+    case "$a" in
+      container) ;;
+      /*/container)   # decide BEFORE running anything: a script named container must not be run twice (--version, then for real)
+        real=$(greadlink -f "$a" 2>/dev/null) || return 1
+        std=$(command -v container 2>/dev/null); [ -n "$std" ] && std=$(greadlink -f "$std" 2>/dev/null)
+        tst=; [ -n "${BG_CONTAINER_TEST_CLI:-}" ] && tst=$(greadlink -f "$BG_CONTAINER_TEST_CLI" 2>/dev/null)   # test seam
+        case "$real" in */Cellar/container/*) ;; *) [ -n "$real" ] && { [ "$real" = "$std" ] || [ "$real" = "$tst" ]; } || return 1 ;; esac ;;
+      *) return 1 ;;
+    esac
     if command -v gtimeout >/dev/null 2>&1; then ver=$(gtimeout 20 "$a" --version 2>/dev/null | head -n 1); else ver=$("$a" --version 2>/dev/null | head -n 1); fi
     case "$ver" in "container CLI version"*) printf '%s\n' "$a"; return 0 ;; esac
     return 1
@@ -1153,7 +1168,7 @@ bg_container_preflight() {
 
 # bg_container_guard_exec ARGS...: exec bin/bgrun-container-guard (next to the real bgrun file, not a symlink to it), which runs
 # the command as a child, relays its output, forwards signals and turns an XPC "Connection invalid" error reported with exit 0
-# into exit 70 (header). exec keeps bg's pid, so the slot locks and the long-run watcher are unchanged.
+# into exit 70 (header). exec keeps bg's pid for the guard (the command is its child), so the slot locks and the long-run watcher follow the guard.
 bg_container_guard_exec() {
   local self dir
   self=$(greadlink -f "$0" 2>/dev/null) || self=$0

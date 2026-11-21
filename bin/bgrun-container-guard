@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 
 EXIT_XPC_HIDDEN = 70
 XPC_ERROR = re.compile(rb"^Error: .*(XPC connection error|Connection invalid)", re.M)
@@ -39,7 +40,11 @@ def main(argv):
             pass
 
     # Handlers first: a TERM between Popen and the install would kill only the guard and orphan the command.
+    # A signal that was already ignored (nohup sets SIGHUP; `cmd &` in a script sets SIGINT) stays ignored, as it was when bgrun
+    # exec'd the command directly: the child inherits the ignore, since Popen resets only PIPE and XFSZ/XFZ.
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        if signal.getsignal(sig) == signal.SIG_IGN:
+            continue
         signal.signal(sig, forward)
     try:
         child = subprocess.Popen(argv, stderr=subprocess.PIPE)
@@ -50,6 +55,7 @@ def main(argv):
         forward(signum, None)
 
     seen = bytearray()  # the last TAIL_KEEP bytes of stderr, scanned after the child ends
+    progress = [0]  # bytes the relay has read and written on; a slow consumer is progress, a stalled grandchild is not
 
     def relay():
         out = sys.stderr.buffer
@@ -59,9 +65,11 @@ def main(argv):
                 return
             seen.extend(chunk)
             del seen[:-TAIL_KEEP]
+            progress[0] += len(chunk)
             try:
                 out.write(chunk)
                 out.flush()
+                progress[0] += len(chunk)
             except OSError:
                 # Our own stderr reader went away (`2>&1 | head`). Close the child's stderr pipe so its next write gets SIGPIPE
                 # and it ends, as it did before this guard existed; never leave it blocked on a full pipe.
@@ -76,12 +84,23 @@ def main(argv):
             break
         except KeyboardInterrupt:  # a SIGINT handler is installed, so this is only a fallback
             continue
-    reader.join(timeout=2)  # a grandchild that kept stderr open must not hold the exit status hostage
+    # Keep waiting while the relay still makes progress (a slow consumer must not hide the XPC line, which is the last thing written);
+    # give up after 2 s with none: a grandchild that kept stderr open must not hold the exit status hostage.
+    idle_since, last = time.monotonic(), progress[0]
+    while reader.is_alive():
+        reader.join(timeout=0.25)
+        if progress[0] != last:
+            idle_since, last = time.monotonic(), progress[0]
+        elif time.monotonic() - idle_since >= 2:
+            break
     if rc < 0:
         return 128 - rc
     if rc == 0 and XPC_ERROR.search(bytes(seen)):
-        print('bg: the container CLI exited 0 but reported an XPC "Connection invalid" error: the command did not run; '
-              "exiting 70 (is `container system status` running?)", file=sys.stderr)
+        try:
+            print('bg: the container CLI exited 0 but reported an XPC "Connection invalid" error: the command did not run; '
+                  "exiting 70 (is `container system status` running?)", file=sys.stderr)
+        except OSError:
+            pass  # stderr is gone (2>&1 | head): the status below is what counts
         return EXIT_XPC_HIDDEN
     return rc
 
