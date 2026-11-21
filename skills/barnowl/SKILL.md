@@ -19,9 +19,9 @@ name and its summary string). The installed client on pastebin is BarnOwl built 
 [djbclark/barnowl-debian](https://forgejo.mit.edu/djbclark/barnowl-debian/releases)); Debian's own is 1.10.
 `~/src/barnowl` is **not** the client source: it is djbclark's modules repo
 (forgejo.mit.edu/djbclark/barnowl): `Goose`, `HistoryLoad`, `InstanceStyle`, `Theme`
-(colours; style `themed`; added 2026-11-01) and the `bo-a` launcher. Since 2026-11-01 a real client for testing them is built by
+(colours; style `themed`) and the `bo-a` launcher. A real client for testing them is built by
 `~/src/barnowl/t/live/local/run.sh` (local podman VM, never the live pastebin session).
-Since `-3` (2026-11-02) the `themed`/`instancebold` styles wrap body lines wider than the pane
+The `themed`/`instancebold` styles wrap body lines wider than the pane
 (`wrap_long_lines`, default on), so in `bo screen` one long message spans several rows; `bo log`
 is unaffected and stays the way to read message text.
 
@@ -35,13 +35,13 @@ The persistent BarnOwl is the tmux session `barnowl` on `pastebin.xvm.mit.edu`,
 started and repaired by `bo-a` (`~/src/barnowl/bin/bo-a`). `bo` talks only to that
 session. A second `barnowl` process may be sitting on another tty. Do not type into it.
 
-**Since 2026-11-02 `bo-a` runs BarnOwl confined by `kjail`** (Landlock and seccomp,
+**`bo-a` runs BarnOwl confined by `kjail`** (Landlock and seccomp,
 [djbclark/kerberos-jail](https://forgejo.mit.edu/djbclark/kerberos-jail); copies in `~/src/barnowl/bin`), with a
 ticket cache holding only `zephyr/zephyr@ATHENA.MIT.EDU` in `~/.local/state/bo-a/jail/krb/cc`. Inside it BarnOwl reads a copy
 of `~/.owl` (made at each `bo-a` start) and can write only its jail `HOME`, regular files in `~/zlog/people` and
 `~/zlog/class`, and `bo`'s answer files in `~/.local/state/bo`; it cannot run other programs, so `zcrypt` and
 `:exec` fail there. Logs stay in `~/zlog`, so `bo log` is unchanged. `BO_A_JAIL=0 bo-a` runs it unconfined.
-Since barnowl-debian `-6` (2026-11-02) `:goose` works in the jail: BarnOwl may run `python3` and connect to one TCP
+`:goose` works in the jail: BarnOwl may run `python3` and connect to one TCP
 port, the one where a broker in tmux window `goose` (outside the jail, on loopback) holds the LLM API key; Landlock
 allows that port number on any host, not only loopback. `bo` still types only into the pane whose command is
 `barnowl`, never into `goose` or `tickets`.
