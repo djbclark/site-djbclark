@@ -965,7 +965,8 @@ if [ "$wait_s" != 0 ]; then
       why="machine load <=16 for macOS CI fallback (now $load1)"
     elif [ -x "$lw" ]; then
       # Ask the watcher's gate (compressor churn, 2026-10-23), which load alone cannot show. Since 2026-10-25 it
-      # also raises the per-core limit to its calm boost (2.0) while the compressor is calm, so a load between
+      # also raises the per-core limit to its calm boost (load-watch's ADMIT_BOOST_PER_CORE; the value moves, so it
+      # is not repeated here) while the compressor is calm, so a load between
       # $max_per_core and the boost is its call, not the awk check's. Exit 0 admit, 75 too hot; anything else
       # (error, missing) keeps the plain $max_per_core check above.
       # The first look is a pure check (--wait 0) so the hold message and the CI offload below keep their timing; once held,
