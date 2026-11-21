@@ -10,7 +10,8 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
    On the Mac only, tailnet HTTPS **3333** is an alias of 7263 (djbclark, 2026-11-21): a second
    `tailscale serve --https=3333` front for the same loopback daemon; 7263 stays so no client breaks.
 2. **No daemon password and no relay** (app.paseo.sh): the tailnet is the boundary
-   ([agents-vps-primary.md](agents-vps-primary.md)). Paseo runs commands for anyone who reaches it.
+   ([agents-vps-primary.md](agents-vps-primary.md)). Paseo runs commands for anyone who reaches it. On the
+   Mac a Tailscale grant narrows that to the operator's own devices (below).
 3. Linux builds happen in Forgejo CI, never on a host: [forgejo.mit.edu/djbclark/paseo-nix](https://forgejo.mit.edu/djbclark/paseo-nix)
    packs the npm release into a hash-pinned tarball and carries the NixOS module (`services.paseo`).
 4. Voice mode and dictation are off on the servers (`speech.enable = false`): on, the daemon downloads about
@@ -36,6 +37,32 @@ site-djbclark f919386, get.sipb.cloud at image `ci-eb12788`, Mac app 0.11.4). An
 `bootstrap_apks`, `just deploy-apks`) is on s24 and t2e; hd8 and p7a were off the tailnet and get it on their
 next `deploy-apks`. t2e has all three hosts. On s24 the app ignores taps (finger and adb alike, even
 after `pm clear`); djbclark will debug it later.
+
+## Who may reach the Mac's daemon (Tailscale grant, 2026-11-21)
+
+The daemon has no password, so on the Mac the boundary is a tailnet grant, not the whole tailnet (djbclark,
+2026-11-21). The former single grant `* -> * ip *` was split three ways, keeping all other access as it was:
+
+1. `* -> *` on every TCP port except 3333 and 7263, plus all UDP and ICMP (grant `ip: "*"` means TCP, UDP and ICMP).
+2. `* -> ipset:all-but-mac` on tcp 7263 and 3333: the other Paseo daemons (vps-primary, get) stay reachable.
+   The ipset lists the tailnet ranges and the approved subnet and app-connector routes, minus the Mac;
+   **add any newly approved subnet route to it.**
+3. `ipset:paseo-mac-clients -> ipset:mac` on tcp 7263 and 3333: this Mac, the operator's other Mac
+   (`defeat`), the Paseo Android phones (s24, t2e, hd8, p7a) and the operator's Windows PC, IPv4 and IPv6.
+   Servers, bot VMs, connectors and other users' devices are left out (no Paseo client config of this Mac was
+   found on them). **A new client device of this daemon needs its two addresses added here.**
+
+The policy carries `tests` (allowed phones accept, vps-primary and another user's device deny, Funnel and ssh
+paths still accept), so the admin API rejects an edit that breaks them. The policy before and after, with
+their ETags, are in site-private `tailscale/2026-11-21/` (they name other people's devices, so never here).
+
+Roll back (restores the former `* -> *` policy; the token stays out of argv):
+
+```sh
+sudo-secretspec run --reason "roll back Tailscale policy" -- sh -c 'T=$(printf "client_id=%s&client_secret=%s&grant_type=client_credentials&scope=policy_file" "$TAILSCALE_OAUTH_CLIENT_ID" "$TAILSCALE_OAUTH_CLIENT_SECRET" | curl -sS --max-time 30 -d @- https://api.tailscale.com/api/v2/oauth/token | python3 -c "import json,sys; print(json.load(sys.stdin)[\"access_token\"])") && printf "header = \"Authorization: Bearer %s\"\n" "$T" | curl -sS --max-time 60 -K - -H "Content-Type: application/hujson" --data-binary @$HOME/ops/site-private-djbclark/tailscale/2026-11-21/policy-before-paseo-grant.hujson -w " http=%{http_code}\n" https://api.tailscale.com/api/v2/tailnet/-/acl'
+```
+
+Swap the last path segment `/acl` for `/acl/validate` to check a file without applying it.
 
 ## Skills
 
