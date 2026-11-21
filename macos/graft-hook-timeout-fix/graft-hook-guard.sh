@@ -9,6 +9,9 @@
 # (isWorkspaceBuildRoot), so that build splits into every child. Under
 # ~/src/hermes-worktrees each child is a full hermes-agent tree (~159k nodes,
 # ~1 GB of graph); on 2026-10-18 a build there took 25+ min and 11 GB, load 140.
+# Running an interactive Claude Code session directly in container roots (~, ~/src,
+# ~/s) causes the same disaster: graft treats ~/src as a multi-repo workspace root
+# and runs runaway recursive builds across dozens of checkouts.
 # graft 0.23.0 has no per-directory opt-out, and TRAIL_NO_HOOKS is global, so
 # this wrapper skips every graft hook event for the denied trees instead.
 #
@@ -28,6 +31,16 @@ deny_stop=(
 )
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 event="${*: -1}"
+
+# Container roots: running an interactive Claude session or agent directly in
+# $HOME, $HOME/src, or $HOME/s causes graft to treat the folder as a multi-repo
+# workspace root (isWorkspaceBuildRoot) and run runaway recursive builds.
+real_dir="$(realpath -q "$dir" 2>/dev/null || echo "$dir")"
+real_home="$(realpath -q "$HOME" 2>/dev/null || echo "$HOME")"
+case "$real_dir" in
+  "$real_home"|"$real_home/src"|"$real_home/s") exit 0 ;;
+esac
+
 # graft's per-prompt pack (UserPromptSubmit `prompt`) was removed on 2026-10-10 and
 # `graft init` puts it back: ~120-300 tokens on every prompt, kept in history, often
 # off-target (djbclark-ade docs/disabled-skills.md). Skip it unless GRAFT_PROMPT_HOOK=1.
@@ -35,8 +48,9 @@ if [ "$event" = prompt ] && [ -z "${GRAFT_PROMPT_HOOK-}" ]; then
   exit 0
 fi
 for d in "${deny[@]}"; do
-  case "$dir/" in
-    "$d"/*) exit 0 ;;
+  real_d="$(realpath -q "$d" 2>/dev/null || echo "$d")"
+  case "$real_dir/" in
+    "$real_d"/*) exit 0 ;;
   esac
 done
 # `graft init` in a repo also writes project-scope copies of these hooks to
@@ -53,8 +67,9 @@ if [ "$event" = session-start ] && [[ -f "$dir/.claude/settings.json" && "$(<"$d
 fi
 if [ "$event" = stop ]; then
   for d in "${deny_stop[@]}"; do
-    case "$dir/" in
-      "$d"/*) exit 0 ;;
+    real_d="$(realpath -q "$d" 2>/dev/null || echo "$d")"
+    case "$real_dir/" in
+      "$real_d"/*) exit 0 ;;
     esac
   done
 fi
