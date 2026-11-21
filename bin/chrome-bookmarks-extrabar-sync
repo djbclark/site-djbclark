@@ -1,0 +1,478 @@
+#!/usr/bin/env python3
+"""Keep a static tree of the Chrome bookmarks bar in ExtraBar, refreshed when it changes.
+
+  chrome-bookmarks-extrabar-sync              build/refresh the "Chrome bookmarks" folder widget
+  chrome-bookmarks-extrabar-sync --dry-run    print the link and folder counts and the tree hash, nothing else
+  chrome-bookmarks-extrabar-sync --force      rebuild even if unchanged, and ask for approval even within 24 h
+  chrome-bookmarks-extrabar-sync --preset-id ID   target this preset instead of the active one
+
+What it does. It reads the Bookmarks bar of the Default Chrome profile (the signed-in
+AccountBookmarks file merged with the local Bookmarks file, parsing shared with chrome-tabs-menu),
+builds ONE folder widget titled "Chrome bookmarks" (nested folders become folder items, every link a
+deep_link action that opens in Safari) and puts it first in the active ExtraBar preset, through
+ExtraBar's MCP helper (extrabar-mcp, a stdio JSON-RPC server that needs ExtraBar running with its
+MCP bridge on). State is kept in ~/.local/state/chrome-bookmarks-extrabar/state.json: the sha256
+of the built tree, the widget's item id, and when approval was last requested.
+
+Runs. If the tree hash is unchanged and the widget is still in the preset, it does nothing, prints
+nothing and exits 0 (the usual case; no prompt). Otherwise it replaces the widget. ExtraBar asks the
+USER to approve removing an item (remove_item answers pending_user_confirmation with a
+confirmationId valid about 5 minutes and bound to the MCP client process), so one process calls
+remove_item on the old widget, polls extrabar_get_confirmation_status until it is approved, repeats
+the exact same call, then adds the new widget and moves it to the top. The first run has no old
+widget and needs no approval. Waiting is limited (--wait-seconds, default 240, under the 300 s limit
+of bin/hourly-updates); on timeout the old tree stays and the next run retries, but approval is asked
+at most once per 24 h unless --force. If ExtraBar is not running or its bridge is off, it exits 0
+silently. Only counts are printed, never bookmark titles or URLs.
+
+Scheduling: bin/hourly-updates.d/chrome-bookmarks runs it hourly; it prints "UPDATED ..." only when
+the widget changed. The process needs read access to Chrome's folder (Full Disk Access); a process
+without it fails with a PermissionError message and exit 1.
+
+Link URLs go into a deep_link template, where {name} is a placeholder, so braces (and spaces and
+control characters) are percent-encoded; every other character, including ? & # and %, is kept.
+
+Environment: CHROME_USER_DATA_DIR (as chrome-tabs-menu), CHROME_BOOKMARKS_EXTRABAR_MCP (the MCP
+helper, default the one inside ExtraBar.app), CHROME_BOOKMARKS_EXTRABAR_STATE (the state file).
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import select
+import subprocess
+import sys
+import tempfile
+import time
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+
+BUILDER_VERSION = 1  # bump to force a rebuild when the shape of the widget changes
+WIDGET_TITLE = "Chrome bookmarks"
+WIDGET_ICON = "bookmark"
+SAFARI = "com.apple.Safari"
+TITLE_MAX = 100
+MCP_DEFAULT = "/Applications/ExtraBar.app/Contents/Helpers/extrabar-mcp"
+PROFILE = "Default"
+PROMPT_INTERVAL = 24 * 3600
+CALL_TIMEOUT = 60
+
+
+class ExtraBarError(Exception):
+    """An error answer from ExtraBar's MCP helper: code is the word before the colon."""
+
+    def __init__(self, code: str, tool: str):
+        super().__init__(f"{tool}: {code}")
+        self.code = code
+        self.tool = tool
+
+
+def load_chrome_module():
+    """bin/chrome-tabs-menu as a module (it has no .py suffix); PyObjC is imported lazily there."""
+    path = Path(__file__).resolve().parent / "chrome-tabs-menu"
+    loader = SourceFileLoader("chrome_tabs_menu", str(path))
+    spec = spec_from_loader("chrome_tabs_menu", loader)
+    assert spec is not None
+    mod = module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+# ---- the tree -------------------------------------------------------------------------------
+
+
+def escape_template_url(url: str) -> str:
+    """Percent-encode what a deep_link template would misread: braces, spaces, control characters."""
+    return re.sub(r"[{} \x00-\x1f\x7f]", lambda m: f"%{ord(m.group(0)):02X}", url)
+
+
+def short_title(name: str, url: str) -> str:
+    title = " ".join((name or url).split())
+    return title if len(title) <= TITLE_MAX else title[: TITLE_MAX - 1] + "…"
+
+
+def build_items(nodes: list[dict]) -> list[dict]:
+    """Chrome bookmark nodes (see chrome-tabs-menu clean_node) -> extrabar_add_folder_widget items."""
+    items = []
+    for n in nodes:
+        if "children" in n:
+            items.append(
+                {
+                    "kind": "folder",
+                    "title": short_title(n["name"], "(unnamed folder)"),
+                    "items": build_items(n["children"]),
+                }
+            )
+        else:
+            title = short_title(n["name"], n["url"])
+            items.append(
+                {
+                    "kind": "action",
+                    "name": title,
+                    "action": {
+                        "type": "deep_link",
+                        "templateUrl": escape_template_url(n["url"]),
+                        "templateName": title,
+                    },
+                    "target": {"bundleId": SAFARI},
+                }
+            )
+    return items
+
+
+def count_items(items: list[dict]) -> tuple[int, int]:
+    """(links, folders) in a built item list."""
+    links = folders = 0
+    for it in items:
+        if it["kind"] == "folder":
+            a, b = count_items(it["items"])
+            links, folders = links + a, folders + b + 1
+        else:
+            links += 1
+    return links, folders
+
+
+def tree_hash(items: list[dict]) -> str:
+    blob = json.dumps(
+        {
+            "v": BUILDER_VERSION,
+            "title": WIDGET_TITLE,
+            "icon": WIDGET_ICON,
+            "items": items,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def read_bar_items(chrome) -> list[dict]:
+    """Widget items for the Default profile's Bookmarks bar; [] when it holds no web link."""
+    roots = chrome.profile_bookmarks(chrome.user_data_dir() / PROFILE)
+    bar = next((r for r in roots if r["key"] == "bookmark_bar"), None)
+    return build_items(bar["children"]) if bar else []
+
+
+# ---- state and decision -----------------------------------------------------------------------
+
+
+def state_path() -> Path:
+    return Path(
+        os.environ.get("CHROME_BOOKMARKS_EXTRABAR_STATE")
+        or "~/.local/state/chrome-bookmarks-extrabar/state.json"
+    ).expanduser()
+
+
+def load_state(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".state.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(state, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def decide(
+    state: dict,
+    preset_id: str,
+    present_ids: set[str],
+    new_hash: str,
+    force: bool,
+    now: float,
+) -> str:
+    """One of: "noop", "add" (no old widget to remove), "replace", "defer" (changed, but asked <24 h ago)."""
+    here = state.get("presetId") == preset_id and state.get("itemId") in present_ids
+    if not here:
+        return "add"
+    if state.get("hash") == new_hash and not force:
+        return "noop"
+    if not force and now - float(state.get("lastPromptAt") or 0) < PROMPT_INTERVAL:
+        return "defer"
+    return "replace"
+
+
+# ---- the MCP client ---------------------------------------------------------------------------
+
+
+class Client:
+    """One extrabar-mcp process: confirmations are bound to it, so a whole sequence uses one."""
+
+    def __init__(self, argv: list[str]):
+        self.proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        self.next_id = 0
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "method": "initialize",
+                "id": self._id(),
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "chrome-bookmarks-extrabar-sync",
+                        "version": "1",
+                    },
+                },
+            }
+        )
+        self._read()
+        self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def _id(self) -> int:
+        self.next_id += 1
+        return self.next_id
+
+    def _send(self, msg: dict) -> None:
+        assert self.proc.stdin is not None
+        self.proc.stdin.write(json.dumps(msg) + "\n")
+        self.proc.stdin.flush()
+
+    def _read(self) -> dict:
+        assert self.proc.stdout is not None
+        ready, _, _ = select.select([self.proc.stdout], [], [], CALL_TIMEOUT)
+        line = self.proc.stdout.readline() if ready else ""
+        if not line:
+            raise ExtraBarError("no_answer", "mcp")
+        return json.loads(line)
+
+    def call(self, tool: str, args: dict | None = None) -> dict:
+        """The tool's structured result; raises ExtraBarError for an error answer."""
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": self._id(),
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": args or {}},
+            }
+        )
+        res = self._read().get("result") or {}
+        if res.get("isError"):
+            text = "".join(c.get("text", "") for c in res.get("content", []))
+            m = re.match(r"([a-z_]+):", text)
+            raise ExtraBarError(m.group(1) if m else "error", tool)
+        data = res.get("structuredContent")
+        if isinstance(data, dict):
+            return data
+        try:
+            data = json.loads(
+                "".join(c.get("text", "") for c in res.get("content", []))
+            )
+        except ValueError:
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    def close(self) -> None:
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            self.proc.kill()
+
+
+# ---- the sync ---------------------------------------------------------------------------------
+
+
+def wait_for_approval(
+    client: Client, confirmation_id: str, wait: float, poll: float
+) -> bool:
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            status = str(
+                client.call(
+                    "extrabar_get_confirmation_status",
+                    {"confirmationId": confirmation_id},
+                ).get("status", "")
+            ).lower()
+        except ExtraBarError:
+            return False  # expired or unknown for this client
+        if status == "approved":
+            return True
+        if status in (
+            "denied",
+            "rejected",
+            "declined",
+            "cancelled",
+            "canceled",
+            "expired",
+        ):
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll)
+
+
+def remove_old_widget(client, state, state_file, preset_id, wait, poll, now) -> bool:
+    """remove_item with the user's approval; True once the old widget is gone."""
+    call_args = {"presetId": preset_id, "itemId": state["itemId"]}
+    try:
+        res = client.call("extrabar_remove_item", call_args)
+        if "pending_user_confirmation" not in json.dumps(res):
+            return True
+        state["lastPromptAt"] = now  # the user was asked: at most once per 24 h
+        save_state(state_file, state)
+        cid = res.get("confirmationId")
+        if not cid or not wait_for_approval(client, str(cid), wait, poll):
+            return False
+        res = client.call("extrabar_remove_item", call_args)  # the exact same call
+        return "pending_user_confirmation" not in json.dumps(res)
+    except ExtraBarError as e:
+        if e.code == "not_found":
+            return True  # already removed by hand
+        raise
+
+
+def sync(args, chrome, now: float | None = None) -> int:
+    now = time.time() if now is None else now
+    items = read_bar_items(chrome)
+    links, folders = count_items(items)
+    new_hash = tree_hash(items)
+    if args.dry_run:
+        print(f"{links} links, {folders} folders, hash {new_hash}")
+        return 0
+    if not items:
+        print(
+            "chrome-bookmarks-extrabar-sync: no web bookmarks on the Bookmarks bar; leaving ExtraBar as is",
+            file=sys.stderr,
+        )
+        return 0
+    state_file = state_path()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(state_file.parent / "lock", "w")  # noqa: SIM115 (held until the process exits)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0  # another run is in progress
+    mcp = os.environ.get("CHROME_BOOKMARKS_EXTRABAR_MCP") or MCP_DEFAULT
+    if not os.access(mcp, os.X_OK):
+        return 0  # ExtraBar is not installed here
+    try:
+        client = Client([mcp])
+    except (OSError, ExtraBarError):
+        return 0
+    try:
+        status = client.call("extrabar_get_status")
+        preset_id = args.preset_id or status["activePresetId"]
+        preset = client.call("extrabar_get_preset", {"presetId": preset_id})
+        present = {i["id"] for i in preset.get("items", [])}
+        state = load_state(state_file)
+        action = decide(state, preset_id, present, new_hash, args.force, now)
+        if action == "noop":
+            return 0
+        if action == "defer":
+            print(
+                "chrome-bookmarks-extrabar-sync: tree changed; approval was asked less than 24 h ago, retrying later",
+                file=sys.stderr,
+            )
+            return 0
+        if action == "replace":
+            if not remove_old_widget(
+                client,
+                state,
+                state_file,
+                preset_id,
+                args.wait_seconds,
+                args.poll_seconds,
+                now,
+            ):
+                print(
+                    "chrome-bookmarks-extrabar-sync: removal not approved in time; the old tree stays, retrying next run",
+                    file=sys.stderr,
+                )
+                return 0
+            state.pop("itemId", None)
+            state.pop("hash", None)
+            save_state(state_file, state)
+        added = client.call(
+            "extrabar_add_folder_widget",
+            {
+                "presetId": preset_id,
+                "title": WIDGET_TITLE,
+                "icon": WIDGET_ICON,
+                "items": items,
+            },
+        )
+        item_id = added["itemId"]
+        state.update(
+            {"presetId": preset_id, "itemId": item_id, "hash": new_hash, "builtAt": now}
+        )
+        save_state(state_file, state)
+        order = [
+            i["id"]
+            for i in client.call("extrabar_get_preset", {"presetId": preset_id}).get(
+                "items", []
+            )
+        ]
+        client.call(
+            "extrabar_reorder_items",
+            {
+                "presetId": preset_id,
+                "orderedItemIds": [item_id] + [i for i in order if i != item_id],
+            },
+        )
+        print(
+            f"UPDATED ExtraBar Chrome bookmarks tree ({links} links, {folders} folders)"
+        )
+        return 0
+    except ExtraBarError as e:
+        if e.code == "app_not_running":
+            return 0  # ExtraBar is off or its bridge is disabled
+        print(f"chrome-bookmarks-extrabar-sync: ExtraBar answered {e}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument(
+        "--dry-run", action="store_true", help="print counts and the tree hash only"
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="rebuild even if unchanged; ask for approval even within 24 h",
+    )
+    ap.add_argument("--preset-id", help="target preset (default: the active one)")
+    ap.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=240,
+        help="how long to wait for the user's approval",
+    )
+    ap.add_argument("--poll-seconds", type=float, default=5, help=argparse.SUPPRESS)
+    args = ap.parse_args(argv)
+    try:
+        return sync(args, load_chrome_module())
+    except (
+        OSError,
+        ValueError,
+    ) as e:  # PermissionError (no Full Disk Access) is an OSError
+        print(
+            f"chrome-bookmarks-extrabar-sync: {type(e).__name__}: {e}", file=sys.stderr
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

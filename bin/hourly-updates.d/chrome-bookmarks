@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# chrome-bookmarks — hourly refresh of the ExtraBar "Chrome bookmarks" tree (see
+# bin/chrome-bookmarks-extrabar-sync). Prints `UPDATED ...` only when the widget changed; silent when
+# nothing changed, when ExtraBar is not running, or when the user has not yet approved a removal.
+# The sync waits at most 240 s for that approval, under the runner's 300 s limit.
+export PATH="/opt/homebrew/bin:$PATH"
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$here/../chrome-bookmarks-extrabar-sync" --wait-seconds 240
