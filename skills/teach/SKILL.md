@@ -61,8 +61,8 @@ item at a time: a few paragraphs about that item, then its picklist (step 3).
    short paragraphs (three or four, no bullets), not a summary line:
    (a) what it is and what it does, concretely;
    (b) how it behaves in this setup: which sessions, tools or agents it covers and
-   which it cannot see (most delegation here goes through `acp-dispatch`, not
-   Agent-tool subagents), what it costs (context, a hook timeout, a refresh
+   which it cannot see (most delegation here goes to Paseo agents started with
+   `paseo run` / `bin/ade-worker-run`, not Agent-tool subagents), what it costs (context, a hook timeout, a refresh
    poll), and how it overlaps or conflicts with what is already installed;
    (c) the command or keystroke that starts it and where it draws.
    Read the README and, for an install, the hook source first; never state scope,
@@ -96,15 +96,16 @@ item at a time: a few paragraphs about that item, then its picklist (step 3).
    `Later`. A plugin that was disabled for context cost (mattpocock-skills, adhd)
    is enabled only for the trial: `claude plugin enable`, `/reload-plugins`,
    measure, and the closing question offers `Disable again`.
-6. **Close the day:** one AskUserQuestion per installed thing: `Keeper, add to
-   apply-toolchain-prompt.md (Recommended)` / `Keep but don't document` / `Uninstall`.
-   Keepers get a row in `~/src/djbclark-ade/docs/apply-toolchain-prompt.md` §0.6
-   "Claude Code mods" table (one line, what it gives the user, install note).
+6. **Close the day:** one AskUserQuestion per installed thing: `Keeper, document it
+   (Recommended)` / `Keep but don't document` / `Uninstall`. A keeper gets one line
+   (what it gives the user, install note) in the README of the repo that installs it
+   (`~/AGENTS.md` item 5); the archived apply-toolchain prompt gets nothing.
 7. **Tick and commit.** Change `- [ ] **Day N**` to `- [x] **Day N, YYYY-MM-DD**`
    (today's date; the repeat and recap logic reads it)
    and append one short "result:" clause (kept / uninstalled / disabled again).
-   `git -C ~/ops/site-private add memory/project_claude_code_mods_rollout.md &&
-   git commit && git push`; same for djbclark-ade if the prompt doc changed.
+   Commit and push it by path with `git-commit-own "teach: Day N done"
+   ~/ops/site-private/memory/project_claude_code_mods_rollout.md` (`~/AGENTS.md`
+   item 21); the same for the repo whose README changed in step 6.
    Then `~/.local/bin/hermes-ping "teach: Day N done — <one line>"`.
 
 ## Rules carried over
