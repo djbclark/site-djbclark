@@ -112,7 +112,7 @@ hosts:
       - {port: 18811, bind: "*",         owner: unmanaged, service: paseo-shift-drag-copy-wt-metro, status: default-claim,
          must_be_up: false,  # on-demand Electron-flavored Expo for the same worktree
          note: "2026-11-13: Expo/Metro for the paseo-shift-drag-copy-wt desktop dev run (see the 18810 row). The repo default 8082-8089 range overlaps open-webui 8085 and landing 8088."}
-      - {port: 18830, bind: "127.0.0.1", owner: unmanaged, service: mitnet-socks, status: planned,
+      - {port: 18830, bind: "127.0.0.1", owner: unmanaged, service: mitnet-socks, status: active,
          must_be_up: false,  # operator-approved pilot; removed by undo.sh
          note: "2026-11-21: MITnet selective-routing Chrome pilot. Per-user LaunchAgent com.djbclark.mitnet-socks runs `ssh -N -D 127.0.0.1:18830 pastebin` (MIT egress 18.25.134.227); a Default-profile chrome.proxy extension sends only www.nature.com and www.cambridge.org to it (exact-host PAC, SOCKS5 remote DNS, DIRECT fallback). Unauthenticated loopback SOCKS. Drafts, enable and undo: ~/.local/state/mitnet-routing/20261117-inventory/slices/chrome-pac-prep/. Release this row when undo.sh exits 0."}
       - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
