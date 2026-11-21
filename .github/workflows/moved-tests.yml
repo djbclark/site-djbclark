@@ -1,5 +1,6 @@
 # The four tests that moved here from djbclark-ade with their skills and tools (slim-down E1, 2026-11-06):
 # nothing ran them in CI after the move (operator batch A16, approved 2026-11-07).
+# 2026-11-21: also runs tests/test_local_lsp_entries.py (the local-lsp plugin's guarded sh -c entries, ADE queue 89).
 name: moved-tests
 
 on:
@@ -8,6 +9,8 @@ on:
       - "tests/test_barnowl_skill.py"
       - "tests/test_bigteam_prune.py"
       - "tests/test_change_hermes_*.py"
+      - "tests/test_local_lsp_entries.py"
+      - "claude/local-marketplace/plugins/local-lsp/**"
       - "skills/barnowl/**"
       - "skills/diskfree/**"
       - "bin/change-hermes*"
@@ -28,4 +31,4 @@ jobs:
         run: |
           python3 -m pip install --quiet pytest pyyaml
           PYTHONPATH=. python3 -m pytest -q tests/test_barnowl_skill.py tests/test_bigteam_prune.py \
-            tests/test_change_hermes_auto.py tests/test_change_hermes_lock.py
+            tests/test_change_hermes_auto.py tests/test_change_hermes_lock.py tests/test_local_lsp_entries.py
