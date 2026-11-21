@@ -84,10 +84,11 @@ RUN_EXTRA_SECONDS = 60  # beyond --wait-seconds: reading, adding, reordering
 class ExtraBarError(Exception):
     """An error answer from ExtraBar's MCP helper: code is the word before the colon."""
 
-    def __init__(self, code: str, tool: str):
+    def __init__(self, code: str, tool: str, text: str = ""):
         super().__init__(f"{tool}: {code}")
         self.code = code
         self.tool = tool
+        self.text = text  # the raw error text; never printed (it may name an item)
 
 
 def load_chrome_module():
@@ -286,7 +287,7 @@ class Client:
         if res.get("isError"):
             text = "".join(c.get("text", "") for c in res.get("content", []))
             m = re.match(r"([a-z_]+):", text)
-            raise ExtraBarError(m.group(1) if m else "error", tool)
+            raise ExtraBarError(m.group(1) if m else "error", tool, text)
         data = res.get("structuredContent")
         if isinstance(data, dict):
             return data
@@ -315,12 +316,14 @@ def wait_for_approval(
     deadline = time.monotonic() + wait
     while True:
         try:
+            res = client.call(
+                "extrabar_get_confirmation_status", {"confirmationId": confirmation_id}
+            )
             status = str(
-                client.call(
-                    "extrabar_get_confirmation_status",
-                    {"confirmationId": confirmation_id},
-                ).get("status", "")
+                find_key(res, "status") or find_key(res, "state") or ""
             ).lower()
+            if find_key(res, "approved") is True:
+                status = "approved"
         except ExtraBarError:
             return False  # expired or unknown for this client
         if status == "approved":
@@ -339,24 +342,60 @@ def wait_for_approval(
         time.sleep(poll)
 
 
+UUID_RE = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+
+
+def find_key(obj, key: str):
+    """The first value of `key` anywhere in nested dicts and lists, else None."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        obj = list(obj.values())
+    if isinstance(obj, list):
+        for v in obj:
+            found = find_key(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+def try_remove(client: Client, call_args: dict) -> tuple[bool, str | None]:
+    """One remove_item call: (removed, confirmation id when ExtraBar wants the user's approval).
+
+    The pending answer may arrive as a result or as an error answer; the id is read from either.
+    """
+    try:
+        res = client.call("extrabar_remove_item", call_args)
+        blob = json.dumps(res)
+    except ExtraBarError as e:
+        if e.code == "not_found":
+            return True, None  # already removed by hand
+        if e.code != "pending_user_confirmation":
+            raise
+        res, blob = {}, e.text
+    if (
+        "pending_user_confirmation" not in blob
+        and find_key(res, "confirmationId") is None
+    ):
+        return True, None
+    cid = find_key(res, "confirmationId")
+    if cid is None:
+        m = UUID_RE.search(blob)
+        cid = m.group(0) if m else None
+    return False, str(cid) if cid else None
+
+
 def remove_old_widget(client, state, state_file, preset_id, wait, poll, now) -> bool:
     """remove_item with the user's approval; True once the old widget is gone."""
     call_args = {"presetId": preset_id, "itemId": state["itemId"]}
-    try:
-        res = client.call("extrabar_remove_item", call_args)
-        if "pending_user_confirmation" not in json.dumps(res):
-            return True
-        state["lastPromptAt"] = now  # the user was asked: at most once per 24 h
-        save_state(state_file, state)
-        cid = res.get("confirmationId")
-        if not cid or not wait_for_approval(client, str(cid), wait, poll):
-            return False
-        res = client.call("extrabar_remove_item", call_args)  # the exact same call
-        return "pending_user_confirmation" not in json.dumps(res)
-    except ExtraBarError as e:
-        if e.code == "not_found":
-            return True  # already removed by hand
-        raise
+    removed, cid = try_remove(client, call_args)
+    if removed:
+        return True
+    state["lastPromptAt"] = now  # the user was asked: at most once per 24 h
+    save_state(state_file, state)
+    if not cid or not wait_for_approval(client, cid, wait, poll):
+        return False
+    return try_remove(client, call_args)[0]  # the exact same call
 
 
 def runner_ids(

@@ -73,7 +73,10 @@ for line in sys.stdin:
         else:
             cid = str(uuid.uuid4())
             confirmations[cid] = [a["itemId"], 0]
-            reply(i, {"status": "pending_user_confirmation", "confirmationId": cid})
+            if os.environ.get("FAKE_XB_PENDING_AS_ERROR"):
+                reply(i, error="pending_user_confirmation: approve in ExtraBar; confirmationId " + cid + " (valid 5 minutes)")
+            else:
+                reply(i, {"status": "pending_user_confirmation", "confirmationId": cid})
     elif tool == "extrabar_get_confirmation_status":
         c = confirmations.get(a["confirmationId"])
         if c is None:
@@ -341,6 +344,23 @@ class Runs(unittest.TestCase):
         self.assertNotEqual(self.saved()["itemId"], old)
         self.assertEqual([i["name"] for i in items].count("Chrome bookmarks"), 1)
         self.assertEqual(self.saved()["lastPromptAt"], T0 + 5000.0)
+
+    def test_pending_answer_delivered_as_an_error_text_is_handled_too(self):
+        self.run_sync()
+        old = self.saved()["itemId"]
+        self.env["FAKE_XB_PENDING_AS_ERROR"] = "1"
+        self.write_bookmarks(url("https://c.example", "TITLE-C"))
+        self.assertEqual(self.run_sync(approve_after=1, now=T0 + 5000.0), 0)
+        self.assertEqual(len(self.calls("remove")), 2)
+        self.assertTrue(self.last_out.startswith("UPDATED "))
+        self.assertNotEqual(self.saved()["itemId"], old)
+
+    def test_find_key_and_try_remove_helpers(self):
+        self.assertEqual(
+            cbes.find_key({"a": [{"b": {"confirmationId": "X"}}]}, "confirmationId"),
+            "X",
+        )
+        self.assertIsNone(cbes.find_key({"a": [1, 2]}, "confirmationId"))
 
     def test_unapproved_removal_keeps_the_old_tree_and_asks_once_per_day(self):
         self.run_sync()
