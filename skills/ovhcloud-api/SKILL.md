@@ -139,9 +139,11 @@ variables, which both the `ovhcloud` CLI and the python-ovh client read
 
 1. **`scripts/ovh-api.py METHOD PATH [JSON]`** — signs and calls one endpoint with the credentials
    from `sudo-secretspec run`, printing the JSON response. Safe by default: it refuses any
-   non-GET method unless `--allow-write` is passed, and refuses paths matching a billable pattern
-   (`/order`, `/cart`, `/billing`, `/payment`, `/refund`, `/credit`) unless `--allow-billable` is
-   passed too. This is the read-only-plus-frozen rule enforced in code rather than remembered.
+   non-GET method unless `--allow-write` is passed, refuses reboot/reinstall/rescue/delete/
+   snapshot/console paths unless `--allow-destructive` is passed separately, and refuses paths
+   matching a billable pattern (`/order`, `/cart`, `/billing`, `/payment`, `/refund`, `/credit`)
+   unless `--allow-billable` is passed too (the gate table under Gotchas). This is the
+   read-only-plus-frozen rule enforced in code rather than remembered.
 2. **curl**, if you must — the signature is
    `"$1$" + SHA1_HEX(AS+"+"+CK+"+"+METHOD+"+"+QUERY+"+"+BODY+"+"+TSTAMP)` with headers
    `X-Ovh-Application`, `X-Ovh-Consumer`, `X-Ovh-Timestamp`, `X-Ovh-Signature`. `QUERY` is the
@@ -358,13 +360,13 @@ Kept because this work repeats: these cost real time and each one looks like som
    failure.** It is not — rights failures are `NOT_GRANTED_CALL`. The credential was a **US**
    credential (`ovh-us`, account accepted 200) on a service named `…vps.ovh.ca`, and the endpoint
    value was `ovh-ca`. **Test the region before believing any 403:** `scripts/ovh-region-check.py`
-   probes all three with `/me` (read-only) and names the one that works. `scripts/ovh-api.py` now
+   probes all three with `/me` (read-only) and names the one that works. `scripts/ovh-api.py`
    does this automatically on an auth failure.
    **Also note:** the *service name* tells you nothing about the API region — `.ovh.ca` on a US
    account is normal. The resource's IAM URN does tell you: `urn:v1:us:resource:…`.
 2. **A `POST` probe is a mutation, not a question.** Probing whether `/vps/{s}/reboot` exists with
    `POST … --allow-write` expected a 404 ("no such path") and instead got `202` plus a queued
-   reboot — **the box rebooted.** A discovery sweep must never be able to act. `ovh-api.py` now
+   reboot — **the box rebooted.** A discovery sweep must never be able to act. `ovh-api.py`
    refuses reboot/reinstall/rescue/delete/snapshot/console paths unless `--allow-destructive` is
    passed *separately* from `--allow-write`, so one broad yes cannot reach them. **Use `GET` to
    discover; never sweep `POST` across candidate paths.**
