@@ -38,7 +38,7 @@ the server itself is fine: the client gave up during a restart and does not retr
 1. **Fix it first** (standing rule, 2026-10-05: "always fix it if it has issues").
    Probe the server with a real MCP `initialize` POST to
    `http://127.0.0.1:18796/mcp` (a bare GET returns 400 even when healthy), then
-   a `search_notes` call. If it fails, look at the launchd job
+   a `bm_search` call. If it fails, look at the launchd job
    `com.djbclark.basic-memory-mcp` and its watchdog
    (`~/Library/Logs/basic-memory-mcp/`), and restart with
    `launchctl kickstart -k gui/$(id -u)/com.djbclark.basic-memory-mcp`.
@@ -47,7 +47,7 @@ the server itself is fine: the client gave up during a restart and does not retr
    client).
 3. **Don't block on it — write the note as a file.** Notes are plain Markdown in
    git, and the server indexes them on its next sync:
-   1. `cd ~/ops/site-private && git pull --rebase`
+   1. `git -C ~/ops/site-private pull --ff-only`
    2. Write `memory/todo/<Title>.md` with this frontmatter (copy an existing
       note under `memory/todo/` for the shape):
       ```yaml
@@ -60,8 +60,9 @@ the server itself is fine: the client gave up during a restart and does not retr
       status: open
       ---
       ```
-   3. `git add "memory/todo/<Title>.md"` (by path), commit, `git push`.
-4. To read the list without MCP: `bm tool search-notes "todo-item"`, or
+   3. Commit and push it by path: `git-commit-own "todo: <Title>"
+      "$HOME/ops/site-private/memory/todo/<Title>.md"` (`~/AGENTS.md` item 21).
+4. To read the list without MCP: `bm tool search "todo-item"`, or
    `grep -l 'status: open' ~/ops/site-private/memory/todo/*.md`.
 5. **Keyword search over every project's todo notes** (exact, FTS5, no MCP,
    since 2026-10-09): `python3 -I ~/src/djbclark-ade/skills/session-finder/session-history.py
@@ -72,9 +73,9 @@ the server itself is fine: the client gave up during a restart and does not retr
 ## When asked "what could I work on" / "what's on the todo"
 
 1. Search the shared pool for open items:
-   - MCP: `mcp__basic-memory__search_notes` (or `search`) with query/tag
-     `todo-item`, project `main`.
-   - CLI: `bm tool search-notes "todo-item"` (or grep
+   - MCP: `mcp__basic-memory__bm_search` with query/tag `todo-item`, project
+     `main`.
+   - CLI: `bm tool search "todo-item"` (or grep
      `~/ops/site-private/memory/todo/` directly if MCP is down).
 2. Filter to `status: open`, list each with a one-line summary + link.
 3. If none exist, say so plainly rather than inventing suggestions.
@@ -82,7 +83,7 @@ the server itself is fine: the client gave up during a restart and does not retr
 ## When you find or create one
 
 Write a new note under `todo/` in project `main` with the convention above
-(`mcp__basic-memory__write_note`, directory `todo`). Set `status: open`. Flip
+(`mcp__basic-memory__bm_write`, directory `todo`). Set `status: open`. Flip
 to `status: closed` (edit in place, don't delete) once done/merged/stale, so
 the surface stays accurate without losing history.
 
