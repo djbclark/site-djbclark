@@ -37,12 +37,15 @@ rejected three formats in a row (see "Why", below). Apply it before the first
    several paragraphs, one per topic. Split at sentence boundaries where the
    topic or source shifts; never reword while splitting (verify the token
    multiset is unchanged).
-5. **Verify the render before saying it is done.** `open -a "Marked 2" <file>`,
-   then capture only Marked's window (section 3) and look at it. Never take a
-   full-screen capture: it records whatever else is on the operator's screen
-   (another session's terminal, 2026-10-10).
-6. **Say the file name in the delivery message** and reopen in Marked 2 after
-   any rename.
+5. **Verify the render before saying it is done.** In a `/report` run or after
+   the operator's yes, `open -a "Marked 2" <file>`, then capture only Marked's
+   window (section 3) and look at it. Otherwise never open a window: use the
+   headless pandoc check in section 3 (operator ruling 2026-11-21: `~/AGENTS.md`
+   item 39 wins over this rule). Never take a full-screen capture: it records
+   whatever else is on the operator's screen (another session's terminal,
+   2026-10-10).
+6. **Say the file name in the delivery message**, as a clickable path. After any
+   rename, reopen in Marked 2 only if it was opened under rule 5 or 7.
 7. **Open the finished deliverable in Marked 2 when the operator asked for it**
    (a `/report` run, or a yes to "open it in Marked 2?"), as the last act before
    the delivery message (`open -a "Marked 2" <file>`). Otherwise give its
