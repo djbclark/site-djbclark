@@ -76,6 +76,27 @@ class Filtering(unittest.TestCase):
         self.assertTrue(all(label == "" for label, _ in ctm.group_by_host(tabs)))
 
 
+def record(payload: bytes) -> bytes:
+    return len(payload).to_bytes(2, "little") + payload
+
+
+class TrimSession(unittest.TestCase):
+    HEADER = b"SNSS" + (3).to_bytes(4, "little")
+
+    def test_whole_file_is_unchanged(self):
+        data = self.HEADER + record(b"\x06abc") + record(b"\x07defg")
+        self.assertEqual(ctm.trim_to_last_record(data), data)
+
+    def test_half_written_last_record_is_cut(self):
+        whole = self.HEADER + record(b"\x06abc")
+        for cut in range(1, 7):
+            data = whole + record(b"\x07defgh")[:cut]
+            self.assertEqual(ctm.trim_to_last_record(data), whole, cut)
+
+    def test_non_snss_data_is_left_alone(self):
+        self.assertEqual(ctm.trim_to_last_record(b"not a session"), b"not a session")
+
+
 class FakeDump(unittest.TestCase):
     def test_deleted_tabs_and_windows_dropped(self):
         payload = {
@@ -91,22 +112,26 @@ class FakeDump(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as d:
             fake = Path(d, "dump")
+            session = Path(d, "Session_1")
+            session.write_bytes(b"SNSS" + (3).to_bytes(4, "little"))
             fake.write_text(
                 "#!/bin/sh\ncat <<'EOF'\n" + json.dumps(payload) + "\nEOF\n"
             )
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             self.assertEqual(
-                ctm.dump_windows(str(fake), "/nonexistent/Session_1"),
+                ctm.dump_windows(str(fake), str(session)),
                 [[{"url": "https://a.example", "title": "A"}]],
             )
 
     def test_failing_dump_raises(self):
         with tempfile.TemporaryDirectory() as d:
             fake = Path(d, "dump")
+            session = Path(d, "Session_1")
+            session.write_bytes(b"SNSS" + (3).to_bytes(4, "little"))
             fake.write_text("#!/bin/sh\necho boom >&2\nexit 3\n")
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             with self.assertRaises(RuntimeError):
-                ctm.dump_windows(str(fake), "/nonexistent/Session_1")
+                ctm.dump_windows(str(fake), str(session))
 
 
 class Install(unittest.TestCase):

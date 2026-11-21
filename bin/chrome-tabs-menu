@@ -121,14 +121,41 @@ def newest_session_files(base: Path) -> dict[str, str]:
     return found
 
 
-def dump_windows(dump: str, session_file: str) -> list[list[dict]]:
-    """Open tabs per window: [[{url, title}, ...], ...]; deleted tabs are dropped."""
-    r = subprocess.run(
-        [dump, "-json", session_file], capture_output=True, text=True, check=False
-    )
+def trim_to_last_record(data: bytes) -> bytes:
+    """Cut an SNSS session snapshot at its last complete record.
+
+    Chrome appends to the live Session_* file, so a read can end inside a record, and
+    chrome-session-dump panics on that ("Failed to read N bytes"). Records are
+    [uint16 size][size bytes] after an 8-byte header, so the last whole one is easy to find.
+    """
+    pos = 8
+    while pos + 2 <= len(data):
+        size = int.from_bytes(data[pos : pos + 2], "little")
+        if size == 0 or pos + 2 + size > len(data):
+            break
+        pos += 2 + size
+    return data[:pos] if data[:4] == b"SNSS" else data
+
+
+def dump_windows(dump: str, session_file: str) -> list[list[dict[str, str]]]:
+    """Open tabs per window: [[{url, title}, ...], ...]; deleted tabs are dropped.
+
+    Reads a trimmed private (0600) snapshot, never the live file, and removes it afterwards.
+    """
+    fd, snap = tempfile.mkstemp(prefix="chrome-tabs-menu.", suffix=".Session_snapshot")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(trim_to_last_record(Path(session_file).read_bytes()))
+        r = subprocess.run(
+            [dump, "-json", snap], capture_output=True, text=True, check=False
+        )
+    finally:
+        os.unlink(snap)
     if r.returncode != 0:
+        # The Go panic prints its message first and a long goroutine trace after it.
+        first = (r.stderr.strip().splitlines() or ["no output"])[0][:200]
         raise RuntimeError(
-            f"chrome-session-dump failed on {Path(session_file).name}: {r.stderr.strip()[-200:]}"
+            f"chrome-session-dump failed on {Path(session_file).name}: {first}"
         )
     wins = json.loads(r.stdout).get("windows", [])
     return [
