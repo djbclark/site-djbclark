@@ -12,7 +12,9 @@
 #   fleet-watch phantom [--dry-run]  only the phantom-running check: Paseo agents stuck "running" (see Phantom "running" Paseo agents)
 #   fleet-watch upstream-release [--registry PATH] [--dry-run] [--once]  registry-driven release alert issues
 #   fleet-watch prs add|rm OWNER/REPO N [N...]  watch / unwatch open PRs we wait on (see Watched PRs)
-#   fleet-watch prs ls  list the watched PRs;  fleet-watch prs check [--dry-run]  one PR check now (`check` runs it every run)
+#   fleet-watch issues add|rm OWNER/REPO N [N...]  watch / unwatch issues we wait on a maintainer reply on
+#   fleet-watch advisories add|rm OWNER/REPO GHSA-xxxx-xxxx-xxxx  watch / unwatch a repository security advisory we reported
+#   fleet-watch prs|issues|advisories ls  list that kind;  fleet-watch prs check [--dry-run]  one check of all three kinds now (`check` runs it every run)
 #   fleet-watch upstream [--profile cfengine|paseo] [--dry-run] [--once]  only the upstream watcher (see Upstream PR watcher)
 #   fleet-watch upstream [--profile P] --relay-to [<session> [<name>]] | --relay-test | --relay-off | --relay-status  who hears events
 #   fleet-watch install   write the launchd agent (every 5 min) and load it; a FLEET_WATCH_UPSTREAM set at install time (e.g. off) is baked into the job's environment
@@ -84,6 +86,16 @@
 # PR's state advances only after its ping succeeds, so a failed ping retries next run; 6 failed fetches in a row for a
 # repo send one ping, and one more on recovery. FLEET_WATCH_GH names the gh binary. `prs check --dry-run` reads GitHub
 # and prints what it would ping, but sends and writes nothing. It does not feed the status line.
+# The same script also watches issues and a repository security advisory (2026-11-21, operator ruling "Issues and
+# advisory"), one `fleet_watch_prs.py --scheduled` call per run for all three kinds. `fleet-watch issues add OWNER/REPO N`
+# (the number must be an issue, and `prs add` a PR: a mix-up is an error at add time) rides the same GraphQL call as
+# that repo's PRs and pings "issues: <issue URL> <event; event>" for new comments (our own left out), closed (as
+# completed / not planned / duplicate; then inactive) and reopened. `fleet-watch advisories add OWNER/REPO GHSA-xxxx-xxxx-xxxx`
+# (checked against the GHSA format) polls REST `repos/OWNER/REPO/security-advisories/GHSA` once per run and pings
+# "advisory: <advisory URL> <event; event>" for a state change, CVE assigned, collaborator change, a new comment count,
+# published or closed (the last two then inactive), or a bare "updated" when only updated_at moved. The API exposes no
+# advisory comment thread, so "updated" means: look at the advisory page. A 403/404 is a fetch failure like any other
+# (6 in a row ping once). Pings for both never carry titles, bodies, summaries or comment text.
 
 # PAUSED (2026-11-07, operator yes): the launchd job carries FLEET_WATCH_UPSTREAM=off, because the
 # dispatch and relay below hand third-party PR text to an agent (djbclark-ade Argon review F-CRIT-1).
@@ -1841,7 +1853,7 @@ check() {
   local p
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
   "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" --scheduled || echo "upstream-release: check failed" >&2
-  HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" "$PY3" "$REPO_ROOT/bin/fleet_watch_prs.py" --scheduled || echo "prs: check failed" >&2
+  HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" "$PY3" "$REPO_ROOT/bin/fleet_watch_prs.py" --scheduled || echo "prs/issues/advisories: check failed" >&2
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   [[ "$DANN_STATE" == off ]] || parts+=("dann=$DANN_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
@@ -1904,6 +1916,7 @@ case "${1:-check}" in
   check) check ;;
   upstream-release) shift; exec "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" "$@" ;;
   prs) shift; HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" exec "$PY3" "$REPO_ROOT/bin/fleet_watch_prs.py" "$@" ;;
+  issues|advisories) kind="$1"; shift; HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" exec "$PY3" "$REPO_ROOT/bin/fleet_watch_prs.py" --kind "$kind" "$@" ;;
   status)
     if [[ -f "$LAST" ]]; then cat "$LAST"; else echo "no check has run yet"; fi
     ;;
