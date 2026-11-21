@@ -20,8 +20,9 @@ import time
 EXIT_XPC_HIDDEN = 70
 XPC_ERROR = re.compile(rb"^Error: .*(XPC connection error|Connection invalid)", re.M)
 TAIL_KEEP = 64 * 1024
-IDLE_READ = 2  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
-IDLE_WRITE = 60  # ... while it waits for a slow consumer of our own stderr (the XPC line may still be queued behind it)
+IDLE_READ = float(os.environ.get("BG_GUARD_IDLE_READ", 2))  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
+IDLE_WRITE = float(os.environ.get("BG_GUARD_IDLE_WRITE", 60))  # (BG_GUARD_IDLE_* only exist so tests can shorten the waits)
+# ... while it waits for a slow consumer of our own stderr (the XPC line may still be queued behind it)
 
 
 def main(argv):
@@ -45,12 +46,22 @@ def main(argv):
     # Handlers first: a TERM between Popen and the install would kill only the guard and orphan the command.
     # A signal that was already ignored (nohup sets SIGHUP; `cmd &` in a script sets SIGINT) stays ignored, as it was when bgrun
     # exec'd the command directly: the child inherits the ignore, since Popen resets only PIPE and XFSZ/XFZ.
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    # Where the terminal already delivers a Ctrl-C to the whole foreground group (stdin is our tty and we are its foreground group),
+    # the child gets that INT from the kernel: forwarding it too would deliver it twice (and a third signal makes Apple's CLI
+    # exit(1) at once, leaving the VM). Otherwise (a lane, a nohup run, a pipe) the child gets its own process group, so a group
+    # signal sent to bgrun reaches it only through our forward, once. USR1/USR2 are forwarded as well: Apple's CLI passes them on.
+    on_tty = False
+    try:
+        on_tty = os.isatty(0) and os.tcgetpgrp(0) == os.getpgrp()
+    except OSError:
+        pass
+    forwarded = [signal.SIGTERM, signal.SIGHUP, signal.SIGUSR1, signal.SIGUSR2] + ([] if on_tty else [signal.SIGINT])
+    for sig in forwarded:
         if signal.getsignal(sig) == signal.SIG_IGN:
             continue
         signal.signal(sig, forward)
     try:
-        child = subprocess.Popen(argv, stderr=subprocess.PIPE)
+        child = subprocess.Popen(argv, stderr=subprocess.PIPE, process_group=None if on_tty else 0)
     except OSError as e:
         print(f"bg: cannot run {argv[0]}: {e.strerror}", file=sys.stderr)
         return 127 if isinstance(e, FileNotFoundError) else 126

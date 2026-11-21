@@ -52,8 +52,20 @@ case "$FAKE_RUN" in
   exit5) echo "boom" >&2; exit 5 ;;
   cat) cat; exit 0 ;;
   sleep) echo $$ > "$S/childpid"; exec sleep 30 ;;
+  count) exec python3 -I -c 'import os, signal, sys, time
+S = sys.argv[1]
+def h(n, f):
+    open(S + "/sigs", "a").write(signal.Signals(n).name + chr(10))
+for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGINT):
+    signal.signal(s, h)
+open(S + "/ready", "w").write("1")
+for _ in range(600):
+    if os.path.exists(S + "/quit"):
+        break
+    time.sleep(0.05)' "$S" ;;
   slowdone) echo $$ > "$S/childpid"; /bin/sleep 2; : > "$S/finished"; exit 0 ;;
   bigxpc) /usr/bin/head -c 150000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; exit 0 ;;
+  bigxpcmark) /usr/bin/head -c 100000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; : > "$S/written"; exit 0 ;;
   flood) echo $$ > "$S/childpid"; exec /usr/bin/yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2 ;;
   *) echo "ran: $*"; echo "diag line" >&2; exit 0 ;;
 esac
@@ -296,13 +308,71 @@ def test_an_absolute_path_script_named_container_is_never_run_twice(box):
     assert (work / "ran.log").read_text().splitlines() == ["ran deploy"]
 
 
+def _read_slowly(p, chunk, pause, first_pause=0.0):
+    total = 0
+    time.sleep(first_pause)
+    while True:
+        b = os.read(p.stderr.fileno(), chunk)
+        if not b:
+            return total
+        total += len(b)
+        time.sleep(pause)
+
+
 def test_a_slow_stderr_reader_does_not_hide_the_xpc_error(box):
-    # 150 KB of stderr read at ~20 KB/s: the relay is still behind (> 2 s) when the child exits 0 having printed the error last
+    # ~5 KB/s: more than 2 s of stderr is still queued when the child exits 0 having printed the error last (round-2 behaviour: rc 0)
     up(box)
     work, env, _ = box
     p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "bigxpc"},
                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    while p.stderr.read(2048):
+    total = _read_slowly(p, 1024, 0.2)
+    p.wait(timeout=60)
+    assert p.returncode == 70 and total >= 150000  # every byte reached the reader, and the error was still seen
+
+
+def test_the_wait_for_a_slow_consumer_restarts_with_every_byte_of_progress(box):
+    # allowance shortened to 3 s: the 1 KB / 0.2 s reader makes progress at least every 1.6 s, so the guard keeps waiting
+    # (a guard that counted the 3 s from the child's exit instead would give up with rc 0 while stderr is still queued)
+    up(box)
+    work, env, _ = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work,
+                         env={**env, "FAKE_RUN": "bigxpc", "BG_GUARD_IDLE_WRITE": "3"}, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    total = _read_slowly(p, 2048, 0.2)
+    p.wait(timeout=60)
+    assert p.returncode == 70 and total >= 150000
+
+
+def test_a_consumer_that_stalls_after_the_command_exited_is_waited_for(box):
+    # the command has finished (all 100 KB incl. the error line fit in the pipes' buffers, more than the reader's own pipe holds) and the consumer then stalls 5 s: more than IDLE_READ (2 s),
+    # less than IDLE_WRITE (60 s). The guard is blocked writing, so it must keep waiting and still report 70.
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "bigxpcmark"},
+                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    for _ in range(300):
+        if (state / "written").exists():
+            break
         time.sleep(0.1)
+    assert (state / "written").exists()
+    time.sleep(5)
+    total = _read_slowly(p, 65536, 0.0)
+    p.wait(timeout=60)
+    assert p.returncode == 70 and total >= 100000
+
+
+def test_a_group_signal_reaches_the_command_once_and_usr1_is_forwarded(box):
+    # a lane (no tty) is stopped with `kill -TERM -- -PGID`: the command is in its own group, so it hears TERM once, not twice
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    os.killpg(p.pid, signal.SIGTERM)
+    time.sleep(1.5)
+    os.kill(p.pid, signal.SIGUSR1)
+    time.sleep(1.5)
+    (state / "quit").write_text("")
     p.wait(timeout=30)
-    assert p.returncode == 70
+    assert (state / "sigs").read_text().split() == ["SIGTERM", "SIGUSR1"]
