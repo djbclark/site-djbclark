@@ -19,8 +19,8 @@ to read first.
 
 Canonical source: `skills/setup-modern-cli/SKILL.md` in `~/ops/site-public-djbclark` (moved from djbclark-ade 2026-11-06).
 Every other TUI reaches it through a direct skill-everywhere link, so there
-is nothing to keep in sync. `djbclark-ade/docs/apply-toolchain-prompt.md` §1.2
-is the full, versioned installer for a new machine or repo.
+is nothing to keep in sync. `djbclark-ade/docs/apply-toolchain-prompt.md` is
+archived (`~/AGENTS.md` item 5): read it as history, and add nothing to it.
 
 ## Search policy: `rg` by default, `ig` as an opt-in first line
 
@@ -125,9 +125,8 @@ HOMEBREW_NO_AUTO_UPDATE=1 brew install \
 
 That is the agent-facing core; `references/replacements.md` has an optional
 second line covering the `awk`/`sed`/`sort`/`join`, GNU-vs-BSD and
-structured-data gaps. `docs/apply-toolchain-prompt.md` §1.2 has the full quality
-toolchain (ruff, pre-commit, gitleaks, shellcheck, semgrep, …); Python CLIs go
-through `uv tool install`, repo JS through `bun`/`bunx`.
+structured-data gaps. Python CLIs go through `uv tool install`, repo JS through
+`bun`/`bunx`.
 
 The `HOMEBREW_NO_AUTO_UPDATE=1` there is a **performance knob, not an update
 switch**: it skips the `brew update` that brew otherwise runs first (minutes, and
@@ -179,8 +178,9 @@ scheduled `brew-fast-upgrade` job owns updating.
    `references/replacements.md` instead of `grep`/`find`/`sed`/`awk`/`cat`/`ls`.
 2. For "which files contain X under glob Y", use the one-command `rg -g`/`rg -t`
    form — never a `find … | xargs grep …` pipeline.
-3. For a repo with no toolchain yet, point at
-   `djbclark-ade/docs/apply-toolchain-prompt.md` (full, versioned installer).
+3. For a repo with no toolchain yet, use the install line above and
+   `references/replacements.md`; document what you add in that repo's README
+   (`~/AGENTS.md` item 5).
 4. Report which tool ran when a search is slow, so a missing install is visible
    (`command -v rg fd ast-grep mlr duckdb`).
 
