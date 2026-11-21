@@ -34,6 +34,7 @@ st = json.load(open(path))
 approve_after = int(os.environ.get("FAKE_XB_APPROVE_AFTER", "-1"))  # polls until approved; -1 never
 confirmations = {}
 approved = set()
+polls = []
 
 
 def save():
@@ -98,6 +99,26 @@ for line in sys.stdin:
             by = {x["id"]: x for x in st["items"]}
             st["items"] = [by[x] for x in a["orderedItemIds"]]; save()
             reply(i, {"ok": True})
+    elif tool == "extrabar_add_action_widget":
+        new = str(uuid.uuid4())
+        st["items"].append({"id": new, "name": a["title"]})
+        st["log"].append(["add_action", {"title": a["title"], "action": a["action"]}]); save()
+        reply(i, {"itemId": new, "scriptActions": [{"actionId": "ACT-" + new}]})
+    elif tool == "extrabar_update_widget_item":
+        st["log"].append(["update", a]); save()
+        reply(i, {"changedFields": ["isVisible"]})
+    elif tool == "extrabar_run_action":
+        st["log"].append(["run", a]); save()
+        polls.clear()
+        reply(i, {"runId": "RUN-1", "status": "running"})
+    elif tool == "extrabar_get_last_run_output":
+        polls.append(1)
+        if len(polls) < 2:
+            reply(i, {"status": "running", "exitCode": None, "stdout": "", "stderr": ""})
+        else:
+            code = int(os.environ.get("FAKE_XB_RUN_EXIT", "0"))
+            reply(i, {"status": "succeeded" if code == 0 else "failed", "exitCode": code,
+                      "stdout": os.environ.get("FAKE_XB_RUN_STDOUT", ""), "stderr": ""})
     else:
         reply(i, error="unknown_tool: " + tool)
 """
@@ -393,9 +414,62 @@ class Runs(unittest.TestCase):
             return real(self, *a, **k)
 
         with mock.patch.object(Path, "read_text", deny):
-            self.assertEqual(self.run_sync(), 1)
+            self.assertEqual(self.run_sync("--no-extrabar-fallback"), 1)
         self.assertIn("PermissionError", self.last_err)
         self.assertEqual(self.last_out, "")
+
+    def deny_chrome(self):
+        real = Path.read_text
+
+        def deny(self, *a, **k):
+            if self.name == "AccountBookmarks":
+                raise PermissionError(1, "Operation not permitted")
+            return real(self, *a, **k)
+
+        return mock.patch.object(Path, "read_text", deny)
+
+    def test_permission_error_runs_the_sync_through_a_hidden_extrabar_action(self):
+        self.env["FAKE_XB_RUN_STDOUT"] = (
+            "UPDATED ExtraBar Chrome bookmarks tree (2 links, 1 folders)\n"
+        )
+        with self.deny_chrome():
+            self.assertEqual(self.run_sync(), 0)
+        self.assertEqual(self.last_out, self.env["FAKE_XB_RUN_STDOUT"])
+        adds = self.calls("add_action")
+        self.assertEqual(len(adds), 1)
+        action = adds[0][1]["action"]
+        self.assertEqual(action["type"], "run_script")
+        self.assertIn("chrome-bookmarks-extrabar-sync", action["content"])
+        self.assertIn("--no-extrabar-fallback", action["content"])
+        self.assertEqual(action["showOutputWindow"], False)
+        self.assertEqual(self.calls("update")[0][1]["isVisible"], False)
+        run = self.calls("run")[0][1]
+        self.assertEqual(run["itemId"], self.saved()["runner"]["itemId"])
+        self.assertEqual(
+            self.calls("add"), []
+        )  # the bookmarks widget is the inner run's job
+        # the second run reuses the action
+        with self.deny_chrome():
+            self.assertEqual(self.run_sync(), 0)
+        self.assertEqual(len(self.calls("add_action")), 1)
+        self.assertEqual(len(self.calls("run")), 2)
+
+    def test_run_under_extrabar_relays_a_failure_exit_status(self):
+        self.env["FAKE_XB_RUN_EXIT"] = "1"
+        with self.deny_chrome():
+            self.assertEqual(self.run_sync(), 1)
+
+    def test_no_fallback_flag_fails_instead(self):
+        with self.deny_chrome():
+            self.assertEqual(self.run_sync("--no-extrabar-fallback"), 1)
+        self.assertEqual(self.xb()["log"], [])
+        self.assertIn("PermissionError", self.last_err)
+
+    def test_fallback_is_silent_when_extrabar_is_not_running(self):
+        self.set_xb(mode="app_not_running")
+        with self.deny_chrome():
+            self.assertEqual(self.run_sync(), 0)
+        self.assertEqual((self.last_out, self.last_err), ("", ""))
 
     def test_empty_bookmarks_bar_leaves_extrabar_alone(self):
         self.write_bookmarks()

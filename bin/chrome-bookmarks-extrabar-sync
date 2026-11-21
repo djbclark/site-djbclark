@@ -26,8 +26,15 @@ at most once per 24 h unless --force. If ExtraBar is not running or its bridge i
 silently. Only counts are printed, never bookmark titles or URLs.
 
 Scheduling: bin/hourly-updates.d/chrome-bookmarks runs it hourly; it prints "UPDATED ..." only when
-the widget changed. The process needs read access to Chrome's folder (Full Disk Access); a process
-without it fails with a PermissionError message and exit 1.
+the widget changed. Reading Chrome's folder needs Full Disk Access, which the hourly LaunchAgent
+(/bin/bash) lacks but ExtraBar has, and a script ExtraBar runs inherits it. So on a PermissionError
+the sync runs ITSELF through ExtraBar: it creates one hidden action widget "Sync Chrome bookmarks
+tree" (run_script, fixed content, ids kept in the state file under "runner"), starts it with
+extrabar_run_action, polls extrabar_get_last_run_output and relays its output and exit status. Actions
+created through the MCP bridge run without a user dialog, so this needs no new macOS permission.
+The fallback runs the plain sync on the ACTIVE preset (--force and --preset-id are not passed on);
+--no-extrabar-fallback turns it off (the inner run uses it). Keep RUNNER_CONTENT stable: changing it
+needs a new approval.
 
 Link URLs go into a deep_link template, where {name} is a placeholder, so braces (and spaces and
 control characters) are percent-encoded; every other character, including ? & # and %, is kept.
@@ -39,6 +46,7 @@ helper, default the one inside ExtraBar.app), CHROME_BOOKMARKS_EXTRABAR_STATE (t
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -62,6 +70,14 @@ MCP_DEFAULT = "/Applications/ExtraBar.app/Contents/Helpers/extrabar-mcp"
 PROFILE = "Default"
 PROMPT_INTERVAL = 24 * 3600
 CALL_TIMEOUT = 60
+RUNNER_TITLE = "Sync Chrome bookmarks tree"
+# What ExtraBar runs (with its Full Disk Access): the plain sync, without the fallback.
+RUNNER_CONTENT = (
+    'exec /usr/bin/env PATH="/opt/homebrew/bin:/usr/bin:/bin" python3 '
+    '"$HOME/ops/site-public-djbclark/bin/chrome-bookmarks-extrabar-sync" '
+    "--no-extrabar-fallback --wait-seconds 200\n"
+)
+RUN_EXTRA_SECONDS = 60  # beyond --wait-seconds: reading, adding, reordering
 
 
 class ExtraBarError(Exception):
@@ -342,9 +358,109 @@ def remove_old_widget(client, state, state_file, preset_id, wait, poll, now) -> 
         raise
 
 
+def runner_ids(
+    state: dict, preset_id: str, present: set[str]
+) -> tuple[str, str] | None:
+    r = state.get("runner")
+    if (
+        isinstance(r, dict)
+        and r.get("presetId") == preset_id
+        and r.get("itemId") in present
+        and r.get("actionId")
+    ):
+        return r["itemId"], r["actionId"]
+    return None
+
+
+def run_under_extrabar(args, now: float) -> int:
+    """Run the plain sync as an ExtraBar run_script action (ExtraBar has Full Disk Access)."""
+    mcp = os.environ.get("CHROME_BOOKMARKS_EXTRABAR_MCP") or MCP_DEFAULT
+    if not os.access(mcp, os.X_OK):
+        return 0
+    try:
+        client = Client([mcp])
+    except (OSError, ExtraBarError):
+        return 0
+    try:
+        status = client.call("extrabar_get_status")
+        preset_id = status["activePresetId"]
+        preset = client.call("extrabar_get_preset", {"presetId": preset_id})
+        present = {i["id"] for i in preset.get("items", [])}
+        state_file = state_path()
+        state = load_state(state_file)
+        ids = runner_ids(state, preset_id, present)
+        if ids is None:
+            added = client.call(
+                "extrabar_add_action_widget",
+                {
+                    "presetId": preset_id,
+                    "title": RUNNER_TITLE,
+                    "icon": "arrow.triangle.2.circlepath",
+                    "runOnClick": True,
+                    "action": {
+                        "type": "run_script",
+                        "language": "zsh",
+                        "source": "inline",
+                        "content": RUNNER_CONTENT,
+                        "showOutputWindow": False,
+                    },
+                },
+            )
+            ids = (added["itemId"], added["scriptActions"][0]["actionId"])
+            state["runner"] = {
+                "presetId": preset_id,
+                "itemId": ids[0],
+                "actionId": ids[1],
+            }
+            save_state(state_file, state)
+            with contextlib.suppress(
+                ExtraBarError
+            ):  # keep the bar tidy; a visible widget still works
+                client.call(
+                    "extrabar_update_widget_item",
+                    {"presetId": preset_id, "itemId": ids[0], "isVisible": False},
+                )
+        started = client.call(
+            "extrabar_run_action",
+            {"presetId": preset_id, "itemId": ids[0], "actionId": ids[1]},
+        )
+        run_id = started.get("runId")
+        deadline = time.monotonic() + args.wait_seconds + RUN_EXTRA_SECONDS
+        while True:
+            out = client.call(
+                "extrabar_get_last_run_output",
+                {"actionId": ids[1], **({"runId": run_id} if run_id else {})},
+            )
+            if out.get("status") not in ("running", "queued", "pending"):
+                break
+            if time.monotonic() >= deadline:
+                print(
+                    "chrome-bookmarks-extrabar-sync: the run under ExtraBar did not finish in time",
+                    file=sys.stderr,
+                )
+                return 1
+            time.sleep(args.poll_seconds)
+        sys.stdout.write(out.get("stdout") or "")
+        sys.stderr.write(out.get("stderr") or "")
+        code = out.get("exitCode")
+        return 0 if code in (0, None) and out.get("status") == "succeeded" else 1
+    except ExtraBarError as e:
+        if e.code == "app_not_running":
+            return 0
+        print(f"chrome-bookmarks-extrabar-sync: ExtraBar answered {e}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+
 def sync(args, chrome, now: float | None = None) -> int:
     now = time.time() if now is None else now
-    items = read_bar_items(chrome)
+    try:
+        items = read_bar_items(chrome)
+    except PermissionError:
+        if args.dry_run or args.no_extrabar_fallback:
+            raise
+        return run_under_extrabar(args, now)
     links, folders = count_items(items)
     new_hash = tree_hash(items)
     if args.dry_run:
@@ -454,6 +570,11 @@ def main(argv: list[str] | None = None) -> int:
         help="rebuild even if unchanged; ask for approval even within 24 h",
     )
     ap.add_argument("--preset-id", help="target preset (default: the active one)")
+    ap.add_argument(
+        "--no-extrabar-fallback",
+        action="store_true",
+        help="on a PermissionError fail instead of running through ExtraBar",
+    )
     ap.add_argument(
         "--wait-seconds",
         type=float,
