@@ -283,8 +283,8 @@ bg_scrub_run() {
   [[ "$user" =~ ^[A-Za-z0-9_.@-]+$ ]] || user=$(/usr/bin/id -un)
   /usr/bin/env -i PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" USER="$user" LANG="$lang" TERM="$term" "$@"
 }
-# bg_approve_local [--ttl T] -- CMD...
-bg_approve_local() {
+# bg_approve_one_shot [--ttl T] -- CMD...: the one-shot token (header).
+bg_approve_one_shot() {
   local ttl=1h secs unit key tmp now sa="$HOME/.local/bin/sudo-ask" shown
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -326,6 +326,230 @@ bg_approve_local() {
   bg_appr_log approved "$key" "$1"
   echo "bg approve-local: approved; the next identical run here (same directory and arguments, within ${ttl}) runs locally once" >&2
 }
+# ---- Approval tickets (Kerberos/OpenAFS pattern; operator 2026-11-21): ONE Touch ID, then many local runs until an expiry.
+# `bgrun approve-local --for 7h` / `--until "tomorrow 8am"` [--scope DIR] [-- CMD...] writes a ticket under ~/.local/state/bg/tickets/
+# (dir 0700, file 0600, atomic) after the same sudo-ask Allow dialog + Touch ID as a one-shot token; the dialog text and the output
+# show the expiry as America/New_York 12-hour time. While it lives, a run that bg would send to CI under `ci` mode runs here instead
+# (any command, or only CMD's argv; any directory, or only under DIR), and every use is logged (tickets/ID.uses and approvals.log: time,
+# directory, argv hash, program; never the arguments). `approve-local status` (klist) lists tickets, `revoke [ID]` (kdestroy) removes
+# them and the one-shot tokens, `check [DIR]` says whether one covers DIR. `approve-local --ask -- CMD` first shows a duration chooser
+# (this run only / 1 h / 7 h / until a time). A ticket is signed with a per-install salt (ticket.salt, 0600) so a hand-edited or
+# hand-written file is refused; the salt is readable by the same user, so this is tamper-evidence, not a boundary (same trust level as
+# the one-shot token and as every agent here: honest mistakes, ~/AGENTS.md trust rule). No upper cap on the duration: the operator picks it.
+bg_ticket_dir="$bg_state/tickets"
+bg_ticket_salt="$bg_state/ticket.salt"
+bg_argv_hash() { printf '%s\0' "$@" | bg_sha256 | gawk '{print $1}'; }
+bg_ticket_fmt() { TZ=America/New_York gdate -d "@$1" '+%a %b %-d %Y %-I:%M %p %Z'; }
+bg_ticket_left() { local s=$1; if [ "$s" -ge 86400 ]; then echo "$((s / 86400)) d $(((s % 86400) / 3600)) h"; elif [ "$s" -ge 3600 ]; then echo "$((s / 3600)) h $(((s % 3600) / 60)) min"; elif [ "$s" -ge 60 ]; then echo "$((s / 60)) min"; else echo "$s s"; fi; }
+bg_stat_mode_uid() { stat -c '%a %u' "$1" 2>/dev/null || stat -f '%Lp %u' "$1" 2>/dev/null; }
+# bg_dur_secs 7h | 90m | 1h30m | 2d | 1w | 45 (seconds) -> seconds, 0 on a bad value
+bg_dur_secs() {
+  local s=$1 total=0 n u
+  [[ "$s" =~ ^([0-9]+[smhdw]?)+$ ]] || { echo 0; return; }
+  while [[ "$s" =~ ^([0-9]+)([smhdw]?)(.*)$ ]]; do
+    n=$((10#${BASH_REMATCH[1]})); u=${BASH_REMATCH[2]}; s=${BASH_REMATCH[3]}
+    case "$u" in m) n=$((n * 60)) ;; h) n=$((n * 3600)) ;; d) n=$((n * 86400)) ;; w) n=$((n * 604800)) ;; esac
+    total=$((total + n))
+  done
+  echo "$total"
+}
+bg_ticket_sig() { # id created expires scope argv uid
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0%s' "$(cat "$bg_ticket_salt")" "$1" "$2" "$3" "$4" "$5" "$6" | bg_sha256 | gawk '{print $1}'
+}
+bg_ticket_load() { # FILE -> t_id t_created t_expires t_scope t_argv t_uid t_sig
+  local line k
+  t_id= t_created= t_expires= t_scope= t_argv= t_uid= t_sig=
+  while IFS= read -r line || [ -n "$line" ]; do
+    k=${line%%=*}
+    case "$k" in id) t_id=${line#*=} ;; created) t_created=${line#*=} ;; expires) t_expires=${line#*=} ;; scope) t_scope=${line#*=} ;;
+      argv) t_argv=${line#*=} ;; uid) t_uid=${line#*=} ;; sig) t_sig=${line#*=} ;; esac
+  done < "$1"
+}
+bg_ticket_log() { # EVENT ID ARGVHASH PROGRAM
+  mkdir -p "$bg_state" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\t%s\tticket=%s\n' "$(gdate -Is)" "$1" "${3:0:12}" "$(printf '%q' "$(pwd -P)")" "$(printf '%q' "${4##*/}")" "$2" >> "$bg_state/approvals.log" 2>/dev/null || true
+}
+# bg_ticket_check FILE NOW: 0 when FILE is a genuine, unexpired ticket of this user (sets t_*); an expired one is removed.
+bg_ticket_check() {
+  local f=$1 now=$2 why=
+  if [ -L "$f" ] || [ ! -f "$f" ]; then why=not-a-plain-file
+  elif [ "$(bg_stat_mode_uid "$f")" != "600 $(id -u)" ]; then why=bad-owner-or-mode
+  elif [ ! -s "$bg_ticket_salt" ]; then why=no-salt
+  else
+    bg_ticket_load "$f"
+    if [[ ! "$t_expires" =~ ^[0-9]+$ ]] || [[ ! "$t_created" =~ ^[0-9]+$ ]] || [ -z "$t_id" ] || [ -z "$t_scope" ] || [ -z "$t_argv" ] \
+       || [ "$t_uid" != "$(id -u)" ] || [ "$t_sig" != "$(bg_ticket_sig "$t_id" "$t_created" "$t_expires" "$t_scope" "$t_argv" "$t_uid")" ]; then
+      why=bad-signature
+    elif [ "$now" -ge "$t_expires" ]; then
+      rm -f "$f"; bg_ticket_log ticket-expired "$t_id" "" ticket; return 1
+    fi
+  fi
+  [ -z "$why" ] && return 0
+  bg_ticket_log "ticket-refused-$why" "${f##*/}" "" ticket
+  return 1
+}
+# bg_ticket_honour ARGV...: 0 (and the use is logged) when a live ticket covers this cwd and argv.
+bg_ticket_honour() {
+  local f cwd ah now
+  [ -d "$bg_ticket_dir" ] || return 1
+  cwd=$(pwd -P) || return 1; ah=$(bg_argv_hash "$@"); now=$(gdate +%s)
+  for f in "$bg_ticket_dir"/*.ticket; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    bg_ticket_check "$f" "$now" || continue
+    if [ "$t_scope" != '*' ]; then case "$cwd/" in "$t_scope"/*) ;; *) continue ;; esac; fi
+    [ "$t_argv" = '*' ] || [ "$t_argv" = "$ah" ] || continue
+    ( umask 077; printf '%s\t%s\t%s\t%s\n' "$(gdate -Is)" "$(printf '%q' "$cwd")" "${ah:0:12}" "$(printf '%q' "${1##*/}")" >> "$bg_ticket_dir/$t_id.uses" ) 2>/dev/null || true
+    bg_ticket_log ticket-used "$t_id" "$ah" "$1"
+    bg_ticket_used="$t_id until $(bg_ticket_fmt "$t_expires")"
+    return 0
+  done
+  return 1
+}
+# bg_ticket_status: klist.
+bg_ticket_status() {
+  local f now n=0 left uses scope what
+  now=$(gdate +%s)
+  echo "bgrun approval tickets ($(bg_ticket_fmt "$now"), America/New_York):"
+  for f in "$bg_ticket_dir"/*.ticket; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    if ! bg_ticket_check "$f" "$now"; then [ -e "$f" ] && { echo "  ${f##*/}: REFUSED (not a genuine ticket; see $bg_state/approvals.log)"; n=$((n + 1)); }; continue; fi
+    left=$(bg_ticket_left "$((t_expires - now))"); uses=0; [ -f "$bg_ticket_dir/$t_id.uses" ] && uses=$(wc -l < "$bg_ticket_dir/$t_id.uses" | tr -d ' ')
+    scope="any directory"; [ "$t_scope" = '*' ] || scope="under $t_scope"
+    what="any command"; [ "$t_argv" = '*' ] || what="one command (argv hash ${t_argv:0:12})"
+    echo "  $t_id  $scope; $what; expires $(bg_ticket_fmt "$t_expires") ($left left); used $uses time(s)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || echo "  (none)"
+  n=$(ls "$bg_appr_dir" 2>/dev/null | grep -Ec '^[0-9a-f]{64}$')
+  echo "one-shot tokens waiting: $n"
+}
+# bg_ticket_revoke [ID...]: kdestroy: no argument removes every ticket and one-shot token.
+bg_ticket_revoke() {
+  local id f c=0
+  if [ $# -eq 0 ]; then
+    for f in "$bg_ticket_dir"/*.ticket; do [ -e "$f" ] || [ -L "$f" ] || continue; rm -f "$f"; c=$((c + 1)); done
+    rm -f "$bg_appr_dir"/[0-9a-f]*[0-9a-f] 2>/dev/null
+  else
+    for id in "$@"; do
+      [[ "$id" =~ ^[0-9a-f]{8}$ ]] || { echo "bg approve-local revoke: '$id' is not a ticket id (see: approve-local status)" >&2; return 2; }
+      if [ -e "$bg_ticket_dir/$id.ticket" ]; then rm -f "$bg_ticket_dir/$id.ticket"; c=$((c + 1)); else echo "bg approve-local revoke: no ticket $id" >&2; fi
+    done
+  fi
+  bg_appr_log revoked "" "$c-tickets"
+  echo "bg approve-local: revoked $c ticket(s)$([ $# -eq 0 ] && echo ' and every one-shot token')" >&2
+}
+# bg_ticket_check_dir DIR: 0 when a live ticket (any command) covers DIR; prints id and expiry. For callers such as load-watch.
+bg_ticket_check_dir() {
+  local d f now
+  d=$(cd "${1:-.}" 2>/dev/null && pwd -P) || { echo "bg approve-local check: no such directory" >&2; return 2; }
+  now=$(gdate +%s)
+  for f in "$bg_ticket_dir"/*.ticket; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    bg_ticket_check "$f" "$now" || continue
+    [ "$t_argv" = '*' ] || continue
+    if [ "$t_scope" != '*' ]; then case "$d/" in "$t_scope"/*) ;; *) continue ;; esac; fi
+    echo "$t_id until $(bg_ticket_fmt "$t_expires")"; return 0
+  done
+  return 1
+}
+# bg_approve_choose: the duration chooser behind `--ask` (BG_APPROVE_CHOOSER replaces it, for tests). Prints once | for:<dur> | until:<text>.
+bg_approve_choose() {
+  local pick text
+  if [ -n "${BG_APPROVE_CHOOSER:-}" ]; then "$BG_APPROVE_CHOOSER"; return $?; fi
+  pick=$(/usr/bin/osascript -e 'set r to choose from list {"This run only", "Any local run for 1 hour", "Any local run for 7 hours", "Any local run until a time..."} with title "bgrun: allow local runs" with prompt "How long should bgrun run builds and suites on this Mac without asking again? Touch ID comes next." default items {"This run only"}' 2>/dev/null) || return 1
+  case "$pick" in
+    "This run only") echo once ;;
+    "Any local run for 1 hour") echo for:1h ;;
+    "Any local run for 7 hours") echo for:7h ;;
+    "Any local run until a time...")
+      text=$(/usr/bin/osascript -e 'text returned of (display dialog "Until when? (e.g. 2026-11-22 08:00, or tomorrow 8am)" default answer "" with title "bgrun: allow local runs")' 2>/dev/null) || return 1
+      echo "until:$text" ;;
+    *) return 1 ;;
+  esac
+}
+# bg_approve_local: subcommands status | revoke [ID...] | check [DIR]; a ticket when --for/--until/--ask is given; else the one-shot token.
+bg_approve_local() {
+  local ttl_seen=0 forv= untilv= scope='*' ask=0 narrow=0 pick="" a before=1 secs now exp sa="$HOME/.local/bin/sudo-ask" shown where what msg id argh tmp
+  case "${1:-}" in
+    status) shift; bg_ticket_status; return $? ;;
+    revoke) shift; bg_ticket_revoke "$@"; return $? ;;
+    check) shift; bg_ticket_check_dir "$@"; return $? ;;
+  esac
+  local args=("$@") rest=() i=0
+  while [ "$i" -lt "${#args[@]}" ]; do
+    a=${args[$i]}
+    if [ "$a" = -- ]; then rest=("${args[@]:$((i + 1))}"); break; fi
+    case "$a" in
+      --for) forv=${args[$((i + 1))]-}; i=$((i + 1)) ;;
+      --for=*) forv=${a#--for=} ;;
+      --until) untilv=${args[$((i + 1))]-}; i=$((i + 1)) ;;
+      --until=*) untilv=${a#--until=} ;;
+      --scope) scope=${args[$((i + 1))]-}; i=$((i + 1)) ;;
+      --scope=*) scope=${a#--scope=} ;;
+      --ask) ask=1 ;;
+      --ttl) [ "${args[$((i + 1))]+x}" ] || { echo "bg approve-local: --ttl needs a value (30m, 1h, 90s)" >&2; return 2; }; ttl_seen=1; i=$((i + 1)) ;;
+      --ttl=*) ttl_seen=1 ;;
+      *) bg_approve_one_shot "$@"; return $? ;;   # not a ticket request: the one-shot path reports a usage error itself
+    esac
+    i=$((i + 1))
+  done
+  if [ -z "$forv$untilv" ] && [ "$ask" = 0 ] && [ "$scope" = '*' ]; then bg_approve_one_shot "$@"; return $?; fi
+  [ "${#rest[@]}" -gt 0 ] && narrow=1
+  if [ "$ask" = 1 ]; then
+    [ -z "$forv$untilv" ] || { echo "bg approve-local: --ask asks for the duration; do not combine it with --for/--until" >&2; return 2; }
+    pick=$(bg_approve_choose) || { echo "bg approve-local: no duration chosen; nothing was written" >&2; return 1; }
+    case "$pick" in
+      once) [ "${#rest[@]}" -gt 0 ] || { echo "usage: bgrun approve-local --ask -- <command> [args...]" >&2; return 2; }
+            [ "$scope" = '*' ] || { echo "bg approve-local: --scope narrows a ticket; 'this run only' is one command here" >&2; return 2; }
+            bg_approve_one_shot -- "${rest[@]}"; return $? ;;
+      for:*) forv=${pick#for:}; narrow=0 ;;
+      until:*) untilv=${pick#until:}; narrow=0 ;;
+      *) echo "bg approve-local: unknown choice; nothing was written" >&2; return 1 ;;
+    esac
+  fi
+  if [ -n "$forv" ] && [ -n "$untilv" ]; then echo "bg approve-local: give --for or --until, not both" >&2; return 2; fi
+  [ -n "$forv$untilv" ] || { echo "bg approve-local: --scope needs --for or --until (a one-shot token is bound to its directory already)" >&2; return 2; }
+  [ "${ttl_seen:-0}" = 0 ] || { echo "bg approve-local: --ttl is for a one-shot token; a ticket takes --for or --until" >&2; return 2; }
+  now=$(gdate +%s)
+  if [ -n "$forv" ]; then
+    secs=$(bg_dur_secs "$forv")
+    [ "$secs" -ge 1 ] || { echo "bg approve-local: --for needs a duration like 7h, 90m, 1h30m, 2d (got '$forv')" >&2; return 2; }
+    exp=$((now + secs))
+  else
+    exp=$(gdate -d "$untilv" +%s 2>/dev/null) || exp=
+    [[ "$exp" =~ ^[0-9]+$ ]] || { echo "bg approve-local: --until could not read '$untilv' as a local date/time (try '2026-11-22 08:00' or 'tomorrow 8am')" >&2; return 2; }
+    [ "$exp" -gt "$now" ] || { echo "bg approve-local: --until '$untilv' is not in the future (it reads as $(bg_ticket_fmt "$exp")); give a full date" >&2; return 2; }
+    secs=$((exp - now))
+  fi
+  if [ "$scope" != '*' ]; then
+    scope=$(cd "$scope" 2>/dev/null && pwd -P) || { echo "bg approve-local: --scope is not a directory" >&2; return 2; }
+    case "$scope" in *$'\n'*) echo "bg approve-local: --scope has a newline" >&2; return 2 ;; esac
+  fi
+  argh='*'; [ "$narrow" = 1 ] && argh=$(bg_argv_hash "${rest[@]}")
+  where="in any directory"; [ "$scope" = '*' ] || where="under $scope"
+  what="ANY bgrun local run"; shown=
+  if [ "$narrow" = 1 ]; then shown=$(printf '%q ' "${rest[@]}"); shown=${shown% }; what="bgrun local runs of ONE command ($shown)"; fi
+  msg="bgrun approve-local TICKET: allow $what $where until $(bg_ticket_fmt "$exp") ($(bg_ticket_left "$secs") from now). Revoke: bgrun approve-local revoke"
+  echo "bg approve-local: asking djbclark for a ticket: $what $where until $(bg_ticket_fmt "$exp")" >&2
+  if [ -x "$sa" ]; then
+    bg_scrub_run "$sa" -k /usr/bin/printf '%s\n' "$msg" >/dev/null || { echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
+  else
+    bg_scrub_run /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+  fi
+  ( umask 077; mkdir -p "$bg_ticket_dir" && chmod 700 "$bg_ticket_dir" || exit 1
+    if [ ! -s "$bg_ticket_salt" ]; then
+      tmp=$(mktemp "$bg_state/.salt.XXXXXX") && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$tmp" && mv -n "$tmp" "$bg_ticket_salt"; rm -f "$tmp"
+    fi
+    [ -s "$bg_ticket_salt" ] || exit 1
+    id=$(od -An -tx1 -N4 /dev/urandom | tr -d ' \n')
+    tmp=$(mktemp "$bg_ticket_dir/.tmp.XXXXXX") || exit 1
+    printf 'id=%s\ncreated=%s\nexpires=%s\nscope=%s\nargv=%s\nuid=%s\nsig=%s\n' "$id" "$now" "$exp" "$scope" "$argh" "$(id -u)" \
+      "$(bg_ticket_sig "$id" "$now" "$exp" "$scope" "$argh" "$(id -u)")" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$bg_ticket_dir/$id.ticket" || { rm -f "$tmp"; exit 1; }
+    echo "$id" > "$bg_ticket_dir/.last-issued.$$" ) || { echo "bg approve-local: could not write the ticket" >&2; return 1; }
+  id=$(cat "$bg_ticket_dir"/.last-issued.$$ 2>/dev/null); rm -f "$bg_ticket_dir"/.last-issued.$$
+  bg_ticket_log ticket-issued "$id" "$argh" "${rest[0]:-any}"
+  echo "bg approve-local: ticket $id issued: $what $where until $(bg_ticket_fmt "$exp") ($(bg_ticket_left "$secs") from now). 'bgrun approve-local status' lists it; 'bgrun approve-local revoke' ends it." >&2
+}
 # bg has no flags of its own: everything after the name is the command. Agents
 # sometimes invent `--name`/`--log`/`--` (from other wrappers); those become
 # `taskpolicy -c utility --name …` and macOS taskpolicy errors with
@@ -344,6 +568,9 @@ Redirect or name the run yourself (bgrun does not take --log/--name):
 
 One run that bgrun sends to CI but must run here: ask djbclark to approve exactly that run (his Touch ID):
   bgrun approve-local [--ttl 1h] -- <the exact command>
+  bgrun approve-local --for 7h | --until "tomorrow 8am" [--scope DIR] [-- <command>]   (a ticket: one Touch ID, many local runs)
+  bgrun approve-local --ask -- <command>      (a dialog offers this run only / 1 h / 7 h / until a time)
+  bgrun approve-local status | revoke [ID...] | check [DIR]
 EOF
 }
 if [ "$#" -eq 0 ]; then
@@ -756,6 +983,8 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     fi
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && ci_release "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); a release gates on CI and publishes here." >&2
+  elif [ "$rc" = 0 ] && [ "$mode" = ci ] && bg_ticket_honour "$@"; then
+    echo "bg: $top runs full suites and builds on CI (load-watch ci); djbclark's approval ticket $bg_ticket_used covers this local run (bgrun approve-local status)." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ] && bg_approval_consume "$@"; then
     echo "bg: $top runs full suites and builds on CI (load-watch ci); djbclark approved this one local run (bg approve-local), now used up." >&2
   elif [ "$rc" = 0 ] && [ "$mode" = ci ]; then
@@ -785,6 +1014,7 @@ if [ -x "$lw" ] && [ "${BG_ALLOW_LOCAL_CI_ONLY:-0}" != 1 ] \
     bg_cmd=$(printf '%q ' "$@"); bg_cmd=${bg_cmd% }
     echo "bg: if this run really must run on this Mac, ask djbclark to approve this one run: run \`$bg_self approve-local -- $bg_cmd\` yourself;" >&2
     echo "bg: it asks for his Touch ID/password, then the next identical run here goes through once." >&2
+    echo "bg: to let this and later local runs through for a while instead (he picks the duration in a dialog, one Touch ID): $bg_self approve-local --ask -- $bg_cmd" >&2
     case "$no_route" in
       "private repo has no Forgejo route:"*|"FORGEJO UNREACHABLE:"*) ;;
       *) echo "bg: no CI route was found to run it there now: $no_route" >&2 ;;
