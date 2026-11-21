@@ -132,7 +132,7 @@ the query commands.
 <slug>: N chapters, ~Xk tokens total. Index is ~Yk — a Z:1 reduction.
   exact    book-kb query '<regex>' <slug>
   outline  book-kb toc <slug>          (--deep for file:line anchors)
-  semantic search_notes(project="books", query=...)
+  semantic bm_search(project="books", query=...)
 ```
 
 **If the book is authoritative for work done in a repo on this machine, offer to
