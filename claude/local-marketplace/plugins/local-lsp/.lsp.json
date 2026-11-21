@@ -3,7 +3,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
       "lsp-guard",
       "basedpyright-langserver",
       "--stdio"
@@ -17,7 +17,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
       "lsp-guard",
       "marksman",
       "server"
@@ -46,7 +46,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
       "lsp-guard",
       "typescript-language-server",
       "--stdio"
