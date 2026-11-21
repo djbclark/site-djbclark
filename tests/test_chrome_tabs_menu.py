@@ -97,6 +97,38 @@ class TrimSession(unittest.TestCase):
         self.assertEqual(ctm.trim_to_last_record(b"not a session"), b"not a session")
 
 
+class RealUrl(unittest.TestCase):
+    def test_web_urls_pass_through(self):
+        self.assertEqual(
+            ctm.real_url("https://a.example/p?url=https://b.example"),
+            "https://a.example/p?url=https://b.example",
+        )
+
+    def test_great_suspender_unencoded_last_param(self):
+        u = "chrome-extension://abc/suspended.html#ttl=T&pos=0&uri=https://a.example/x?y=1&z=2"
+        self.assertEqual(ctm.real_url(u), "https://a.example/x?y=1&z=2")
+
+    def test_park_page_encoded_param(self):
+        u = "chrome-extension://abc/park.html?title=T&url=https%3A%2F%2Fa.example%2Fx%3Fy%3D1&favicon=f"
+        self.assertEqual(ctm.real_url(u), "https://a.example/x?y=1")
+
+    def test_extension_page_without_target_is_left_and_then_hidden(self):
+        u = "chrome-extension://abc/options.html"
+        self.assertEqual(ctm.real_url(u), u)
+        self.assertEqual(ctm.split_openable([{"url": u, "title": "x"}]), ([], 1))
+
+    def test_suspended_tab_becomes_openable(self):
+        ok, hidden = ctm.split_openable(
+            [
+                {
+                    "url": "chrome-extension://abc/suspended.html#uri=https://a.example/",
+                    "title": "T",
+                }
+            ]
+        )
+        self.assertEqual((ok[0]["url"], hidden), ("https://a.example/", 0))
+
+
 class FakeDump(unittest.TestCase):
     def test_deleted_tabs_and_windows_dropped(self):
         payload = {

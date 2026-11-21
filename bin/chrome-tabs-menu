@@ -35,7 +35,7 @@ import tempfile
 import urllib.request
 from collections import OrderedDict
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 DUMP_VERSION = "v0.0.2"
 # sha256 of the v0.0.2 release asset chrome-session-dump-osx (x86_64; runs under Rosetta).
@@ -169,7 +169,24 @@ def dump_windows(dump: str, session_file: str) -> list[list[dict[str, str]]]:
     ]
 
 
+def real_url(url: str) -> str:
+    """The page a tab really shows: unwrap tab-suspender extension pages (suspended.html#...&uri=URL,
+    park.html?title=...&url=ENCODED, discarded pages), whose own address Safari could not open."""
+    u = urlsplit(url)
+    if u.scheme not in ("chrome-extension", "moz-extension"):
+        return url
+    for part in (u.fragment, u.query):
+        m = re.search(r"(?:^|&)(?:uri|url)=(.+)$", part)
+        if m and re.match(r"https?://", m.group(1)):
+            return m.group(1)  # unencoded and last, as The Great Suspender writes it
+        m = re.search(r"(?:^|&)(?:uri|url)=([^&]+)", part)
+        if m and re.match(r"https?://", unquote(m.group(1))):
+            return unquote(m.group(1))
+    return url
+
+
 def split_openable(tabs: list[dict]) -> tuple[list[dict], int]:
+    tabs = [{**t, "url": real_url(t["url"])} for t in tabs]
     ok = [
         t
         for t in tabs
