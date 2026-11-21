@@ -125,6 +125,7 @@ def test_an_unwritable_log_never_stops_the_server(tmp_path: Path, name: str) -> 
     assert "starts UNGUARDED" in done.stderr and not log.exists()
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write /.local whatever HOME is")
 @pytest.mark.parametrize("name", GUARDED)
 def test_an_unset_home_never_stops_the_server(tmp_path: Path, name: str) -> None:
     done, _ = run_entry(tmp_path, name, None, home=False)  # no HOME: the log path is /.local/..., never written as a user
