@@ -7,7 +7,9 @@ against fake servers and fake guards (no real LSP server, no network, no live co
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -15,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 LSP_JSON = ROOT / "claude/local-marketplace/plugins/local-lsp/.lsp.json"
 CONFIG = json.loads(LSP_JSON.read_text())
-GUARDED = [name for name, ent in CONFIG.items() if ent.get("command") == "sh"]
+GUARDED = [name for name, ent in CONFIG.items() if ent.get("args", [None, None, None])[2:3] == ["lsp-guard"]]
 EXTRA = ["x y", "$(touch PWNED)", "*", "%s%n"]
 
 GOOD_GUARD = '#!/bin/sh\n[ "$1" = --check ] && exit 0\nshift\necho "GUARD $*"\ncat\n'
@@ -24,28 +26,33 @@ SERVER = '#!/bin/sh\necho "SERVER $*"\ncat\n'
 
 
 def run_entry(tmp_path: Path, name: str, guard: str | None, env_extra: dict[str, str] | None = None,
-              home: bool = True) -> tuple[subprocess.CompletedProcess[str], Path]:
+              home: bool = True, readonly_home: bool = False) -> tuple[subprocess.CompletedProcess[str], Path]:
     bindir = tmp_path / "bin"
-    bindir.mkdir()
+    bindir.mkdir(exist_ok=True)
     (bindir / "fakesrv").write_text(SERVER)
     (bindir / "fakesrv").chmod(0o755)
     if guard is not None:
         (bindir / "lsp-root-guard").write_text(guard)
         (bindir / "lsp-root-guard").chmod(0o755)
     homedir = tmp_path / "home"
-    homedir.mkdir()
+    homedir.mkdir(exist_ok=True)
+    if readonly_home:
+        homedir.chmod(0o500)  # mkdir -p and tee cannot create the log here
     env = {"PATH": f"{bindir}:/usr/bin:/bin"}
     if home:
         env["HOME"] = str(homedir)
     env.update(env_extra or {})
     args = list(CONFIG[name]["args"])
     argv = ["sh", args[0], args[1], args[2], "fakesrv", *EXTRA]
-    done = subprocess.run(argv, env=env, cwd=tmp_path, input="HELLO\n", capture_output=True, text=True, timeout=30)
+    try:
+        done = subprocess.run(argv, env=env, cwd=tmp_path, input="HELLO\n", capture_output=True, text=True, timeout=30)
+    finally:
+        homedir.chmod(0o700)
     return done, homedir / ".local/state/lsp-guard/unguarded.log"
 
 
 def test_the_config_has_guarded_entries_and_no_claude_expansion() -> None:
-    assert GUARDED, "no guarded entry found"
+    assert set(GUARDED) == {"basedpyright", "marksman", "typescript"}, GUARDED  # an entry that stops being `sh -c` must not drop out
     assert "${" not in LSP_JSON.read_text(), "Claude Code expands ${...} before sh runs and splices the value into the script"
     for name in GUARDED:
         args = CONFIG[name]["args"]
@@ -97,7 +104,29 @@ def test_a_broken_guard_with_the_switch_off_still_starts_the_server(tmp_path: Pa
 
 
 @pytest.mark.parametrize("name", GUARDED)
+def test_the_log_is_appended_and_stamped_in_utc(tmp_path: Path, name: str) -> None:
+    """A `tee` without -a would keep only the newest line (every count over days reads 1); a `date` without -u stamps local
+    time with a literal Z (TZ=XXX-14 is UTC+14, so the slip is a 14 hour skew here)."""
+    first, log = run_entry(tmp_path, name, None, {"TZ": "XXX-14"})
+    second, _ = run_entry(tmp_path, name, None, {"TZ": "XXX-14"})
+    assert first.returncode == 0 and second.returncode == 0
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2, lines
+    for line in lines:
+        stamp = datetime.strptime(line.split(" ", 1)[0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        assert abs(datetime.now(timezone.utc) - stamp) < timedelta(minutes=2), line
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write the log whatever the mode")
+@pytest.mark.parametrize("name", GUARDED)
 def test_an_unwritable_log_never_stops_the_server(tmp_path: Path, name: str) -> None:
-    done, _ = run_entry(tmp_path, name, None, home=False)  # HOME unset: the log path is not writable
+    done, log = run_entry(tmp_path, name, None, readonly_home=True)  # HOME is a directory the script cannot write to
+    assert done.returncode == 0 and done.stdout.startswith("SERVER x y") and "UNGUARDED" not in done.stdout
+    assert "starts UNGUARDED" in done.stderr and not log.exists()
+
+
+@pytest.mark.parametrize("name", GUARDED)
+def test_an_unset_home_never_stops_the_server(tmp_path: Path, name: str) -> None:
+    done, _ = run_entry(tmp_path, name, None, home=False)  # no HOME: the log path is /.local/..., never written as a user
     assert done.returncode == 0 and done.stdout.startswith("SERVER x y") and "UNGUARDED" not in done.stdout
     assert "starts UNGUARDED" in done.stderr
