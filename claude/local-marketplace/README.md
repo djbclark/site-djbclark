@@ -18,8 +18,10 @@ RAM guard (basedpyright, marksman, typescript-language-server):
   `~/src`, so one server does not index every repo.
 - If the guard is off, missing from PATH, or fails `lsp-root-guard --check /`
   (for example an import error), the plain server starts UNGUARDED and one
-  line goes to stderr (visible with `claude --debug`) and to
-  `~/.local/state/lsp-guard/unguarded.log`.
+  line goes to stderr (visible with `claude --debug`). When the cause is
+  `unavailable` (not the switch) the line, with a UTC time, is also appended to
+  `~/.local/state/lsp-guard/unguarded.log`; djbclark-ade `bin/ram-census
+  --roots` reports that log. Tests: `tests/test_local_lsp_entries.py`.
 - Off switch: `ADE_LSP_ROOT_GUARD=off` in `~/.claude/settings.json` `env`,
   then restart sessions (only the exact lowercase `off` counts). A guard that
   starts and then crashes is not covered.
