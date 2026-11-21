@@ -36,9 +36,11 @@ exit 0
 FAKE_CONTAINER = r"""#!/bin/bash
 S="$FAKE_STATE"
 echo "$*" >> "$S/calls"
+[ "$1" = "--version" ] && { echo "container CLI version 1.7.1 (build: release, commit: unspecified)"; exit 0; }
 case "$1 $2" in
   "system status")
-    if [ -e "$S/up" ]; then printf 'FIELD VALUE\nstatus running\n'; else echo 'apiserver is not running and not registered with launchd'; exit 1; fi
+    [ "${FAKE_STATUS:-}" = slow ] && exec /bin/sleep 30
+    if [ -e "$S/up" ]; then echo '{"server":{"status":"running"}}'; else echo 'apiserver is not running and not registered with launchd' >&2; exit 1; fi
     exit 0 ;;
   "system start")
     [ "${FAKE_START:-ok}" = ok ] && : > "$S/up"
@@ -50,6 +52,7 @@ case "$FAKE_RUN" in
   exit5) echo "boom" >&2; exit 5 ;;
   cat) cat; exit 0 ;;
   sleep) echo $$ > "$S/childpid"; exec sleep 30 ;;
+  flood) echo $$ > "$S/childpid"; exec /usr/bin/yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2 ;;
   *) echo "ran: $*"; echo "diag line" >&2; exit 0 ;;
 esac
 """
@@ -79,7 +82,7 @@ def box(tmp_path):
         "BG_NO_DEADLINE": "1",
         "FAKE_STATE": str(state),
     }
-    for k in ("BG_LOAD_WAIT", "DEADLINE_NAME", "PASEO_AGENT_ID", "BG_CONTAINER_AUTOSTART", "FAKE_RUN", "FAKE_START",
+    for k in ("BG_LOAD_WAIT", "DEADLINE_NAME", "PASEO_AGENT_ID", "BG_CONTAINER_AUTOSTART", "BG_CONTAINER_STATUS_TIMEOUT", "FAKE_RUN", "FAKE_START", "FAKE_STATUS",
               "BGRUN_RUN_ID", "BGRUN_RUN_START"):
         env.pop(k, None)
     return work, env, state
@@ -211,3 +214,54 @@ def test_each_run_gets_its_own_run_id_and_start_time(box):
         assert abs(int(env["BGRUN_RUN_START"]) - time.time()) < 120
         ids.append(env["BGRUN_RUN_ID"])
     assert ids[0] != ids[1]
+
+
+def test_a_reader_that_goes_away_ends_the_run_instead_of_hanging_it(box):
+    # `bgrun container ... 2>&1 | head`: the child must get SIGPIPE as before the guard, not block forever on a full pipe
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "flood"},
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        p.stderr.read(100)
+        p.stderr.close()
+        p.wait(timeout=20)
+    finally:
+        if p.poll() is None:
+            p.kill()
+            pid = (state / "childpid")
+            if pid.exists():
+                os.kill(int(pid.read_text()), signal.SIGKILL)
+    assert p.returncode is not None
+
+
+def test_a_status_timeout_does_not_refuse_or_restart(box):
+    r = bg(box, "container", "run", "img", extra={"FAKE_STATUS": "slow", "BG_CONTAINER_STATUS_TIMEOUT": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "did not answer in time" in r.stderr
+    assert not any(c.startswith("system start") for c in calls(box))
+    assert "run img" in calls(box)
+
+
+def test_only_apples_container_gets_the_guard(box):
+    work = box[0]
+    wrapper = work / "container"
+    wrapper.write_text("#!/bin/bash\necho WRAPPER $*\necho 'Error: XPC connection error: Connection invalid' >&2\n")
+    wrapper.chmod(0o755)
+    r = bg(box, "./container", "run", "img")
+    assert r.returncode == 0 and "WRAPPER run img" in r.stdout  # no preflight, no guard: status passes through
+    assert calls(box) == []
+
+
+def test_a_wrapper_prefix_does_not_hide_or_confuse_the_container_word(box):
+    r = bg(box, "env", "FOO=/opt/homebrew/bin/container", "container", "run", "img", extra={"FAKE_RUN": "xpc0"})
+    assert r.returncode == 70, r.stderr
+
+
+def test_the_guard_ignores_the_callers_pythonpath(box, tmp_path):
+    up(box)
+    poison = tmp_path / "poison"
+    poison.mkdir()
+    (poison / "signal.py").write_text("raise SystemExit(99)\n")
+    r = bg(box, "container", "run", "img", extra={"FAKE_RUN": "xpc0", "PYTHONPATH": str(poison)})
+    assert r.returncode == 70, r.stderr

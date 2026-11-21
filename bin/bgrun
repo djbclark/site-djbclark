@@ -51,6 +51,8 @@
 # `Error: ... XPC connection error ... Connection invalid` line even though the CLI exited 0 (exit 70; any other nonzero status
 # is passed through unchanged). The apiserver is an on-demand LaunchAgent that `container system start` registers itself
 # (RunAtLoad, no KeepAlive; the plist is rewritten on each start and pins the keg path), so launchd cannot be told to keep it up.
+# The key must be the command itself: `bgrun container run ...`, not `bgrun bash lane.sh` whose script calls `container run` inside
+# (that gets neither the preflight nor the XPC check); only Apple's CLI qualifies (absolute path or bare name, `--version` checked).
 # Every command also gets BGRUN_RUN_ID (UTC time + bg's pid) and BGRUN_RUN_START (epoch seconds) in its environment: a gate that
 # writes `out/<sha>` should write `out/<sha>-$BGRUN_RUN_ID` and judge only that directory (a gate that never launched leaves an
 # older sha-only directory that looks like a pass).
@@ -1100,30 +1102,51 @@ if [ "$is_test" = 1 ] && [ "$tslots" -gt 0 ]; then
   take_slot test "$tslots" "$HOME/.local/state/bg/test-slots"
 fi
 
-# bg_container_exe ARGS...: the `container` executable named in the command (first word whose basename is `container`).
+# bg_container_exe ARGS...: Apple's `container` CLI named in the command. Past the wrappers bg_key skips (nice -n N, env, VAR=x,
+# flags) the first word must be `container` or an absolute path ending in /container (never ./container or scripts/container) and
+# must answer `--version` with "container CLI version"; prints it, else fails (the command then runs as before, unguarded).
 bg_container_exe() {
-  local a
+  local a skip=0 ver
   for a in "$@"; do
-    case "${a##*/}" in container) printf '%s\n' "$a"; return 0 ;; esac
+    if [ "$skip" -gt 0 ]; then skip=$((skip - 1)); continue; fi
+    case "$a" in
+      nice|env|time|caffeinate|taskpolicy|timeout|gtimeout|[0-9]*|*=*) continue ;;
+      -n) skip=1; continue ;;
+      -*) continue ;;
+    esac
+    case "$a" in container|/*/container) ;; *) return 1 ;; esac
+    if command -v gtimeout >/dev/null 2>&1; then ver=$(gtimeout 20 "$a" --version 2>/dev/null | head -n 1); else ver=$("$a" --version 2>/dev/null | head -n 1); fi
+    case "$ver" in "container CLI version"*) printf '%s\n' "$a"; return 0 ;; esac
+    return 1
   done
   return 1
 }
 
-# bg_container_up EXE: the apiserver answers and reads `status running`.
-bg_container_up() {
-  if command -v gtimeout >/dev/null 2>&1; then gtimeout 20 "$1" system status 2>/dev/null; else "$1" system status 2>/dev/null; fi | grep -Eq '^status[[:space:]]+running'
+# bg_container_state EXE: up | down | unknown, from the exit status of `system status --format json` (0 running; upstream exits 1
+# when the apiserver is unregistered or not running). A timeout (a loaded Mac answering slowly) is unknown, never down.
+bg_container_state() {
+  local rc t="${BG_CONTAINER_STATUS_TIMEOUT:-20}"
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout "$t" "$1" system status --format json >/dev/null 2>&1; rc=$?
+  else "$1" system status --format json >/dev/null 2>&1; rc=$?; fi
+  case "$rc" in 0) echo up ;; 124|137) echo unknown ;; *) echo down ;; esac
 }
 
-# bg_container_preflight EXE SUB: start a down apiserver once (header). `system` and help/version calls need none.
+# bg_container_preflight EXE SUB: start a definitely-down apiserver once (header). `system` and help/version calls need none.
 bg_container_preflight() {
-  local exe="$1" sub="$2"
+  local exe="$1" sub="$2" st
   case "$sub" in system|""|-h|--help|--version|-v|help) return 0 ;; esac
   [ "${BG_CONTAINER_AUTOSTART:-1}" = 1 ] || return 0
-  bg_container_up "$exe" && return 0
+  st=$(bg_container_state "$exe")
+  [ "$st" = up ] && return 0
+  if [ "$st" = unknown ]; then
+    echo "bg: 'container system status' did not answer in time (a loaded Mac?); running the command anyway: the XPC check catches a real failure" >&2
+    return 0
+  fi
   echo "bg: the container apiserver is not running; starting it: container system start --disable-kernel-install" >&2
   if command -v gtimeout >/dev/null 2>&1; then gtimeout 120 "$exe" system start --disable-kernel-install </dev/null >&2 || true
   else "$exe" system start --disable-kernel-install </dev/null >&2 || true; fi
-  bg_container_up "$exe" && return 0
+  st=$(bg_container_state "$exe")
+  [ "$st" = down ] || return 0
   echo "bg: the container apiserver is still not running after 'container system start'; not running the command (check 'container system status' and /opt/homebrew/var/log/container.log)" >&2
   return 72
 }
@@ -1136,7 +1159,7 @@ bg_container_guard_exec() {
   self=$(greadlink -f "$0" 2>/dev/null) || self=$0
   dir=$(cd "$(dirname "$self")" 2>/dev/null && pwd)
   if [ -x "$dir/bgrun-container-guard" ] && command -v python3 >/dev/null 2>&1; then
-    exec python3 "$dir/bgrun-container-guard" -- "$@"
+    exec python3 -I "$dir/bgrun-container-guard" -- "$@"
   fi
   echo "bg: bgrun-container-guard or python3 is missing; running the container command without the XPC check" >&2
   return 1
@@ -1191,6 +1214,12 @@ bg_watch() {
   printf '%s\t%s\t%s\t%s\n' "$(gdate +%s)" "$(( $(gdate +%s) - t0 ))" "$bg_repo" "$bg_k" >> "$bg_hist"
   [ -z "$dl" ] || bg_dl done "$dl"
 }
+# Apple `container` (header): preflight before the run record starts, so a refused run leaves no deadline or history row.
+bg_cexe=$(bg_container_exe "$@") || bg_cexe=
+if [ -n "$bg_cexe" ]; then
+  bg_csub=${bg_k#container}; bg_csub=${bg_csub# }; bg_csub=${bg_csub%% *}
+  bg_container_preflight "$bg_cexe" "$bg_csub" || exit $?
+fi
 # The wait record ends here; the run's record belongs to the watcher below (header, "Deadline").
 bg_wait_end
 trap - EXIT
@@ -1208,13 +1237,9 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 : > "$bg_mark" 2>/dev/null   # the run starts now (see the header): the watcher registers its deadline on seeing this
 export BGRUN_RUN_ID="$(gdate -u +%Y%m%dT%H%M%SZ)-$$"
 export BGRUN_RUN_START="$(gdate +%s)"
-case "$bg_k" in
-  container|container\ *)
-    bg_csub=${bg_k#container}; bg_csub=${bg_csub# }; bg_csub=${bg_csub%% *}
-    bg_container_preflight "$(bg_container_exe "$@" || echo container)" "$bg_csub" || exit $?
-    if command -v taskpolicy >/dev/null 2>&1; then bg_container_guard_exec taskpolicy -c utility "$@"; else bg_container_guard_exec "$@"; fi
-    ;;
-esac
+if [ -n "$bg_cexe" ]; then
+  if command -v taskpolicy >/dev/null 2>&1; then bg_container_guard_exec taskpolicy -c utility "$@"; else bg_container_guard_exec "$@"; fi
+fi
 if command -v taskpolicy >/dev/null 2>&1; then
   exec taskpolicy -c utility "$@"
 else

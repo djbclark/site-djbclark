@@ -26,20 +26,28 @@ def main(argv):
     if not argv:
         print("usage: bgrun-container-guard -- CMD [ARGS...]", file=sys.stderr)
         return 2
-    try:
-        child = subprocess.Popen(argv, stderr=subprocess.PIPE)
-    except OSError as e:
-        print(f"bg: cannot run {argv[0]}: {e.strerror}", file=sys.stderr)
-        return 127 if isinstance(e, FileNotFoundError) else 126
+    child = None
+    pending = []  # a signal that arrived before the child existed
 
     def forward(signum, _frame):
+        if child is None:
+            pending.append(signum)
+            return
         try:
             child.send_signal(signum)
         except OSError:
             pass
 
+    # Handlers first: a TERM between Popen and the install would kill only the guard and orphan the command.
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, forward)
+    try:
+        child = subprocess.Popen(argv, stderr=subprocess.PIPE)
+    except OSError as e:
+        print(f"bg: cannot run {argv[0]}: {e.strerror}", file=sys.stderr)
+        return 127 if isinstance(e, FileNotFoundError) else 126
+    for signum in pending:
+        forward(signum, None)
 
     seen = bytearray()  # the last TAIL_KEEP bytes of stderr, scanned after the child ends
 
@@ -49,10 +57,16 @@ def main(argv):
             chunk = child.stderr.read1(8192)
             if not chunk:
                 return
-            out.write(chunk)
-            out.flush()
             seen.extend(chunk)
             del seen[:-TAIL_KEEP]
+            try:
+                out.write(chunk)
+                out.flush()
+            except OSError:
+                # Our own stderr reader went away (`2>&1 | head`). Close the child's stderr pipe so its next write gets SIGPIPE
+                # and it ends, as it did before this guard existed; never leave it blocked on a full pipe.
+                child.stderr.close()
+                return
 
     reader = threading.Thread(target=relay, daemon=True)
     reader.start()
