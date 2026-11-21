@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `bin/bgrun`: the admission gate's default `BG_MAX_LOAD_PER_CORE` rises from 3.0 to 5.0 (50 on the 10-core Mac) per the operator ruling of 2026-11-21 ("mac is still perfectly usable at 50"); the header comment and `docs/gradle-limits.md` (which still said 1.5) now agree, and `tests/test_bg_load_gate.py` pins the default (bg hands `load-watch admit --max-per-core 5.0` when the variable is unset). `load-watch`'s own admit base moves to 5.0 in djbclark-ade, so bg's value is no longer the tighter one. Memory-churn, swap-in and free-memory gates are unchanged. (2026-11-21)
+
 - Prepared an opt-in ADE NATS JetStream module for vps-hub with tailnet-only authenticated clients, local monitoring, runtime-only credentials, synchronous persistent storage, and isolated NixOS VM/host CI. Activation remains disabled pending review and live acceptance. (2026-11-18; https://github.com/djbclark/djbclark-ade/issues/779)
 
 - `bin/bg approve-local`: the authentication call (`sudo-ask`, or `sudo -k` without it) now runs under `env -i` with only a fixed PATH, HOME, USER, LANG and TERM, so a caller's `BASH_ENV`, `ENV`, `PYTHONSTARTUP`, `LD_*`/`DYLD_*`, `IFS`, `LC_*` or PATH entries no longer reach sudo-ask or sudo (bg's own shell still honours BASH_ENV, same user); LANG, TERM and USER are forwarded only when they are plain names. (2026-11-15)

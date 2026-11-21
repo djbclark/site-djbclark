@@ -14,7 +14,7 @@ several agents building at once everything slowed down.
    `check` (revert an expired profile), and `link` (repair the Gradle home links). A
    non-default profile always needs an expiry.
 3. **`bin/bgrun`**: starts work at utility QoS. It first waits while the 1-minute load per core
-   is above `BG_MAX_LOAD_PER_CORE` (default 1.5), for at most `BG_LOAD_WAIT` seconds (default
+   is above `BG_MAX_LOAD_PER_CORE` (default 5.0, i.e. 50 on the 10-core Mac, since 2026-11-21; it was 1.5 when this was written), for at most `BG_LOAD_WAIT` seconds (default
    900), then starts anyway. `BG_LOAD_WAIT=0` skips the wait for a test, but `bg` ignores it for a Gradle command. It also runs
    `gradle-limits check`.
 4. **Gradle slots in `bg`**: a `bg` command that runs `gradle`/`gradlew` (also behind

@@ -77,13 +77,15 @@ def run_bg(tmp_path, admit_codes, max_wait, max_per_core="1000", extra_env=None)
         "BASH_ENV": str(shim),
         # work is not in a git repo, so bg skips `load-watch ci check`; the stub answers it anyway.
         "GIT_CEILING_DIRECTORIES": str(tmp_path),
-        "BG_MAX_LOAD_PER_CORE": max_per_core,
         "BG_MAX_WAIT": str(max_wait),
         "BG_PING_CMD": "/usr/bin/true",
         "BG_NO_DEADLINE": "1",
         "BG_WATCH_POLL": "1",
     }
     env.pop("BG_LOAD_WAIT", None)  # 0 would skip the gate under test
+    env.pop("BG_MAX_LOAD_PER_CORE", None)
+    if max_per_core is not None:  # None leaves bg's own default in force
+        env["BG_MAX_LOAD_PER_CORE"] = max_per_core
     env.pop("LW_REFUSED_SINCE", None)  # the stub reports whether bg exported it
     env.update(extra_env or {})
     t0 = time.monotonic()
@@ -114,6 +116,15 @@ def test_bg_waits_and_gives_up_while_admit_says_hot(tmp_path):
     assert calls[0] == "admit --wait 0 --max-per-core 1000"
     assert all(re.fullmatch(r"admit --wait [1-9][0-9]* --refused-since [0-9]+ --max-per-core 1000", c) for c in calls[1:]), calls
     assert "15" in slept  # a --wait call that returns at once must not spin: bg keeps its 15 s poll then
+
+
+def test_bg_default_load_gate_is_5_per_core(tmp_path):
+    """Operator 2026-11-21: the Mac stays usable at load 50, so bg's own base is 5.0 per core (10 cores), and that is what it hands load-watch."""
+    r, marker, calls, slept, took = run_bg(tmp_path, [0], max_wait=60, max_per_core=None)
+    assert r.returncode == 0, r.stderr
+    assert marker.exists()
+    assert calls == ["admit --wait 0 --max-per-core 5.0"]
+    assert "BG_MAX_LOAD_PER_CORE (default 5.0," in BG.read_text()  # the header comment states the same number
 
 
 def test_bg_starts_the_command_when_admit_says_ok(tmp_path):
