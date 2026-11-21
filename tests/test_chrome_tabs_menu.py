@@ -5,6 +5,8 @@ needs a display and a pointer, so it is checked by hand, not here."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import stat
@@ -180,6 +182,203 @@ class Install(unittest.TestCase):
             ):
                 ctm.install()
             self.assertFalse(Path(home, ".local/bin/chrome-session-dump").exists())
+
+
+def url(u: str, name: str = "n") -> dict:
+    return {"type": "url", "name": name, "url": u}
+
+
+def folder(name: str, *kids: dict) -> dict:
+    return {"type": "folder", "name": name, "children": list(kids)}
+
+
+def doc(bar=(), other=(), synced=()) -> dict:
+    return {
+        "roots": {
+            "bookmark_bar": folder("Bookmarks Bar", *bar),
+            "other": folder("Other Bookmarks", *other),
+            "synced": folder("Mobile Bookmarks", *synced),
+        }
+    }
+
+
+class BookmarkTree(unittest.TestCase):
+    def test_non_web_links_and_emptied_folders_are_dropped(self):
+        d = doc(
+            bar=[
+                url("https://a.example/x", "A"),
+                url("javascript:alert(1)", "bookmarklet"),
+                url("chrome://settings", "settings"),
+                url("file:///tmp/x", "file"),
+                url("https://", "no host"),
+                folder("Only junk", url("javascript:void(0)")),
+                folder("Keep", url("http://b.example", "B")),
+            ]
+        )
+        roots = ctm.merge_bookmark_files([d])
+        self.assertEqual([r["key"] for r in roots], ["bookmark_bar"])
+        self.assertEqual(
+            roots[0]["children"],
+            [
+                {"name": "A", "url": "https://a.example/x"},
+                {
+                    "name": "Keep",
+                    "children": [{"name": "B", "url": "http://b.example"}],
+                },
+            ],
+        )
+
+    def test_root_order_and_names_come_from_the_file(self):
+        d = doc(synced=[url("https://m.example")], other=[url("https://o.example")])
+        d["roots"]["other"]["name"] = "Other"
+        names = [(r["key"], r["name"]) for r in ctm.merge_bookmark_files([d])]
+        self.assertEqual(names, [("other", "Other"), ("synced", "Mobile Bookmarks")])
+
+    def test_unnamed_root_gets_the_chrome_default(self):
+        d = doc(bar=[url("https://a.example")])
+        d["roots"]["bookmark_bar"]["name"] = ""
+        self.assertEqual(ctm.merge_bookmark_files([d])[0]["name"], "Bookmarks bar")
+
+    def test_account_first_then_local_with_folders_merged_and_links_deduped(self):
+        account = doc(
+            bar=[url("https://a.example", "A"), folder("F", url("https://f1.example"))]
+        )
+        local = doc(
+            bar=[
+                url("https://a.example", "A again"),
+                url("https://l.example", "L"),
+                folder("F", url("https://f1.example"), url("https://f2.example")),
+            ]
+        )
+        bar = ctm.merge_bookmark_files([account, local])[0]["children"]
+        self.assertEqual(
+            [n.get("url") or n["name"] for n in bar],
+            ["https://a.example", "F", "https://l.example"],
+        )
+        self.assertEqual(
+            [c["url"] for c in bar[1]["children"]],
+            ["https://f1.example", "https://f2.example"],
+        )
+
+    def test_malformed_documents_are_ignored(self):
+        self.assertEqual(ctm.merge_bookmark_files([{}, {"roots": []}, []]), [])  # type: ignore[list-item]
+        self.assertEqual(ctm.merge_bookmark_files([{"roots": {"bookmark_bar": 3}}]), [])
+
+    def test_count_bookmarks(self):
+        nodes = ctm.merge_bookmark_files(
+            [
+                doc(
+                    bar=[
+                        url("https://a.example"),
+                        folder(
+                            "F",
+                            url("https://b.example"),
+                            folder("G", url("https://c.example")),
+                        ),
+                    ]
+                )
+            ]
+        )[0]["children"]
+        self.assertEqual(ctm.count_bookmarks(nodes), (3, 2))
+
+
+class BookmarkProfiles(unittest.TestCase):
+    def write_profile(self, base: Path, name: str, account=None, local=None):
+        (base / name).mkdir()
+        if account is not None:
+            (base / name / "AccountBookmarks").write_text(json.dumps(account))
+        if local is not None:
+            (base / name / "Bookmarks").write_text(json.dumps(local))
+
+    def test_profiles_without_web_bookmarks_are_skipped_and_names_come_from_local_state(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            self.write_profile(
+                base, "Profile 10", account=doc(bar=[url("https://ten.example")])
+            )
+            self.write_profile(
+                base, "Profile 2", local=doc(bar=[url("https://two.example")])
+            )
+            self.write_profile(
+                base,
+                "Default",
+                account=doc(bar=[url("https://d.example")]),
+                local=doc(),
+            )
+            self.write_profile(
+                base, "Profile 3", account=doc(bar=[url("javascript:1")])
+            )
+            self.write_profile(base, "Profile 4")  # no bookmark files at all
+            (base / "Profile 5").mkdir()
+            (base / "Profile 5" / "Bookmarks").write_text("not json")
+            (base / "Crashpad").mkdir()
+            (base / "Local State").write_text(
+                json.dumps(
+                    {
+                        "profile": {
+                            "info_cache": {
+                                "Default": {"name": "Main"},
+                                "Profile 2": {"name": "Second"},
+                            }
+                        }
+                    }
+                )
+            )
+            with mock.patch.dict(os.environ, {"CHROME_USER_DATA_DIR": d}):
+                found = ctm.collect_bookmarks()
+        self.assertEqual(
+            [p["profile"] for p in found], ["Main", "Second", "Profile 10"]
+        )
+
+    def test_unreadable_folder_raises_permission_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_profile(
+                Path(d), "Default", account=doc(bar=[url("https://a.example")])
+            )
+            real = Path.read_text
+
+            def deny(self, *a, **k):
+                if self.name == "AccountBookmarks":
+                    raise PermissionError(1, "Operation not permitted")
+                return real(self, *a, **k)
+
+            with (
+                mock.patch.dict(os.environ, {"CHROME_USER_DATA_DIR": d}),
+                mock.patch.object(Path, "read_text", deny),
+                self.assertRaises(PermissionError),
+            ):
+                ctm.collect_bookmarks()
+
+    def test_count_mode_prints_counts_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_profile(
+                Path(d),
+                "Default",
+                account=doc(
+                    bar=[
+                        url("https://secret-title.example", "SECRET"),
+                        folder("SECRETDIR", url("https://x.example")),
+                    ]
+                ),
+            )
+            buf = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"CHROME_USER_DATA_DIR": d}),
+                contextlib.redirect_stdout(buf),
+            ):
+                self.assertEqual(ctm.main(["--bookmarks", "--count"]), 0)
+        self.assertIn("2 bookmarks, 1 folders in 1 profiles", buf.getvalue())
+
+    def test_count_mode_fails_with_exit_1_when_unreadable(self):
+        with (
+            mock.patch.object(
+                ctm, "collect_bookmarks", side_effect=PermissionError("denied")
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(ctm.main(["--bookmarks", "--count"]), 1)
 
 
 if __name__ == "__main__":

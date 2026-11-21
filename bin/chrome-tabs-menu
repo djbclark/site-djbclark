@@ -7,6 +7,8 @@
 
   chrome-tabs-menu               pop the menu at the pointer (bind it to an ExtraBar button)
   chrome-tabs-menu --count       print window and tab counts per profile, no UI
+  chrome-tabs-menu --bookmarks   pop the menu of every profile's bookmarks (read at click time)
+  chrome-tabs-menu --bookmarks --count   print bookmark and folder counts per profile, no UI
   chrome-tabs-menu --all-profiles  also use each profile's newest session file (stale if the profile is closed)
   chrome-tabs-menu --install     fetch lemnos/chrome-session-dump into ~/.local/bin (sha256 checked)
 
@@ -15,6 +17,13 @@ list is the open tabs of every profile Chrome has open right now (found with lso
 browser extension or debugging port. Only http(s) tabs are listed; chrome:// pages and the like
 are counted but hidden, because Safari cannot open them. Opening runs
 "open -a Safari URL" as an argument vector (no shell), so a tab URL is never interpreted.
+
+Bookmarks (--bookmarks) come straight from each profile's AccountBookmarks (the signed-in
+bookmarks) merged with its local Bookmarks file, read when the menu is popped, so the menu is
+current. A profile with no bookmarks is skipped; with two or more, each gets a submenu. Under each
+come Chrome's own roots (Bookmarks bar, Other bookmarks, Mobile bookmarks) and then the folders as
+submenus; a pick opens in Safari like a tab. javascript: bookmarklets and other non-web URLs are
+counted but hidden.
 
 Environment: CHROME_SESSION_DUMP (binary path), CHROME_USER_DATA_DIR (default
 ~/Library/Application Support/Google/Chrome), CHROME_TABS_BROWSER (default Safari).
@@ -235,11 +244,137 @@ def collect(all_profiles: bool) -> list[dict]:
     return wins
 
 
-def build_menu(wins: list[dict], target, notice: str | None = None):
-    from AppKit import (
-        NSMenu,
-        NSMenuItem,
-    )  # lazy so --count, --install and the tests need no PyObjC
+ROOT_ORDER = ("bookmark_bar", "other", "synced")
+ROOT_DEFAULT_NAMES = {
+    "bookmark_bar": "Bookmarks bar",
+    "other": "Other bookmarks",
+    "synced": "Mobile bookmarks",
+}
+BOOKMARK_FILES = (
+    "AccountBookmarks",
+    "Bookmarks",
+)  # signed-in copy first, then the local file
+
+
+def is_web_url(url: str) -> bool:
+    u = urlsplit(url)
+    return u.scheme in ("http", "https") and bool(u.netloc)
+
+
+def clean_node(node: dict) -> dict | None:
+    """A Chrome bookmark node as {"name", "url"} or {"name", "children"}; None when it has no web link.
+
+    Non-web URLs (javascript: bookmarklets, chrome:// pages) and folders left empty by that are dropped.
+    """
+    if not isinstance(node, dict):
+        return None
+    name = str(node.get("name") or "")
+    if node.get("type") == "folder" or "children" in node:
+        kids = [c for c in map(clean_node, node.get("children") or []) if c]
+        return {"name": name, "children": kids} if kids else None
+    url = str(node.get("url") or "")
+    return {"name": name, "url": url} if is_web_url(url) else None
+
+
+def merge_children(first: list[dict], second: list[dict]) -> list[dict]:
+    """first then second; a folder of the same name is merged, a link already present is dropped."""
+    out = [dict(n) for n in first]
+    for n in second:
+        if "children" in n:
+            twin = next(
+                (o for o in out if "children" in o and o["name"] == n["name"]), None
+            )
+            if twin is not None:
+                twin["children"] = merge_children(twin["children"], n["children"])
+            else:
+                out.append(dict(n))
+        elif not any(o.get("url") == n["url"] for o in out):
+            out.append(dict(n))
+    return out
+
+
+def merge_bookmark_files(docs: list[dict]) -> list[dict]:
+    """Bookmark JSON documents (signed-in first) -> [{"key","name","children"}] for the roots that hold a link."""
+    merged: dict[str, dict] = {}
+    for doc in docs:
+        roots = doc.get("roots") if isinstance(doc, dict) else None
+        if not isinstance(roots, dict):
+            continue
+        for key in ROOT_ORDER:
+            node = clean_node(roots.get(key) or {})
+            if not node:
+                continue
+            if key in merged:
+                merged[key]["children"] = merge_children(
+                    merged[key]["children"], node["children"]
+                )
+            else:
+                name = node["name"] or ROOT_DEFAULT_NAMES[key]
+                merged[key] = {"key": key, "name": name, "children": node["children"]}
+    return [merged[k] for k in ROOT_ORDER if k in merged]
+
+
+def count_bookmarks(nodes: list[dict]) -> tuple[int, int]:
+    """(links, folders) below a list of nodes."""
+    links = folders = 0
+    for n in nodes:
+        if "children" in n:
+            folders += 1
+            a, b = count_bookmarks(n["children"])
+            links, folders = links + a, folders + b
+        else:
+            links += 1
+    return links, folders
+
+
+def profile_bookmarks(pdir: Path) -> list[dict]:
+    """Merged roots of one profile directory; a file that is missing or not JSON is skipped.
+
+    PermissionError is not swallowed: it means Chrome's folder is unreadable (macOS privacy).
+    """
+    docs = []
+    for fn in BOOKMARK_FILES:
+        try:
+            docs.append(json.loads((pdir / fn).read_text()))
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            continue
+    return merge_bookmark_files(docs)
+
+
+def profile_dirs(base: Path) -> list[Path]:
+    """Default first, then the others in natural order (Profile 2 before Profile 10)."""
+
+    def key(p: Path):
+        m = re.fullmatch(r"Profile (\d+)", p.name)
+        return (0, 0) if p.name == "Default" else (1, int(m.group(1))) if m else (2, 0)
+
+    return sorted(
+        (
+            d
+            for d in base.iterdir()
+            if d.name == "Default" or d.name.startswith("Profile ")
+        ),
+        key=lambda d: (key(d), d.name),
+    )
+
+
+def collect_bookmarks() -> list[dict]:
+    """[{"profile", "roots"}] for every profile holding at least one web bookmark."""
+    base = user_data_dir()
+    names = profile_names(base)
+    found = []
+    for d in profile_dirs(base):
+        if not d.is_dir():
+            continue
+        roots = profile_bookmarks(d)
+        if roots:
+            found.append({"profile": names.get(d.name, d.name), "roots": roots})
+    return found
+
+
+def menu_helpers(target):
+    """(item, sub) builders shared by the tabs and bookmarks menus; PyObjC is imported lazily."""
+    from AppKit import NSMenu, NSMenuItem
 
     def item(menu, title, url=None):
         it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -261,6 +396,17 @@ def build_menu(wins: list[dict], target, notice: str | None = None):
         m.setAutoenablesItems_(False)
         it.setSubmenu_(m)
         return m
+
+    return item, sub
+
+
+def build_menu(wins: list[dict], target, notice: str | None = None):
+    from AppKit import (
+        NSMenu,
+        NSMenuItem,
+    )  # lazy so --count, --install and the tests need no PyObjC
+
+    item, sub = menu_helpers(target)
 
     def fill(menu, tabs):
         for label, ts in group_by_host(tabs):
@@ -289,7 +435,37 @@ def build_menu(wins: list[dict], target, notice: str | None = None):
     return menu
 
 
-def show(wins: list[dict], notice: str | None = None) -> None:
+def build_bookmarks_menu(profiles: list[dict], target, notice: str | None = None):
+    from AppKit import NSMenu
+
+    item, sub = menu_helpers(target)
+
+    def fill(menu, nodes):
+        for n in nodes:
+            if "children" in n:
+                fill(sub(menu, n["name"] or "(unnamed folder)"), n["children"])
+            else:
+                item(menu, n["name"] or n["url"], n["url"])
+
+    def fill_roots(menu, roots):
+        for r in roots:
+            fill(sub(menu, r["name"]), r["children"])
+
+    menu = NSMenu.alloc().initWithTitle_("Chrome bookmarks")
+    menu.setAutoenablesItems_(False)
+    if notice:
+        item(menu, notice)
+    elif not profiles:
+        item(menu, "No Chrome bookmarks found")
+    elif len(profiles) == 1:
+        fill_roots(menu, profiles[0]["roots"])
+    else:
+        for p in profiles:
+            fill_roots(sub(menu, p["profile"]), p["roots"])
+    return menu
+
+
+def show(wins: list, notice: str | None = None, builder=None) -> None:
     import time
 
     from AppKit import (
@@ -344,15 +520,59 @@ def show(wins: list[dict], notice: str | None = None) -> None:
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     target = Target.alloc().init()
     delegate = Delegate.alloc().init()
-    delegate.menu = build_menu(wins, target, notice)
+    delegate.menu = (builder or build_menu)(wins, target, notice)
     app.setDelegate_(delegate)
     app.run()
+
+
+def main_bookmarks(count_only: bool) -> int:
+    try:
+        profiles = collect_bookmarks()
+    except PermissionError as e:
+        print(f"chrome-tabs-menu: {e}", file=sys.stderr)
+        if count_only:
+            return 1
+        show(
+            [],
+            "Cannot read Chrome data: grant Full Disk Access to the launcher",
+            build_bookmarks_menu,
+        )
+        return 1
+    except OSError as e:
+        print(f"chrome-tabs-menu: {e}", file=sys.stderr)
+        if count_only:
+            return 1
+        show(
+            [],
+            "Could not read Chrome bookmarks (see the script's stderr)",
+            build_bookmarks_menu,
+        )
+        return 1
+    if count_only:
+        total_links = total_folders = 0
+        for p in profiles:
+            links, folders = count_bookmarks(
+                [n for r in p["roots"] for n in r["children"]]
+            )
+            total_links, total_folders = total_links + links, total_folders + folders
+            print(f"{p['profile']}\t{links} bookmarks\t{folders} folders")
+        print(
+            f"total\t{total_links} bookmarks, {total_folders} folders in {len(profiles)} profiles"
+        )
+        return 0
+    show(profiles, None, build_bookmarks_menu)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
         "--count", action="store_true", help="print counts per profile window, no UI"
+    )
+    ap.add_argument(
+        "--bookmarks",
+        action="store_true",
+        help="menu of the bookmarks of every profile (with --count: counts only)",
     )
     ap.add_argument(
         "--all-profiles",
@@ -368,6 +588,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.install:
         install()
         return 0
+    if a.bookmarks:
+        return main_bookmarks(a.count)
     try:
         wins = collect(a.all_profiles)
     except PermissionError as e:
