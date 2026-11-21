@@ -9,6 +9,7 @@ exits 0 but its stderr carried a line like `Error: interrupted: "XPC connection 
 not run, so this exits 70 and says so. Any other status is passed through (a death by signal N is 128+N).
 """
 
+import os
 import re
 import signal
 import subprocess
@@ -19,6 +20,8 @@ import time
 EXIT_XPC_HIDDEN = 70
 XPC_ERROR = re.compile(rb"^Error: .*(XPC connection error|Connection invalid)", re.M)
 TAIL_KEEP = 64 * 1024
+IDLE_READ = 2  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
+IDLE_WRITE = 60  # ... while it waits for a slow consumer of our own stderr (the XPC line may still be queued behind it)
 
 
 def main(argv):
@@ -56,6 +59,7 @@ def main(argv):
 
     seen = bytearray()  # the last TAIL_KEEP bytes of stderr, scanned after the child ends
     progress = [0]  # bytes the relay has read and written on; a slow consumer is progress, a stalled grandchild is not
+    writing = [False]  # the relay is inside a write to OUR stderr: the consumer is slow, so the XPC line may still be queued
 
     def relay():
         out = sys.stderr.buffer
@@ -67,8 +71,10 @@ def main(argv):
             del seen[:-TAIL_KEEP]
             progress[0] += len(chunk)
             try:
+                writing[0] = True
                 out.write(chunk)
                 out.flush()
+                writing[0] = False
                 progress[0] += len(chunk)
             except OSError:
                 # Our own stderr reader went away (`2>&1 | head`). Close the child's stderr pipe so its next write gets SIGPIPE
@@ -84,21 +90,23 @@ def main(argv):
             break
         except KeyboardInterrupt:  # a SIGINT handler is installed, so this is only a fallback
             continue
-    # Keep waiting while the relay still makes progress (a slow consumer must not hide the XPC line, which is the last thing written);
-    # give up after 2 s with none: a grandchild that kept stderr open must not hold the exit status hostage.
+    # Keep waiting while the relay still makes progress (a slow consumer must not hide the XPC line, which is the last thing written):
+    # up to IDLE_WRITE s without progress while it is blocked writing to a slow consumer, IDLE_READ s while it is blocked reading (a
+    # grandchild that kept stderr open must not hold the exit status hostage).
     idle_since, last = time.monotonic(), progress[0]
     while reader.is_alive():
         reader.join(timeout=0.25)
         if progress[0] != last:
             idle_since, last = time.monotonic(), progress[0]
-        elif time.monotonic() - idle_since >= 2:
+        elif time.monotonic() - idle_since >= (IDLE_WRITE if writing[0] else IDLE_READ):
             break
     if rc < 0:
         return 128 - rc
     if rc == 0 and XPC_ERROR.search(bytes(seen)):
         try:
-            print('bg: the container CLI exited 0 but reported an XPC "Connection invalid" error: the command did not run; '
-                  "exiting 70 (is `container system status` running?)", file=sys.stderr)
+            # os.write, not print: a relay thread blocked on a slow consumer holds sys.stderr's lock, and print would wait for it
+            os.write(2, b'bg: the container CLI exited 0 but reported an XPC "Connection invalid" error: the command did not run; '
+                        b"exiting 70 (is `container system status` running?)\n")
         except OSError:
             pass  # stderr is gone (2>&1 | head): the status below is what counts
         return EXIT_XPC_HIDDEN
@@ -106,4 +114,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    # os._exit: a daemon relay thread may still hold sys.stderr's buffer lock (slow consumer, grandchild holding the pipe), and a normal
+    # interpreter shutdown then aborts (SIGABRT, "could not acquire lock for <stderr>"), which would replace the status below.
+    _rc = main(sys.argv[1:])
+    os._exit(_rc)
