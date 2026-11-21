@@ -285,3 +285,47 @@ def test_a_ticket_dated_in_the_future_is_refused(repo, home):
 def test_scope_root_covers_every_directory(repo, home):
     assert ap(repo, home, "--for", "1h", "--scope", "/").returncode == 0
     assert run(repo, home, "vitest", "run").returncode == 0 and ap(repo, home, "check", str(repo)).returncode == 0
+
+
+# ---- 288 r2 follow-up (adversary LOWs N1-N4) ----
+
+def test_a_scope_the_dialog_cannot_show_plainly_is_refused(repo, home):
+    for name in ("it's", "café", "rtl‮txt"):  # a quote (sudo-ask expands each to 4 characters), non-ASCII, a bidi override
+        d = repo / name
+        d.mkdir()
+        assert ap(repo, home, "--for", "1h", "--scope", str(d)).returncode == 2, name
+    assert tickets(home) == [] and not (home / "sudo-ask.calls").exists()
+
+
+def test_the_command_in_the_dialog_has_no_quote_or_control_character(repo, home):
+    # sudo-ask quotes the message whole and turns every ' into 4 characters (or the message into $'..' on a control character):
+    # the shown command is flattened so the expiry-first text can never be pushed past its 700-character cut
+    quoted = "it's " * 30
+    a = ap(repo, home, "--for", "52w", "--", "vitest", quoted, "tab\there", "line\nbreak")
+    assert a.returncode == 0, a.stderr
+    msg = (home / "sudo-ask.calls").read_text().splitlines()[-1]
+    body = msg.split("printf %s\\n ", 1)[1]
+    assert "'" not in body and "\t" not in body and msg.count("\n") == 0
+    assert NY_12H.search(body[:300]) and "ONE command" in body[:300]
+    assert len(body) + 27 + 2 <= 700  # what sudo-ask shows: its fixed prefix, the message, its surrounding quotes
+
+
+def test_revoking_one_id_is_remembered_for_a_copy_restored_later(repo, home):
+    ap(repo, home, "--for", "1h")
+    [t] = tickets(home)
+    saved = t.read_bytes()
+    assert ap(repo, home, "revoke", t.stem).returncode == 0 and tickets(home) == []
+    t.write_bytes(saved)  # a backup restore or a copy kept aside, under the same name
+    t.chmod(0o600)
+    assert run(repo, home, "vitest", "run").returncode == 3 and "ticket-refused-revoked" in log(home)
+
+
+def test_a_refused_ticket_name_cannot_forge_a_log_row(repo, home):
+    ap(repo, home, "--for", "1h")
+    d = tickets(home)[0].parent
+    evil = d / "x\tticket-used\t0\tfake.ticket"
+    evil.write_text("junk\n")
+    evil.chmod(0o600)
+    assert ap(repo, home, "status").returncode == 0  # status checks every file, so the bad one is logged whatever its sort order
+    rows = [r for r in log(home).splitlines() if "refused" in r]
+    assert rows and all(len(r.split("\t")) == 6 for r in rows)

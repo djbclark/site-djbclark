@@ -51,12 +51,16 @@
 # BG_CONTAINER_AUTOSTART=0 turns it off; exit 72 if it is still definitely down), and (2) fail a run whose stderr carries an
 # `Error: ... XPC connection error ... Connection invalid` line even though the CLI exited 0 (exit 70; any other nonzero status
 # is passed through unchanged). The apiserver is an on-demand LaunchAgent that `container system start` registers itself
-# (RunAtLoad, no KeepAlive; the plist is rewritten on each start and pins the keg path), so launchd cannot be told to keep it up.
+# (RunAtLoad, no KeepAlive; the plist is rewritten on each start and pins the keg path), so launchd cannot be told to keep it up. Autostart also restarts an apiserver stopped on purpose (there is no
+# 'stopped deliberately' marker): a call that must leave it stopped sets BG_CONTAINER_AUTOSTART=0.
 # The key must be the command itself: `bgrun container run ...`, not `bgrun bash lane.sh` whose script calls `container run` inside
 # (that gets neither the preflight nor the XPC check); only Apple's CLI qualifies (bare name, or an absolute path to the PATH's
 # `container` or a Cellar keg, `--version` checked). The guard is the command's PARENT, not an exec: the slot file holds the guard's
-# pid, and a SIGKILL of the guard frees the slot while the command runs on, so stop a container run with TERM/INT (forwarded) or
-# kill its whole process group. SIGHUP/SIGINT/SIGTERM already ignored when the guard starts (nohup, `cmd &`) stay ignored.
+# pid, and a SIGKILL of the guard ALONE frees the slot while the command runs on, so stop a container run with TERM to the bgrun pid
+# (forwarded once; SIGUSR1/USR2 are forwarded too). The command stays in the guard's process group, so a group SIGKILL (deadline run after its
+# grace, `gtimeout -k`) takes both down, and a command that prompts on /dev/tty is never stopped by SIGTTIN; the price is that a TERM sent to
+# the whole group reaches the CLI twice (kernel + forward), under Apple's 3-signal force-exit threshold. In a terminal Ctrl-C reaches the
+# command from the kernel, so INT is not forwarded there. SIGHUP/SIGINT/SIGTERM already ignored when the guard starts (nohup, `cmd &`) stay ignored.
 # Every command also gets BGRUN_RUN_ID (UTC time + bg's pid) and BGRUN_RUN_START (epoch seconds) in its environment: a gate that
 # writes `out/<sha>` should write `out/<sha>-$BGRUN_RUN_ID` and judge only that directory (a gate that never launched leaves an
 # older sha-only directory that looks like a pass). Caveat: read $BGRUN_RUN_ID INSIDE the run; `bgrun cmd -e X=$BGRUN_RUN_ID` expands
@@ -382,7 +386,7 @@ bg_ticket_load() { # FILE -> t_id t_created t_expires t_scope t_argv t_uid t_sig
 }
 bg_ticket_log() { # EVENT ID ARGVHASH PROGRAM
   mkdir -p "$bg_state" 2>/dev/null || return 0
-  printf '%s\t%s\t%s\t%s\t%s\tticket=%s\n' "$(gdate -Is)" "$1" "${3:0:12}" "$(printf '%q' "$(pwd -P)")" "$(printf '%q' "${4##*/}")" "$2" >> "$bg_state/approvals.log" 2>/dev/null || true
+  printf '%s\t%s\t%s\t%s\t%s\tticket=%s\n' "$(gdate -Is)" "$1" "${3:0:12}" "$(printf '%q' "$(pwd -P)")" "$(printf '%q' "${4##*/}")" "$(printf '%q' "$2")" >> "$bg_state/approvals.log" 2>/dev/null || true
 }
 # bg_ticket_check FILE NOW: 0 when FILE is a genuine, unexpired ticket of this user (sets t_*); an expired one is removed.
 bg_ticket_check() {
@@ -397,6 +401,8 @@ bg_ticket_check() {
       why=bad-signature
     elif [[ ! "$t_id" =~ ^[0-9a-f]{8}$ ]] || [ "$t_id.ticket" != "${f##*/}" ]; then
       why=id-not-file-name   # a copy under another name, or an id that is a path, is no ticket
+    elif [ -f "$bg_ticket_dir/.revoked" ] && grep -qxF "$t_id" "$bg_ticket_dir/.revoked" 2>/dev/null; then
+      why=revoked   # `revoke ID` is remembered: a copy kept aside and restored under the same name is refused
     elif [ "$now" -lt "$t_created" ]; then
       why=clock-before-created
     elif [ "$now" -ge "$t_expires" ]; then
@@ -453,7 +459,9 @@ bg_ticket_revoke() {
   else
     for id in "$@"; do
       [[ "$id" =~ ^[0-9a-f]{8}$ ]] || { echo "bg approve-local revoke: '$id' is not a ticket id (see: approve-local status)" >&2; return 2; }
-      if [ -e "$bg_ticket_dir/$id.ticket" ]; then rm -f "$bg_ticket_dir/$id.ticket"; c=$((c + 1)); else echo "bg approve-local revoke: no ticket $id" >&2; fi
+      ( umask 077; mkdir -p "$bg_ticket_dir" && chmod 700 "$bg_ticket_dir" && echo "$id" >> "$bg_ticket_dir/.revoked" ) 2>/dev/null \
+        || echo "bg approve-local revoke: could not record $id as revoked" >&2
+      if [ -e "$bg_ticket_dir/$id.ticket" ]; then rm -f "$bg_ticket_dir/$id.ticket"; c=$((c + 1)); else echo "bg approve-local revoke: no ticket $id (recorded as revoked anyway)" >&2; fi
     done
   fi
   bg_appr_log revoked "" "$c-tickets"
@@ -547,7 +555,9 @@ bg_approve_local() {
   bg_ticket_fmt "$exp" >/dev/null 2>&1 || { echo "bg approve-local: that expiry is too far away to be shown as a date; nothing was written" >&2; return 2; }
   if [ "$scope" != '*' ]; then
     scope=$(cd "$scope" 2>/dev/null && pwd -P) || { echo "bg approve-local: --scope is not a directory" >&2; return 2; }
-    case "$scope" in *$'\n'*|*$'\t'*) echo "bg approve-local: --scope has a newline or tab" >&2; return 2 ;; esac
+    # The path goes into the dialog, so only characters sudo-ask shows 1:1 are allowed: no quote (sudo-ask turns each ' into 4
+    # characters and could push the expiry-first text past its 700-character cut), no control or bidi/non-ASCII character (display tricks).
+    [[ "$scope" =~ ^[-A-Za-z0-9_./=:,+@%~\ ]+$ ]] || { echo "bg approve-local: --scope has a character the approval dialog cannot show safely (allowed: letters, digits, space and _ . / = : , + @ % ~ -)" >&2; return 2; }
     # the dialog must show the whole scope (sudo-ask cuts its text at 700 characters), so a very long path is refused, never cut
     [ "${#scope}" -le 250 ] || { echo "bg approve-local: --scope path is over 250 characters, too long to show whole in the approval dialog" >&2; return 2; }
   fi
@@ -558,6 +568,7 @@ bg_approve_local() {
     # The dialog is the operator's only view of the period, so expiry and scope come FIRST and are never cut; only the command text is
     # capped (120 characters), with a marker that says how much was left out and the argv hash that the ticket is bound to.
     shown=$(printf '%q ' "${rest[@]}"); shown=${shown% }
+    shown=${shown//\'/\"}; shown=$(printf '%s' "$shown" | LC_ALL=C tr -c ' -~' '?')   # display only (the hash binds the real argv): no quote, no control or non-ASCII character
     if [ "${#shown}" -gt 120 ]; then shown="${shown:0:120}... [command truncated: ${#shown} characters in all]"; fi
     what="bgrun local runs of ONE command ($shown; argv hash ${argh:0:12})"
   fi
