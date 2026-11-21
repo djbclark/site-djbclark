@@ -14,8 +14,7 @@ Built 2026-08-21 getting KIRA's `terminus-kira` (krafton-ai/KIRA, harbor's
 Terminus2 agent extended with native tool calling) running locally on Apple
 Silicon with no Docker/Colima and no Rosetta emulation. This skill is the
 "I (Claude) can choose to pass real work to this" entry point — distinct
-from `bigteam` (fan-out to peer agent sessions) and
-`ralph-tui-orchestration` (multi-repo controller loops). TerminusKira is a
+from `fan-out` (Paseo peer agent sessions). TerminusKira is a
 single sandboxed sub-agent you dispatch one task to, not a peer session.
 
 ## When to reach for this
@@ -69,10 +68,9 @@ if something looks broken, per the memory-verification convention)
   removed — upgrading harbor breaks TerminusKira outright with an
   `AttributeError`. 0.2.0 (2026-03-25) is the earliest release with the
   `apple-container` environment backend and still has that method.
-- **harbor's CLI flags shifted around 0.2.0**: `--agent` became a closed
-  enum of built-in names — a custom agent class only loads via
-  `--agent-import-path` (never combine the two). `-i`/task-id filtering
-  became `-t`/`--task-name` (glob-based).
+- **harbor 0.2.0 CLI**: `--agent` is a closed enum of built-in names — a
+  custom agent class only loads via `--agent-import-path` (never combine the
+  two). Task filtering is `-t`/`--task-name` (glob-based), not `-i`.
 - **Apple Silicon native, no Rosetta** needs three things harbor doesn't do
   on its own: `container system kernel set --recommended`,
   `container builder start`, and `--force-build` on `harbor run` (else it
