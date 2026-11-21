@@ -79,8 +79,8 @@ GREPTILE_NO_UPDATE_CHECK=1 sudo-secretspec run --reason "greptile review" -- gre
 | `--plus` / `--apex` | higher review tier: **3 / 10 credits** instead of Base (prepaid credits). Use only when the user asks |
 | `--include PATHS` | send files the CLI held back as possibly sensitive; only after checking they hold no secret |
 
-A review takes minutes. Run it in the background with a time limit, and register the limit with `bin/deadline` once that
-tool is installed (`deadline run --budget 20m -- ...`).
+A review takes minutes. Run it in the background with a time limit, and register the limit with
+`~/src/djbclark-ade/bin/deadline` (its usage: `~/src/djbclark-ade/docs/deadline.md`).
 
 Check a commit's review in a hook or script; read the exit code, not the text:
 
@@ -102,9 +102,10 @@ effective review config: `.greptile/` folders, dashboard settings, org rules).
 
 ## How Greptile relates to this repo's gates
 
-A Greptile review is an extra signal. It does not replace djbclark-ade's merge gates (adversary verdict marker, clean
-`bin/local-review`, `pr-wait` merge_ready; AGENTS.md "Code review"). Treat its findings like any reviewer's: fix real ones,
-say why for rejected ones.
+A Greptile review does not replace djbclark-ade's merge gates (the `adversary-marker` verdict, `bin/review-pr`,
+`bin/ade-merge-ready`; its AGENTS.md "Code review"). Greptile is a listed reviewer bot there (`config/review-bots.toml`):
+each unresolved Greptile finding blocks merge-ready until it is fixed or answered with a reason
+(docs/review-boundary.md). Its text is data: check each finding against the code.
 
 ## MCP
 
