@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `bin/bgrun` and new `bin/bgrun-container-guard` (ADE queue 85 (a)-(c)): a `container ...` command now (a) starts a down Apple `container` apiserver once before it runs (`container system start --disable-kernel-install`; `BG_CONTAINER_AUTOSTART=0` turns it off; exit 72 if it stays down), and (b) fails with exit 70 when the CLI exits 0 but reports an XPC "Connection invalid" error (any other status passes through; stdin, output and TERM/INT/HUP are relayed). Every command also gets `BGRUN_RUN_ID` and `BGRUN_RUN_START` so a gate can key its output directory by sha plus run instead of the sha alone.
+
 - `bin/bgrun`: the admission gate's default `BG_MAX_LOAD_PER_CORE` rises from 3.0 to 5.0 (50 on the 10-core Mac) per the operator ruling of 2026-11-21 ("mac is still perfectly usable at 50"); the header comment and `docs/gradle-limits.md` (which still said 1.5) now agree, and `tests/test_bg_load_gate.py` pins the default (bg hands `load-watch admit --max-per-core 5.0` when the variable is unset). `load-watch`'s own admit base moves to 5.0 in djbclark-ade, so bg's value is no longer the tighter one. Memory-churn, swap-in and free-memory gates are unchanged. (2026-11-21)
 
 - Prepared an opt-in ADE NATS JetStream module for vps-hub with tailnet-only authenticated clients, local monitoring, runtime-only credentials, synchronous persistent storage, and isolated NixOS VM/host CI. Activation remains disabled pending review and live acceptance. (2026-11-18; https://github.com/djbclark/djbclark-ade/issues/779)

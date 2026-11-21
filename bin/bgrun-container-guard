@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Run a command for bgrun and fail it when Apple `container` hid an XPC failure behind exit 0.
+
+usage: bgrun-container-guard -- CMD [ARGS...]
+
+bgrun execs this for a command whose key is `container ...` (ADE queue 85 (b), 2026-11-21). The command runs as a child with
+stdin and stdout inherited and stderr relayed live; SIGTERM/SIGINT/SIGHUP to this process go on to the child. When the child
+exits 0 but its stderr carried a line like `Error: interrupted: "XPC connection error: Connection invalid"`, the command did
+not run, so this exits 70 and says so. Any other status is passed through (a death by signal N is 128+N).
+"""
+
+import re
+import signal
+import subprocess
+import sys
+import threading
+
+EXIT_XPC_HIDDEN = 70
+XPC_ERROR = re.compile(rb"^Error: .*(XPC connection error|Connection invalid)", re.M)
+TAIL_KEEP = 64 * 1024
+
+
+def main(argv):
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        print("usage: bgrun-container-guard -- CMD [ARGS...]", file=sys.stderr)
+        return 2
+    try:
+        child = subprocess.Popen(argv, stderr=subprocess.PIPE)
+    except OSError as e:
+        print(f"bg: cannot run {argv[0]}: {e.strerror}", file=sys.stderr)
+        return 127 if isinstance(e, FileNotFoundError) else 126
+
+    def forward(signum, _frame):
+        try:
+            child.send_signal(signum)
+        except OSError:
+            pass
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, forward)
+
+    seen = bytearray()  # the last TAIL_KEEP bytes of stderr, scanned after the child ends
+
+    def relay():
+        out = sys.stderr.buffer
+        while True:
+            chunk = child.stderr.read1(8192)
+            if not chunk:
+                return
+            out.write(chunk)
+            out.flush()
+            seen.extend(chunk)
+            del seen[:-TAIL_KEEP]
+
+    reader = threading.Thread(target=relay, daemon=True)
+    reader.start()
+    while True:
+        try:
+            rc = child.wait()
+            break
+        except KeyboardInterrupt:  # a SIGINT handler is installed, so this is only a fallback
+            continue
+    reader.join(timeout=2)  # a grandchild that kept stderr open must not hold the exit status hostage
+    if rc < 0:
+        return 128 - rc
+    if rc == 0 and XPC_ERROR.search(bytes(seen)):
+        print('bg: the container CLI exited 0 but reported an XPC "Connection invalid" error: the command did not run; '
+              "exiting 70 (is `container system status` running?)", file=sys.stderr)
+        return EXIT_XPC_HIDDEN
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -44,6 +44,17 @@
 # (CI-first, Plektra), so a caller can tell the two apart. The command, once started, is never
 # killed by bg.
 #
+# Apple `container` (2026-11-21, ADE queue 85 (a)-(c), cfengine lead 4c788430): a command whose key is `container ...` is not
+# exec'd but run as a child so bg can (1) start the apiserver if it is down (`container system status` must read `status
+# running`; else `container system start --disable-kernel-install`, the same command the sh.brew.container login job runs;
+# BG_CONTAINER_AUTOSTART=0 turns it off; exit 72 if it still is not up), and (2) fail a run whose stderr carries an
+# `Error: ... XPC connection error ... Connection invalid` line even though the CLI exited 0 (exit 70; any other nonzero status
+# is passed through unchanged). The apiserver is an on-demand LaunchAgent that `container system start` registers itself
+# (RunAtLoad, no KeepAlive; the plist is rewritten on each start and pins the keg path), so launchd cannot be told to keep it up.
+# Every command also gets BGRUN_RUN_ID (UTC time + bg's pid) and BGRUN_RUN_START (epoch seconds) in its environment: a gate that
+# writes `out/<sha>` should write `out/<sha>-$BGRUN_RUN_ID` and judge only that directory (a gate that never launched leaves an
+# older sha-only directory that looks like a pass).
+#
 # Long-run ping (2026-10-18): a small watcher, forked just before the exec and detached from the
 # caller's output, records each run's duration in ~/.local/state/bg/history.tsv, keyed by repo and
 # the command's first two words ("python pytest", "cargo test", "gradlew assembleDebug"). It sends
@@ -1089,6 +1100,48 @@ if [ "$is_test" = 1 ] && [ "$tslots" -gt 0 ]; then
   take_slot test "$tslots" "$HOME/.local/state/bg/test-slots"
 fi
 
+# bg_container_exe ARGS...: the `container` executable named in the command (first word whose basename is `container`).
+bg_container_exe() {
+  local a
+  for a in "$@"; do
+    case "${a##*/}" in container) printf '%s\n' "$a"; return 0 ;; esac
+  done
+  return 1
+}
+
+# bg_container_up EXE: the apiserver answers and reads `status running`.
+bg_container_up() {
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout 20 "$1" system status 2>/dev/null; else "$1" system status 2>/dev/null; fi | grep -Eq '^status[[:space:]]+running'
+}
+
+# bg_container_preflight EXE SUB: start a down apiserver once (header). `system` and help/version calls need none.
+bg_container_preflight() {
+  local exe="$1" sub="$2"
+  case "$sub" in system|""|-h|--help|--version|-v|help) return 0 ;; esac
+  [ "${BG_CONTAINER_AUTOSTART:-1}" = 1 ] || return 0
+  bg_container_up "$exe" && return 0
+  echo "bg: the container apiserver is not running; starting it: container system start --disable-kernel-install" >&2
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout 120 "$exe" system start --disable-kernel-install </dev/null >&2 || true
+  else "$exe" system start --disable-kernel-install </dev/null >&2 || true; fi
+  bg_container_up "$exe" && return 0
+  echo "bg: the container apiserver is still not running after 'container system start'; not running the command (check 'container system status' and /opt/homebrew/var/log/container.log)" >&2
+  return 72
+}
+
+# bg_container_guard_exec ARGS...: exec bin/bgrun-container-guard (next to the real bgrun file, not a symlink to it), which runs
+# the command as a child, relays its output, forwards signals and turns an XPC "Connection invalid" error reported with exit 0
+# into exit 70 (header). exec keeps bg's pid, so the slot locks and the long-run watcher are unchanged.
+bg_container_guard_exec() {
+  local self dir
+  self=$(greadlink -f "$0" 2>/dev/null) || self=$0
+  dir=$(cd "$(dirname "$self")" 2>/dev/null && pwd)
+  if [ -x "$dir/bgrun-container-guard" ] && command -v python3 >/dev/null 2>&1; then
+    exec python3 "$dir/bgrun-container-guard" -- "$@"
+  fi
+  echo "bg: bgrun-container-guard or python3 is missing; running the container command without the XPC check" >&2
+  return 1
+}
+
 # Long-run watcher (see the header): forked here, so it watches this pid through the exec.
 bg_hist="$HOME/.local/state/bg/history.tsv"
 mkdir -p "${bg_hist%/*}"
@@ -1153,6 +1206,15 @@ for v in OMP_NUM_THREADS OPENBLAS_NUM_THREADS MKL_NUM_THREADS NUMEXPR_NUM_THREAD
 done
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 : > "$bg_mark" 2>/dev/null   # the run starts now (see the header): the watcher registers its deadline on seeing this
+export BGRUN_RUN_ID="$(gdate -u +%Y%m%dT%H%M%SZ)-$$"
+export BGRUN_RUN_START="$(gdate +%s)"
+case "$bg_k" in
+  container|container\ *)
+    bg_csub=${bg_k#container}; bg_csub=${bg_csub# }; bg_csub=${bg_csub%% *}
+    bg_container_preflight "$(bg_container_exe "$@" || echo container)" "$bg_csub" || exit $?
+    if command -v taskpolicy >/dev/null 2>&1; then bg_container_guard_exec taskpolicy -c utility "$@"; else bg_container_guard_exec "$@"; fi
+    ;;
+esac
 if command -v taskpolicy >/dev/null 2>&1; then
   exec taskpolicy -c utility "$@"
 else
