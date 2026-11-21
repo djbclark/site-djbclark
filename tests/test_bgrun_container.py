@@ -67,7 +67,7 @@ for _ in range(600):
   slowdone) echo $$ > "$S/childpid"; /bin/sleep 2; : > "$S/finished"; exit 0 ;;
   bigxpc) /usr/bin/head -c 150000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; exit 0 ;;
   bigxpcmark) /usr/bin/head -c 100000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; : > "$S/written"; exit 0 ;;
-  xpcgc) echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; /bin/sleep 6 & exit 0 ;;
+  xpcgc) echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; /bin/sleep 12 & exit 0 ;;
   flood) echo $$ > "$S/childpid"; exec /usr/bin/yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2 ;;
   *) echo "ran: $*"; echo "diag line" >&2; exit 0 ;;
 esac
@@ -419,6 +419,19 @@ def test_a_zero_idle_setting_does_not_make_the_guard_give_up_at_once(box):
     total = _read_slowly(p, 4096, 0.2)
     p.wait(timeout=60)
     assert p.returncode == 70 and total >= 150000
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "1e9", "1e308", "601"])
+def test_an_out_of_range_idle_setting_cannot_hold_the_slot_for_a_grandchild(box, value):
+    # a grandchild keeps stderr open for 12 s after the command exited with the XPC error: the default 2 s wait must still apply
+    up(box)
+    work, env, _ = box
+    t0 = time.monotonic()
+    # no pipes to read: the grandchild also holds our stdout for 12 s, which would hold a capture_output run just as long
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env={**env, "FAKE_RUN": "xpcgc", "BG_CONTAINER_TEST_IDLE_READ": value, "BG_CONTAINER_TEST_IDLE_WRITE": value})
+    p.wait(timeout=60)
+    assert p.returncode == 70 and time.monotonic() - t0 < 9
 
 
 def test_ctrl_c_during_the_final_wait_on_a_tty_keeps_exit_70(box):

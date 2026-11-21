@@ -4,7 +4,8 @@
 usage: bgrun-container-guard -- CMD [ARGS...]
 
 bgrun execs this for a command whose key is `container ...` (ADE queue 85 (b), 2026-11-21). The command runs as a child with
-stdin and stdout inherited and stderr relayed live; SIGTERM/SIGINT/SIGHUP to this process go on to the child. When the child
+stdin and stdout inherited and stderr relayed live; SIGTERM/SIGHUP/SIGUSR1/SIGUSR2 to this process go on to the child (SIGINT too, except on a tty, where the kernel already delivers
+Ctrl-C to the child). When the child
 exits 0 but its stderr carried a line like `Error: interrupted: "XPC connection error: Connection invalid"`, the command did
 not run, so this exits 70 and says so. Any other status is passed through (a death by signal N is 128+N).
 """
@@ -23,7 +24,7 @@ TAIL_KEEP = 64 * 1024
 
 
 def _idle_setting(name, default):
-    """A test-only knob (BG_CONTAINER_TEST_IDLE_*): a finite number of seconds >= 0.1, else the default (a stray value must neither crash
+    """A test-only knob (BG_CONTAINER_TEST_IDLE_*): a number of seconds from 0.1 to 600, else the default (nan, inf, negatives and huge values would make the guard give up at once or hold the slot for as long as a stray grandchild lives) (a stray value must neither crash
     the guard nor make it give up at once or never)."""
     raw = os.environ.get(name)
     if raw is None:
@@ -32,7 +33,7 @@ def _idle_setting(name, default):
         v = float(raw)
     except ValueError:
         return default
-    return v if v == v and 0.1 <= v < float("inf") else default
+    return v if 0.1 <= v <= 600 else default
 
 
 IDLE_READ = _idle_setting("BG_CONTAINER_TEST_IDLE_READ", 2.0)  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
