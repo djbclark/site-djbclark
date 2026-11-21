@@ -20,9 +20,23 @@ import time
 EXIT_XPC_HIDDEN = 70
 XPC_ERROR = re.compile(rb"^Error: .*(XPC connection error|Connection invalid)", re.M)
 TAIL_KEEP = 64 * 1024
-IDLE_READ = float(os.environ.get("BG_GUARD_IDLE_READ", 2))  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
-IDLE_WRITE = float(os.environ.get("BG_GUARD_IDLE_WRITE", 60))  # (BG_GUARD_IDLE_* only exist so tests can shorten the waits)
-# ... while it waits for a slow consumer of our own stderr (the XPC line may still be queued behind it)
+
+
+def _idle_setting(name, default):
+    """A test-only knob (BG_CONTAINER_TEST_IDLE_*): a finite number of seconds >= 0.1, else the default (a stray value must neither crash
+    the guard nor make it give up at once or never)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    return v if v == v and 0.1 <= v < float("inf") else default
+
+
+IDLE_READ = _idle_setting("BG_CONTAINER_TEST_IDLE_READ", 2.0)  # seconds without progress while the relay waits for the child (a grandchild holding stderr open) before giving up
+IDLE_WRITE = _idle_setting("BG_CONTAINER_TEST_IDLE_WRITE", 60.0)  # ... while it waits for a slow consumer of our own stderr (the XPC line may still be queued behind it)
 
 
 def main(argv):
@@ -46,10 +60,14 @@ def main(argv):
     # Handlers first: a TERM between Popen and the install would kill only the guard and orphan the command.
     # A signal that was already ignored (nohup sets SIGHUP; `cmd &` in a script sets SIGINT) stays ignored, as it was when bgrun
     # exec'd the command directly: the child inherits the ignore, since Popen resets only PIPE and XFSZ/XFZ.
+    # The child stays in OUR process group, always: a group SIGKILL (deadline run after its grace, gtimeout -k) must take it down with us,
+    # and a command that talks to the controlling terminal (a prompt on /dev/tty, raw mode for -t) must stay in the job the shell manages
+    # (a private group would be stopped by SIGTTIN/SIGTTOU). The price: a TERM sent to the whole group reaches the CLI twice (once from the
+    # kernel, once from our forward), which stays under Apple's 3-signal force-exit threshold; stop a run with TERM to the bgrun pid.
     # Where the terminal already delivers a Ctrl-C to the whole foreground group (stdin is our tty and we are its foreground group),
-    # the child gets that INT from the kernel: forwarding it too would deliver it twice (and a third signal makes Apple's CLI
-    # exit(1) at once, leaving the VM). Otherwise (a lane, a nohup run, a pipe) the child gets its own process group, so a group
-    # signal sent to bgrun reaches it only through our forward, once. USR1/USR2 are forwarded as well: Apple's CLI passes them on.
+    # the child gets that INT from the kernel: forwarding it too would deliver it twice, so on a tty INT is not forwarded and our own
+    # INT handler does nothing (Python's default would raise KeyboardInterrupt in the drain loop and lose the exit status).
+    # USR1/USR2 are forwarded as well: Apple's CLI passes them on.
     on_tty = False
     try:
         on_tty = os.isatty(0) and os.tcgetpgrp(0) == os.getpgrp()
@@ -60,8 +78,10 @@ def main(argv):
         if signal.getsignal(sig) == signal.SIG_IGN:
             continue
         signal.signal(sig, forward)
+    if on_tty and signal.getsignal(signal.SIGINT) != signal.SIG_IGN:
+        signal.signal(signal.SIGINT, lambda *_: None)
     try:
-        child = subprocess.Popen(argv, stderr=subprocess.PIPE, process_group=None if on_tty else 0)
+        child = subprocess.Popen(argv, stderr=subprocess.PIPE)
     except OSError as e:
         print(f"bg: cannot run {argv[0]}: {e.strerror}", file=sys.stderr)
         return 127 if isinstance(e, FileNotFoundError) else 126
@@ -99,7 +119,7 @@ def main(argv):
         try:
             rc = child.wait()
             break
-        except KeyboardInterrupt:  # a SIGINT handler is installed, so this is only a fallback
+        except KeyboardInterrupt:  # a SIGINT handler is installed (a no-op on a tty), so this is only a fallback
             continue
     # Keep waiting while the relay still makes progress (a slow consumer must not hide the XPC line, which is the last thing written):
     # up to IDLE_WRITE s without progress while it is blocked writing to a slow consumer, IDLE_READ s while it is blocked reading (a

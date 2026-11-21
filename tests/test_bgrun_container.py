@@ -58,6 +58,7 @@ def h(n, f):
     open(S + "/sigs", "a").write(signal.Signals(n).name + chr(10))
 for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGINT):
     signal.signal(s, h)
+open(S + "/childpid", "w").write(str(os.getpid()))
 open(S + "/ready", "w").write("1")
 for _ in range(600):
     if os.path.exists(S + "/quit"):
@@ -66,6 +67,7 @@ for _ in range(600):
   slowdone) echo $$ > "$S/childpid"; /bin/sleep 2; : > "$S/finished"; exit 0 ;;
   bigxpc) /usr/bin/head -c 150000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; exit 0 ;;
   bigxpcmark) /usr/bin/head -c 100000 /dev/zero | /usr/bin/tr '\0' x >&2; echo >&2; echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; : > "$S/written"; exit 0 ;;
+  xpcgc) echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2; /bin/sleep 6 & exit 0 ;;
   flood) echo $$ > "$S/childpid"; exec /usr/bin/yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' >&2 ;;
   *) echo "ran: $*"; echo "diag line" >&2; exit 0 ;;
 esac
@@ -336,7 +338,7 @@ def test_the_wait_for_a_slow_consumer_restarts_with_every_byte_of_progress(box):
     up(box)
     work, env, _ = box
     p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work,
-                         env={**env, "FAKE_RUN": "bigxpc", "BG_GUARD_IDLE_WRITE": "3"}, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                         env={**env, "FAKE_RUN": "bigxpc", "BG_CONTAINER_TEST_IDLE_WRITE": "3"}, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     total = _read_slowly(p, 2048, 0.2)
     p.wait(timeout=60)
     assert p.returncode == 70 and total >= 150000
@@ -360,8 +362,7 @@ def test_a_consumer_that_stalls_after_the_command_exited_is_waited_for(box):
     assert p.returncode == 70 and total >= 100000
 
 
-def test_a_group_signal_reaches_the_command_once_and_usr1_is_forwarded(box):
-    # a lane (no tty) is stopped with `kill -TERM -- -PGID`: the command is in its own group, so it hears TERM once, not twice
+def test_a_term_to_the_bgrun_pid_reaches_the_command_once_and_usr1_is_forwarded(box):
     up(box)
     work, env, state = box
     p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
@@ -369,10 +370,77 @@ def test_a_group_signal_reaches_the_command_once_and_usr1_is_forwarded(box):
     deadline = time.monotonic() + 30
     while not (state / "ready").exists() and time.monotonic() < deadline:
         time.sleep(0.1)
-    os.killpg(p.pid, signal.SIGTERM)
+    os.kill(p.pid, signal.SIGTERM)
     time.sleep(1.5)
     os.kill(p.pid, signal.SIGUSR1)
     time.sleep(1.5)
     (state / "quit").write_text("")
     p.wait(timeout=30)
     assert (state / "sigs").read_text().split() == ["SIGTERM", "SIGUSR1"]
+
+
+def test_a_group_sigkill_takes_the_command_down_with_bgrun(box):
+    # deadline run / gtimeout -k end with a SIGKILL to the whole process group: the command must not outlive it (own-group regression)
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    child = int((state / "childpid").read_text())
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait(timeout=30)
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    os.kill(child, signal.SIGKILL)  # do not leave it behind when the test fails
+    raise AssertionError("the command is still running after a group SIGKILL")
+
+
+@pytest.mark.parametrize("value", ["2s", "nan", "inf", "0", "-1", ""])
+def test_a_stray_idle_setting_neither_stops_the_command_nor_changes_the_waits(box, value):
+    up(box)
+    work, env, _ = box
+    r = subprocess.run([str(BG), fake_path(box), "build", "."], cwd=work, capture_output=True, text=True, timeout=60,
+                       env={**env, "BG_CONTAINER_TEST_IDLE_READ": value, "BG_CONTAINER_TEST_IDLE_WRITE": value})
+    assert r.returncode == 0 and "ran: build ." in r.stdout
+
+
+def test_a_zero_idle_setting_does_not_make_the_guard_give_up_at_once(box):
+    # 0 would end the wait the moment the command exits and hide the XPC line queued behind a slow consumer (rc 0 instead of 70)
+    up(box)
+    work, env, _ = box
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                         env={**env, "FAKE_RUN": "bigxpc", "BG_CONTAINER_TEST_IDLE_READ": "0", "BG_CONTAINER_TEST_IDLE_WRITE": "0"})
+    total = _read_slowly(p, 4096, 0.2)
+    p.wait(timeout=60)
+    assert p.returncode == 70 and total >= 150000
+
+
+def test_ctrl_c_during_the_final_wait_on_a_tty_keeps_exit_70(box):
+    import fcntl
+    import pty
+    import termios
+
+    up(box)
+    work, env, _ = box
+    master, slave = pty.openpty()
+
+    def own_tty():
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    p = subprocess.Popen([str(BG), fake_path(box), "build", "."], cwd=work, env={**env, "FAKE_RUN": "xpcgc"}, stdin=slave,
+                         stdout=slave, stderr=subprocess.DEVNULL, preexec_fn=own_tty)
+    os.close(slave)
+    time.sleep(1.0)  # the command has exited; a grandchild still holds stderr, so the guard is draining
+    os.killpg(p.pid, signal.SIGINT)  # what the terminal does on Ctrl-C: the whole foreground group
+    try:
+        p.wait(timeout=30)
+    finally:
+        os.close(master)
+    assert p.returncode == 70

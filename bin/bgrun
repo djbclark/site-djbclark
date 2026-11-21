@@ -56,9 +56,11 @@
 # The key must be the command itself: `bgrun container run ...`, not `bgrun bash lane.sh` whose script calls `container run` inside
 # (that gets neither the preflight nor the XPC check); only Apple's CLI qualifies (bare name, or an absolute path to the PATH's
 # `container` or a Cellar keg, `--version` checked). The guard is the command's PARENT, not an exec: the slot file holds the guard's
-# pid, and a SIGKILL of the guard frees the slot while the command runs on, so stop a container run with TERM to the bgrun pid (forwarded once; in a
-# terminal Ctrl-C reaches the command from the kernel, so INT is not forwarded there). Without a tty the command is in its own
-# process group, so a group signal also reaches it only through the forward, once; SIGUSR1/USR2 are forwarded too. SIGHUP/SIGINT/SIGTERM already ignored when the guard starts (nohup, `cmd &`) stay ignored.
+# pid, and a SIGKILL of the guard ALONE frees the slot while the command runs on, so stop a container run with TERM to the bgrun pid
+# (forwarded once; SIGUSR1/USR2 are forwarded too). The command stays in the guard's process group, so a group SIGKILL (deadline run after its
+# grace, `gtimeout -k`) takes both down, and a command that prompts on /dev/tty is never stopped by SIGTTIN; the price is that a TERM sent to
+# the whole group reaches the CLI twice (kernel + forward), under Apple's 3-signal force-exit threshold. In a terminal Ctrl-C reaches the
+# command from the kernel, so INT is not forwarded there. SIGHUP/SIGINT/SIGTERM already ignored when the guard starts (nohup, `cmd &`) stay ignored.
 # Every command also gets BGRUN_RUN_ID (UTC time + bg's pid) and BGRUN_RUN_START (epoch seconds) in its environment: a gate that
 # writes `out/<sha>` should write `out/<sha>-$BGRUN_RUN_ID` and judge only that directory (a gate that never launched leaves an
 # older sha-only directory that looks like a pass). Caveat: read $BGRUN_RUN_ID INSIDE the run; `bgrun cmd -e X=$BGRUN_RUN_ID` expands
