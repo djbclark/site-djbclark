@@ -62,8 +62,7 @@ problems, 2 = unreadable input. It needs `uv` (it carries its own `jsonschema` d
 Builds go to CI (standing rule, `memory/feedback_macos_ci_on_request_only.md`). Work in a
 worktree on a feature branch from `origin/middle-truncate-command` (`~/src/bottom` is the
 shared checkout; it only fast-forwards). Format with `cargo +stable fmt --all` before each
-push: CI uses the latest stable rustfmt, and an older one formats differently (2026-11-01:
-a 1.92 default toolchain caused a CI fmt failure; the default is now `stable`). Check the branch with
+push: CI uses the latest stable rustfmt, and an older one formats differently. Check the branch with
 `gh workflow run fork-build.yml --repo djbclark/bottom --ref <branch>` (its artifact can be
 previewed with `preview.py --bin`), then publish by fast-forward:
 `git push origin <branch>:middle-truncate-command`, and `git merge --ff-only` `~/src/bottom`
