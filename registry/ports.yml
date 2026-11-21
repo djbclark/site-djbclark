@@ -97,6 +97,9 @@ hosts:
          must_be_up: false,  # the desktop app owns the daemon; down while Paseo.app is quit
          tailscale_serve_port: 7263,
          note: "2026-10-18: Paseo daemon + web UI (github.com/getpaseo/paseo), started by Paseo.app (brew cask paseo); config and tailnet serve by roles/paseo_desktop. Also opens one ephemeral loopback port. No password, no relay: tailnet-only, never funnel. Same port on vps-primary and get. See docs/paseo.md."}
+      - {port: 3333,  bind: "100.113.53.87", owner: site, service: paseo-tailnet-alias, status: active,
+         must_be_up: false,  # fronts the 7263 daemon, which is down while Paseo.app is quit
+         note: "2026-11-21 (djbclark): tailscaled's tailnet HTTPS listener `tailscale serve --bg --https=3333 http://127.0.0.1:7263`, an alias of the 7263 front for the same Paseo daemon (no new backend; 7263 stays so no client breaks). Tailnet-only, never funnel; reachable only by the sources in the Paseo Tailscale grant. Applied by roles/paseo_desktop (paseo_desktop_serve_ports). See docs/paseo.md."}
       - {port: 18806, bind: "127.0.0.1", owner: unmanaged, service: paseo-dev-daemon, status: default-claim,
          must_be_up: false,  # on-demand dev daemon, started by agents working in ~/src/paseo
          note: "2026-10-24: Paseo checkout dev daemon (`PASEO_LISTEN=127.0.0.1:18806 scripts/dev-daemon.sh` in ~/src/paseo, home .dev/paseo-home). The repo default is 6768, which this registry gives to orca-app, so agents set PASEO_LISTEN; never use the repo's `npm run dev`, whose cross-env hard-codes 6768. Distinct from the production daemon on 7263 and from Paseo's own 6767. Its node worker (process title `Paseo Daemon`) also opens ephemeral inspector and helper ports: see ephemeral_processes."}

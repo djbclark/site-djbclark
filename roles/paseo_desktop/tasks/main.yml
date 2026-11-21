@@ -39,15 +39,18 @@
   check_mode: false
 
 - name: Publish the daemon on the tailnet with tailscale serve
+  # One `--https=<port>` front per entry of paseo_desktop_serve_ports, all to the same loopback daemon.
+  # Additive and idempotent: it never stops or restarts the daemon, and never touches other serves.
   ansible.builtin.command:
     argv:
       - tailscale
       - serve
       - --bg
-      - "--https={{ paseo_desktop_serve_port }}"
+      - "--https={{ item }}"
       - "http://127.0.0.1:{{ paseo_desktop_port }}"
+  loop: "{{ (paseo_desktop_serve_ports | default([paseo_desktop_serve_port], true)) | map('int') | list }}"
   vars:
-    _key: "{{ caddy_public_hostname }}:{{ paseo_desktop_serve_port }}"
+    _key: "{{ caddy_public_hostname }}:{{ item }}"
     _doc: "{{ (_paseo_desktop_serve_status.stdout | from_json) | default({}, true) }}"
   when: >-
     (_doc.get('Web', {}).get(_key, {}).get('Handlers', {}).get('/', {}).get('Proxy', ''))

@@ -8,7 +8,12 @@ paseo_desktop_label: com.djbclark.paseo-desktop
 paseo_desktop_plist_path: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ paseo_desktop_label }}.plist"
 paseo_desktop_port: 7263
 # Tailnet HTTPS port of `tailscale serve` (registry/ports.yml tailscale_serve_port). Never funnel.
+# Kept as a scalar for backward compatibility; the role publishes every port in paseo_desktop_serve_ports.
 paseo_desktop_serve_port: 7263
+# Every tailnet HTTPS front for the one loopback daemon. 3333 is an alias of 7263 (djbclark, 2026-11-21):
+# same backend, 7263 stays so no client breaks. Both are tailnet-only and limited by a Tailscale grant
+# (docs/paseo.md). Override with a list; the first entry defaults to paseo_desktop_serve_port.
+paseo_desktop_serve_ports: "{{ [paseo_desktop_serve_port | int, 3333] | unique }}"
 # Daemon config keys (`paseo daemon config set PATH VALUE`; values are JSON). No password and no relay:
 # the tailnet is the boundary (djbclark, 2026-10-18).
 paseo_desktop_config:
