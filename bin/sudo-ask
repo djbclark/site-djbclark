@@ -19,7 +19,21 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/log"
 
 # Shell-quoted form so arguments with spaces are unambiguous in the dialog.
-cmd=$(printf '%q ' "$@")
+# Each argument is quoted whole ('a b (c)'), not printf %q's per-character
+# backslashes (a\ b\ \(c\)), which made long arguments unreadable. An
+# argument with a control character keeps %q ($'a\nb'), so a newline can
+# never fake another line (such as "Directory:") in the dialog.
+safe_re='^[A-Za-z0-9_./=:,+@%-]+$'
+quote_arg() {
+  local a=$1 sq="'"
+  if [[ -z $a ]]; then printf "''"
+  elif [[ $a =~ $safe_re ]]; then printf '%s' "$a"
+  elif [[ $a == *[[:cntrl:]]* ]]; then printf '%q' "$a"
+  else printf "'%s'" "${a//$sq/$sq\\$sq$sq}"
+  fi
+}
+cmd=""
+for a in "$@"; do cmd+="$(quote_arg "$a") "; done
 cmd=${cmd% }
 shown=$cmd
 [ ${#shown} -gt 700 ] && shown="${shown:0:700}... [truncated, ${#cmd} chars]"
