@@ -284,6 +284,22 @@ class FleetWatchPrs(unittest.TestCase):
         self.check()
         self.assertEqual(len(self.sent()), 2)
 
+    def test_missing_alias_counts_as_failure_but_siblings_are_processed(self) -> None:
+        self.add("o/r", 1, 2)
+        self.serve(**{"o/r": {1: pr(comments=[("c0", "alice")]), 2: pr()}})
+        self.check()
+        self.assertEqual(self.sent(), [])
+        self.serve(**{"o/r": {1: pr(comments=[("c0", "alice"), ("c1", "bob")]), 2: None}})
+        r = self.run_cli("check")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("#2", r.stderr)
+        self.assertEqual(self.sent(), ["prs: https://github.com/o/r/pull/1 1 comment by bob"])
+        fetch = json.loads((self.state / "prs.json").read_text())["fetch"]["o/r"]
+        self.assertEqual(fetch["fails"], 1)
+        self.run_cli("check")
+        self.assertEqual(json.loads((self.state / "prs.json").read_text())["fetch"]["o/r"]["fails"], 2)
+        self.assertEqual(len(self.sent()), 1)
+
     def test_failed_fetch_keeps_state(self) -> None:
         self.baselined(node=pr(comments=[("c1", "alice")]))
         self.data["fail"] = True

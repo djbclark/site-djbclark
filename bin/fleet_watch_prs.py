@@ -261,12 +261,14 @@ class Watcher:
         errors = 0
         for repo, numbers in sorted(groups.items()):
             fetch = state['fetch'].setdefault(repo, {'fails': 0, 'alerted': False})
+            failed = None
+            prs = {}
             try:
                 prs = self.fetch_repo(repo, numbers)
                 missing = [n for n, pr in prs.items() if not isinstance(pr, dict)]
                 if missing:
-                    raise ValueError('PR(s) not found: %s' % ','.join('#%d' % n for n in missing))
-                failed = None
+                    # A missing alias counts as the repo's fetch failure, but the PRs that did come back are still processed.
+                    failed = 'ValueError: PR(s) not found: %s' % ','.join('#%d' % n for n in missing)
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 failed = '%s: %s' % (type(error).__name__, error)
                 prs = {}
