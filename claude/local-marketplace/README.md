@@ -8,8 +8,21 @@ from the official `rust-analyzer-lsp` / `clangd-lsp` plugins.
 Install (from any machine, after `brew install basedpyright marksman gopls
 typescript-language-server taplo kotlin-lsp`):
 
-    claude plugin marketplace add ~/ops/site-private-djbclark/claude/local-marketplace
+    claude plugin marketplace add ~/ops/site-public-djbclark/claude/local-marketplace
     claude plugin install local-lsp@local     # then /reload-plugins
+
+RAM guard (basedpyright, marksman, typescript-language-server):
+- These entries start through `lsp-root-guard` from the djbclark-ade checkout
+  (`ade update` links it into `~/.local/bin`). It starts the server with no
+  workspace root when Claude Code's root is a container such as `~` or
+  `~/src`, so one server does not index every repo.
+- If the guard is off, missing from PATH, or fails `lsp-root-guard --check /`
+  (for example an import error), the plain server starts UNGUARDED and one
+  line goes to stderr (visible with `claude --debug`) and to
+  `~/.local/state/lsp-guard/unguarded.log`.
+- Off switch: `ADE_LSP_ROOT_GUARD=off` in `~/.claude/settings.json` `env`,
+  then restart sessions (only the exact lowercase `off` counts). A guard that
+  starts and then crashes is not covered.
 
 Notes:
 - Claude Code caches the plugin: **bump `version`** in both `marketplace.json`

@@ -3,7 +3,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
+      "if [ \"$ADE_LSP_ROOT_GUARD\" != off ] && lsp-root-guard --check / >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; fi; d=\"$HOME/.local/state/lsp-guard\"; mkdir -p \"$d\" 2>/dev/null; printf '%s lsp-guard: lsp-root-guard off, broken or not on PATH; %s starts UNGUARDED\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$1\" | tee -a \"$d/unguarded.log\" >&2; exec \"$@\"",
       "lsp-guard",
       "basedpyright-langserver",
       "--stdio"
@@ -17,7 +17,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
+      "if [ \"$ADE_LSP_ROOT_GUARD\" != off ] && lsp-root-guard --check / >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; fi; d=\"$HOME/.local/state/lsp-guard\"; mkdir -p \"$d\" 2>/dev/null; printf '%s lsp-guard: lsp-root-guard off, broken or not on PATH; %s starts UNGUARDED\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$1\" | tee -a \"$d/unguarded.log\" >&2; exec \"$@\"",
       "lsp-guard",
       "marksman",
       "server"
@@ -46,7 +46,7 @@
     "command": "sh",
     "args": [
       "-c",
-      "if [ \"${ADE_LSP_ROOT_GUARD:-on}\" != off ] && command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else printf 'lsp-guard: lsp-root-guard off or not on PATH; %s starts UNGUARDED\\n' \"$1\" >&2; exec \"$@\"; fi",
+      "if [ \"$ADE_LSP_ROOT_GUARD\" != off ] && lsp-root-guard --check / >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; fi; d=\"$HOME/.local/state/lsp-guard\"; mkdir -p \"$d\" 2>/dev/null; printf '%s lsp-guard: lsp-root-guard off, broken or not on PATH; %s starts UNGUARDED\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$1\" | tee -a \"$d/unguarded.log\" >&2; exec \"$@\"",
       "lsp-guard",
       "typescript-language-server",
       "--stdio"
