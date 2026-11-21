@@ -39,10 +39,14 @@ stay. It does nothing unless the user settings already run graft through the gua
 project copies are duplicates), and never in KEEP_PROJECTS. The file is usually tracked, so
 the edit shows up in `git status` and gets a log line; commit it like any other change.
 
+It also raises the pre-bash, pre-edit and post-bash-fail timeouts to at least FLOOR (15 s,
+2026-11-21): graft writes 5 s, and a PreToolUse timeout fails closed (the tool call is
+refused), which happens on a loaded host.
+
 Remove the timeout part once graft writes seconds (check its settings-merge.js), and the
 refresh part once graft's prompt hook stops rebuilding inline.
 """
-import json, os, sys, tempfile, time
+import json, os, re, sys, tempfile, time
 
 SETTINGS = os.path.expanduser(os.environ.get("CLAUDE_SETTINGS", "~/.claude/settings.json"))
 LOG = os.path.expanduser("~/.local/state/graft-hook-timeout-fix.log")
@@ -55,12 +59,24 @@ SECONDS = {"prompt": 60, "post-edit": 15, "tool-savings": 12, "session-start": 1
 # Repos whose project graft hooks are meant to be there: graft's own source tree ships them
 # (upstream trailhq/Graft), and a stripped copy there would ride into an upstream PR.
 KEEP_PROJECTS = [os.path.expanduser("~/src/Graft")]
+# Minimum seconds for the tool-gating hooks (2026-11-21). graft writes 5 s for these, and a
+# timeout on a PreToolUse hook fails closed: Claude Code refuses the Bash/Edit call. On a
+# loaded host (load average in the tens) node startup alone overran 5 s and tool calls were
+# refused. A value below the floor is raised; a missing one is left alone (default 60 s).
+# Upstream: trailhq/Graft issue "PreToolUse hook budget of 5 s is too tight".
+FLOOR = {"pre-bash": 15, "pre-edit": 15, "post-bash-fail": 15}
 
 
 def log(msg):
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a") as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+
+
+def subcommand(cmd):
+    """The graft hook event argument, e.g. `pre-bash` from `node ".../graft-hooks.cjs" pre-bash || exit 0`."""
+    m = re.search(r'graft-hooks\.cjs"?\s+([\w-]+)', cmd)
+    return m.group(1) if m else cmd.rstrip().split()[-1]
 
 
 def fix(d):
@@ -71,7 +87,7 @@ def fix(d):
                 cmd, t = h.get("command", ""), h.get("timeout")
                 if "graft-hooks.cjs" not in cmd:
                     continue
-                sub = cmd.rstrip().split()[-1]
+                sub = subcommand(cmd)
                 if sub == "prompt" and "GRAFT_NO_REFRESH=" not in cmd:
                     h["command"] = NO_REFRESH + cmd
                     changes.append(f"{event}/{sub}: added {NO_REFRESH.strip()}")
@@ -79,11 +95,15 @@ def fix(d):
                 if GUARD not in h["command"] and at >= 0:
                     h["command"] = h["command"][:at] + GUARD + " " + h["command"][at:]
                     changes.append(f"{event}/{sub}: added guard")
-                if not isinstance(t, (int, float)) or t <= MAX_SANE:
-                    continue
-                new = SECONDS.get(sub, -(-int(t) // 1000))
-                h["timeout"] = new
-                changes.append(f"{event}/{sub}: {t} -> {new}")
+                if not isinstance(t, (int, float)) or isinstance(t, bool):
+                    continue  # a missing timeout means Claude Code's own default (60 s): leave it
+                if t > MAX_SANE:
+                    new = SECONDS.get(sub, -(-int(t) // 1000))
+                else:
+                    new = max(t, FLOOR.get(sub, 0))
+                if new != t:
+                    h["timeout"] = new
+                    changes.append(f"{event}/{sub}: {t} -> {new}")
     return changes
 
 
