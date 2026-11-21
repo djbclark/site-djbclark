@@ -49,7 +49,7 @@ def home(tmp_path_factory):
 def test_one_touch_id_then_any_command_runs_locally_until_the_expiry(repo, home):
     a = ap(repo, home, "--for", "7h")
     assert a.returncode == 0, a.stderr
-    assert (home / "sudo-ask.calls").read_text().count("approve-local TICKET") == 1  # one authentication
+    assert (home / "sudo-ask.calls").read_text().count("bgrun TICKET") == 1  # one authentication
     assert NY_12H.search((home / "sudo-ask.calls").read_text()) and NY_12H.search(a.stderr)  # the dialog and the output show NY 12-hour time
     [t] = tickets(home)
     assert t.stat().st_mode & 0o777 == 0o600 and t.parent.stat().st_mode & 0o777 == 0o700
@@ -57,7 +57,7 @@ def test_one_touch_id_then_any_command_runs_locally_until_the_expiry(repo, home)
         r = run(repo, home, *argv)
         assert r.returncode == 0, r.stderr
         assert "approval ticket" in r.stderr
-    assert (home / "sudo-ask.calls").read_text().count("approve-local TICKET") == 1  # still just the one
+    assert (home / "sudo-ask.calls").read_text().count("bgrun TICKET") == 1  # still just the one
     st = ap(repo, home, "status")
     assert t.stem in st.stdout and "used 2 time(s)" in st.stdout and NY_12H.search(st.stdout)
     uses = (t.parent / f"{t.stem}.uses").read_text().splitlines()
@@ -161,7 +161,7 @@ def test_ask_offers_a_chooser_and_acts_on_the_answer(repo, home, tmp_path):
         c = tmp_path / f"chooser-{abs(hash(answer))}"
         c.write_text(f"#!/bin/bash\n{answer}\n")
         c.chmod(0o755)
-        return {"BG_APPROVE_CHOOSER": str(c)}
+        return {"BG_APPROVE_CHOOSER": str(c), "BG_APPROVE_CHOOSER_TEST": "1"}
 
     a = ap(repo, home, "--ask", "--", "vitest", "run", **chooser("echo for:7h"))
     assert a.returncode == 0 and len(tickets(home)) == 1 and "ANY bgrun local run" in (home / "sudo-ask.calls").read_text()
@@ -185,3 +185,103 @@ def test_the_one_shot_form_still_works_unchanged(repo, home):
     assert ap(repo, home, "--ttl", "1h", "--", "vitest", "run").returncode == 0
     assert tickets(home) == [] and run(repo, home, "vitest", "run").returncode == 0
     assert run(repo, home, "vitest", "run").returncode == 3
+
+
+# ---- 288 repair round 1 (adversary BLOCK on 24e0df3: the dialog must always show the expiry and the scope) ----
+
+def forge(home, name, *, tid, created, expires, scope="*", argv="*"):
+    """A ticket signed with the install's real salt (as a same-user process could), to probe what bgrun still refuses."""
+    import hashlib
+
+    state = home / ".local" / "state" / "bg"
+    salt = (state / "ticket.salt").read_bytes()
+    parts = [salt, tid.encode(), str(created).encode(), str(expires).encode(), scope.encode(), argv.encode(), str(os.getuid()).encode()]
+    sig = hashlib.sha256(b"\0".join(parts)).hexdigest()
+    f = state / "tickets" / name
+    f.write_text(f"id={tid}\ncreated={created}\nexpires={expires}\nscope={scope}\nargv={argv}\nuid={os.getuid()}\nsig={sig}\n")
+    f.chmod(0o600)
+    return f
+
+
+def test_the_dialog_starts_with_expiry_and_scope_and_never_cuts_them(repo, home):
+    sub = repo / "sub"
+    sub.mkdir()
+    cmd = ["vitest", "run", *[f"packages/some-long-package-name/src/features/area-{i:02d}/very.long.test.name.spec.ts" for i in range(14)]]
+    a = ap(repo, home, "--for", "52w", "--scope", str(sub), "--", *cmd)
+    assert a.returncode == 0, a.stderr
+    msg = (home / "sudo-ask.calls").read_text().splitlines()[-1]
+    assert len(msg) <= 700, len(msg)  # sudo-ask cuts at 700; nothing the operator must see may be past that
+    first = msg[:700]
+    assert NY_12H.search(first) and "364 d" in first and "LONG-LIVED" in first and str(sub.resolve()) in first
+    assert "command truncated:" in first and "argv hash" in first and "area-13" not in first  # the command, not the period, is what is cut
+    assert first.index("until") < first.index("vitest")
+
+
+def test_a_scope_too_long_to_show_whole_is_refused(repo, home):
+    deep = repo
+    for _ in range(6):
+        deep = deep / ("d" * 50)
+    deep.mkdir(parents=True)
+    r = ap(repo, home, "--for", "1h", "--scope", str(deep))
+    assert r.returncode == 2 and "too long to show" in r.stderr
+    assert tickets(home) == [] and not (home / "sudo-ask.calls").exists()
+
+
+def test_a_period_that_overflows_is_refused_before_the_dialog(repo, home):
+    for v in ("99999999999999999999", "9999999999", "1h99999999999999999999"):
+        assert ap(repo, home, "--for", v).returncode == 2, v
+    assert tickets(home) == [] and not (home / "sudo-ask.calls").exists()
+
+
+def test_a_ticket_needs_the_sudo_ask_dialog(repo, tmp_path_factory):
+    home = make_home(tmp_path_factory, None)  # no sudo-ask: a bare sudo prompt would not show the expiry or scope
+    r = ap(repo, home, "--for", "1h")
+    assert r.returncode == 1 and "needs the sudo-ask dialog" in r.stderr and tickets(home) == []
+
+
+def test_a_ticket_id_must_be_its_file_name_and_a_path_is_no_id(repo, home):
+    ap(repo, home, "--for", "1h")
+    now = int(time.time())
+    forge(home, "deadbeef.ticket", tid="../../../escape", created=now, expires=now + 3600)
+    forge(home, "cafef00d.ticket", tid="deadbeef", created=now, expires=now + 3600)  # a different name than its id
+    [real] = [t for t in tickets(home) if t.stem not in ("deadbeef", "cafef00d")]
+    real.unlink()
+    assert run(repo, home, "vitest", "run").returncode == 3
+    assert not list(home.glob("**/escape.uses")) and log(home).count("ticket-refused-id-not-file-name") >= 2
+
+
+def test_revoking_one_id_also_kills_a_copy_under_another_name(repo, home):
+    ap(repo, home, "--for", "1h")
+    [t] = tickets(home)
+    copy = t.with_name("zzzzcopy.ticket")
+    copy.write_bytes(t.read_bytes())
+    copy.chmod(0o600)
+    ap(repo, home, "revoke", t.stem)
+    assert run(repo, home, "vitest", "run").returncode == 3  # the copy is not honoured under another name
+
+
+def test_revoke_all_rotates_the_salt_so_a_restored_ticket_is_dead(repo, home):
+    ap(repo, home, "--for", "1h")
+    [t] = tickets(home)
+    saved = t.read_bytes()
+    salt = t.parents[1] / "ticket.salt"
+    old_salt = salt.read_bytes()
+    assert ap(repo, home, "revoke").returncode == 0
+    assert salt.read_bytes() != old_salt and salt.stat().st_mode & 0o777 == 0o600
+    t.write_bytes(saved)  # a backup restore, or a copy kept aside
+    t.chmod(0o600)
+    assert run(repo, home, "vitest", "run").returncode == 3 and "ticket-refused-bad-signature" in log(home)
+
+
+def test_a_ticket_dated_in_the_future_is_refused(repo, home):
+    ap(repo, home, "--for", "1h")
+    [t] = tickets(home)
+    t.unlink()
+    now = int(time.time())
+    forge(home, "deadbeef.ticket", tid="deadbeef", created=now + 7200, expires=now + 9000)
+    assert run(repo, home, "vitest", "run").returncode == 3 and "ticket-refused-clock-before-created" in log(home)
+
+
+def test_scope_root_covers_every_directory(repo, home):
+    assert ap(repo, home, "--for", "1h", "--scope", "/").returncode == 0
+    assert run(repo, home, "vitest", "run").returncode == 0 and ap(repo, home, "check", str(repo)).returncode == 0
