@@ -10,21 +10,13 @@ description: >-
 
 # coderabbit-feeder
 
-Written 2026-08-02, the same day this project split out of a single
-`~/.config/coderabbit-feeder/` script, and the split-brain problem
-described below (dev repo vs. live daemon disagreeing) was fixed the
-same day too — see "Migration status" for the resolved state and how to
-re-verify it hasn't regressed.
-
 ## What it's for
 
 Gets CodeRabbit reviews of source files djbclark owns or has a fork of,
 working around two constraints: CodeRabbit's GitHub App is only installed
 on repos djbclark owns (so it can't review a PR on someone else's repo),
-and CodeRabbit's own rate limits (a Pro+ trial being drained on purpose,
-was showing 298 consecutive rate-limited attempts as of 2026-08-02, with
-the trial itself expiring 2026-08-03 — check current trial/plan status
-before assuming any of this still applies).
+and CodeRabbit's own rate limits (check the current plan and
+`state.json`'s rate-limit fields before assuming how fast the queue drains).
 
 Three modes (per `~/src/coderabbit-feeder/README.md`, the source of truth
 for how each mode is *supposed* to work):
@@ -40,55 +32,23 @@ for how each mode is *supposed* to work):
   the findings as a comment on the real PR and closes the twin without
   merging. This is the pattern the ops-djbclark Shizuku-API work needed.
 
-## Migration status: resolved 2026-08-02, verified end-to-end
+## Where the queue lives (check before adding to it)
 
-The split-brain problem this section used to warn about (dev repo and
-live daemon disagreeing) is fixed. History, in case it's useful context
-or the fix ever regresses:
-
-**What was wrong**: the live `com.djbclark.coderabbit-feeder` launchd job
-ran the old standalone `~/.config/coderabbit-feeder/feeder.py` directly —
-no `mode` concept at all, `queue.jsonl`/`state.json` resolved via
-`Path(__file__).parent` (cwd-independent). The new package
-(`~/src/coderabbit-feeder`) resolves `ROOT` via `Path.cwd()` instead. The
-README's own documented invocation,
-`uv run --directory ~/src/coderabbit-feeder coderabbit-feeder add ...`,
-silently wrote into the dev repo's own `queue.jsonl` — `uv run --directory X`
-actually changes the process cwd to `X` (confirmed via `os.getcwd()`) — a
-file the live daemon never read.
-
-**The fix**: `uv run --project X` (not `--directory X`) discovers the
-project at `X` for dependency/venv resolution **without** changing cwd
-(confirmed: `os.getcwd()` still reports the caller's real cwd). The
-launchd plist now runs:
+The launchd job `com.djbclark.coderabbit-feeder` runs
 
 ```
 /opt/homebrew/bin/uv run --project /Users/djbclark/src/coderabbit-feeder coderabbit-feeder tick
 ```
 
-with `WorkingDirectory` set to `/Users/djbclark/.config/coderabbit-feeder`
-— so the new code runs, but `queue.jsonl`/`state.json` stay exactly where
-they always were, no data migration needed. Also fixed while cutting over:
-a stuck entry (`stayturgid-batch-0001`, PR #203, 299 consecutive
-rate-limited attempts against a PR that had actually already been closed
-manually outside the tool) was marked `"done"` and `state.json`'s stale
-tracking fields were cleared, so the queue could actually progress.
-
-**Verified live**, not just a clean exit code: manually triggered
-(`launchctl start com.djbclark.coderabbit-feeder`), confirmed in
-`launchd.out.log` that it picked up the next pending entry
-(`stayturgid-batch-0002`) and opened a real PR
-(`djbclark/stayturgid#212`), and confirmed via
-`coderabbit-feeder list` (run from `~/.config/coderabbit-feeder`, matching
-the daemon's own `WorkingDirectory`) that the queue state advanced
-correctly.
-
-**Before trusting any of this in a future session**: re-verify it hasn't
-drifted — `cat ~/Library/LaunchAgents/com.djbclark.coderabbit-feeder.plist`
-should still show the `uv run --project ... coderabbit-feeder tick`
-invocation above, not a direct `python3 .../feeder.py` call. If someone
-reinstalls/edits the plist back to the old form, this whole section goes
-stale again.
+with `WorkingDirectory` `/Users/djbclark/.config/coderabbit-feeder`. The package
+resolves `queue.jsonl` and `state.json` from the current directory, so run every
+`coderabbit-feeder add|list|...` from `~/.config/coderabbit-feeder`, or with
+`uv run --project ~/src/coderabbit-feeder` from there. Never use
+`uv run --directory ~/src/coderabbit-feeder`: it changes the working directory
+and writes a queue the daemon never reads.
+Before trusting the queue, read the plist: if it shows a direct
+`python3 .../feeder.py` call instead of the `uv run --project ... tick` line
+above, the old standalone script is back; report that instead of queueing.
 
 ## Shared responsibilities (from the README, written for AI orchestrators)
 
