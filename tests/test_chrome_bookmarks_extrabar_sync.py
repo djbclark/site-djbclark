@@ -428,7 +428,7 @@ class Runs(unittest.TestCase):
 
         return mock.patch.object(Path, "read_text", deny)
 
-    def test_permission_error_runs_the_sync_through_a_hidden_extrabar_action(self):
+    def test_permission_error_runs_the_sync_through_an_extrabar_action(self):
         self.env["FAKE_XB_RUN_STDOUT"] = (
             "UPDATED ExtraBar Chrome bookmarks tree (2 links, 1 folders)\n"
         )
@@ -442,7 +442,7 @@ class Runs(unittest.TestCase):
         self.assertIn("chrome-bookmarks-extrabar-sync", action["content"])
         self.assertIn("--no-extrabar-fallback", action["content"])
         self.assertEqual(action["showOutputWindow"], False)
-        self.assertEqual(self.calls("update")[0][1]["isVisible"], False)
+        self.assertEqual(self.calls("update"), [])  # a hidden action will not run
         run = self.calls("run")[0][1]
         self.assertEqual(run["itemId"], self.saved()["runner"]["itemId"])
         self.assertEqual(

@@ -28,10 +28,12 @@ silently. Only counts are printed, never bookmark titles or URLs.
 Scheduling: bin/hourly-updates.d/chrome-bookmarks runs it hourly; it prints "UPDATED ..." only when
 the widget changed. Reading Chrome's folder needs Full Disk Access, which the hourly LaunchAgent
 (/bin/bash) lacks but ExtraBar has, and a script ExtraBar runs inherits it. So on a PermissionError
-the sync runs ITSELF through ExtraBar: it creates one hidden action widget "Sync Chrome bookmarks
-tree" (run_script, fixed content, ids kept in the state file under "runner"), starts it with
-extrabar_run_action, polls extrabar_get_last_run_output and relays its output and exit status. Actions
-created through the MCP bridge run without a user dialog, so this needs no new macOS permission.
+the sync runs ITSELF through ExtraBar: it creates one action widget "Sync Chrome bookmarks tree"
+(run_script with fixed content, last in the preset, ids kept in the state file under "runner"; it
+must stay visible, because ExtraBar will not run a hidden action, and doubles as a refresh-now
+button), starts it with extrabar_run_action, polls extrabar_get_last_run_output and relays its
+output and exit status. Actions created through the MCP bridge run without a user dialog, so this
+needs no new macOS permission.
 The fallback runs the plain sync on the ACTIVE preset (--force and --preset-id are not passed on);
 --no-extrabar-fallback turns it off (the inner run uses it). Keep RUNNER_CONTENT stable: changing it
 needs a new approval.
@@ -46,7 +48,6 @@ helper, default the one inside ExtraBar.app), CHROME_BOOKMARKS_EXTRABAR_STATE (t
 from __future__ import annotations
 
 import argparse
-import contextlib
 import fcntl
 import hashlib
 import json
@@ -413,13 +414,6 @@ def run_under_extrabar(args, now: float) -> int:
                 "actionId": ids[1],
             }
             save_state(state_file, state)
-            with contextlib.suppress(
-                ExtraBarError
-            ):  # keep the bar tidy; a visible widget still works
-                client.call(
-                    "extrabar_update_widget_item",
-                    {"presetId": preset_id, "itemId": ids[0], "isVisible": False},
-                )
         started = client.call(
             "extrabar_run_action",
             {"presetId": preset_id, "itemId": ids[0], "actionId": ids[1]},
@@ -442,6 +436,11 @@ def run_under_extrabar(args, now: float) -> int:
             time.sleep(args.poll_seconds)
         sys.stdout.write(out.get("stdout") or "")
         sys.stderr.write(out.get("stderr") or "")
+        if out.get("failureReason"):
+            print(
+                f"chrome-bookmarks-extrabar-sync: ExtraBar: {out['failureReason']}",
+                file=sys.stderr,
+            )
         code = out.get("exitCode")
         return 0 if code in (0, None) and out.get("status") == "succeeded" else 1
     except ExtraBarError as e:
