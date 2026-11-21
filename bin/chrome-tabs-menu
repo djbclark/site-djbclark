@@ -1,0 +1,340 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyobjc-framework-Cocoa"]
+# ///
+"""Pop up a menu of the tabs open in Chrome; the one you pick opens in Safari.
+
+  chrome-tabs-menu               pop the menu at the pointer (bind it to an ExtraBar button)
+  chrome-tabs-menu --count       print window and tab counts per profile, no UI
+  chrome-tabs-menu --all-profiles  also use each profile's newest session file (stale if the profile is closed)
+  chrome-tabs-menu --install     fetch lemnos/chrome-session-dump into ~/.local/bin (sha256 checked)
+
+Tabs come from lemnos/chrome-session-dump, which reads Chrome's own Session_* files, so the
+list is the open tabs of every profile Chrome has open right now (found with lsof) and needs no
+browser extension or debugging port. Only http(s) tabs are listed; chrome:// pages and the like
+are counted but hidden, because Safari cannot open them. Opening runs
+"open -a Safari URL" as an argument vector (no shell), so a tab URL is never interpreted.
+
+Environment: CHROME_SESSION_DUMP (binary path), CHROME_USER_DATA_DIR (default
+~/Library/Application Support/Google/Chrome), CHROME_TABS_BROWSER (default Safari).
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from collections import OrderedDict
+from pathlib import Path
+from urllib.parse import urlsplit
+
+DUMP_VERSION = "v0.0.2"
+# sha256 of the v0.0.2 release asset chrome-session-dump-osx (x86_64; runs under Rosetta).
+DUMP_SHA256 = "81d9c1880ffb81c95050bf684c4934339f72ca08c063617de81932bbbafb44c6"
+DUMP_URL = f"https://github.com/lemnos/chrome-session-dump/releases/download/{DUMP_VERSION}/chrome-session-dump-osx"
+GROUP_MIN = 4  # a site with this many tabs in one window gets its own submenu
+TITLE_MAX = 80
+SESSION_RE = re.compile(r"/([^/]+)/Sessions/Session_(\d+)$")
+
+
+def user_data_dir() -> Path:
+    return Path(
+        os.environ.get("CHROME_USER_DATA_DIR")
+        or "~/Library/Application Support/Google/Chrome"
+    ).expanduser()
+
+
+def find_dump() -> str:
+    for cand in (
+        os.environ.get("CHROME_SESSION_DUMP"),
+        shutil.which("chrome-session-dump"),
+        str(Path("~/.local/bin/chrome-session-dump").expanduser()),
+    ):
+        if cand and os.access(cand, os.X_OK):
+            return cand
+    sys.exit(
+        "chrome-tabs-menu: chrome-session-dump not found; run: chrome-tabs-menu --install"
+    )
+
+
+def install() -> None:
+    dest = Path("~/.local/bin/chrome-session-dump").expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(DUMP_URL, timeout=60) as r:
+        data = r.read()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != DUMP_SHA256:
+        sys.exit(f"chrome-tabs-menu: sha256 mismatch for {DUMP_URL}: got {digest}")
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".chrome-session-dump.")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, dest)  # atomic
+    print(f"installed {dest} ({DUMP_VERSION}, sha256 verified)")
+
+
+def profile_names(base: Path) -> dict[str, str]:
+    try:
+        cache = json.loads((base / "Local State").read_text())["profile"]["info_cache"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    return {d: str(v.get("name") or d) for d, v in cache.items()}
+
+
+def parse_lsof(text: str) -> dict[str, str]:
+    """Profile directory -> session file, from lsof -Fn output (newest file wins)."""
+    found: dict[str, tuple[int, str]] = {}
+    for line in text.splitlines():
+        if not line.startswith("n"):
+            continue
+        m = SESSION_RE.search(line[1:])
+        if m and (m.group(1) not in found or int(m.group(2)) > found[m.group(1)][0]):
+            found[m.group(1)] = (int(m.group(2)), line[1:])
+    return {k: v[1] for k, v in found.items()}
+
+
+def live_session_files(base: Path) -> dict[str, str]:
+    out = subprocess.run(
+        ["lsof", "-n", "-w", "-c", "Google Chrome", "-Fn"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    return {k: v for k, v in parse_lsof(out).items() if v.startswith(str(base) + "/")}
+
+
+def newest_session_files(base: Path) -> dict[str, str]:
+    found = {}
+    for d in base.iterdir():
+        files = glob.glob(str(d / "Sessions" / "Session_*"))
+        if files:
+            found[d.name] = max(files, key=lambda p: int(p.rsplit("_", 1)[1]))
+    return found
+
+
+def dump_windows(dump: str, session_file: str) -> list[list[dict]]:
+    """Open tabs per window: [[{url, title}, ...], ...]; deleted tabs are dropped."""
+    r = subprocess.run(
+        [dump, "-json", session_file], capture_output=True, text=True, check=False
+    )
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"chrome-session-dump failed on {Path(session_file).name}: {r.stderr.strip()[-200:]}"
+        )
+    wins = json.loads(r.stdout).get("windows", [])
+    return [
+        [
+            {"url": t.get("url", ""), "title": t.get("title", "")}
+            for t in w.get("tabs", [])
+            if not t.get("deleted")
+        ]
+        for w in wins
+        if not w.get("deleted")
+    ]
+
+
+def split_openable(tabs: list[dict]) -> tuple[list[dict], int]:
+    ok = [
+        t
+        for t in tabs
+        if urlsplit(t["url"]).scheme in ("http", "https") and urlsplit(t["url"]).netloc
+    ]
+    return ok, len(tabs) - len(ok)
+
+
+def group_by_host(tabs: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Ordered (label, tabs) entries; a host with GROUP_MIN+ tabs is one group, the rest stay flat singles."""
+    by_host: OrderedDict[str, list[dict]] = OrderedDict()
+    for t in tabs:
+        by_host.setdefault(urlsplit(t["url"]).hostname or "", []).append(t)
+    big = {h for h, ts in by_host.items() if len(ts) >= GROUP_MIN}
+    entries: list[tuple[str, list[dict]]] = []
+    emitted: set[str] = set()
+    for t in tabs:
+        h = urlsplit(t["url"]).hostname or ""
+        if h in big:
+            if h not in emitted:
+                emitted.add(h)
+                entries.append((h, by_host[h]))
+        else:
+            entries.append(("", [t]))
+    return entries
+
+
+def collect(all_profiles: bool) -> list[dict]:
+    base = user_data_dir()
+    dump = find_dump()
+    files = newest_session_files(base) if all_profiles else live_session_files(base)
+    names = profile_names(base)
+    wins = []
+    for pdir in sorted(files):
+        for i, tabs in enumerate(dump_windows(dump, files[pdir]), 1):
+            ok, hidden = split_openable(tabs)
+            if tabs:
+                wins.append(
+                    {
+                        "profile": names.get(pdir, pdir),
+                        "n": i,
+                        "tabs": ok,
+                        "hidden": hidden,
+                    }
+                )
+    return wins
+
+
+def build_menu(wins: list[dict], target):
+    from AppKit import (
+        NSMenu,
+        NSMenuItem,
+    )  # lazy so --count, --install and the tests need no PyObjC
+
+    def item(menu, title, url=None):
+        it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            title[:TITLE_MAX], "openTab:" if url else None, ""
+        )
+        if url:
+            it.setTarget_(target)
+            it.setRepresentedObject_(url)
+            it.setToolTip_(url)
+        else:
+            it.setEnabled_(False)
+        menu.addItem_(it)
+        return it
+
+    def sub(menu, title):
+        it = item(menu, title)
+        it.setEnabled_(True)
+        m = NSMenu.alloc().initWithTitle_(title)
+        m.setAutoenablesItems_(False)
+        it.setSubmenu_(m)
+        return m
+
+    def fill(menu, tabs):
+        for label, ts in group_by_host(tabs):
+            if label:
+                m = sub(menu, f"{label} ({len(ts)})")
+                for t in ts:
+                    item(m, t["title"] or t["url"], t["url"])
+            else:
+                item(menu, ts[0]["title"] or ts[0]["url"], ts[0]["url"])
+
+    menu = NSMenu.alloc().initWithTitle_("Chrome tabs")
+    menu.setAutoenablesItems_(False)
+    if not wins:
+        item(menu, "No open Chrome tabs found")
+    for w in wins if len(wins) > 1 else []:
+        label = f"{w['profile']} · window {w['n']} ({len(w['tabs'])})"
+        fill(sub(menu, label), w["tabs"])
+    if len(wins) == 1:
+        fill(menu, wins[0]["tabs"])
+    hidden = sum(w["hidden"] for w in wins)
+    if hidden:
+        menu.addItem_(NSMenuItem.separatorItem())
+        item(menu, f"{hidden} chrome:// and other non-web tabs hidden")
+    return menu
+
+
+def show(wins: list[dict]) -> None:
+    import time
+
+    from AppKit import (
+        NSApplication,
+        NSApplicationActivationPolicyAccessory,
+        NSBackingStoreBuffered,
+        NSEvent,
+        NSPopUpMenuWindowLevel,
+        NSWindow,
+    )
+    from Foundation import NSMakeRect, NSObject, NSPoint
+
+    browser = os.environ.get("CHROME_TABS_BROWSER", "Safari")
+
+    class Target(NSObject):
+        def openTab_(self, sender):
+            subprocess.run(
+                ["open", "-a", browser, str(sender.representedObject())], check=False
+            )
+
+    class Delegate(NSObject):
+        # A menu popped before the run loop is up, or while the app is not active, is dismissed at once,
+        # so pop it from applicationDidFinishLaunching after activating.
+        def applicationDidFinishLaunching_(self, _note):
+            app = NSApplication.sharedApplication()
+            loc = NSEvent.mouseLocation()
+            win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+                NSMakeRect(loc.x, loc.y, 1, 1), 0, NSBackingStoreBuffered, False
+            )
+            win.setLevel_(NSPopUpMenuWindowLevel)
+            win.setOpaque_(False)
+            win.setAlphaValue_(0.0)
+            win.makeKeyAndOrderFront_(None)
+            app.activateIgnoringOtherApps_(True)
+            started = time.monotonic()
+            self.menu.popUpMenuPositioningItem_atLocation_inView_(
+                None, NSPoint(0, 0), win.contentView()
+            )
+            if os.environ.get("CHROME_TABS_DEBUG"):
+                print(
+                    f"chrome-tabs-menu: popUp returned after {time.monotonic() - started:.2f}s, active={app.isActive()}",
+                    file=sys.stderr,
+                )
+            if time.monotonic() - started < 0.3:
+                print(
+                    "chrome-tabs-menu: the menu closed at once (the app could not take focus)",
+                    file=sys.stderr,
+                )
+            app.terminate_(None)
+
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    target = Target.alloc().init()
+    delegate = Delegate.alloc().init()
+    delegate.menu = build_menu(wins, target)
+    app.setDelegate_(delegate)
+    app.run()
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument(
+        "--count", action="store_true", help="print counts per profile window, no UI"
+    )
+    ap.add_argument(
+        "--all-profiles",
+        action="store_true",
+        help="use each profile's newest session file, open or not",
+    )
+    ap.add_argument(
+        "--install",
+        action="store_true",
+        help="install chrome-session-dump into ~/.local/bin",
+    )
+    a = ap.parse_args(argv)
+    if a.install:
+        install()
+        return 0
+    wins = collect(a.all_profiles)
+    if a.count:
+        for w in wins:
+            print(
+                f"{w['profile']}\twindow {w['n']}\t{len(w['tabs'])} openable\t{w['hidden']} hidden"
+            )
+        print(
+            f"total\t{sum(len(w['tabs']) for w in wins)} openable in {len(wins)} windows"
+        )
+        return 0
+    show(wins)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
