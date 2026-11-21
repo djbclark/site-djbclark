@@ -1,7 +1,9 @@
 {
   "basedpyright": {
-    "command": "basedpyright-langserver",
+    "command": "lsp-root-guard",
     "args": [
+      "--",
+      "basedpyright-langserver",
       "--stdio"
     ],
     "extensionToLanguage": {
@@ -10,8 +12,10 @@
     }
   },
   "marksman": {
-    "command": "marksman",
+    "command": "lsp-root-guard",
     "args": [
+      "--",
+      "marksman",
       "server"
     ],
     "extensionToLanguage": {
@@ -35,8 +39,10 @@
     }
   },
   "typescript": {
-    "command": "typescript-language-server",
+    "command": "lsp-root-guard",
     "args": [
+      "--",
+      "typescript-language-server",
       "--stdio"
     ],
     "extensionToLanguage": {
@@ -52,7 +58,8 @@
     "initializationOptions": {
       "tsserver": {
         "path": "/Users/djbclark/.local/share/tsserver-ts5/node_modules/typescript/lib"
-      }
+      },
+      "maxTsServerMemory": 2048
     }
   },
   "kotlin": {
