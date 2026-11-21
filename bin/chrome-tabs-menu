@@ -218,7 +218,7 @@ def collect(all_profiles: bool) -> list[dict]:
     return wins
 
 
-def build_menu(wins: list[dict], target):
+def build_menu(wins: list[dict], target, notice: str | None = None):
     from AppKit import (
         NSMenu,
         NSMenuItem,
@@ -256,7 +256,9 @@ def build_menu(wins: list[dict], target):
 
     menu = NSMenu.alloc().initWithTitle_("Chrome tabs")
     menu.setAutoenablesItems_(False)
-    if not wins:
+    if notice:
+        item(menu, notice)
+    elif not wins:
         item(menu, "No open Chrome tabs found")
     for w in wins if len(wins) > 1 else []:
         label = f"{w['profile']} · window {w['n']} ({len(w['tabs'])})"
@@ -270,7 +272,7 @@ def build_menu(wins: list[dict], target):
     return menu
 
 
-def show(wins: list[dict]) -> None:
+def show(wins: list[dict], notice: str | None = None) -> None:
     import time
 
     from AppKit import (
@@ -325,7 +327,7 @@ def show(wins: list[dict]) -> None:
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     target = Target.alloc().init()
     delegate = Delegate.alloc().init()
-    delegate.menu = build_menu(wins, target)
+    delegate.menu = build_menu(wins, target, notice)
     app.setDelegate_(delegate)
     app.run()
 
@@ -349,7 +351,21 @@ def main(argv: list[str] | None = None) -> int:
     if a.install:
         install()
         return 0
-    wins = collect(a.all_profiles)
+    try:
+        wins = collect(a.all_profiles)
+    except PermissionError as e:
+        # macOS privacy (TCC): a process started by a launcher without Full Disk Access cannot read Chrome's folder.
+        print(f"chrome-tabs-menu: {e}", file=sys.stderr)
+        if a.count:
+            return 1
+        show([], "Cannot read Chrome data: grant Full Disk Access to the launcher")
+        return 1
+    except (OSError, RuntimeError) as e:
+        print(f"chrome-tabs-menu: {e}", file=sys.stderr)
+        if a.count:
+            return 1
+        show([], "Could not read Chrome tabs (see the script's stderr)")
+        return 1
     if a.count:
         for w in wins:
             print(
