@@ -25,8 +25,9 @@ numbers.
 ## Ground rules
 
 1. **Size with `dust` or `gdu`, never `du`/`find`** — on these trees `du`/`find`
-   time out (>120 s repeatedly, 2026-10-11). Follow symlinks when a tree is one
-   (`~/.codex/sessions` is): `dust` follows by default; use `du -skL` by hand.
+   time out (>120 s repeatedly, 2026-10-11). Symlinked trees (`~/.codex/sessions`
+   is one): `dust` follows a symlink named as its argument, but not symlinks found
+   inside a tree; add `dust -L` (`--dereference-links`) to follow those too.
    **Low-load rule (djbclark, 2026-10-25):** a `dust` of all of `~` indexed 5.2M
    files / 314 GiB logical (cow pastures count in full), ran 30+ min and added to a
    load of 24. Never scan `~` or `~/src`. Size one named directory at a time,
@@ -148,7 +149,7 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
    workspace was needed — stale Hermes clones/worktrees once held 3.6 GB),
    propose replacing it with a pasture: `cow-pasture create <name> --source
    <repo>` (scrubs gitignored secrets, handles `uchg`, pre-trusts Claude;
-   the `--orca` flag for Orca workers is retired from djbclark-ade 2026-10-31 and now a usage error). Never pastures from `~/ops/*` (deployment
+   no `--orca` flag). Never pastures from `~/ops/*` (deployment
    checkouts — the wrapper refuses).
 2. Reclaim merged work: `cow gc --merged --dry-run`, and with the operator's
    go, for real. Remove an arbitrary one with `cow-pasture remove <name>`, or
@@ -198,10 +199,10 @@ pasture shares them with APFS `clonefile(2)` (measured: 36.5 GB logical in
   the `sqlite3` CLI fails on `s1-evidence` files, 2026-10-31). Never `immutable=1` on a live
   store: it ignores the WAL (checked 2026-11-01 on hermes `state.db`: `journal_mode` read
   `delete` instead of `wal`), so the count can describe an older checkpoint. If `mode=ro`
-  fails (no `-shm` to attach), say so and size the file instead of guessing. 2026-10-31 sizes:
-  `s1-evidence/candidates.sqlite3` 12.2 GB (6.1 GB on 2026-10-13, no free pages: real growth),
-  `cas-pack/pack.sqlite3` 4.9 GB (2.3 GB), hermes `state.db` 1.4 GB, `opencode.db` 1.0 GB with 0.49 GB
-  free (the Sunday `sqlite-vacuum` Jobber job reclaims it). Growth of the s1 pair is the one to watch.
+  fails (no `-shm` to attach), say so and size the file instead of guessing. The usual large
+  stores are `s1-evidence/candidates.sqlite3`, `cas-pack/pack.sqlite3`, hermes `state.db` and
+  `opencode.db` (the Sunday `sqlite-vacuum` Jobber job reclaims its free pages). Growth of the s1
+  pair is the one to watch: compare with the sizes recorded by the last pass.
 - `~/.local/state/bigteam` (11 GB, 2026-10-31): task dirs of finished fan-outs, holding reports
   that docs and memory cite, plus repo checkouts. With the operator's go, run
   `scripts/bigteam-prune.py` (dry run; `--apply` to act). It deletes directories, so every check
