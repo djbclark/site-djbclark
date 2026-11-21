@@ -1,5 +1,5 @@
 {
   "name": "local",
   "owner": {"name": "djbclark"},
-  "plugins": [{"name": "local-lsp", "description": "Local LSP servers (basedpyright, marksman, taplo, gopls, typescript)", "version": "1.0.3", "source": "./plugins/local-lsp"}]
+  "plugins": [{"name": "local-lsp", "description": "Local LSP servers (basedpyright, marksman, taplo, gopls, typescript)", "version": "1.0.4", "source": "./plugins/local-lsp"}]
 }

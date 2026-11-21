@@ -1,1 +1,1 @@
-{"name": "local-lsp", "version": "1.0.3", "description": "Local LSP servers", "lspServers": "./.lsp.json"}
+{"name": "local-lsp", "version": "1.0.4", "description": "Local LSP servers", "lspServers": "./.lsp.json"}

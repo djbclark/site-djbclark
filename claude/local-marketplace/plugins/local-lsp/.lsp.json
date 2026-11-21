@@ -1,8 +1,10 @@
 {
   "basedpyright": {
-    "command": "lsp-root-guard",
+    "command": "sh",
     "args": [
-      "--",
+      "-c",
+      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "lsp-guard",
       "basedpyright-langserver",
       "--stdio"
     ],
@@ -12,9 +14,11 @@
     }
   },
   "marksman": {
-    "command": "lsp-root-guard",
+    "command": "sh",
     "args": [
-      "--",
+      "-c",
+      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "lsp-guard",
       "marksman",
       "server"
     ],
@@ -39,9 +43,11 @@
     }
   },
   "typescript": {
-    "command": "lsp-root-guard",
+    "command": "sh",
     "args": [
-      "--",
+      "-c",
+      "if command -v lsp-root-guard >/dev/null 2>&1; then exec lsp-root-guard -- \"$@\"; else exec \"$@\"; fi",
+      "lsp-guard",
       "typescript-language-server",
       "--stdio"
     ],
@@ -59,7 +65,7 @@
       "tsserver": {
         "path": "/Users/djbclark/.local/share/tsserver-ts5/node_modules/typescript/lib"
       },
-      "maxTsServerMemory": 2048
+      "maxTsServerMemory": 3072
     }
   },
   "kotlin": {
