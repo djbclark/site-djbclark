@@ -18,7 +18,9 @@
     mode: "{{ item.mode }}"
   loop:
     - {path: "{{ site_agents_bin_dir }}", mode: "0755"}
-    - {path: "{{ site_agents_state_dir }}", mode: "0755"}
+    # 0700: agent reports and private session state live here, and the
+    # djbclark-ade tools create it 0700; a 0755 here widened it on every apply.
+    - {path: "{{ site_agents_state_dir }}", mode: "0700"}
     - {path: "{{ site_agents_jobber_state_dir }}", mode: "0755"}
     - {path: "{{ site_agents_jobber_var_dir }}", mode: "0755"}
     - {path: "{{ site_agents_launchagents_dir }}", mode: "0755"}
