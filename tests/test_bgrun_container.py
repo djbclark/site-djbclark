@@ -11,6 +11,7 @@ a stub load-watch (bg takes it from $HOME/src/djbclark-ade/bin) that reports `lo
 
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -432,6 +433,141 @@ def test_an_out_of_range_idle_setting_cannot_hold_the_slot_for_a_grandchild(box,
                          env={**env, "FAKE_RUN": "xpcgc", "BG_CONTAINER_TEST_IDLE_READ": value, "BG_CONTAINER_TEST_IDLE_WRITE": value})
     p.wait(timeout=60)
     assert p.returncode == 70 and time.monotonic() - t0 < 9
+
+
+@pytest.mark.parametrize("stdin_kind", ["devnull", "pipe", "tty"])
+def test_ctrl_c_on_a_terminal_reaches_the_command_once(box, stdin_kind):
+    # Ctrl-C is a SIGINT to the whole foreground group: the kernel already delivers it to the command, so the guard must not forward it
+    # again, whatever stdin is (`echo x | bgrun ...`, `< /dev/null`). Exactly one INT per press; the command is alive when it arrives.
+    import fcntl
+    import pty
+    import termios
+
+    up(box)
+    work, env, state = box
+    master, slave = pty.openpty()
+
+    def own_tty():
+        os.setsid()
+        fcntl.ioctl(1, termios.TIOCSCTTY, 0)  # stdout is the slave: it becomes our controlling terminal
+
+    stdin = {"devnull": subprocess.DEVNULL, "pipe": subprocess.PIPE, "tty": slave}[stdin_kind]
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=stdin,
+                         stdout=slave, stderr=subprocess.DEVNULL, preexec_fn=own_tty)
+    os.close(slave)
+    try:
+        deadline = time.monotonic() + 30
+        while not (state / "ready").exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert (state / "ready").exists()
+        os.killpg(p.pid, signal.SIGINT)
+        time.sleep(1.0)  # a forwarded copy would have arrived by now
+        (state / "quit").write_text("")
+        p.wait(timeout=30)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        if p.stdin:
+            p.stdin.close()
+        os.close(master)
+    assert (state / "sigs").read_text().split() == ["SIGINT"]
+
+
+def test_int_is_forwarded_when_there_is_no_controlling_terminal(box):
+    # a lane or nohup run: nothing delivers the INT to the command, so the guard does, once
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    os.kill(p.pid, signal.SIGINT)
+    time.sleep(1.0)
+    (state / "quit").write_text("")
+    p.wait(timeout=30)
+    assert (state / "sigs").read_text().split() == ["SIGINT"]
+
+
+def test_a_repeated_term_within_a_moment_is_forwarded_once(box):
+    # the deterministic form of the gtimeout race: the same TERM reaching the guard twice 50 ms apart is one event, not two
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    os.kill(p.pid, signal.SIGTERM)
+    time.sleep(0.05)
+    os.kill(p.pid, signal.SIGTERM)
+    time.sleep(1.0)
+    (state / "quit").write_text("")
+    p.wait(timeout=30)
+    assert (state / "sigs").read_text().split() == ["SIGTERM"]
+
+
+def test_int_is_forwarded_when_our_group_is_in_the_background_of_its_terminal(box):
+    # `bgrun container ... &` in an interactive shell: a controlling terminal exists, but our group is not its foreground group, so the
+    # terminal's Ctrl-C never reaches the command and the guard must pass an INT on
+    import fcntl
+    import pty
+    import termios
+
+    up(box)
+    work, env, state = box
+    master, slave = pty.openpty()
+    launcher = (
+        "import os, signal, subprocess, sys\n"
+        "g = subprocess.Popen(sys.argv[1:], process_group=0)\n"  # its own group: background, the launcher's group is the foreground one
+        "open(os.environ['FAKE_STATE'] + '/guardpid', 'w').write(str(g.pid))\n"
+        "g.wait()\n"
+    )
+
+    def own_tty():
+        os.setsid()
+        fcntl.ioctl(1, termios.TIOCSCTTY, 0)
+
+    p = subprocess.Popen(["python3", "-I", "-c", launcher, str(BG), fake_path(box), "run", "img"], cwd=work,
+                         env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL, stdout=slave, stderr=subprocess.DEVNULL,
+                         preexec_fn=own_tty)
+    os.close(slave)
+    try:
+        deadline = time.monotonic() + 30
+        while not (state / "ready").exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert (state / "ready").exists()
+        os.kill(int((state / "guardpid").read_text()), signal.SIGINT)
+        time.sleep(1.0)
+        (state / "quit").write_text("")
+        p.wait(timeout=30)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        os.close(master)
+    assert (state / "sigs").read_text().split() == ["SIGINT"]
+
+
+@pytest.mark.skipif(shutil.which("gtimeout") is None, reason="needs coreutils gtimeout")
+def test_a_gtimeout_term_reaches_the_command_at_most_twice(box):
+    # gtimeout (no --foreground) signals the pid and the group: one timeout used to reach the CLI three times (kernel + two forwards),
+    # and Apple's CLI force-exits on its third signal. Repeat: the double delivery to the guard is a race.
+    up(box)
+    work, env, state = box
+    for i in range(8):
+        for f in ("sigs", "ready", "quit", "childpid"):
+            (state / f).unlink(missing_ok=True)
+        p = subprocess.Popen([shutil.which("gtimeout"), "1.5", str(BG), fake_path(box), "run", "img"], cwd=work,
+                             env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        deadline = time.monotonic() + 30
+        while not (state / "ready").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(2.2)  # the timeout fires at 1.5 s; the command ignores TERM, so it is still running
+        (state / "quit").write_text("")
+        p.wait(timeout=30)
+        sigs = (state / "sigs").read_text().split()
+        assert sigs and sigs.count("SIGTERM") <= 2, (i, sigs)
 
 
 def test_ctrl_c_during_the_final_wait_on_a_tty_keeps_exit_70(box):
