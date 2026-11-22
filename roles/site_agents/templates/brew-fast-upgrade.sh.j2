@@ -404,10 +404,15 @@ run_chrome_use_pass() {
 # ~/.claude/settings.json, and the CLI has no sign-in-free up-to-date check.
 # No --no-path: the `update` subcommand's forwarding of installer flags is
 # documented only for --tools (macroscope-local README), so it is unproven; the
-# saved install state (pathPolicy skip) already keeps shell rc files untouched.
+# saved install state (pathPolicy skip) already keeps shell rc files untouched,
+# so the pass is skipped when that state file is missing: without it the
+# installer would pick a login rc file to edit for PATH (install.sh
+# resolve_path_action) and --yes would apply the edit unattended.
 run_macroscope_pass() {
   local cli="$HOME/.local/bin/macroscope"
+  local state="${XDG_STATE_HOME:-$HOME/.local/state}/macroscope/install.json"
   [ -x "$cli" ] || return 0
+  [ -r "$state" ] || { echo "[brew-fast-upgrade] macroscope: no install state at $state; skipping update"; return 0; }
   echo "[brew-fast-upgrade] macroscope: updating CLI + plugin"
   MACROSCOPE_REQUIRE_CHECKSUM=1 "$cli" update --yes </dev/null || return 1
 }

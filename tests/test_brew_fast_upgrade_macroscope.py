@@ -20,14 +20,19 @@ def _function(name: str) -> str:
     return re.search(rf"^{name}\(\) \{{.*?^\}}", SOURCE.read_text(), re.S | re.M).group()
 
 
-def _run(home: Path, out: Path, install_fake: bool = True, rc: int = 0):
+def _run(home: Path, out: Path, install_fake: bool = True, rc: int = 0, state: bool = True):
     cli = home / ".local/bin/macroscope"
     if install_fake:
         cli.parent.mkdir(parents=True)
         cli.write_text(FAKE)
         cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
+    if state:
+        state_file = home / ".local/state/macroscope/install.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text('{"tools": ["claude"], "pathPolicy": "skip"}')
     env = dict(os.environ, HOME=str(home), FAKE_OUT=str(out), FAKE_RC=str(rc))
     env.pop("MACROSCOPE_REQUIRE_CHECKSUM", None)
+    env.pop("XDG_STATE_HOME", None)
     script = _function("run_macroscope_pass") + "\nrun_macroscope_pass"
     result = subprocess.run(["bash", "-c", script], env=env, text=True, input="", capture_output=True)
     return result.returncode, result.stdout, result.stderr
@@ -54,7 +59,11 @@ def test_macroscope_pass_stdin_is_devnull_not_the_callers_pipe(tmp_path):
     cli.parent.mkdir(parents=True)
     cli.write_text(FAKE)
     cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
+    state_file = home / ".local/state/macroscope/install.json"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text('{"tools": ["claude"], "pathPolicy": "skip"}')
     env = dict(os.environ, HOME=str(home), FAKE_OUT=str(out), FAKE_RC="0")
+    env.pop("XDG_STATE_HOME", None)
     script = _function("run_macroscope_pass") + "\nrun_macroscope_pass"
     result = subprocess.run(
         ["bash", "-c", script], env=env, text=True, input="would-block-or-leak\n", capture_output=True
@@ -78,11 +87,25 @@ def test_macroscope_pass_failing_cli_returns_one(tmp_path):
     assert rc == 1
 
 
+def test_macroscope_pass_skips_without_install_state(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    rc, stdout, _ = _run(tmp_path / "home", out, state=False)
+    assert rc == 0
+    assert "no install state" in stdout
+    assert not (out / "argv").exists()
+
+
 def test_macroscope_pass_runs_only_on_first_attempt():
     source = SOURCE.read_text()
-    calls = re.findall(r"^.*\brun_macroscope_pass\b.*$", source, re.M)
-    guarded = [c for c in calls if re.search(r'\[ "\$attempt" -eq 1 \] && ! run_macroscope_pass', c)]
-    assert len(guarded) == 1, calls
+    calls = [
+        c for c in re.findall(r"^.*\brun_macroscope_pass\b.*$", source, re.M)
+        if not c.lstrip().startswith("#")
+        and not re.match(r"^run_macroscope_pass\(\) \{", c)
+        and "declare -f" not in c
+    ]
+    assert len(calls) == 1, calls
+    assert re.search(r'^\s*if \[ "\$attempt" -eq 1 \] && ! run_macroscope_pass; then$', calls[0]), calls
 
 
 def test_locked_run_declares_every_template_function():
