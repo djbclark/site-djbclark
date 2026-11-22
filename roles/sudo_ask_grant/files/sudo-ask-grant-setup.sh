@@ -39,6 +39,10 @@ render_sudoers() {
 # NOPASSWD line, so it needs a fresh password / Touch ID; timestamp_timeout=0 stops a cached ticket for this
 # program from standing in for one (the helper also checks that sudo ran with -k).
 Defaults!$BIN env_reset, timestamp_timeout=0
+# Ticket off for $operator: this machine's 10-timestamp-global shares ONE sudo ticket with every process of the user, so
+# a single Touch ID would let any agent run plain sudo. A later drop-in wins over an earlier one; removing this file
+# (rollback) restores the exact prior state, and 10-timestamp-global is never touched.
+Defaults:$operator timestamp_timeout=0
 $operator ALL=(root) NOPASSWD: $BIN exec *, $BIN status, $BIN status *, $BIN revoke ""
 SUDO
 }
@@ -70,6 +74,7 @@ case $mode in
     echo "install root:wheel 0755      $BIN   (sha256[:24] $(sha24 "$src"))"
     echo "(the helper itself creates $LOGF, root:wheel 0644, on first use)"
     echo "install root:wheel 0440      $SUDOERS   (sha256[:24] $(sha24 "$tmp/sudoers"))"
+    echo "sudo ticket for $operator: switched off by the same drop-in (Defaults:$operator timestamp_timeout=0); 10-timestamp-global is not touched"
     echo "grant file (written only by 'sudo-ask --grant'): $STATE_DIR/grant"
     exit 0 ;;
   check)
@@ -80,6 +85,9 @@ case $mode in
       if [ "$diff_flag" = 1 ] && [ -f "$BIN" ]; then diff -u "$BIN" "$src" || true; fi; fi
     if [ -e "$SUDOERS" ]; then echo "present  $SUDOERS ($(st "$SUDOERS")); content is root-only, not compared"
     else echo "MISSING  $SUDOERS"; rc=3; fi
+    echo "ticket   Defaults:$operator timestamp_timeout=0 is in the drop-in (a password every time; later files win over 10-timestamp-global)"
+    if [ -e /etc/sudoers.d/10-timestamp-global ]; then echo "present  /etc/sudoers.d/10-timestamp-global (left untouched; overridden by $SUDOERS)"
+    else echo "absent   /etc/sudoers.d/10-timestamp-global (nothing to override)"; fi
     [ "$diff_flag" = 1 ] && { echo "--- drop-in that would be installed ---"; cat "$tmp/sudoers"; }
     if [ -d "$STATE_DIR" ]; then echo "ok       $STATE_DIR ($(st "$STATE_DIR"))"; else echo "MISSING  $STATE_DIR"; rc=3; fi
     exit $rc ;;
@@ -87,11 +95,13 @@ esac
 
 # The guard. Nothing below this line may run a privileged command before it has passed.
 in_temp_prefix() {
+  # Fixed temp roots only: $TMPDIR is the caller's to set, so it never counts. The operator's own sudo-ask never counts either.
   /usr/bin/python3 -IS -c '
 import os, sys
 p = os.path.realpath(sys.argv[1])
-roots = {os.path.realpath(d) for d in ("/tmp", "/var/folders", os.environ.get("TMPDIR") or "/tmp")}
-sys.exit(0 if any(p.startswith(r.rstrip("/") + "/") for r in roots) else 1)' "$1"
+real = os.path.realpath(os.path.join(sys.argv[2], ".local", "bin", "sudo-ask"))
+roots = {os.path.realpath(d) for d in ("/private/tmp", "/private/var/folders")}
+sys.exit(0 if p != real and any(p.startswith(r.rstrip("/") + "/") for r in roots) else 1)' "$1" "$HOME"
 }
 if [ "$live" != 1 ]; then
   fake=$(PATH=$caller_path command -v sudo-ask 2>/dev/null || true)
@@ -127,7 +137,7 @@ case $mode in
   rollback)
     body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/grant $BIN; rm -rf $STATE_DIR"
     run_root /bin/sh -c "$body"
-    echo "sudo-ask-grant-setup: removed the drop-in, helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
+    echo "sudo-ask-grant-setup: removed the drop-in (so the sudo ticket behaves as before), helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
   verify)
     fail=0
     ok() { echo "ok    $1"; }
@@ -138,6 +148,7 @@ case $mode in
       echo "WARN  a sudo ticket is cached (an earlier sudo ran with no -k). The helper's own check still refuses a grant" \
            "that was not run as 'sudo -k'; end the ticket with: sudo -k"
     fi
+    echo "NOTE  the ticket is off for $operator (Defaults:$operator timestamp_timeout=0): after one authentication, a plain 'sudo -n true' must still fail"
     /usr/bin/sudo -k
     # grant must NOT be reachable without a password. If this succeeds a 60 s window just opened: roll back.
     if /usr/bin/sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi

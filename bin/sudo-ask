@@ -19,6 +19,7 @@
 #   sudo-ask --grant [DURATION]   open a window (30m, 2h, 8h; default 8h, max 24h): dialog + Touch ID
 #   sudo-ask --revoke             end it now (Touch ID)
 #   sudo-ask --status             is a window open, and until when (exit 0 open, 1 not)
+#   sudo-ask --status --audit [EPOCH]   setuid files and launchd targets changed since the grant (or EPOCH)
 # `grant`, `revoke` and `status` without the dashes work too, but only when no program of that
 # name is on PATH. No helper installed (or no window): the dialog path below, unchanged.
 # Whether a window covers a command is decided by ONE tool, bin/approval-gate (next to this script;
@@ -115,7 +116,12 @@ case $1 in
 esac
 case $sub in
   status)
-    [ $# -eq 0 ] || { echo "usage: sudo-ask --status" >&2; exit 64; }
+    if [ "${1:-}" = "--audit" ]; then   # what changed since the grant: setuid files, launchd targets (read-only; the sudoers `status *` line)
+      [ $# -le 2 ] || { echo "usage: sudo-ask --status [--audit [EPOCH]]" >&2; exit 64; }
+      [ -x "$HELPER" ] || { echo "sudo-ask: no window helper installed ($HELPER)" >&2; exit 1; }
+      "$SUDO" -n "$HELPER" status "$@"; exit $?
+    fi
+    [ $# -eq 0 ] || { echo "usage: sudo-ask --status [--audit [EPOCH]]" >&2; exit 64; }
     if window_status; then describe_window; exit 0; fi
     echo "sudo-ask window: none ($W_REASON)"; exit 1 ;;
   revoke)

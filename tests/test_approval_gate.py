@@ -151,6 +151,17 @@ class DecideTests(GateBase):
         self.assertEqual(gate.decide("bgrun-ticket", max_ttl=99999, now=self.now)[2]["ttl"], 7200)  # window ends first
         self.assertEqual(gate.decide("bgrun-approve-local", max_ttl=300, now=self.now)[2]["ttl"], 300)
 
+    def test_a_program_written_after_the_grant_prompts_through_the_gate(self) -> None:   # MED-2 B1, gate side
+        self.open_window()
+        script = pathlib.Path(self.tmp.name) / "made-in-the-window.py"
+        script.write_text("print(1)\n")
+        os.utime(script, (self.now + 5, self.now + 5))
+        with mock.patch.object(self.h, "agent_writable", return_value=False):
+            ok, why, _ = gate.decide("sudo-ask", cmd=["python3", str(script)], now=self.now)
+        self.assertFalse(ok)
+        self.assertIn("changed after the window was granted", why)
+        self.assertEqual(self.h.GRANTED_EPOCH, self.now)
+
     def test_denylisted_command_prompts(self) -> None:
         self.open_window()
         self.assertFalse(gate.decide("sudo-ask", cmd=["visudo"], now=self.now)[0])

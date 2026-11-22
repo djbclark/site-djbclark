@@ -116,6 +116,10 @@ def decide(gate, max_ttl=None, cmd=None, now=None):
     if cmd:
         h = load_helper()
         h.INVOKER_UID = os.getuid()  # the root helper sees the same user as SUDO_UID, so both judge the same writable paths
+        try:
+            h.GRANTED_EPOCH = h.parse_iso(data["granted_utc"])  # programs changed since the window opened prompt, as in the helper
+        except (KeyError, ValueError):
+            return False, "grant time unknown", {}
         why = h.evaluate(list(cmd), os.getcwd(), h.EXEC_PATH)
         if why:
             return False, why, {}
