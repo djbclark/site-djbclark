@@ -57,7 +57,7 @@ case "$FAKE_RUN" in
 S = sys.argv[1]
 def h(n, f):
     open(S + "/sigs", "a").write(signal.Signals(n).name + chr(10))
-for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGINT):
+for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGINT, signal.SIGHUP):
     signal.signal(s, h)
 open(S + "/childpid", "w").write(str(os.getpid()))
 open(S + "/ready", "w").write("1")
@@ -505,6 +505,139 @@ def test_a_repeated_term_within_a_moment_is_forwarded_once(box):
     (state / "quit").write_text("")
     p.wait(timeout=30)
     assert (state / "sigs").read_text().split() == ["SIGTERM"]
+
+
+def _run_count_command(box):
+    up(box)
+    work, env, state = box
+    p = subprocess.Popen([str(BG), fake_path(box), "run", "img"], cwd=work, env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert (state / "ready").exists()
+    return p, state
+
+
+def _finish_count_command(p, state):
+    time.sleep(0.5)
+    (state / "quit").write_text("")
+    p.wait(timeout=30)
+    return (state / "sigs").read_text().split()
+
+
+# The debounce drops only the SAME signal again soon after a forward. Each case pins what must still get through: a later one, a
+# different one, and one more once the window has passed even though earlier repeats were dropped.
+def test_a_second_term_after_the_window_is_forwarded(box):
+    p, state = _run_count_command(box)
+    os.kill(p.pid, signal.SIGTERM)
+    time.sleep(0.8)
+    os.kill(p.pid, signal.SIGTERM)
+    assert _finish_count_command(p, state) == ["SIGTERM", "SIGTERM"]
+
+
+def test_a_different_signal_right_after_a_term_is_forwarded(box):
+    p, state = _run_count_command(box)
+    os.kill(p.pid, signal.SIGTERM)
+    time.sleep(0.05)
+    os.kill(p.pid, signal.SIGHUP)
+    assert sorted(_finish_count_command(p, state)) == ["SIGHUP", "SIGTERM"]
+
+
+def test_a_steady_stream_of_the_same_signal_is_forwarded_again_after_each_window(box):
+    # a sliding window (a dropped repeat restarts it) would forward only the first. Run the guard directly: bgrun's own layers add
+    # signal traffic that would hide the difference.
+    work, env, state = box
+    p = subprocess.Popen(["python3", "-I", str(BG.parent / "bgrun-container-guard"), "--", fake_path(box), "run", "img"], cwd=work,
+                         env={**env, "FAKE_RUN": "count"}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert (state / "ready").exists()
+    for _ in range(25):  # 0.75 s of one TERM every 30 ms: well inside the window even when a loaded machine stretches a sleep
+        os.kill(p.pid, signal.SIGTERM)
+        time.sleep(0.03)
+    assert _finish_count_command(p, state).count("SIGTERM") >= 2
+
+
+def _run_count_command_on_a_terminal(box, start_in_foreground):
+    """Run the command under a launcher that owns a pty as its controlling terminal and moves the guard's own process group between
+    background and foreground on request (job control: fg / bg). Returns (process, state dir, master fd, move function)."""
+    import fcntl
+    import pty
+    import termios
+
+    up(box)
+    work, env, state = box
+    master, slave = pty.openpty()
+    launcher = (
+        "import os, signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGTTOU, signal.SIG_IGN)\n"
+        "S = os.environ['FAKE_STATE']\n"
+        "g = subprocess.Popen(sys.argv[1:], process_group=0)\n"  # its own group
+        "open(S + '/guardpid', 'w').write(str(g.pid))\n"
+        "if os.environ.get('LAUNCH_FG'):\n"
+        "    os.tcsetpgrp(1, g.pid)\n"
+        "while g.poll() is None:\n"
+        "    for name in ('fg', 'bg'):\n"
+        "        if os.path.exists(S + '/' + name):\n"
+        "            os.remove(S + '/' + name)\n"
+        "            os.tcsetpgrp(1, g.pid if name == 'fg' else os.getpgrp())\n"
+        "            open(S + '/' + name + '.done', 'w').write('1')\n"
+        "    time.sleep(0.05)\n"
+    )
+
+    def own_tty():
+        os.setsid()
+        fcntl.ioctl(1, termios.TIOCSCTTY, 0)
+
+    p = subprocess.Popen(["python3", "-I", "-c", launcher, str(BG), fake_path(box), "run", "img"], cwd=work,
+                         env={**env, "FAKE_RUN": "count", **({"LAUNCH_FG": "1"} if start_in_foreground else {})},
+                         stdin=subprocess.DEVNULL, stdout=slave, stderr=subprocess.DEVNULL, preexec_fn=own_tty)
+    os.close(slave)
+
+    def move(name):
+        (state / name).write_text("")
+        deadline = time.monotonic() + 30
+        while not (state / (name + ".done")).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert (state / (name + ".done")).exists()
+
+    deadline = time.monotonic() + 30
+    while not (state / "ready").exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert (state / "ready").exists()
+    return p, state, master, move
+
+
+def test_a_run_brought_to_the_foreground_gets_one_int_per_ctrl_c(box):
+    # `bgrun container run ... &` then `fg`: the guard started in the background (it forwards INT); once foreground, Ctrl-C reaches the
+    # command from the terminal and must not be forwarded as well
+    p, state, master, move = _run_count_command_on_a_terminal(box, start_in_foreground=False)
+    try:
+        move("fg")
+        os.killpg(int((state / "guardpid").read_text()), signal.SIGINT)  # the terminal's Ctrl-C: the whole foreground group
+        sigs = _finish_count_command(p, state)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        os.close(master)
+    assert sigs == ["SIGINT"]
+
+
+def test_a_kill_int_to_a_run_sent_to_the_background_is_forwarded(box):
+    # Ctrl-Z then `bg` (or another job takes the terminal): the guard started in the foreground, but a `kill -INT PID` now must reach the command
+    p, state, master, move = _run_count_command_on_a_terminal(box, start_in_foreground=True)
+    try:
+        move("bg")
+        os.kill(int((state / "guardpid").read_text()), signal.SIGINT)
+        sigs = _finish_count_command(p, state)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        os.close(master)
+    assert sigs == ["SIGINT"]
 
 
 def test_int_is_forwarded_when_our_group_is_in_the_background_of_its_terminal(box):

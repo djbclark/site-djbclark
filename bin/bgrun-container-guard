@@ -71,6 +71,11 @@ def main(argv):
         if child is None:
             pending.append(signum)
             return
+        # Ctrl-C reaches the whole foreground group from the terminal, so the command already has this INT: forwarding it would deliver
+        # it twice. Asked now, not at start: a run moved by fg/bg changes the answer (a `&` run brought to the foreground, or a
+        # foreground run sent to the background and stopped with `kill -INT PID`).
+        if signum == signal.SIGINT and _foreground_in_controlling_terminal():
+            return
         # gtimeout (without --foreground) signals the pid AND the group, so the same TERM can reach this handler twice a moment apart:
         # the same signal again within DEBOUNCE seconds is the same event, not a second one (Apple's CLI force-exits on its third).
         now = time.monotonic()
@@ -93,17 +98,16 @@ def main(argv):
     # within DEBOUNCE seconds of a forward is dropped, so the CLI hears at most two (kernel + one forward).
     # Where the terminal already delivers a Ctrl-C to the whole foreground group (we have a controlling terminal and our group is its
     # foreground group, whatever stdin is: `echo x | bgrun ...`, `< /dev/null`), the child gets that INT from the kernel: forwarding it
-    # too would deliver it twice, so there INT is not forwarded and our own INT handler does nothing (Python's default would raise
-    # KeyboardInterrupt in the drain loop and lose the exit status). No controlling terminal (a lane, nohup): INT is forwarded.
+    # too would deliver it twice, so the INT handler (installed always, so Python's default never raises KeyboardInterrupt in the drain
+    # loop and loses the exit status) forwards nothing then. That is decided when the INT arrives, so a run moved by job control gets
+    # one INT per Ctrl-C, and a `kill -INT PID` is forwarded whenever our group is not the terminal's foreground group (no controlling
+    # terminal: a lane, nohup; a background job). Left open: a `kill -INT PID` sent while we ARE the foreground group looks like a
+    # Ctrl-C (Python on macOS has no siginfo) and is not forwarded; use TERM to stop a foreground run.
     # USR1/USR2 are forwarded as well: Apple's CLI passes them on.
-    on_tty = _foreground_in_controlling_terminal()
-    forwarded = [signal.SIGTERM, signal.SIGHUP, signal.SIGUSR1, signal.SIGUSR2] + ([] if on_tty else [signal.SIGINT])
-    for sig in forwarded:
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGUSR1, signal.SIGUSR2, signal.SIGINT):
         if signal.getsignal(sig) == signal.SIG_IGN:
             continue
         signal.signal(sig, forward)
-    if on_tty and signal.getsignal(signal.SIGINT) != signal.SIG_IGN:
-        signal.signal(signal.SIGINT, lambda *_: None)
     try:
         child = subprocess.Popen(argv, stderr=subprocess.PIPE)
     except OSError as e:
