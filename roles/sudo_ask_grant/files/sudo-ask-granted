@@ -1,0 +1,701 @@
+#!/usr/bin/python3 -IS
+# sudo-ask-granted: the root side of the sudo-ask approval window.
+#
+# Installed root:wheel 0755 at /usr/local/libexec/sudo-ask-granted. Every path below is
+# HARD-CODED on purpose: no environment variable, argument or config file can move them
+# (tests patch the module constants in-process instead). Python runs isolated (-I: no
+# PYTHON* variables, no cwd or script dir on sys.path) and without site (-S): stdlib only.
+#
+# sudoers (see the setup script) lets the operator's user run, WITHOUT a password:
+#     sudo-ask-granted exec *      sudo-ask-granted status [*]
+# and nothing else. `grant` and `revoke` only ever reach this file through the normal
+# password/Touch ID rule, and the drop-in sets `timestamp_timeout=0` for this command so a
+# cached sudo ticket never satisfies it. An agent (running as the operator) therefore can
+# use an open window but cannot open, extend or close one.
+#
+#   exec -- CMD...       run CMD as root IF a valid window is open and CMD is not denylisted
+#   status               print key=value lines about the window; exit 0 open, 1 not open
+#   status --check -- CMD...   exit 0 only if a window is open AND CMD would be allowed
+#   grant DURATION       write the grant file (DURATION: 60s..24h, e.g. 30m 2h 8h)
+#   revoke               delete the grant file
+#
+# The denylist is a guard rail for the commands an agent types, NOT a sandbox: while a
+# window is open, anything not listed (a script the agent wrote, `python3 x.py`) runs as
+# root. See roles/sudo_ask_grant/README.md "What an agent can do during a window".
+import calendar
+import json
+import os
+import re
+import shlex
+import stat
+import sys
+import time
+
+GRANT_DIR = "/var/db/sudo-ask"
+GRANT_FILE = GRANT_DIR + "/grant"
+LOG_FILE = "/var/log/sudo-ask-grant.log"
+OWNER_UID = 0  # the grant dir/file/log must be owned by root
+MIN_SECONDS = 60
+MAX_SECONDS = 86400
+CLOCK_SLACK = 120  # tolerated clock skew for a grant stamped "in the future"
+MAX_DEPTH = 6
+
+EX_USAGE, EX_REFUSED, EX_DENIED, EX_NOEXEC = 64, 75, 76, 126
+
+# ---------------------------------------------------------------- time and duration
+
+
+def parse_duration(text):
+    """'30m' -> 1800. Only <digits><s|m|h|d>; 60 s .. 24 h. Raises ValueError."""
+    m = re.fullmatch(r"([0-9]{1,6})([smhd])", text or "")
+    if not m:
+        raise ValueError("duration must look like 30m, 2h or 8h (units s m h d)")
+    secs = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+    if secs < MIN_SECONDS:
+        raise ValueError("duration must be at least 60s")
+    if secs > MAX_SECONDS:
+        raise ValueError("duration must be at most 24h")
+    return secs
+
+
+def iso(epoch):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+def parse_iso(text):
+    if not isinstance(text, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", text
+    ):
+        raise ValueError("bad timestamp")
+    return calendar.timegm(time.strptime(text, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+# ---------------------------------------------------------------- grant file
+
+
+def _trusted(st, want_dir):
+    if want_dir != stat.S_ISDIR(st.st_mode) or (not want_dir and not stat.S_ISREG(st.st_mode)):
+        return False
+    return st.st_uid == OWNER_UID and (st.st_mode & 0o022) == 0
+
+
+def read_grant(now):
+    """-> (open, reason, data). Closed on ANY doubt (fail closed)."""
+    try:
+        if not _trusted(os.lstat(GRANT_DIR), True):
+            return False, "grant dir is not a root-owned, non-writable directory", {}
+        fd = os.open(GRANT_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return False, "no window is open", {}
+    except OSError as e:
+        return False, "cannot read the grant file (%s)" % e.strerror, {}
+    try:
+        st = os.fstat(fd)
+        if not _trusted(st, False) or st.st_size > 4096:
+            return False, "grant file is not a small root-owned, non-writable file", {}
+        raw = os.read(fd, 4097)
+    finally:
+        os.close(fd)
+    try:
+        d = json.loads(raw.decode("utf-8"))
+        exp, gra = parse_iso(d["expires_utc"]), parse_iso(d["granted_utc"])
+        dur, uid, nonce = d["duration_s"], d["granted_by_uid"], d["nonce"]
+        if not isinstance(dur, int) or isinstance(dur, bool) or not isinstance(uid, int):
+            raise ValueError("types")
+        if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+            raise ValueError("nonce")
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        return False, "grant file is damaged", {}
+    if not MIN_SECONDS <= dur <= MAX_SECONDS or exp - gra != dur:
+        return False, "grant file has an impossible duration", {}
+    if gra > now + CLOCK_SLACK:
+        return False, "grant file is dated in the future", {}
+    if exp - now > MAX_SECONDS:
+        return False, "grant file expires more than 24h from now (tampered?)", {}
+    if exp <= now:
+        return False, "the window expired at " + iso(exp), {"expired_utc": iso(exp)}
+    data = {"expires_epoch": exp, "expires_utc": iso(exp), "granted_utc": iso(gra),
+            "duration_s": dur, "granted_by_uid": uid, "remaining_s": exp - now}
+    return True, "window open", data
+
+
+def write_grant(seconds, now, by_uid):
+    """Atomic root-only write: temp file in the (root-owned) dir, then rename."""
+    if not _trusted(os.lstat(GRANT_DIR), True):
+        raise OSError("grant dir is not a root-owned, non-writable directory")
+    d = {"expires_utc": iso(now + seconds), "granted_utc": iso(now), "granted_by_uid": by_uid,
+         "duration_s": seconds, "nonce": os.urandom(16).hex()}
+    tmp = "%s/.grant.%d.tmp" % (GRANT_DIR, os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        os.fchown(fd, OWNER_UID, -1)
+        os.fchmod(fd, 0o644)
+        os.write(fd, (json.dumps(d, sort_keys=True) + "\n").encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.rename(tmp, GRANT_FILE)
+    return d
+
+
+# ---------------------------------------------------------------- log
+
+
+def clean(text):
+    return "".join(c if " " <= c < "\x7f" else "\\x%02x" % ord(c) for c in text)
+
+
+def log(event, cmd_text=""):
+    """Append one line; a log that cannot be written refuses the action (audit is part of it)."""
+    line = "%s\t%s\t%s\t%s\t%s\n" % (
+        iso(time.time()), clean(os.environ.get("SUDO_UID", "-")), event,
+        clean(os.getcwd()), clean(cmd_text))
+    fd = os.open(LOG_FILE, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    try:
+        if os.fstat(fd).st_uid != OWNER_UID:
+            raise OSError("log file is not owned by root")
+        os.write(fd, line.encode("utf-8", "replace"))
+    finally:
+        os.close(fd)
+
+
+# ---------------------------------------------------------------- the denylist
+# Everything below is pure (argv, cwd, PATH in; a refusal reason or None out).
+
+# Paths that may not be written/changed (compared case-insensitively: APFS is, by default;
+# realpath first, so /etc is /private/etc and symlinks cannot hide a target).
+PROTECTED = [
+    "/private/etc/sudoers", "/private/etc/sudoers.d", "/private/etc/sudo.conf",
+    "/private/etc/pam.d", "/usr/lib/pam",                      # sudo policy, PAM
+    "/private/var/db/sudo-ask", "/private/var/log/sudo-ask-grant.log",   # this feature
+    "/usr/local/libexec", "/usr/local/sbin",                   # root helpers, sudo-secretspec broker
+    "/private/var/db/dslocal",                                 # users/groups/admin membership
+    "/library/application support/com.apple.tcc", "/private/var/db/tcc",   # TCC
+    "/library/keychains",
+]
+PROTECTED_RE = [
+    r"/users/[^/]+/library/application support/com\.apple\.tcc(/|$)",
+    r"/users/[^/]+/library/keychains(/|$)",
+    r"(^|/)login\.keychain[^/]*$",
+    r"^/dev/r?disk",
+]
+# Substrings that, in an argument of a command that is not read-only, send it to the prompt.
+TRIPWIRE = ["sudoers", "/pam.d", "sudo-ask", "secretspec", "com.apple.tcc", "tcc.db",
+            "library/keychains", ".keychain", "dslocal"]
+
+READ_ONLY = frozenset(
+    "ls stat file cat head tail wc grep egrep fgrep rg readlink realpath du df basename dirname"
+    " id whoami test [ echo printf true false : pwd ps lsof shasum md5 cmp diff strings hexdump"
+    " uname sw_vers which mdfind sleep".split())
+READ_ONLY_BANNED_FLAG = {"rg": ("--pre",), "file": ("-C",)}
+
+ALWAYS_DENY = frozenset(
+    "visudo csrutil nvram tccutil fdisk gpt asr fdesetup passwd pwpolicy profiles systemsetup"
+    " sntp ntpdate sudo-ask sudo-ask-granted sudo-secretspec su login script expect screen tmux"
+    " at batch ssh parallel watch entr chroot osascript".split())
+ALWAYS_DENY_PREFIX = ("newfs_", "mkfs", "sudo-secretspec")
+DISKUTIL_OK = {"list", "info", "activity", "listfilesystems", "mount", "mountdisk", "unmount",
+               "unmountdisk", "eject", "verifyvolume", "verifydisk"}
+DISKUTIL_SUB_OK = {"list", "listcryptousers", "listsnapshots", "listvolumegroups"}
+DSCL_WRITE = {"create", "delete", "change", "append", "merge", "passwd", "createpl", "createpli",
+              "changei", "appendpl", "appendpli", "deletepl", "deletepli", "mcxset", "mcxedit",
+              "mcxdelete", "mcxexport", "mcximport", "diff"}
+DSCL_READ = {"read", "readall", "readpl", "readpli", "list", "search", "ls", "cat"}
+SECURITY_OK = {"find-certificate", "find-identity", "show-keychain-info", "verify-cert", "error",
+               "help", "list-keychains"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish"}
+INTERPRETERS = re.compile(
+    r"^(python[0-9.]*|pypy[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node(js)?|deno|bun|php[0-9.]*|"
+    r"lua[0-9.]*|luajit|tclsh[0-9.]*|wish|swift)$")
+INLINE_FLAGS = {"python": "c", "pypy": "c", "perl": "eE", "ruby": "e", "node": "ep", "nodejs": "ep",
+                "php": "r", "lua": "e", "luajit": "e", "bun": "e", "deno": ""}
+CRITICAL_RECURSIVE = {"rm": "rR", "chmod": "R", "chown": "R", "chgrp": "R", "chflags": "R"}
+SH_BAD_FIRST = {"cd", "pushd", "popd", "eval", "source", ".", "alias", "unalias", "trap", "set",
+                "builtin", "ulimit", "hash", "enable", "shopt", "local", "declare", "typeset",
+                "let", "fc", "history", "export", "unset", "read", "if", "then", "else", "elif",
+                "fi", "for", "while", "until", "do", "done", "case", "esac", "function", "select",
+                "{", "}", "!", "[[", "]]", "coproc", "wait", "jobs", "fg", "bg", "disown"}
+
+# name -> (flags without argument, flags with argument, positionals before the command)
+WRAPPERS = {
+    "nohup": (set(), set(), 0),
+    "nice": (set(), {"-n", "--adjustment"}, 0),
+    "time": ({"-p", "-l", "-h", "-a"}, set(), 0),
+    "command": ({"-p"}, set(), 0),
+    "exec": ({"-c"}, set(), 0),
+    "timeout": ({"--foreground", "--preserve-status", "-v", "--verbose"},
+                {"-s", "--signal", "-k", "--kill-after"}, 1),
+    "caffeinate": ({"-d", "-i", "-m", "-s", "-u"}, {"-t", "-w"}, 0),
+    "arch": ({"-arm64", "-arm64e", "-x86_64", "-x86_64h", "-i386", "-32", "-64", "-c"}, {"-arch"}, 0),
+    "stdbuf": (set(), {"-i", "-o", "-e"}, 0),
+    "sudo": ({"-n", "-S", "-E", "-H", "-b", "-k", "-P", "-A", "--non-interactive", "--preserve-env"},
+             {"-u", "-g", "-C", "-h", "-p", "-r", "-t", "-T", "-U", "-D", "-R"}, 0),
+}
+
+
+def canon(p, cwd):
+    return os.path.realpath(os.path.join(cwd, p)).casefold()
+
+
+def _is_under(p, root):
+    return p == root or p.startswith(root.rstrip("/") + "/")
+
+
+def path_problem(token, cwd, recursive_critical=False):
+    """Why this argument, taken as a path, may not be touched (or None)."""
+    cands = {token}
+    if "=" in token:
+        cands.add(token.split("=", 1)[1])
+    if re.match(r"-[A-Za-z][^-]", token):
+        cands.add(token[2:])
+    low = token.casefold()
+    for t in TRIPWIRE:
+        if t in low:
+            return "argument %r mentions %s" % (token, t)
+    for c in cands:
+        if not c or "\0" in c:
+            continue
+        p = canon(c, cwd)
+        for root in PROTECTED:
+            if _is_under(p, root):
+                return "argument %r is protected (%s)" % (token, root)
+            if p == "/" or root.startswith(p.rstrip("/") + "/"):
+                return "argument %r contains the protected path %s" % (token, root)
+        for rx in PROTECTED_RE:
+            if re.search(rx, p):
+                return "argument %r is protected (%s)" % (token, rx)
+        if recursive_critical and (p.count("/") <= 1 or p.startswith(("/private/", "/users/", "/volumes/"))
+                                   and p.count("/") <= 2):
+            return "recursive change of %r" % token
+    return None
+
+
+def resolve(name, cwd, path):
+    if "/" in name:
+        c = os.path.join(cwd, name)
+        return c if os.path.isfile(c) and os.access(c, os.X_OK) else None
+    for d in (path or "").split(":"):
+        if not d.startswith("/"):
+            continue  # an empty or relative PATH entry is never searched
+        c = os.path.join(d, name)
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def skip_options(args, flags, with_arg, positionals, numeric=False):
+    """Skip a wrapper's own options; returns the rest (the wrapped command) or None."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if not a.startswith("-") or a == "-":
+            break
+        if a in flags or (numeric and re.fullmatch(r"-[0-9]+", a)):
+            i += 1
+        elif a in with_arg:
+            i += 2
+        elif a.startswith("--") and "=" in a and a.split("=")[0] in with_arg:
+            i += 1
+        elif a[:2] in with_arg and len(a) > 2 and not a.startswith("--"):
+            i += 1
+        else:
+            return None
+    i += positionals
+    return args[i:] if i <= len(args) else None
+
+
+SHELL_BAD_CHARS = set("$`{}()*?[]!\n\r\0")
+SEP = {";", "&&", "||", "|", "&", "|&"}
+
+
+def parse_shell(text):
+    """A conservative parse of `sh -c TEXT`: [(argv, [redirect targets])] or None."""
+    if len(text) > 4000 or SHELL_BAD_CHARS & set(text) or "<<" in text:
+        return None
+    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        toks = list(lex)
+    except ValueError:
+        return None
+    cmds, cur, redirs, want = [], [], [], False
+    for t in toks:
+        if want:
+            redirs.append(t)
+            want = False
+        elif t in SEP:
+            if cur:
+                cmds.append((cur, redirs))
+            cur, redirs = [], []
+        elif t and set(t) <= set("<>&") and ("<" in t or ">" in t):
+            want = t.find(">") >= 0  # only output redirections name a file we must vet
+            if "<" in t and ">" not in t:
+                want = False
+                redirs.append("/dev/null")  # input redirection: nothing to protect
+        elif set(t) <= set("();<>|&") and t:
+            return None
+        elif t.startswith("~"):
+            return None
+        else:
+            cur.append(t)
+    if want:
+        return None
+    if cur:
+        cmds.append((cur, redirs))
+    out = []
+    for argv, rd in cmds:
+        while argv and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[0]):
+            if re.match(r"(PATH|IFS|ENV|BASH_ENV|SHELLOPTS|PS4|LD_|DYLD_)", argv[0]):
+                return None
+            argv = argv[1:]
+        while argv[:1] in (["exec"], ["command"]):  # builtins that just run what follows
+            argv = argv[1:]
+            if argv[:1] in (["-a"], ["-c"], ["-p"], ["-v"], ["-V"]):
+                return None
+        if not argv or argv[0] == ":":
+            continue
+        if argv[0] in SH_BAD_FIRST:
+            return None
+        out.append((argv, rd))
+    return out
+
+
+def evaluate(argv, cwd, path, depth=0):
+    """A refusal reason, or None when the window may run this command."""
+    if depth > MAX_DEPTH:
+        return "wrappers nested too deeply"
+    if not argv:
+        return "empty command"
+    prog = resolve(argv[0], cwd, path)
+    if prog is None:
+        return "program %r not found" % argv[0]
+    real = os.path.realpath(prog)
+    names = {os.path.basename(argv[0]).lower(), os.path.basename(prog).lower(),
+             os.path.basename(real).lower()}
+    name, args = os.path.basename(real).lower(), argv[1:]
+    for n in names:
+        if n in ALWAYS_DENY or n.startswith(ALWAYS_DENY_PREFIX):
+            return "program %s is on the denylist" % n
+    ccwd = canon(".", cwd)
+    for root in PROTECTED:
+        if _is_under(ccwd, root) and not names & READ_ONLY:
+            return "working directory is protected (%s)" % root
+
+    def hit(n):
+        return n in names
+
+    if hit("diskutil"):
+        verb = args[0].lower() if args else ""
+        if verb in ("apfs", "cs", "appleraid", "corestorage"):
+            verb = (args[1].lower() if len(args) > 1 else "")
+            if verb not in DISKUTIL_SUB_OK:
+                return "diskutil %s is not a read-only verb" % verb
+        elif verb not in DISKUTIL_OK:
+            return "diskutil %r is not a read-only verb" % verb
+    if hit("dscl"):
+        low = {a.lstrip("-").lower() for a in args}
+        if low & DSCL_WRITE or not low & DSCL_READ:
+            return "dscl may change users or groups"
+    if hit("dseditgroup"):
+        o = args[args.index("-o") + 1].lower() if "-o" in args and args.index("-o") + 1 < len(args) else ""
+        if o not in ("read", "checkmember"):
+            return "dseditgroup may change group membership"
+    if hit("sysadminctl") and args != ["-secureTokenStatus"] and (
+            len(args) != 2 or args[0] != "-secureTokenStatus"):
+        return "sysadminctl may change accounts"
+    if hit("security"):
+        verb = args[0] if args else ""
+        if verb not in SECURITY_OK or (verb == "list-keychains" and any(a.startswith(("-s", "-d")) for a in args[1:])):
+            return "security %r may change the keychain" % verb
+    if hit("date") and "-j" not in args and any(not a.startswith(("-", "+")) for a in args):
+        return "date may set the clock"
+    if hit("rm") and "--no-preserve-root" in args:
+        return "rm --no-preserve-root"
+
+    # wrappers: judge the wrapped command
+    if name == "env":
+        return eval_env(args, cwd, path, depth)
+    for w, (flags, with_arg, pos) in WRAPPERS.items():
+        if hit(w):
+            if w == "command" and args[:1] in (["-v"], ["-V"]):
+                return None
+            rest = skip_options(args, flags, with_arg, pos, numeric=(w == "nice"))
+            if rest is None:
+                return "%s options are not understood" % w
+            return evaluate(rest, cwd, path, depth + 1) if rest else None
+    if hit("xargs"):
+        return eval_xargs(args, cwd, path, depth)
+    if hit("find"):
+        return eval_find(args, cwd, path, depth)
+    if names & SHELLS:
+        return eval_shell(args, cwd, path, depth)
+    base_interp = re.sub(r"[0-9.]+$", "", name)
+    if INTERPRETERS.match(name):
+        flag = INLINE_FLAGS.get(base_interp, "")
+        for a in args:
+            if a == "--":
+                break
+            if a in ("--eval", "--print", "--exec") or (
+                    flag and re.fullmatch(r"-[A-Za-z]*[%s][A-Za-z]*" % re.escape(flag), a)):
+                return "%s with inline code cannot be checked" % name
+        if not [a for a in args if not a.startswith("-")]:
+            return "%s with no script reads code from stdin" % name
+    if hit("launchctl") and args[:1] in (["submit"], ["asuser"]):
+        return "launchctl %s runs an unchecked command" % args[0]
+    if names & READ_ONLY:
+        for n in names & READ_ONLY:
+            if any(a.startswith(f) for f in READ_ONLY_BANNED_FLAG.get(n, ()) for a in args):
+                return "%s flag is not read-only" % n
+        return None
+    crit = CRITICAL_RECURSIVE.get(name)
+    recursive = bool(crit) and any(re.fullmatch(r"-[A-Za-z]*[%s][A-Za-z]*" % crit, a) or a in ("--recursive",)
+                                   for a in args)
+    for a in args:
+        why = path_problem(a, cwd, recursive_critical=recursive)
+        if why:
+            return why
+    return None
+
+
+def eval_env(args, cwd, path, depth):
+    i, ncwd = 0, cwd
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if a in ("-i", "-", "-0", "-v", "--ignore-environment", "--null", "--debug"):
+            i += 1
+        elif a in ("-u", "--unset"):
+            i += 2
+        elif a.startswith("--unset="):
+            i += 1
+        elif a in ("-C", "--chdir") and i + 1 < len(args):
+            ncwd, i = os.path.join(cwd, args[i + 1]), i + 2
+        elif a.startswith("--chdir="):
+            ncwd, i = os.path.join(cwd, a.split("=", 1)[1]), i + 1
+        elif a in ("-S", "--split-string") or (a.startswith("-S") and len(a) > 2) or a.startswith("--split-string="):
+            if a in ("-S", "--split-string"):
+                s, i = (args[i + 1] if i + 1 < len(args) else ""), i + 2
+            elif a.startswith("--split-string="):
+                s, i = a.split("=", 1)[1], i + 1
+            else:
+                s, i = a[2:], i + 1
+            if SHELL_BAD_CHARS & set(s) or "\\" in s or "#" in s:
+                return "env -S string cannot be checked"
+            try:
+                return evaluate(shlex.split(s) + args[i:], ncwd, path, depth + 1)
+            except ValueError:
+                return "env -S string cannot be checked"
+        elif a.startswith("-"):
+            return "env option %s is not understood" % a
+        elif "=" in a:
+            if re.match(r"(PATH|IFS|ENV|BASH_ENV|SHELLOPTS|LD_|DYLD_|PYTHON)", a):
+                return "env sets %s" % a.split("=")[0]
+            i += 1
+        else:
+            break
+    rest = args[i:]
+    return evaluate(rest, ncwd, path, depth + 1) if rest else None
+
+
+def eval_xargs(args, cwd, path, depth):
+    rest = skip_options(args, {"-0", "-r", "-t", "-p", "-x", "--null", "--no-run-if-empty"},
+                        {"-n", "-I", "-L", "-P", "-s", "-E", "-J", "-R", "-S", "-d", "-a"}, 0)
+    if rest is None:
+        return "xargs options are not understood"
+    if not rest:
+        return None  # default command is echo
+    inner = evaluate(rest, cwd, path, depth + 1)
+    if inner:
+        return inner
+    p = resolve(rest[0], cwd, path)
+    if os.path.basename(os.path.realpath(p)).lower() not in READ_ONLY:
+        return "xargs feeds unknown arguments to a command that is not read-only"
+    return None
+
+
+def eval_find(args, cwd, path, depth):
+    starts, i = [], 0
+    while i < len(args) and args[i] in ("-H", "-L", "-P", "-E", "-X", "-d", "-x", "-s"):
+        i += 1
+    while i < len(args) and not args[i].startswith(("-", "(", "!")):
+        starts.append(args[i])
+        i += 1
+    acting, inner, j = False, [], i
+    while j < len(args):
+        a = args[j]
+        if a in ("-delete", "-fprint", "-fprint0", "-fprintf", "-fls"):
+            acting = True
+            if a != "-delete":
+                inner.append(["tee", args[j + 1] if j + 1 < len(args) else "/"])
+        elif a in ("-exec", "-execdir", "-ok", "-okdir"):
+            acting = True
+            k = j + 1
+            while k < len(args) and args[k] not in (";", "+", "\\;"):
+                k += 1
+            if k >= len(args):
+                return "find %s without a terminator cannot be checked" % a
+            cmd = ["/nonexistent-match" if x == "{}" else x for x in args[j + 1:k]]
+            if not cmd:
+                return "find %s with no command" % a
+            inner.append(cmd)
+            j = k
+        j += 1
+    if acting:
+        for s in starts or ["."]:
+            why = path_problem(s, cwd, recursive_critical=True)
+            if why:
+                return "find acts on " + why
+    for cmd in inner:
+        why = evaluate(cmd, cwd, path, depth + 1)
+        if why:
+            return why
+    return None
+
+
+def eval_shell(args, cwd, path, depth):
+    i, code = 0, None
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if re.fullmatch(r"-[A-Za-z]+", a) and "c" in a and not set(a[1:]) & set("os"):
+            if i + 1 >= len(args):
+                return "shell -c without a command"
+            code, i = args[i + 1], i + 2
+            break
+        if re.fullmatch(r"-[A-Za-z]+", a) and not set(a[1:]) & set("cos"):
+            i += 1
+        elif a.startswith("--") and "=" not in a and a in ("--login", "--noprofile", "--norc", "--posix"):
+            i += 1
+        else:
+            return "shell option %s is not understood" % a
+    if code is None:
+        rest = args[i:]
+        if not rest:
+            return "a shell with no script reads commands from stdin"
+        return path_problem(rest[0], cwd) or None  # a script file: only its own path is vetted
+    cmds = parse_shell(code)
+    if cmds is None:
+        return "shell command text cannot be parsed confidently"
+    for argv, redirs in cmds:
+        for r in redirs:
+            why = path_problem(r, cwd)
+            if why:
+                return "redirection: " + why
+        why = evaluate(argv, cwd, path, depth + 1)
+        if why:
+            return why
+    return None
+
+
+# ---------------------------------------------------------------- environment, modes
+
+ENV_KEEP = re.compile(r"^(PATH|HOME|LOGNAME|USER|SHELL|TERM|TZ|LANG|LC_[A-Z]+|COLORTERM|CLICOLOR[A-Z_]*|"
+                      r"LSCOLORS|COLUMNS|LINES|SUDO_USER|SUDO_UID|SUDO_GID|__CF_USER_TEXT_ENCODING)$")
+
+
+def clean_env(src, cwd):
+    env = {k: v for k, v in src.items() if ENV_KEEP.match(k)}
+    env["PWD"] = cwd
+    return env
+
+
+def die(msg, code):
+    sys.stderr.write("sudo-ask-granted: %s\n" % msg)
+    sys.exit(code)
+
+
+def need_root():
+    if os.geteuid() != 0:
+        die("must run as root through sudo", EX_NOEXEC)
+
+
+def split_command(rest):
+    if len(rest) < 2 or rest[0] != "--":
+        die("usage: ... -- COMMAND [ARG...]", EX_USAGE)
+    return rest[1:]
+
+
+def main(argv):
+    mode = argv[1] if len(argv) > 1 else ""
+    now = time.time()
+    cwd = os.getcwd()
+    path = os.environ.get("PATH", "")
+    if mode == "status":
+        is_open, reason, d = read_grant(now)
+        if len(argv) > 2:
+            if argv[2] != "--check":
+                die("usage: status [--check -- COMMAND...]", EX_USAGE)
+            cmd = split_command(argv[3:])
+            if not is_open:
+                die("REFUSED: " + reason, 1)
+            why = evaluate(cmd, cwd, path)
+            if why:
+                die("REFUSED: " + why, EX_DENIED)
+            return 0
+        print("open=%d" % is_open)
+        print("reason=" + clean(reason))
+        for k in ("expires_epoch", "expires_utc", "granted_utc", "remaining_s", "duration_s", "expired_utc"):
+            if k in d:
+                print("%s=%s" % (k, d[k]))
+        return 0 if is_open else 1
+    if mode == "exec":
+        need_root()
+        cmd = split_command(argv[2:])
+        text = " ".join(shlex.quote(c) for c in cmd)
+        is_open, reason, _ = read_grant(now)
+        why = None if not is_open else evaluate(cmd, cwd, path)
+        try:
+            if not is_open:
+                log("REFUSED(%s)" % reason, text)
+                die("REFUSED: " + reason, EX_REFUSED)
+            if why:
+                log("DENYLISTED(%s)" % why, text)
+                die("REFUSED: " + why, EX_DENIED)
+            log("GRANTED-EXEC", text)
+        except OSError as e:
+            die("cannot write the audit log (%s); not running anything" % e.strerror, EX_NOEXEC)
+        target = os.path.realpath(resolve(cmd[0], cwd, path))
+        try:
+            os.execve(target, cmd, clean_env(os.environ, cwd))
+        except OSError as e:
+            die("cannot run %s: %s" % (cmd[0], e.strerror), 127)
+    if mode == "grant":
+        need_root()
+        if len(argv) != 3:
+            die("usage: grant DURATION (30m, 2h, 8h; max 24h)", EX_USAGE)
+        try:
+            secs = parse_duration(argv[2])
+        except ValueError as e:
+            die(str(e), EX_USAGE)
+        uid = os.environ.get("SUDO_UID", "")
+        try:
+            log("GRANT(%s until %s)" % (argv[2], iso(int(now) + secs)))
+            d = write_grant(secs, int(now), int(uid) if uid.isdigit() else 0)
+        except OSError as e:
+            die("cannot grant: %s" % e.strerror, EX_NOEXEC)
+        print("expires_utc=" + d["expires_utc"])
+        return 0
+    if mode == "revoke":
+        need_root()
+        if len(argv) != 2:
+            die("usage: revoke", EX_USAGE)
+        try:
+            log("REVOKE")
+            os.unlink(GRANT_FILE)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            die("cannot revoke: %s" % e.strerror, EX_NOEXEC)
+        return 0
+    die("usage: exec -- CMD... | status [--check -- CMD...] | grant DURATION | revoke", EX_USAGE)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

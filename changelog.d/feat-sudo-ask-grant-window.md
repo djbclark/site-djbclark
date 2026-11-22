@@ -1,0 +1,4 @@
+
+### Added
+
+- `sudo-ask` approval window (`roles/sudo_ask_grant`): `sudo-ask --grant [DURATION]` (default 8h, max 24h, one dialog + Touch ID), `--revoke`, `--status`. While a window is open `sudo-ask CMD...` runs through the root helper `sudo-ask-granted` with no dialog, except a denylist (sudoers, PAM, the helper and grant file, the sudo-secretspec broker, TCC, keychain, disk erase, csrutil, nvram, user/admin changes), which still prompts. The grant file is root-owned; the sudoers drop-in allows only `exec` and `status` without a password and sets `timestamp_timeout=0`, so an agent cannot open or extend a window. Setup script with `--print`, `--check --diff`, `--verify`, `--rollback`; 12 mutants killed. (#PR)

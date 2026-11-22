@@ -9,14 +9,31 @@
 # Use `sudo-ask <command...>` instead of `sudo <command...>` (agents included).
 # The real `sudo` is not shadowed, so launchd/ansible/scripts are unaffected.
 # Every decision is appended to ~/.local/state/sudo-ask/log.
+#
+# Approval window (roles/sudo_ask_grant): one Touch ID opens a timed window; while it is open
+# every `sudo-ask CMD...` runs with no dialog and no Touch ID, through the root helper
+# /usr/local/libexec/sudo-ask-granted, EXCEPT commands on its denylist (sudoers, PAM, the
+# helper and grant file, the sudo-secretspec broker, TCC, keychain, disk erase, csrutil,
+# nvram, user/admin changes, ...), which still get the dialog and Touch ID. The helper
+# re-checks everything as root; this client only decides whether to try it.
+#   sudo-ask --grant [DURATION]   open a window (30m, 2h, 8h; default 8h, max 24h): dialog + Touch ID
+#   sudo-ask --revoke             end it now (Touch ID)
+#   sudo-ask --status             is a window open, and until when (exit 0 open, 1 not)
+# `grant`, `revoke` and `status` without the dashes work too, but only when no program of that
+# name is on PATH. No helper installed (or no window): the dialog path below, unchanged.
 
 export PATH="/opt/homebrew/bin:$PATH"
 set -u
-[ $# -gt 0 ] || { echo "usage: sudo-ask <command...>" >&2; exit 64; }
+HELPER=/usr/local/libexec/sudo-ask-granted
+SUDO=/usr/bin/sudo
+OSASCRIPT=/usr/bin/osascript
+PING=hermes-ping
+[ $# -gt 0 ] || { echo "usage: sudo-ask <command...> | --grant [DURATION] | --revoke | --status" >&2; exit 64; }
 
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/sudo-ask"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/log"
+MARKER="$LOG_DIR/window-expires"   # epoch of the last window's end; only drives the "expired" ping
 
 # Shell-quoted form so arguments with spaces are unambiguous in the dialog.
 # Each argument is quoted whole ('a b (c)'), not printf %q's per-character
@@ -32,13 +49,98 @@ quote_arg() {
   else printf "'%s'" "${a//$sq/$sq\\$sq$sq}"
   fi
 }
+log() { printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
+
+# ---- the approval window -------------------------------------------------------------------
+ny() { TZ=America/New_York gdate -d "@$1" '+%Y-%m-%d %I:%M %p %Z'; }   # display only; files and logs are UTC
+ping_op() {  # best effort: a failed or missing hermes-ping never blocks anything
+  command -v "$PING" >/dev/null 2>&1 || return 0
+  { timeout 15 "$PING" "$1" || true; } >/dev/null 2>&1
+}
+# window_status: sets W_OPEN (1/0), W_EXPIRES_EPOCH, W_EXPIRES_UTC, W_REMAINING, W_REASON from the helper.
+window_status() {
+  W_OPEN=0 W_EXPIRES_EPOCH= W_EXPIRES_UTC= W_REMAINING= W_REASON="no window helper installed"
+  [ -x "$HELPER" ] || return 1
+  local out k v
+  out=$("$SUDO" -n "$HELPER" status 2>/dev/null) || true
+  W_REASON="the helper did not answer (not in sudoers?)"
+  while IFS== read -r k v; do
+    case $k in
+      open) [[ $v == [01] ]] && W_OPEN=$v ;;
+      reason) W_REASON=${v//[^[:print:]]/?} ;;
+      expires_epoch) [[ $v =~ ^[0-9]+$ ]] && W_EXPIRES_EPOCH=$v ;;
+      expires_utc) [[ $v =~ ^[0-9TZ:-]+$ ]] && W_EXPIRES_UTC=$v ;;
+      remaining_s) [[ $v =~ ^[0-9]+$ ]] && W_REMAINING=$v ;;
+    esac
+  done <<<"$out"
+  [ "$W_OPEN" = 1 ] && [ -n "$W_EXPIRES_EPOCH" ]
+}
+describe_window() {
+  local r=$W_REMAINING
+  echo "sudo-ask window: OPEN until $(ny "$W_EXPIRES_EPOCH") ($W_EXPIRES_UTC; $((r / 3600))h$(((r % 3600) / 60))m left)"
+}
+# The first use after a window ended tells the operator once (best effort).
+note_expiry_once() {
+  [ -f "$MARKER" ] || return 0
+  local e; e=$(cat "$MARKER" 2>/dev/null)
+  [[ $e =~ ^[0-9]+$ ]] || { rm -f "$MARKER"; return 0; }
+  [ "$(gdate +%s)" -ge "$e" ] || return 0
+  rm -f "$MARKER"
+  printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "WINDOW-EXPIRED" "$PWD" "ended $e" >> "$LOG"
+  ping_op "sudo-ask: approval window expired at $(ny "$e"); commands prompt again"
+}
+
+grant_mode=
+note=
+sub=
+case $1 in
+  --grant|--revoke|--status) sub=${1#--}; shift ;;
+  grant|revoke|status)
+    if ! command -v "$1" >/dev/null 2>&1; then sub=$1; shift; fi ;;
+esac
+case $sub in
+  status)
+    [ $# -eq 0 ] || { echo "usage: sudo-ask --status" >&2; exit 64; }
+    if window_status; then describe_window; exit 0; fi
+    echo "sudo-ask window: none ($W_REASON)"; exit 1 ;;
+  revoke)
+    [ $# -eq 0 ] || { echo "usage: sudo-ask --revoke" >&2; exit 64; }
+    [ -x "$HELPER" ] || { echo "sudo-ask: no window helper installed ($HELPER)" >&2; exit 1; }
+    "$SUDO" -k
+    "$SUDO" "$HELPER" revoke || { echo "sudo-ask: revoke failed" >&2; exit 1; }
+    rm -f "$MARKER"
+    printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "WINDOW-REVOKE" "$PWD" "" >> "$LOG"
+    ping_op "sudo-ask: approval window revoked; commands prompt again"
+    echo "sudo-ask window: revoked"; exit 0 ;;
+  grant)
+    dur=${1:-8h}
+    [ $# -le 1 ] && [[ $dur =~ ^([0-9]{1,6})([smhd])$ ]] || { echo "usage: sudo-ask --grant [DURATION]  (30m, 2h, 8h; units s m h d; default 8h)" >&2; exit 64; }
+    case ${BASH_REMATCH[2]} in s) mult=1 ;; m) mult=60 ;; h) mult=3600 ;; d) mult=86400 ;; esac
+    secs=$(( 10#${BASH_REMATCH[1]} * mult ))
+    if [ "$secs" -lt 60 ] || [ "$secs" -gt 86400 ]; then echo "sudo-ask: a window lasts 1 minute to 24 hours (got $dur)" >&2; exit 64; fi
+    [ -x "$HELPER" ] || { echo "sudo-ask: no window helper installed ($HELPER); see roles/sudo_ask_grant/README.md" >&2; exit 1; }
+    set -- "$HELPER" grant "$dur"
+    grant_mode=1
+    note="OPENS AN APPROVAL WINDOW for $dur: every agent's sudo-ask then runs as root with NO dialog and NO Touch ID, except denylisted commands. Touch ID follows."
+    ;;
+  *)
+    # Plain command. Window open and the helper says this command is allowed: run it, no dialog.
+    # (An option first, or VAR=value first, is sudo syntax this path does not take: normal path.)
+    if [ "${1#-}" = "$1" ] && [[ $1 != *=* ]] && [ -x "$HELPER" ]; then
+      if "$SUDO" -n "$HELPER" status --check -- "$@" >/dev/null 2>&1; then
+        cmd=""; for a in "$@"; do cmd+="$(quote_arg "$a") "; done; cmd=${cmd% }
+        log GRANTED-WINDOW
+        exec "$SUDO" -n "$HELPER" exec -- "$@"
+      fi
+      note_expiry_once
+    fi ;;
+esac
+
 cmd=""
 for a in "$@"; do cmd+="$(quote_arg "$a") "; done
 cmd=${cmd% }
 shown=$cmd
 [ ${#shown} -gt 700 ] && shown="${shown:0:700}... [truncated, ${#cmd} chars]"
-
-log() { printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "$1" "$PWD" "$cmd" >> "$LOG"; }
 
 # Enter and Esc must never decide: the default button is "Wait" (a no-op that
 # re-shows the dialog), and Esc is mapped to it too. Wait is also the leftmost
@@ -50,16 +152,19 @@ MAX_WAIT=${SUDO_ASK_MAX_WAIT:-600}
 start=$SECONDS
 while :; do
   # Command goes to AppleScript via argv, never interpolated into the script text.
-  answer=$(/usr/bin/osascript - "$shown" "$PWD" 2>&1 <<'APPLESCRIPT'
+  answer=$($OSASCRIPT - "$shown" "$PWD" "$note" 2>&1 <<'APPLESCRIPT'
 on run argv
   set theCmd to item 1 of argv
   set theDir to item 2 of argv
+  set theNote to item 3 of argv
+  set msg to "Run as root?  (Enter/Esc do nothing - click a button)" & return & return
+  if theNote is not "" then set msg to msg & theNote & return & return
   tell application "System Events"
     activate
     -- The Apple event timeout must outlast "giving up after", or an unanswered
     -- dialog ends in error -1712 instead of returning gave up.
     with timeout of 180 seconds
-      set r to display dialog ("Run as root?  (Enter/Esc do nothing - click a button)" & return & return & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Wait", "Deny", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
+      set r to display dialog (msg & theCmd & return & return & "Directory: " & theDir) with title "sudo-ask" buttons {"Wait", "Deny", "Allow"} default button "Wait" cancel button "Wait" with icon caution giving up after 120
     end timeout
   end tell
   return (button returned of r) & "|" & (gave up of r)
@@ -91,4 +196,17 @@ APPLESCRIPT
 done
 
 log ALLOWED
-exec /usr/bin/sudo "$@"
+if [ -n "$grant_mode" ]; then
+  # A fresh sudo ticket is required (-k; the sudoers drop-in also sets timestamp_timeout=0 for the helper).
+  "$SUDO" -k
+  "$SUDO" "$@" || { log "WINDOW-GRANT-FAILED"; echo "sudo-ask: grant failed" >&2; exit 1; }
+  if window_status; then
+    log "WINDOW-GRANT($W_EXPIRES_UTC)"
+    printf '%s\n' "$W_EXPIRES_EPOCH" > "$MARKER"
+    describe_window
+    ping_op "sudo-ask: approval window open until $(ny "$W_EXPIRES_EPOCH")"
+    exit 0
+  fi
+  echo "sudo-ask: the grant ran but the window is not open: $W_REASON" >&2; exit 1
+fi
+exec "$SUDO" "$@"

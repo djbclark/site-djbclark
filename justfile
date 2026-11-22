@@ -295,6 +295,23 @@ mac-dns-status:
     @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | ggrep ip_address || echo 'NO ANSWER')"
     @echo "probe example.com: $(dscacheutil -q host -a name example.com | ggrep -m1 ip_address || echo 'NO ANSWER')"
 
+# The sudo-ask approval window (roles/sudo_ask_grant): print/check are read-only; setup, verify
+# and rollback are the operator's Touch ID steps.
+sudo-ask-grant-print:
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --print
+
+sudo-ask-grant-check:
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --check --diff
+
+sudo-ask-grant-setup:
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh
+
+sudo-ask-grant-verify:
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --verify
+
+sudo-ask-grant-rollback:
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --rollback
+
 # launchd's per-user PATH = the login-shell PATH (roles/launchd_path). Takes
 # effect at the next reboot. `launchd-path-setup` is the one privileged step
 # (Touch ID): installs the root-owned applier + sudoers rule.
