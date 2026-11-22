@@ -107,6 +107,7 @@ note_expiry_once() {
 grant_mode=
 note=
 sub=
+nk=0   # leading `-k` words (the approval-probe form)
 case $1 in
   --grant|--revoke|--status) sub=${1#--}; shift ;;
   grant|revoke|status)
@@ -120,8 +121,9 @@ case $sub in
   revoke)
     [ $# -eq 0 ] || { echo "usage: sudo-ask --revoke" >&2; exit 64; }
     [ -x "$HELPER" ] || { echo "sudo-ask: no window helper installed ($HELPER)" >&2; exit 1; }
-    "$SUDO" -k
-    "$SUDO" "$HELPER" revoke || { echo "sudo-ask: revoke failed" >&2; exit 1; }
+    # revoke only lowers privilege: the sudoers drop-in lets it run with no authentication (a panic button).
+    # An older install without that line asks for authentication instead (fresh: -k).
+    "$SUDO" -n "$HELPER" revoke 2>/dev/null || "$SUDO" -k "$HELPER" revoke || { echo "sudo-ask: revoke failed" >&2; exit 1; }
     rm -f "$MARKER"
     printf '%s\t%s\t%s\t%s\n' "$(gdate '+%Y-%m-%dT%H:%M:%S%z')" "WINDOW-REVOKE" "$PWD" "" >> "$LOG"
     ping_op "sudo-ask: approval window revoked; commands prompt again"
@@ -141,7 +143,7 @@ case $sub in
     # Plain command. Window open and approval-gate says it covers this command: run it, no dialog. Leading
     # `-k` words (the approval-probe form) are dropped for that decision only; without a window the original
     # arguments, `-k` included, take the dialog path below.
-    nk=0; for a in "$@"; do [ "$a" = -k ] || break; nk=$((nk + 1)); done
+    for a in "$@"; do [ "$a" = -k ] || break; nk=$((nk + 1)); done
     try_window "${@:nk+1}"
     note_expiry_once ;;
 esac
@@ -149,6 +151,13 @@ esac
 cmd=""
 for a in "$@"; do cmd+="$(quote_arg "$a") "; done
 cmd=${cmd% }
+# Running the helper itself (or a link to it) by hand skips `--grant`'s dialog note: say what it can do.
+if [ -z "$note" ]; then
+  first=; for a in "$@"; do [ "$a" = -k ] && continue; first=$a; break; done
+  if [ -n "$first" ] && [ -e "$HELPER" ] && [ "$(/usr/bin/readlink -f -- "$first" 2>/dev/null)" = "$(/usr/bin/readlink -f -- "$HELPER" 2>/dev/null)" ]; then
+    note="THIS COMMAND IS THE APPROVAL-WINDOW HELPER ITSELF: it can open or end an approval window, bypassing sudo-ask --grant."
+  fi
+fi
 shown=$cmd
 [ ${#shown} -gt 700 ] && shown="${shown:0:700}... [truncated, ${#cmd} chars]"
 
@@ -209,7 +218,7 @@ log ALLOWED
 if [ -n "$grant_mode" ]; then
   # A fresh sudo ticket is required (-k; the sudoers drop-in also sets timestamp_timeout=0 for the helper).
   "$SUDO" -k
-  "$SUDO" "$@" || { log "WINDOW-GRANT-FAILED"; echo "sudo-ask: grant failed" >&2; exit 1; }
+  "$SUDO" -k "$@" || { log "WINDOW-GRANT-FAILED"; echo "sudo-ask: grant failed" >&2; exit 1; }
   if window_status; then
     log "WINDOW-GRANT($W_EXPIRES_UTC)"
     printf '%s\n' "$W_EXPIRES_EPOCH" > "$MARKER"
@@ -219,4 +228,6 @@ if [ -n "$grant_mode" ]; then
   fi
   echo "sudo-ask: the grant ran but the window is not open: $W_REASON" >&2; exit 1
 fi
-exec "$SUDO" "$@"
+# -k with a command: sudo ignores any cached ticket and does not leave one, so an approval here never feeds the
+# machine-wide ticket that would let another process run sudo with no prompt (and open a window).
+exec "$SUDO" -k "${@:nk+1}"

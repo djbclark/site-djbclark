@@ -51,6 +51,7 @@ class GrantBase(unittest.TestCase):
             "GRANT_FILE": str(self.dir / "grant"),
             "LOG_FILE": str(pathlib.Path(self.tmp.name) / "grant.log"),
             "OWNER_UID": os.getuid(),
+            "INVOKER_UID": os.getuid() or 501,   # the user whose writable paths prompt
         }
         for k, v in patches.items():
             p = mock.patch.object(mod, k, v)
@@ -316,7 +317,8 @@ class PolicyTests(GrantBase):
                      ["find", str(self.work), "-name", "a", "-exec", "cat", "{}", ";"],
                      ["xargs", "-n1", "echo"], ["launchctl", "list"], ["nice", "-n", "5", "ls"],
                      ["env", "-S", "echo hi"], ["mkdir", "-p", str(self.work / "d" / "e")],
-                     ["python3", str(f)], ["timeout", "5", "ls"], ["sudo", "-n", "ls"]):
+                     ["timeout", "5", "ls"], ["sudo", "-n", "ls"], ["find", "-L", ".", "-name", "a"],
+                     ["dseditgroup", "-o", "read", "admin"], ["crontab", "-l"]):
             with self.subTest(argv=argv):
                 self.assertAllowed(argv)
 
@@ -324,13 +326,140 @@ class PolicyTests(GrantBase):
         self.assertDenied(["no-such-program-xyz"])
         self.assertDenied(["./nothing-here"])
 
+    # ---- ruling 1: code the invoking user can change prompts, even inside a window
+
+    def test_agent_writable_scripts_and_programs_prompt(self) -> None:
+        f = self.work / "a"
+        f.write_text("print(1)\n")
+        copy = self.work / "g"
+        copy.write_text(HELPER.read_text())
+        copy.chmod(0o755)
+        mine = self.work / "echo"
+        mine.write_bytes(pathlib.Path("/bin/echo").read_bytes())
+        mine.chmod(0o755)
+        for argv in (["python3", str(f)], ["sh", str(f)], ["bash", str(f)], ["perl", str(f)], [str(mine), "hi"],
+                     ["python3", "-IS", str(copy), "grant", "24h"],       # MED-3: a copy of the helper in ~/g
+                     ["python3", str(copy), "grant", "24h"], ["env", "python3", str(f)],
+                     ["nice", "sh", str(f)], ["sh", "-c", "python3 " + str(f)],
+                     ["python3", "/dev/stdin"], ["python3", "-"], ["python3", "-m", "http.server"],
+                     ["python3", "-mhttp.server"], ["python3", "-Im", "pdb"], ["perl", "-M/tmp/x", str(f)],
+                     ["sh", "/dev/stdin"], ["bash", "/dev/fd/0"]):
+            with self.subTest(argv=argv):
+                self.assertDenied(argv)
+
+    def test_root_owned_scripts_and_system_tools_run(self) -> None:
+        rc = pathlib.Path("/etc/rc.common")
+        if not rc.is_file():
+            self.skipTest("no /etc/rc.common here")
+        self.assertAllowed(["sh", str(rc)])      # control: the script check is not just refusing everything
+        self.assertAllowed(["ls", "/usr/bin"])
+        self.assertAllowed(["perl", "-MPOSIX", str(rc)])
+
+    def test_unknown_invoker_prompts_for_everything(self) -> None:
+        for uid in (None, 0):
+            with self.subTest(uid=uid), mock.patch.object(mod, "INVOKER_UID", uid):
+                self.assertDenied(["ls"])
+                self.assertDenied(["echo", "hi"])
+
+    def test_agent_writable_places(self) -> None:
+        for p in ("/tmp/x", "/private/tmp/x/y", "/var/folders/zz/T/x", "/private/var/tmp/x", "/TMP/X", str(self.work)):
+            with self.subTest(p=p):
+                self.assertTrue(mod.agent_writable(p))
+        self.assertFalse(mod.agent_writable("/usr/bin/true"))
+        self.assertFalse(mod.agent_writable("/bin/ls"))
+
+    def test_agent_writable_group_and_world_bits(self) -> None:
+        def fake_stat(path):
+            if path == "/srv/shared":
+                return os.stat_result((0o40775, 1, 1, 1, 0, 20, 0, 0, 0, 0))
+            if path == "/srv/open":
+                return os.stat_result((0o40777, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+            if path == "/srv/mine":
+                return os.stat_result((0o40755, 1, 1, 1, mod.INVOKER_UID, 0, 0, 0, 0, 0))
+            return os.stat_result((0o40755, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+        with mock.patch.object(mod.os, "stat", fake_stat), mock.patch.object(mod, "_user_groups", return_value={20, 501}):
+            self.assertTrue(mod.agent_writable("/srv/shared/tool"))
+            self.assertTrue(mod.agent_writable("/srv/open/tool"))
+            self.assertTrue(mod.agent_writable("/srv/mine/tool"))
+            self.assertFalse(mod.agent_writable("/srv/other/tool"))
+        with mock.patch.object(mod.os, "stat", fake_stat), mock.patch.object(mod, "_user_groups", return_value={501}):
+            self.assertFalse(mod.agent_writable("/srv/shared/tool"))   # group-writable, but not the user's group
+        with mock.patch.object(mod.os, "stat", fake_stat), mock.patch.object(mod, "_user_groups", return_value=None):
+            self.assertTrue(mod.agent_writable("/srv/other/tool"))     # cannot tell: prompt
+
+    def test_make_and_git_read_code_from_the_working_directory(self) -> None:
+        self.assertDenied(["make"], cwd=self.work)
+        self.assertDenied(["git", "status"], cwd=self.work)
+        self.assertAllowed(["git", "--version"], cwd="/usr")
+
+    # ---- adversary round 1, LOW findings
+
+    def test_a_link_named_like_a_read_only_tool_is_judged_by_its_target(self) -> None:
+        link = self.work / "cat"
+        os.symlink("/bin/cp", link)
+        with mock.patch.object(mod, "agent_writable", return_value=False):   # isolate LOW-1 from ruling 1
+            self.assertDenied([str(link), str(self.work / "a"), "/etc/sudoers.d/x"])
+            self.assertDenied([str(link), "x"], cwd="/private/etc/pam.d")
+            self.assertAllowed(["/bin/cat", "/etc/sudoers.d"])
+
+    def test_hash_and_dollar_in_shell_text_prompt(self) -> None:
+        for text in ("echo a#b", "echo hi # visudo", "echo $HOME", "ls $X", "cat /etc/$Y", "echo ${x}", "echo $1"):
+            with self.subTest(text=text):
+                self.assertDenied(["sh", "-c", text])
+
+    def test_find_f_and_follow_links(self) -> None:
+        self.assertDenied(["find", "-f", "/etc/sudoers.d", "-delete"])
+        self.assertDenied(["find", "-f", "/etc", "-exec", "rm", "{}", ";"])
+        self.assertDenied(["find", "-L", str(self.work), "-delete"])
+        self.assertDenied(["find", "-H", str(self.work), "-exec", "ls", "{}", ";"])
+
+    def test_root_owned_files_with_other_hard_links_prompt(self) -> None:
+        def lstat(nlink):
+            return lambda p: os.stat_result((0o100644, 1, 1, nlink, 0, 0, 0, 0, 0, 0))
+        with mock.patch.object(mod.os, "lstat", lstat(2)):
+            self.assertDenied(["touch", "anything"])
+        with mock.patch.object(mod.os, "lstat", lstat(1)):
+            self.assertAllowed(["touch", "anything"])
+
+    def test_every_dseditgroup_operation_is_checked(self) -> None:
+        self.assertDenied(["dseditgroup", "-o", "read", "-o", "edit", "-a", "x", "-t", "user", "admin"])
+        self.assertDenied(["dseditgroup", "-o", "edit", "-o", "read", "-a", "x", "admin"])
+        self.assertAllowed(["dseditgroup", "-o", "checkmember", "-m", "x", "admin"])
+
+    def test_persistence_paths_are_protected(self) -> None:
+        for p in ("/Library/LaunchDaemons/x.plist", "/Library/LaunchAgents/x.plist", "/Library/StartupItems/x",
+                  "/etc/periodic/daily/999.x", "/etc/paths", "/etc/paths.d/x", "/etc/zshenv", "/etc/zprofile",
+                  "/etc/zshrc", "/etc/profile", "/etc/bashrc", "/var/root/.zshrc", "/var/root", "/etc/ssh/sshd_config",
+                  "/usr/lib/cron/tabs/root", "/var/at/tabs/root", "/etc/ld.so.conf",
+                  "/Library/Security/SecurityAgentPlugins/x"):
+            for prog in (["touch"], ["tee"], ["cp", str(self.work / "x")], ["chmod", "777"]):
+                with self.subTest(path=p, prog=prog[0]):
+                    self.assertDenied(prog + [p])
+        self.assertAllowed(["ls", "/etc/paths.d"])
+        self.assertAllowed(["touch", str(self.work / "pathsfoo")])
+
+    def test_launchctl_and_crontab_that_run_things(self) -> None:
+        for argv in (["launchctl", "bootstrap", "system", "/x.plist"], ["launchctl", "load", "-w", "/x.plist"],
+                     ["launchctl", "enable", "system/x"], ["launchctl", "submit", "-l", "x", "--", "/bin/sh"],
+                     ["launchctl", "kickstart", "system/x"], ["launchctl", "asuser", "501", "/bin/sh"],
+                     ["crontab", "-u", "root", "/x"], ["crontab", "/x"], ["crontab", "-e"], ["crontab", "-r"]):
+            with self.subTest(argv=argv):
+                self.assertDenied(argv)
+        self.assertAllowed(["launchctl", "list"])
+        self.assertAllowed(["launchctl", "print", "system"])
+
 
 class ModeTests(GrantBase):
     """main() with the boundary patched: no root needed, execve captured."""
 
-    def run_main(self, *args, env=None):
+    def run_main(self, *args, env=None, fresh=None, installed=True):
+        """fresh: a refusal text for the fresh-authentication proof (None: proven). installed: run as the installed
+        helper path (False: as some other copy)."""
         calls = []
+        real = os.path.realpath(str(HELPER)) if installed else "/usr/local/libexec/sudo-ask-granted"
         with mock.patch.object(mod, "need_root"), \
+                mock.patch.object(mod, "INSTALLED_PATH", real), \
+                mock.patch.object(mod, "fresh_auth_problem", return_value=fresh), \
                 mock.patch.object(mod.os, "execve", lambda *a: calls.append(a)), \
                 mock.patch.dict(mod.os.environ, {"PATH": PATH, "SUDO_UID": "501", **(env or {})}), \
                 mock.patch("os.getcwd", return_value=str(self.work)):
@@ -362,6 +491,9 @@ class ModeTests(GrantBase):
         for bad in ("BASH_ENV", "DYLD_INSERT_LIBRARIES", "PYTHONPATH"):
             self.assertNotIn(bad, env)
         self.assertEqual(env["LANG"], "C")
+        self.assertEqual(env["PATH"], mod.EXEC_PATH)   # the caller's PATH and HOME never reach the root program
+        self.assertEqual(env["HOME"], "/var/root")
+        self.assertEqual(env["PWD"], str(self.work))
 
     def test_exec_refused_without_window(self) -> None:
         rc, calls = self.run_main("exec", "--", "echo", "hi")
@@ -406,6 +538,74 @@ class ModeTests(GrantBase):
         self.assertIn("GRANT(30m", self.log_text())
         self.assertIn("REVOKE", self.log_text())
 
+    def test_grant_refused_without_proof_of_fresh_authentication(self) -> None:
+        rc, _ = self.run_main("grant", "30m", fresh="sudo was not run with -k")
+        self.assertEqual(rc, mod.EX_REFUSED)
+        self.assertFalse((self.dir / "grant").exists())
+        self.assertIn("GRANT-REFUSED(sudo was not run with -k)", self.log_text())
+
+    def test_grant_refused_from_a_copy_of_the_helper(self) -> None:   # MED-3
+        rc, _ = self.run_main("grant", "24h", installed=False)
+        self.assertEqual(rc, mod.EX_REFUSED)
+        self.assertFalse((self.dir / "grant").exists())
+
+    def test_grant_uses_the_real_ancestor_check_by_default(self) -> None:
+        self.put(expires_in=-1, granted_ago=100)   # not a window; just a file to compare against
+        chain = {100: (50, "/usr/bin/sudo", "sudo -k /usr/local/libexec/sudo-ask-granted grant 1h"), 50: (1, "zsh", "zsh")}
+        with mock.patch.object(mod, "need_root"), mock.patch.object(mod, "proc_info", lambda pid: chain.get(pid)), \
+                mock.patch.object(mod.os, "getppid", return_value=100), \
+                mock.patch.object(mod, "INSTALLED_PATH", os.path.realpath(str(HELPER))), \
+                mock.patch.dict(mod.os.environ, {"SUDO_UID": "501"}), mock.patch("os.getcwd", return_value=str(self.work)):
+            self.assertEqual(mod.main(["h", "grant", "1h"]), 0)
+            chain[100] = (50, "/usr/bin/sudo", "sudo -n /usr/local/libexec/sudo-ask-granted grant 1h")
+            with self.assertRaises(SystemExit) as cm:
+                mod.main(["h", "grant", "1h"])
+            self.assertEqual(cm.exception.code, mod.EX_REFUSED)
+
+    def test_revoke_needs_no_authentication_but_takes_no_arguments(self) -> None:   # ruling 3
+        self.put()
+        self.assertEqual(self.run_main("revoke", "x")[0], mod.EX_USAGE)
+        self.assertEqual(self.run_main("revoke", "--", "x")[0], mod.EX_USAGE)
+        self.assertTrue(mod.read_grant(int(time.time()))[0], "a refused revoke must not revoke")
+        rc, _ = self.run_main("revoke", fresh="no proof of anything")   # no fresh-auth check on this path
+        self.assertEqual(rc, 0)
+        self.assertFalse(mod.read_grant(int(time.time()))[0])
+
+    def test_exec_refuses_a_program_that_changes_between_check_and_run(self) -> None:   # LOW-6
+        self.put()
+        real_resolve = mod.resolve
+        def flipping(name, cwd, path):
+            if "GRANTED-EXEC" in self.log_text() and name == "echo":
+                return "/bin/ls"
+            return real_resolve(name, cwd, path)
+        with mock.patch.object(mod, "resolve", flipping):
+            rc, calls = self.run_main("exec", "--", "echo", "hi")
+        self.assertEqual((rc, calls), (mod.EX_DENIED, []))
+        self.assertIn("changed during the check", self.log_text())
+
+    def test_exec_prompts_for_agent_writable_programs(self) -> None:   # ruling 1 at exec time
+        self.put()
+        script = self.work / "a.py"
+        script.write_text("print(1)\n")
+        rc, calls = self.run_main("exec", "--", "python3", str(script))
+        self.assertEqual((rc, calls), (mod.EX_DENIED, []))
+        self.assertIn("DENYLISTED", self.log_text())
+
+    def test_log_is_private_capped_and_rotates(self) -> None:   # LOW-9
+        mod.log("EVENT", "x" * 10000)
+        st = os.stat(mod.LOG_FILE)
+        self.assertEqual(stat.S_IMODE(st.st_mode), 0o600)
+        line = self.log_text()
+        self.assertLess(len(line), mod.CMD_LOG_MAX + 400)
+        self.assertIn("[10000 chars]", line)
+        os.chmod(mod.LOG_FILE, 0o644)
+        mod.log("AGAIN")
+        self.assertEqual(stat.S_IMODE(os.stat(mod.LOG_FILE).st_mode), 0o600)   # tightened on every write
+        with mock.patch.object(mod, "LOG_MAX_BYTES", 10):
+            mod.log("AFTER-ROTATE")
+        self.assertTrue(pathlib.Path(mod.LOG_FILE + ".1").exists())
+        self.assertEqual(len(self.log_text().splitlines()), 1)
+
     def test_grant_refuses_bad_durations(self) -> None:
         for d in ("25h", "0m", "junk", "8", ""):
             with self.subTest(d=d):
@@ -434,6 +634,46 @@ class ModeTests(GrantBase):
         self.assertEqual(self.run_main("status", "--check", "--", "visudo")[0], mod.EX_DENIED)
 
 
+class FreshAuthTests(unittest.TestCase):
+    """MED-1: grant proves fresh authentication by the nearest sudo above it carrying -k."""
+
+    @staticmethod
+    def chain(*rows):
+        table = {100 + i: (101 + i if i + 1 < len(rows) else 1, comm, args) for i, (comm, args) in enumerate(rows)}
+        return lambda pid: table.get(pid)
+
+    def problem(self, *rows):
+        return mod.fresh_auth_problem(info=self.chain(*rows), start=100)
+
+    def test_sudo_with_k_proves_it(self) -> None:
+        for args in ("sudo -k /h grant 1h", "sudo -nk /h grant 1h", "sudo --reset-timestamp /h grant 1h",
+                     "sudo -u root -k /h grant 1h", "sudo -k -n /h grant 1h"):
+            with self.subTest(args=args):
+                self.assertIsNone(self.problem(("/usr/bin/sudo", args), ("-zsh", "-zsh")))
+
+    def test_sudo_without_k_does_not(self) -> None:
+        for args in ("sudo -n /h grant 1h", "sudo /h grant 1h", "sudo -ukate /h grant 1h", "sudo -u root /h grant 1h",
+                     "sudo /h grant 1h -k", "sudo -- /h grant -k"):
+            with self.subTest(args=args):
+                self.assertIn("-k", self.problem(("/usr/bin/sudo", args), ("-zsh", "-zsh")) or "")
+
+    def test_no_sudo_above_does_not(self) -> None:
+        self.assertIn("no sudo", self.problem(("python3", "python3 x"), ("-zsh", "-zsh")))
+        self.assertIn("no sudo", mod.fresh_auth_problem(info=lambda pid: None, start=100))
+
+    def test_nearest_sudo_decides(self) -> None:
+        # an outer `sudo -k` must not vouch for an inner plain `sudo -n`: the inner is the one that ran us
+        self.assertIsNotNone(self.problem(("/usr/bin/sudo", "sudo -n /h grant 1h"), ("/bin/sh", "sh -c x"),
+                                          ("/usr/bin/sudo", "sudo -k sh -c x"), ("-zsh", "-zsh")))
+
+    def test_a_sudo_named_program_elsewhere_is_not_sudo(self) -> None:
+        self.assertIsNotNone(self.problem(("/tmp/sudo", "sudo -k /h grant 1h"), ("-zsh", "-zsh")))
+
+    def test_deep_chain_is_bounded(self) -> None:
+        rows = [("sh", "sh")] * 20
+        self.assertIsNotNone(self.problem(*rows, ("/usr/bin/sudo", "sudo -k x")))
+
+
 class HelperSourceTests(unittest.TestCase):
     def test_paths_are_hard_coded_and_not_overridable(self) -> None:
         src = HELPER.read_text()
@@ -459,8 +699,22 @@ class SetupScriptTests(unittest.TestCase):
         line = rule[0]
         self.assertIn("/usr/local/libexec/sudo-ask-granted exec *", line)
         self.assertIn("sudo-ask-granted status", line)
-        self.assertNotRegex(line, r"\b(grant|revoke)\b|NOPASSWD: ALL")
+        self.assertNotRegex(line, r"\bgrant\b|NOPASSWD: ALL")
+        # ruling 3: revoke needs no password, with an EMPTY argument list ("" matches no arguments, never a wildcard)
+        self.assertIn('/usr/local/libexec/sudo-ask-granted revoke ""', line)
+        self.assertNotRegex(line, r"revoke( \*|\s*,|\s*$)")
         self.assertIn("Defaults!/usr/local/libexec/sudo-ask-granted env_reset, timestamp_timeout=0", p.stdout)
+
+    def test_root_steps_use_system_tools_only(self) -> None:   # MED-2
+        src = SETUP.read_text()
+        code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+        self.assertIn("export PATH=/usr/bin:/bin:/usr/sbin:/sbin", code)
+        self.assertNotIn("/opt/homebrew", code)
+        self.assertNotRegex(code, r"(?m)(^|[;&|(])\s*sudo ")                  # no PATH-resolved sudo call
+        self.assertIn('run_root() { "$fake" "$@"; }', code)              # root steps go through one absolute path
+        self.assertNotIn('sudo -n "$BIN" revoke', code)                  # no live revoke probe
+        self.assertIn('-l "$BIN" revoke extra', code)
+        self.assertIn("a sudo ticket is cached", code)                   # MED-1: verify warns
 
     def test_check_is_read_only_and_reports(self) -> None:
         p = self.run_setup("--check", "--diff")
@@ -507,9 +761,17 @@ class SetupScriptTests(unittest.TestCase):
         self.assertIn("skipped --verify", p.stdout)
         self.assertEqual(len(calls.splitlines()), 1)
         self.assertIn("visudo -cf", calls)
+        # MED-2 / LOW-10b: the root body pins PATH, replaces the helper by rename, re-checks the whole sudoers set
+        # and removes the drop-in again if that fails
+        self.assertIn("PATH=/usr/bin:/bin:/usr/sbin:/sbin;set -e", calls)
+        self.assertIn("install -S -o root -g wheel -m 755", calls)
+        self.assertIn("visudo -c>/dev/null||{ rm -f $S;exit 1;}", calls)
+        self.assertLess(len(calls.splitlines()[0]), 700 + 200)   # the dialog text is capped at 700 by the script
         p, calls = self.guarded("--rollback")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("rm -f /etc/sudoers.d/sudo-ask-grant", calls)
+        self.assertIn("PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f", calls)
+        self.assertIn("rm -rf /var/db/sudo-ask", calls)
 
     def test_verify_never_runs_without_live(self) -> None:
         p, _ = self.guarded("--verify", with_fake=False)
@@ -536,7 +798,9 @@ class ClientTests(unittest.TestCase):
 
     FAKE_SUDO = """#!/bin/bash
 echo "sudo $*" >> "$FAKE_STATE/calls"
-[ "$1" = -k ] && exit 0
+[ "$1" = -n ] && [ -f "$FAKE_STATE/n_needs_auth" ] && exit 1   # a sudoers line that needs authentication
+[ "$1" = -k ] && shift
+[ $# -eq 0 ] && exit 0
 [ "$1" = -n ] && shift
 exec "$@"
 """
@@ -639,7 +903,8 @@ exit 0
         p = self.run_client("echo", "hi there")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(len(self.dialogs()), 1)
-        self.assertIn("sudo echo hi there", self.calls())
+        self.assertIn("sudo -k echo hi there", self.calls())   # MED-1: -k, so no machine-wide ticket is left behind
+        self.assertNotIn("sudo echo hi there", self.calls())
         self.assertIn("ALLOWED", self.log())
         self.assertNotIn("GRANTED-WINDOW", self.log())
 
@@ -664,7 +929,7 @@ exit 0
         (self.state / "answer").write_text("Deny|false")
         p = self.run_client("echo", "x")
         self.assertEqual(p.returncode, 1)
-        self.assertNotIn("sudo echo x", self.calls())
+        self.assertNotIn("sudo -k echo x", self.calls())
 
     def test_open_window_runs_without_dialog(self) -> None:
         self.open_window()
@@ -759,7 +1024,9 @@ exit 0
         calls = self.calls()
         self.assertIn("helper grant 8h", calls)
         self.assertTrue(any("OPENS AN APPROVAL WINDOW for 8h" in c for c in self.dialogs()))
-        self.assertLess(calls.index("sudo -k"), calls.index(next(c for c in calls if c.startswith("sudo ") and "grant" in c)))
+        grant_call = next(c for c in calls if c.startswith("sudo ") and "grant" in c)
+        self.assertTrue(grant_call.startswith("sudo -k "), grant_call)   # the helper proves fresh auth by this -k
+        self.assertLess(calls.index("sudo -k"), calls.index(grant_call))
         self.assertTrue(any(c.startswith("ping: sudo-ask: approval window open until") for c in calls))
         self.assertIn("OPEN until", p.stdout)
         self.assertIn("WINDOW-GRANT(", self.log())
@@ -800,10 +1067,43 @@ exit 0
         p = self.run_client("--revoke")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("helper revoke", self.calls())
+        self.assertIn("sudo -n %s revoke" % self.fakes["sudo-ask-granted"], self.calls())   # ruling 3: no auth needed
+        self.assertNotIn("sudo -k", self.calls())
         self.assertEqual(self.dialogs(), [])
         self.assertFalse((self.state / "open_until").exists())
         self.assertTrue(any(c.startswith("ping: sudo-ask: approval window revoked") for c in self.calls()))
         self.assertIn("WINDOW-REVOKE", self.log())
+
+    def test_revoke_falls_back_to_authentication_on_an_older_install(self) -> None:
+        self.open_window()
+        (self.state / "n_needs_auth").write_text("")
+        p = self.run_client("--revoke")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("sudo -k %s revoke" % self.fakes["sudo-ask-granted"], self.calls())
+        self.assertFalse((self.state / "open_until").exists())
+
+    def test_the_helper_by_hand_gets_a_warning_in_the_dialog(self) -> None:   # LOW-10a
+        helper = str(self.fakes["sudo-ask-granted"])
+        link = self.state / "innocent"
+        os.symlink(helper, link)
+        for prog in (helper, str(link)):
+            with self.subTest(prog=prog):
+                (self.state / "calls").unlink(missing_ok=True)
+                (self.state / "open_until").unlink(missing_ok=True)   # the fake helper's grant opened a window
+                self.run_client(prog, "grant", "24h")
+                self.assertTrue(any("APPROVAL-WINDOW HELPER" in c for c in self.dialogs()), self.dialogs())
+        (self.state / "calls").unlink(missing_ok=True)
+        self.run_client("echo", "x")
+        self.assertFalse(any("APPROVAL-WINDOW HELPER" in c for c in self.dialogs()))
+
+    def test_every_sudo_the_client_runs_is_k(self) -> None:   # MED-1: never feeds the machine-wide ticket
+        self.run_client("echo", "x")
+        self.run_client("-k", "echo", "y")
+        self.run_client("--grant", "1h")
+        self.run_client("--revoke")
+        for c in self.calls():
+            if c.startswith("sudo "):
+                self.assertTrue(c.startswith(("sudo -k", "sudo -n %s revoke" % self.fakes["sudo-ask-granted"])), c)
 
     def test_first_use_after_expiry_pings_once(self) -> None:
         marker = self.state / "xdg" / "sudo-ask" / "window-expires"

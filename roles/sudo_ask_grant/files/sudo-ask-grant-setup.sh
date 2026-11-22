@@ -4,7 +4,8 @@
 #   sudo-ask-grant-setup.sh --print            show the sudoers drop-in and the planned actions (no root)
 #   sudo-ask-grant-setup.sh --check [--diff]   compare the installed files with the repo (no root, read-only)
 #   sudo-ask-grant-setup.sh --live             install: ONE sudo-ask step (dialog + Touch ID)
-#   sudo-ask-grant-setup.sh --verify --live    prove the split: grant needs a password, exec needs a window
+#   sudo-ask-grant-setup.sh --verify --live    prove the split: grant needs a password, revoke needs none,
+#                                              exec needs a window; warns when a sudo ticket is cached
 #   sudo-ask-grant-setup.sh --rollback --live  remove the drop-in, helper and grant file (sudo-ask then prompts again)
 #
 # GUARD: install, --verify and --rollback change or probe the REAL machine, so they refuse (exit 2, before any
@@ -16,7 +17,10 @@
 # Run it from a shell YOU are watching: the install opens a sudo-ask dialog that names the two files and
 # their SHA-256 prefixes; compare them with `--print`. Root re-hashes its own copy of both files before
 # it installs anything, so a file swapped after you approved cannot be installed.
-export PATH="/opt/homebrew/bin:$PATH"
+# Tools run by this script, and by root inside the install body, come from the system directories only: never a
+# user-writable one such as /opt/homebrew/bin. The caller's PATH is read once, to find a TEST fake sudo-ask.
+caller_path=$PATH
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/sudo-ask-granted"
@@ -30,11 +34,12 @@ operator=$(id -un)
 render_sudoers() {
   cat <<SUDO
 # Managed by site-djbclark roles/sudo_ask_grant (installed by \`just sudo-ask-grant-setup\`).
-# The approval window: $operator may use an OPEN window (exec) and read its state (status) without a
-# password. Opening or closing a window (grant, revoke) matches no NOPASSWD line, so it needs a fresh
-# password / Touch ID, and timestamp_timeout=0 stops a cached sudo ticket from standing in for one.
+# The approval window: $operator may use an OPEN window (exec), read its state (status) and END it (revoke, with
+# no arguments: the "" matches only an empty argument list) without a password. OPENING one (grant) matches no
+# NOPASSWD line, so it needs a fresh password / Touch ID; timestamp_timeout=0 stops a cached ticket for this
+# program from standing in for one (the helper also checks that sudo ran with -k).
 Defaults!$BIN env_reset, timestamp_timeout=0
-$operator ALL=(root) NOPASSWD: $BIN exec *, $BIN status, $BIN status *
+$operator ALL=(root) NOPASSWD: $BIN exec *, $BIN status, $BIN status *, $BIN revoke ""
 SUDO
 }
 
@@ -89,7 +94,7 @@ roots = {os.path.realpath(d) for d in ("/tmp", "/var/folders", os.environ.get("T
 sys.exit(0 if any(p.startswith(r.rstrip("/") + "/") for r in roots) else 1)' "$1"
 }
 if [ "$live" != 1 ]; then
-  fake=$(command -v sudo-ask 2>/dev/null || true)
+  fake=$(PATH=$caller_path command -v sudo-ask 2>/dev/null || true)
   if [ "$mode" = verify ] || [ -z "$fake" ] || ! in_temp_prefix "$fake"; then
     echo "sudo-ask-grant-setup: refusing to run '$mode': it changes or probes the REAL machine (sudoers, /usr/local, /var/db)." >&2
     echo "  Read-only modes: --print, --check [--diff]. To do it for real, from a shell you are watching, add --live." >&2
@@ -98,14 +103,21 @@ if [ "$live" != 1 ]; then
   fi
 fi
 
-run_root() { if [ "$live" != 1 ]; then "$fake" "$@"; elif command -v sudo-ask >/dev/null 2>&1; then sudo-ask "$@"; else sudo "$@"; fi; }
+# Absolute paths only. Live: the operator's sudo-ask, else plain sudo.
+if [ "$live" = 1 ]; then
+  if [ -x "$HOME/.local/bin/sudo-ask" ]; then fake=$HOME/.local/bin/sudo-ask; else fake=/usr/bin/sudo; fi
+fi
+run_root() { "$fake" "$@"; }
 
 case $mode in
   install)
     validate
     h1=$(sha24 "$src"); h2=$(sha24 "$tmp/sudoers")
     # Short on purpose: sudo-ask's dialog cuts its text at 700 characters.
-    body='set -e; t=$(mktemp -d /tmp/r.XXXXXX); trap "rm -rf $t" EXIT; install -m 600 "$1" $t/h; install -m 600 "$2" $t/s; [ "$(shasum -a 256 <$t/h|cut -c1-24)" = "$3" ] || exit 1; [ "$(shasum -a 256 <$t/s|cut -c1-24)" = "$4" ] || exit 1; /usr/sbin/visudo -cf $t/s; install -d -o root -g wheel -m 755 /usr/local/libexec '"$STATE_DIR"'; install -o root -g wheel -m 755 $t/h '"$BIN"'; install -o root -g wheel -m 440 $t/s '"$SUDOERS"'.new; mv -f '"$SUDOERS"'.new '"$SUDOERS"
+    # PATH pinned inside the body: sudo may pass the caller's PATH (with user-writable directories) to root.
+    # `install -S` writes the helper to a temp name and renames it; a full `visudo -c` after the move removes the
+    # drop-in again if the whole sudoers set no longer parses.
+    body='PATH=/usr/bin:/bin:/usr/sbin:/sbin;set -e;B='"$BIN"';S='"$SUDOERS"';t=$(mktemp -d /tmp/r.XXXXXX);trap "rm -rf $t" EXIT;install -m 600 "$1" $t/h;install -m 600 "$2" $t/s;[ "$(shasum -a 256 <$t/h|cut -c1-24)" = "$3" ]||exit 1;[ "$(shasum -a 256 <$t/s|cut -c1-24)" = "$4" ]||exit 1;visudo -cf $t/s;install -d -o root -g wheel -m 755 /usr/local/libexec '"$STATE_DIR"';install -S -o root -g wheel -m 755 $t/h $B;install -o root -g wheel -m 440 $t/s $S.new;mv -f $S.new $S;visudo -c>/dev/null||{ rm -f $S;exit 1;}'
     keep="$tmp/h.copy"; cp "$src" "$keep"; cp "$tmp/sudoers" "$tmp/s.copy"
     shown="$body $keep $tmp/s.copy $h1 $h2"
     [ ${#shown} -le 700 ] || { echo "sudo-ask-grant-setup: dialog text is ${#shown} chars (>700); sudo-ask would hide the tail" >&2; exit 1; }
@@ -113,7 +125,7 @@ case $mode in
     echo "sudo-ask-grant-setup: installed $BIN and $SUDOERS for $operator"
     if [ "$live" = 1 ]; then "$0" --verify --live; else echo "sudo-ask-grant-setup: not live: skipped --verify"; fi ;;
   rollback)
-    body="rm -f $SUDOERS $STATE_DIR/grant $BIN; rmdir $STATE_DIR"
+    body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/grant $BIN; rm -rf $STATE_DIR"
     run_root /bin/sh -c "$body"
     echo "sudo-ask-grant-setup: removed the drop-in, helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
   verify)
@@ -121,13 +133,20 @@ case $mode in
     ok() { echo "ok    $1"; }
     bad() { echo "FAIL  $1"; fail=1; }
     [ -x "$BIN" ] && ok "helper installed" || { bad "helper missing ($BIN)"; exit 1; }
-    sudo -k
+    # A cached machine-wide ticket is what would let `sudo -n /bin/sh -c "<helper> grant 24h"` open a window: say so.
+    if /usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then
+      echo "WARN  a sudo ticket is cached (an earlier sudo ran with no -k). The helper's own check still refuses a grant" \
+           "that was not run as 'sudo -k'; end the ticket with: sudo -k"
+    fi
+    /usr/bin/sudo -k
     # grant must NOT be reachable without a password. If this succeeds a 60 s window just opened: roll back.
-    if sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi
-    if sudo -n "$BIN" revoke >/dev/null 2>&1; then bad "revoke ran WITHOUT a password"; else ok "revoke needs authentication"; fi
-    s=0; sudo -n "$BIN" status >/dev/null 2>&1 || s=$?
+    if /usr/bin/sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi
+    # revoke only lowers privilege and needs none, but takes no arguments. `sudo -l CMD` asks sudoers without running it.
+    if /usr/bin/sudo -n -l "$BIN" revoke >/dev/null 2>&1; then ok "revoke needs no password"; else bad "revoke is not allowed without a password"; fi
+    if /usr/bin/sudo -n -l "$BIN" revoke extra >/dev/null 2>&1; then bad "revoke with extra arguments is allowed"; else ok "revoke with extra arguments is refused"; fi
+    s=0; /usr/bin/sudo -n "$BIN" status >/dev/null 2>&1 || s=$?
     if [ $s -le 1 ]; then ok "status works without a password (exit $s)"; else bad "status needs a password (exit $s)"; fi
-    e=0; sudo -n "$BIN" exec -- /usr/bin/true >/dev/null 2>&1 || e=$?
+    e=0; /usr/bin/sudo -n "$BIN" exec -- /usr/bin/true >/dev/null 2>&1 || e=$?
     if [ $s -eq 1 ] && [ $e -eq 75 ]; then ok "exec refuses with no window (75)"
     elif [ $s -eq 0 ]; then ok "a window is open; exec check skipped"
     else bad "exec with no window exited $e (want 75)"; fi

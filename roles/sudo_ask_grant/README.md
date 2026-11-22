@@ -6,7 +6,7 @@ still get the normal dialog + Touch ID. (Operator ruling 2026-11-22.)
 
 ```
 sudo-ask --grant [DURATION]   # dialog + Touch ID; 30m, 2h, 8h, 1d (units s m h d); default 8h; 60s..24h
-sudo-ask --revoke             # Touch ID; ends the window now
+sudo-ask --revoke             # no Touch ID needed (it only lowers privilege); ends the window now
 sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_York, 12-hour AM/PM
 ```
 
@@ -16,12 +16,12 @@ sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_Y
 
 | Piece | Where it ends up | What it does |
 |---|---|---|
-| `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION`, `revoke`. Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
+| `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION` (runs only from the installed path, only when it can prove a fresh authentication, see below), `revoke` (no arguments). `exec` resolves the program once, judges it, and runs exactly that file, with `PATH` and `HOME` fixed (never the caller's). Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
 | `files/sudo-ask-grant-setup.sh` | run by hand | `--print`, `--check [--diff]` (read-only); install, `--verify`, `--rollback` refuse unless given `--live` (see the guard below). |
-| drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` only**; `Defaults!helper timestamp_timeout=0`. |
+| drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` and `revoke ""` only** (`""` = no arguments, never a wildcard; the helper also refuses extra arguments to `revoke`); `Defaults!helper env_reset, timestamp_timeout=0`. `grant` matches no NOPASSWD line. |
 | `/var/db/sudo-ask/grant` | root:wheel 0644 in a root:wheel 0755 dir | `{expires_utc, granted_utc, granted_by_uid, duration_s, nonce}`; written only by `grant`. |
-| `/var/log/sudo-ask-grant.log` | root:wheel 0644 | one line per grant, revoke, refusal, denylist hit and run (UTC). The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
-| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. |
+| `/var/log/sudo-ask-grant.log` | root:wheel 0600 | one line per grant, revoke, refusal, denylist hit and run (UTC); command text capped at 4096 characters; rotated to `.log.1` above 8 MiB. The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
+| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. Every sudo the client runs is `sudo -k CMD` (never leaves a ticket), except `--revoke`'s `sudo -n HELPER revoke`. |
 | `bin/approval-gate` | `~/.local/bin/approval-gate` (symlink, like `sudo-ask`) | The ONE place that decides whether a window covers a gate: `status`, `check --gate NAME [--max-ttl S] [-- CMD...]` (exit 0 covered, 1 must prompt), `ask --gate NAME --reason TEXT -- CMD...`. `sudo-ask` and `bgrun` call it and reimplement nothing. |
 | `config/approval-gates.toml` | the repo | The registry of gates, see below. |
 
@@ -49,16 +49,57 @@ duration chooser (a ticket until the window's end). `bin/tired` and `sudo-askpas
 ## Why an agent cannot open or extend a window
 
 Agents run as the operator, so they can run the NOPASSWD lines. Those lines cannot write the grant
-file: `grant` and `revoke` match no NOPASSWD entry, so sudo asks for a password / Touch ID, and the
-drop-in sets `timestamp_timeout=0` for the helper so a cached sudo ticket never stands in for one.
-`sudo-ask --grant` also runs `sudo -k` first. The grant file and its directory are root-owned and
-not group/world writable. The helper refuses a file that is not root-owned, is group/world writable,
-is a symlink, is damaged, is dated in the future, has a duration over 24h or an expiry more than 24h
-away (a tampered far-future file), or is expired. Anything doubtful means "no window": `sudo-ask`
+file: `grant` matches no NOPASSWD entry, so sudo asks for a password / Touch ID. The grant file and its
+directory are root-owned and not group/world writable. The helper refuses a file that is not root-owned, is
+group/world writable, is a symlink, is damaged, is dated in the future, has a duration over 24h or an expiry
+more than 24h away (a tampered far-future file), or is expired. Anything doubtful means "no window": `sudo-ask`
 shows the dialog. The helper re-checks the denylist itself and never trusts the caller.
 
-`--verify` proves this on the installed system: with no cached ticket, `sudo -n helper grant` and
-`revoke` must fail, `status` must work, and `exec` with no window must exit 75.
+**Fresh authentication (adversary MED-1).** This Mac has a machine-wide sudo ticket (`10-timestamp-global`), and
+`timestamp_timeout=0` in the drop-in covers only the helper's own path. So an agent could run any command that
+authenticated once (say a plain `sudo` an agent triggered, or a Touch ID prompt for something else), and then
+`sudo -n /bin/sh -c '<helper> grant 24h'` would ride on the cached ticket. Two layers close that:
+
+1. `sudo-ask` runs its own sudo as `sudo -k CMD` (and `--grant` as `sudo -k HELPER grant DUR`): sudo ignores any
+   cached ticket and does not leave one, so approving a command through `sudo-ask` never feeds the shared ticket.
+2. `grant` itself walks its ancestor processes (`/bin/ps`, depth <= 8) and requires the nearest `/usr/bin/sudo`
+   above it to carry `-k` / `--reset-timestamp`; otherwise it refuses (exit 75, logged `GRANT-REFUSED`). It fails
+   closed: no sudo ancestor found, or `ps` unavailable, means no grant.
+
+Limits, stated plainly: (a) the check reads the sudo command line: it proves sudo was told to ignore the cached ticket (so
+it asked for authentication), not that a person touched the sensor. An agent that runs `sudo -k <helper> grant` itself still
+meets the Touch ID prompt, which it cannot satisfy; the guarantee is that no ride on a cached ticket opens a window.
+(b) The check assumes `sudo` stays an ancestor of the helper (with
+`use_pty`, sudo forks a monitor and stays the parent chain's root). That assumption has not been exercised on the live
+machine yet (no privileged command was run building this); if sudo execs the command directly on this machine, `grant`
+will fail closed, and `--verify` / the first `sudo-ask --grant` will show it. (c) `grant` only runs from
+`/usr/local/libexec/sudo-ask-granted` (a copy elsewhere refuses), and the denylist protects that path.
+
+`revoke` needs no authentication on purpose: it only lowers privilege, so an agent or the operator can end a window
+from a panic button without a sensor. It takes no arguments (the sudoers line is `revoke ""`, the helper also refuses
+extras).
+
+`--verify` proves this on the installed system: it warns if a sudo ticket is cached; then, with the ticket dropped,
+`sudo -n helper grant` must fail, `sudo -n -l helper revoke` must be allowed and `... revoke extra` refused (a sudoers
+question, nothing is revoked), `status` must work, and `exec` with no window must exit 75.
+
+## Agent-writable code prompts, even in a window (ruling 1)
+
+The denylist is not a sandbox, because root running code an agent can edit is root for the agent. So inside a window,
+`exec` refuses (and `sudo-ask` shows the dialog + Touch ID) when:
+
+- the program, after realpath, lives where the invoking user (`SUDO_UID`) can write it: it or any directory above it is
+  owned by that user, group-writable in one of the user's groups, or world-writable; everything under `/tmp`,
+  `/private/tmp`, `/var/folders`, `/var/tmp` counts as writable. An unknown invoking user, or a stat error, counts as
+  writable (prompt);
+- an interpreter or shell is given a script (`python3 x.py`, `sh x.sh`, `perl x.pl`) that is agent-writable, missing, not a
+  regular file, or is `/dev/stdin` / `/dev/fd/N`; or loads code that cannot be checked (`python -m`, `node -r/--import`,
+  `perl -M` with unusual characters, inline `-c`/`-e`);
+- `make`, `gmake`, `just`, `xcodebuild` or `git` runs in an agent-writable working directory (they read Makefile,
+  justfile, hooks from there).
+
+System tools in `/usr/bin`, `/bin`, `/sbin`, `/usr/sbin`, `/usr/libexec` and root-owned Homebrew paths run without a prompt.
+A test copies the helper to a temp "~/g" and runs `python3 ~/g grant 24h`: it prompts (adversary MED-3).
 
 ## The denylist (still dialog + Touch ID inside a window)
 
@@ -71,6 +112,10 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
   `erase*`, `partitionDisk`, `apfs delete*` prompts); `dscl` / `dseditgroup` / `sysadminctl` unless read-only
   (users, groups, admin membership); `security` unless a read-only verb (login keychain);
   `rm`/`chmod`/`chown`/`chgrp -R` on `/`, a top-level directory or a home directory; `--no-preserve-root`.
+- Persistence paths (writes): `/Library/LaunchDaemons`, `/Library/LaunchAgents`, `/Library/StartupItems`, `/etc/periodic`,
+  `/usr/lib/cron`, `/var/at`, `/etc/paths` and `/etc/paths.d`, the root shell startup files (`/etc/zshenv`, `zprofile`, `zshrc`,
+  `profile`, `bashrc`), `/var/root`, `/etc/ssh`, `SecurityAgentPlugins`, `ld.so.conf`; `launchctl bootstrap|load|enable|submit|
+  asuser|kickstart`; `crontab` anything but `-l`.
 - Paths (writes, and anything not read-only): `/etc/sudoers`, `sudoers.d`, `sudo.conf`, `/etc/pam.d`,
   `/var/db/sudo-ask`, the helper and `/usr/local/libexec` + `/usr/local/sbin` (which hold the helper,
   the sudo-secretspec broker and its wrapper), `/var/db/dslocal`, TCC databases, keychains, `/dev/disk*`;
@@ -82,20 +127,24 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
 - Prompts when a wrapper's inner command cannot be parsed confidently: `$`, backticks, globs, braces,
   `cd`/`eval`/`source`, newlines, here-docs, subshells, `PATH=`/`IFS=` assignments, `xargs` feeding a
   command that is not read-only, `find -exec` without a terminator.
-- Read-only programs (`ls cat grep stat ...`) may read protected paths.
+- Read-only programs (`ls cat grep stat ...`) may read protected paths; "read-only" is judged on the REAL program
+  (a link named `cat` pointing at `cp` is `cp`). A root-owned file with other hard links is refused as an argument.
+  `find -f PATH` counts PATH as a start path; an acting `find` with `-L`/`-H` prompts. Every `dseditgroup -o` must be
+  `read`/`checkmember`. `#` and `$` anywhere in `sh -c` text prompt.
 
 ## What an agent can and cannot do during a window
 
-Cannot: open, extend or end a window; run a denylisted command without the dialog; change the grant
-file, the helper, the drop-in, PAM, sudoers or the secretspec broker through a command line the
-helper can parse; run when the log cannot be written.
+Cannot: open or extend a window (a fresh Touch ID is needed, see above); run a denylisted command without the
+dialog; run code it can edit, or tools in places it can write, without the dialog (ruling 1); change the grant file, the
+helper, the drop-in, PAM, sudoers or the secretspec broker through a command line the helper can parse; run when the
+log cannot be written. Can: end the window (`revoke`, no sensor needed).
 
-Can: everything else as root, for up to the window. **The denylist is a guard rail for the commands
-agents type, not a sandbox.** A script an agent wrote (`sudo-ask python3 x.py`, `sh x.sh`, a compiled
-binary) runs unchecked, so in a window a determined agent has root, including persistence
-(LaunchDaemons, new users via a script, ssh keys) that outlives the window. Open a window only for
-work you are willing to give root, and prefer short ones. Approval is always Touch ID, never typed or pasted
-text.
+Can: run system tools as root, for up to the window. **The denylist is a guard rail for the commands agents type, not a
+sandbox.** A window is still root: a root-owned system tool that can be driven to do anything (a package manager's
+post-install hook, `installer`, `pkgutil`, `brew` from a root-owned prefix, `defaults write` to a system domain)
+can be used to persist or to extend privilege, and the persistence paths in the denylist are a best effort list, not
+a proof. Open a window only for work you are willing to give root, and prefer short ones. Approval is always Touch ID,
+never typed or pasted text.
 
 ## Install and roll back (operator, Touch ID)
 
@@ -124,7 +173,7 @@ after approval cannot be installed. Rollback leaves `sudo-ask` prompting as befo
 `tests/test_sudo_ask_grant.py` (`just test`): duration grammar, every grant-file failure (expired,
 future-dated, >24h, wrong owner, writable, symlink, damaged), each denylist class, wrapper unwrapping and
 unparseable wrappers, case-insensitive paths, `main()` modes against a temp boundary (the installed helper
-has no test hook: the test patches module constants in-process), the sudoers rule shape, and the
+has no test hook: the test patches module constants in-process), the sudoers rule shape (`revoke ""`, no `grant`), ruling 1 (agent-writable code prompts, the MED-3 copy of the helper), the fresh-authentication proof (sudo with and without `-k`, nearest sudo decides), `revoke` with and without arguments, and the
 client as a patched copy driven by absolute-path fakes (including a fake `approval-gate` and the `-k` probe form), the
 setup script's `--live` guard (refusals, and a temp-dir fake that only logs). `tests/test_approval_gate.py`: the registry,
 the ttl caps, the denylist through the gate, a missing or untrusted helper, the CLI exit codes, `ask`'s two exec targets.

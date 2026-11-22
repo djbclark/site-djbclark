@@ -114,7 +114,9 @@ def decide(gate, max_ttl=None, cmd=None, now=None):
     if ttl < 1:
         return False, "no time left in the window", {}
     if cmd:
-        why = load_helper().evaluate(list(cmd), os.getcwd(), os.environ.get("PATH", ""))
+        h = load_helper()
+        h.INVOKER_UID = os.getuid()  # the root helper sees the same user as SUDO_UID, so both judge the same writable paths
+        why = h.evaluate(list(cmd), os.getcwd(), h.EXEC_PATH)
         if why:
             return False, why, {}
     return True, "covered", {"ttl": ttl, "expires_epoch": data["expires_epoch"], "expires_utc": data["expires_utc"]}
