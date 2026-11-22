@@ -8,7 +8,7 @@ alwaysApply: true
 `~`: no git repo. `~/ops/site-public-djbclark/home-agents.md` wins conflicts.
 `~/.cursor/rules/home-agents.mdc` links here (`cursor/home-agents.mdc`); same item numbers.
 
-Editors: Claude Opus 5.5+ or newest Codex Astra only, here and `home-agents.md`, item-11 fixes too; others: native `paseo run` (`skills/model-routing`). Required agent unavailable → capable available agent. Quota tight: wait/ask; no other Anthropic route. Both load each session: under 200 lines, 14,000 bytes; target ≤13,000, prune at most weekly ([[reference_instruction_file_size]]).
+Editors: Claude Opus 5.5+, newest Codex Astra, Gemini Neon (else Argon) only, here and `home-agents.md`, item-11 fixes too; others: native `paseo run` (`skills/model-routing`). Required agent unavailable → any capable one. Quota tight: wait/ask; no other Anthropic route. Both load each session: under 200 lines, 14,000 bytes; target ≤13,000, prune at most weekly ([[reference_instruction_file_size]]).
 Rule + pointer: details in the named `site-private-djbclark/memory/` file, else `reference_agent_rules_*.md`.
 Keep both in step, unasked. Condense without losing active rules or `memory/*.md` pointers and `[[link]]`:
 diff before and after. Keep item numbers unique and stable.
@@ -29,7 +29,7 @@ relay its "tokens saved ≈ N" banner as a total. `rtk` compacts Bash output: ne
 8. Replies: follow `~/src/djbclark-ade/docs/ref-labels.md` Parts A/B: Roman sections, bold-italic item labels, blank lines; script-issued `Ref:` last line. Question-card options: `1.`, `2.`, … ([[feedback_numbered_bullets]]). Markdown URL links; copyables in prose before question cards ([[feedback_links_clickable_markdown]]).
 42. ELI5 or plain-language ask: the `eli5` skill.
 46. Questions for djbclark: `/steps` unasked, unless ADE queue 67 (central questions) is in use ([[feedback_questions_run_steps]]).
-9. Never discard paid work unasked: never stop agents/workflows mid-run or rerun finished work. After restart/crash/session end: resume, never relaunch: sub-agent `SendMessage`, Paseo `paseo send`; stateless pollers may restart ([[feedback_resume_not_relaunch]]). Quota tight or pause asked: stop scheduling, let running work finish. Accidental breakage: ask whether to fix; queue last.
+9. Never discard paid work unasked: never stop agents/workflows mid-run or rerun finished work. Restart/crash/session end: try to resume (`SendMessage`/`paseo send`) before relaunching on its files; stateless pollers may restart ([[feedback_resume_not_relaunch]]). Quota tight or pause asked: stop scheduling, let running work finish. Accidental breakage: ask whether to fix; queue last.
 10. Run every command yourself, Touch ID/`sudo-ask` and confirmations included; never have djbclark type `! <command>` ([[feedback_run_commands_yourself]]).
 11. Recurrable tool-call mistake: fix enabling instructions this turn, unasked; say what changed ([[feedback_fix_instructions_after_tool_mistake]]). Harness failures: fix root cause in `~/src/djbclark-ade`, code not just docs, not a re-route ([[feedback_fix_harness_failures_in_djbclark_ade]]).
 12. Task done or something needs djbclark? Also `hermes-ping "<repo>: <one line>"` (never bare `hermes send`): one per event; PRs, issues, pages as full URLs, never `repo#N` ([[feedback_ping_telegram_and_chat]]).
