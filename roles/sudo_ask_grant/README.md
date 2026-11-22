@@ -16,12 +16,13 @@ sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_Y
 
 | Piece | Where it ends up | What it does |
 |---|---|---|
-| `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION` (runs only from the installed path, only when it can prove a fresh authentication, see below), `revoke` (no arguments). `exec` resolves the program once, judges it, and runs exactly that file, with `PATH` and `HOME` fixed (never the caller's). Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
+| `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION` (runs only from the installed path, only when it can prove a fresh authentication, see below), `revoke` (no arguments). `exec` resolves the program once, judges it, and runs exactly that file, with `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`, no user-owned directory) and `HOME` fixed (never the caller's). Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
 | `files/sudo-ask-grant-setup.sh` | run by hand | `--print`, `--check [--diff]` (read-only); install, `--verify`, `--rollback` refuse unless given `--live` (see the guard below). |
 | drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` and `revoke ""` only** (`""` = no arguments, never a wildcard; the helper also refuses extra arguments to `revoke`); `Defaults!helper env_reset, timestamp_timeout=0`; and `Defaults:OPERATOR timestamp_timeout=0` (the shared sudo ticket is off, see below). `grant` matches no NOPASSWD line. |
 | `/var/db/sudo-ask/grant` | root:wheel 0644 in a root:wheel 0755 dir | `{expires_utc, granted_utc, granted_by_uid, duration_s, nonce}`; written only by `grant`. |
+| `/var/db/sudo-ask/audit-stamp` | root:wheel 0644, same dir | The epoch at which the last `status --audit` sweep started (see "Persistence is not bounded by the window"); written only by that sweep. |
 | `/var/log/sudo-ask-grant.log` | root:wheel 0600 | one line per grant, revoke, refusal, denylist hit and run (UTC); command text capped at 4096 characters (a refused call, which anyone may make, at 256); rotated through `.log.1` ... `.log.5` above 8 MiB; every record except a refusal is also sent to the unified log (`logger`), which the user cannot rewrite. The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
-| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. Every sudo the client runs is `sudo -k CMD` (never leaves a ticket), except `--revoke`'s `sudo -n HELPER revoke`. |
+| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. Every sudo the client runs is `sudo -k CMD` (never leaves a ticket), except two `sudo -n HELPER ...` calls on NOPASSWD lines that only lower privilege or read: `--revoke`'s `revoke` and `--status --audit`'s `status --audit`. |
 | `bin/approval-gate` | `~/.local/bin/approval-gate` (symlink, like `sudo-ask`) | The ONE place that decides whether a window covers a gate: `status`, `check --gate NAME [--max-ttl S] [-- CMD...]` (exit 0 covered, 1 must prompt), `ask --gate NAME --reason TEXT -- CMD...`. `sudo-ask` and `bgrun` call it and reimplement nothing. |
 | `config/approval-gates.toml` | the repo | The registry of gates, see below. |
 
@@ -63,7 +64,7 @@ user can ride, including `sudo -n /bin/sh -c '<helper> grant 24h'`. Three layers
 1. **The ticket is switched off** (operator ruling). The setup script's install mode puts
    `Defaults:OPERATOR timestamp_timeout=0` in the same drop-in. A later drop-in wins over an earlier one, so this beats
    `10-timestamp-global` without editing or deleting it: nothing else is touched, there is no second file to back up,
-   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install. **The install checks it, and undoes itself if the check fails**: after installing, the script asks `LC_ALL=C sudo -n -l` (sudo's own answer after reading ALL of sudoers, every drop-in in any order; it needs no password because of the NOPASSWD lines) and reads its two sections apart. In "Matching Defaults entries for OPERATOR" the last `timestamp_timeout` must be 0 (a bare `!timestamp_timeout` counts as 0; a missing line fails). In "Runas and Command-specific defaults" no `Defaults>` entry may mention `timestamp_timeout`, and no `Defaults!` entry (the helper's own included) may carry a value other than 0. The drop-in's own `Defaults!HELPER ... timestamp_timeout=0` line sits last in that second section, which is why the listing is not read as one text. A failed or unreadable listing fails too, and a failed check removes the drop-in, helper and grant file again (`--verify` runs the same check on demand). **What this proves and what it does not:** it proves that the defaults sudo lists for this user and host say 0. It does not prove behaviour. The behavioural proof is `sudo -v; sudo -n /usr/bin/true; echo exit=$?; sudo -k` (must print `exit=1`), and it is a mandatory step of the reinstall runbook before the first `--grant`. Anything the listing does not show is not covered by it; the behavioural check is.
+   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install. **The install checks it, and undoes itself if the check fails**: after installing, the script asks `LC_ALL=C sudo -n -l` (sudo's own answer after reading ALL of sudoers, every drop-in in any order; it needs no password because of the NOPASSWD lines) and reads its two sections apart. In "Matching Defaults entries for OPERATOR" the last `timestamp_timeout` must be 0 (a bare `!timestamp_timeout` counts as 0; a missing line fails). In "Runas and Command-specific defaults" no `Defaults>` entry may mention `timestamp_timeout`, and no `Defaults!` entry (the helper's own included) may carry a value other than 0. The drop-in's own `Defaults!HELPER ... timestamp_timeout=0` line sits last in that second section, which is why the listing is not read as one text. The check fails closed on anything it cannot read: a value outside sudo's number grammar (`0_0`, `0e5`), a quoted value that mentions `timestamp_timeout`, a missing, renamed or duplicated Runas section, a Runas section without the helper's own `Defaults!` line, or an unknown line after the defaults. (sudo prints the first `Defaults!` entry on the same line as the last `Defaults>` entry; the check splits them again, so a `Defaults>` entry elsewhere on the machine does not by itself fail the install.) A failed or unreadable listing fails too, and a failed check removes the drop-in, helper and grant file again (`--verify` runs the same check on demand). **What this proves and what it does not:** it checks that the defaults sudo lists for this user and host say 0. It does not prove behaviour. The behavioural proof is `sudo -v; sudo -n /usr/bin/true; echo exit=$?; sudo -k` (must print `exit=1`), and it is a mandatory step of the reinstall runbook before the first `--grant`. Anything the listing does not show is not covered by it; the behavioural check is.
    (The alternative, removing `10-timestamp-global`, is root-only 0440 and would need a byte-exact root-side backup and
    restore; it also changes the file for every user.) `--print`, `--check` and `--diff` show it. After install, one
    `sudo -v` followed by `sudo -n true` must still ask.
@@ -131,10 +132,24 @@ The denylist is not a sandbox, because root running code an agent can edit is ro
   library trees, `node_modules`): those are root-owned programs that run code from their arguments (`timeit`, `pdb`,
   `http.server` ...).
 
-`exec` runs the realpath it judged, for the program and for the script, so a link switched afterwards changes nothing.
+`exec` runs the realpath it judged for the **top-level** program and the **top-level** script word, so a link switched
+afterwards changes nothing there. A program or script typed **inside** something else (a wrapper such as `nohup`, `nice`,
+`timeout`, `env`; `sh -c` text; `find -exec`; `xargs`; a script named inside `sh -c`) is run by the path as typed, so it is
+covered by a link check instead: such a path prompts when any component of it (walked lexically from the working directory)
+is a symbolic link that sits in a directory the invoking user can write (the user could repoint it between the check and
+the run, for example during a `sleep`), or contains `..`; a link that passes is followed, and its target is walked the same
+way (a root-owned link whose target goes through a link the user can repoint is swappable too; 16 links at most). A script typed as the top-level argument gets the same link check
+(stricter than needed there, on purpose). What this does not cover: a program that is a real file in a directory the user
+cannot write is safe; one in a directory the user can write already prompts by the realpath rule above.
 
-System tools in `/usr/bin`, `/bin`, `/sbin`, `/usr/sbin`, `/usr/libexec` and root-owned Homebrew paths run without a prompt.
-A test copies the helper to a temp "~/g" and runs `python3 ~/g grant 24h`: it prompts (adversary MED-3).
+The helper's own `PATH` for resolving and running programs is `/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`.
+`/opt/homebrew/bin` and `/opt/homebrew/sbin` are left out: the invoking user owns them, so a bare name inside `sh -c` or a
+wrapper that is found only there after the check could be created there while the command sleeps. A bare name that exists
+only there is "not found", which means the dialog (it would have prompted anyway: Homebrew's Cellar is user-owned).
+Consequence for a root program started in a window: it does not find Homebrew tools by bare name.
+
+System tools in `/usr/bin`, `/bin`, `/sbin`, `/usr/sbin`, `/usr/libexec` run without a prompt; anything under `/opt/homebrew`
+prompts. A test copies the helper to a temp "~/g" and runs `python3 ~/g grant 24h`: it prompts (adversary MED-3).
 
 ## The denylist (still dialog + Touch ID inside a window)
 
@@ -164,7 +179,22 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
   `bisect`, `submodule`, `rebase`, `daemon`, `hook`, `help`, with `config` unless it only reads, and with
   `--upload-pack`, `--receive-pack`, `--exec`, `--config`, `--template`, `-O`.
 - Persistence beyond the paths above: `chmod`/`install -m`/`rsync --chmod` that sets a setuid or setgid bit (octal or
-  symbolic) and any copy or move (`cp ditto rsync mv pax tar cpio install scp`) of a setuid or setgid file; writes to
+  symbolic) and any copy or move (`cp ditto rsync mv pax tar cpio install scp`) of a setuid or setgid file. For `chmod`
+  both the cluster and the word after it are judged when the cluster holds a character that is not one of BSD chmod's
+  option letters (`HLPRfhvECNiI`): BSD getopt also takes the mode letters (`rwxXstugoa`), so `-Rx 4755 F`, `-fx u+s F` and
+  `-vvx 4755 F` end the options at the `x` and the NEXT word is the mode; only exactly `-x`, or a word with a comma or sign in
+  it (`-x,u+s`, `-w,+s`), is itself the mode (`--` ends the options). A cluster that is neither option letters nor a mode
+  start (`-Z`) cannot be classified, and the command prompts. For `install` the `-m` is read out of BSD install's getopt clusters
+  (`-pm 4755`, `-Sm4755`, `-pm4755`, also `--mode`). Extracting an archive as root restores owners and setuid files from
+  it, so inside a window these prompt: **every** `tar`/`bsdtar`/`gtar`/`gnutar` extraction (`-x`, `--extract`, `--get`, a
+  cluster such as `-xpf`, old-style `xf`), whatever flags it carries (`--no-same-owner`/`--no-same-permissions` excuse
+  nothing: bsdtar applies its options in order, so a later `-p`, `--same-permissions` or `--same-owner` undoes them, and the
+  member names, `-C` and `-P` are not judged); `mtree -U`/`-u` (it sets owners and modes from the spec); `pax -r`; `cpio -i` and
+  `-p`; `ditto -x` and `-k` alone (extract; `-c`, with or without `-k`, creates); `unzip` unless its leading options include
+  `-l`, `-t`, `-v`, `-p` or `-Z`. Listing and creating (`tar -tf`/`-cf`, `pax -w`, `ditto -c`, `cpio -o`) run. This is a
+  judgment on the options of these named programs, not a parse of every extractor: others (`xar`, `7z`, `jar`, `pkgutil`,
+  `installer`, `hdiutil`) are not looked at, and a setuid file made by a program the helper cannot see inside is what the
+  sweep below reports afterwards. Writes to
   `/usr/local/bin`, `/Library/PrivilegedHelperTools`, `/Library/Preferences/com.apple.loginwindow` (and `defaults write`
   to that domain: `LoginHook`/`LogoutHook` run as root); every `Program`/`ProgramArguments` target named by a plist in
   `/Library/LaunchDaemons` and `/Library/LaunchAgents`, read at check time; a write through a link whose target is one
@@ -199,10 +229,27 @@ are willing to give root, and prefer short ones. Approval is always Touch ID, ne
 
 **Persistence is not bounded by the window.** Ending the window does not undo what root did during it: a setuid file, a
 launchd job, a login hook or a changed root-owned program stays. So `--revoke` (and `sudo-ask --status --audit`, any
-time) runs a sweep and prints what changed since the grant: setuid/setgid files under `/usr/local`, `/opt`,
-`/Applications`, `/Library`, root's and the user's home, the temp dirs and the volumes, and every launchd
-`Program`/`ProgramArguments` target or plist changed since. It is a best-effort list, with a time limit, not a proof; read it
+time) runs a sweep and prints what changed since the grant: setuid/setgid files (each root with `find -xdev`, so a
+different volume inside one is not entered) under exactly these: `/usr/local`, `/opt`, `/Applications`, `/Library`,
+`/private/etc`, `/private/var/db`, `/private/var/root`, `/private/tmp`, `/private/var/tmp`, `/Users/Shared`, each volume
+directly under `/Volumes` (listed when the sweep runs; links such as the boot volume's are skipped) and the invoking user's home,
+and every launchd `Program`/`ProgramArguments` target or plist changed since. **Not swept:** `/private/var/folders`, other
+users' homes, everything else on the data volume outside the roots above, and anything on a volume mounted below one
+of these roots. It is a best-effort list, not a proof; read it
 after every window and treat a finding as an incident.
+
+Limits on the sweep, because `status --audit` has a NOPASSWD sudoers line (any agent can call it, with no window) and runs
+a root `find`: each root gets at most 60 s and all roots together at most 120 s (a root not reached is printed as skipped,
+incomplete); a second `status --audit` within 60 s of the start of the last one is refused (exit 75, no `find`, one
+`REFUSED(...)` log line), and so is one that starts while another is running. The time of the last sweep is kept in the
+root-owned `/var/db/sudo-ask/audit-stamp` under an exclusive lock; a stamp or directory that is not root-owned and
+non-writable makes the sweep refuse. `--status --audit` with no grant time known runs no sweep and uses no slot. `--revoke`
+sweeps only when a grant file existed (it is a NOPASSWD line too, so it cannot be a free way to start sweeps) and is not
+subject to the one-a-minute limit, which keeps the end-of-window report; a second `revoke` with no grant file prints that it
+skipped the sweep. When the file is missing but the log shows a `GRANT(` with no `REVOKE` after it (the file was removed, or
+the window ended oddly), `revoke` says so, with the time and the `sudo-ask --status --audit EPOCH` command to run, and still
+sweeps nothing. `status --audit EPOCH` takes an epoch from 0 to a day from now; anything else is a usage error that does not
+spend the one-a-minute slot.
 
 ## Install and roll back (operator, Touch ID)
 
@@ -228,7 +275,8 @@ after approval cannot be installed. Rollback leaves `sudo-ask` prompting as befo
 
 ## Tests
 
-`tests/test_sudo_ask_grant.py` (`just test`; the process-tree proof is tested against real child processes): duration grammar, every grant-file failure (expired,
+`tests/test_sudo_ask_grant.py` (`just test`; the process-tree proof is tested against real child processes; the setuid, archive, link,
+sweep-root and sweep-limit rules of the follow-up have their own tests, each checked with a mutant): duration grammar, every grant-file failure (expired,
 future-dated, >24h, wrong owner, writable, symlink, damaged), each denylist class, wrapper unwrapping and
 unparseable wrappers, case-insensitive paths, `main()` modes against a temp boundary (the installed helper
 has no test hook: the test patches module constants in-process), the sudoers rule shape (`revoke ""`, no `grant`), ruling 1 (agent-writable code prompts, the MED-3 copy of the helper), the fresh-authentication proof (sudo with and without `-k`, nearest sudo decides), `revoke` with and without arguments, and the

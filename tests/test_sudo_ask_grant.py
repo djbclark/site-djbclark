@@ -36,6 +36,8 @@ assert _spec
 mod = importlib.util.module_from_spec(_spec)
 _loader.exec_module(mod)
 REAL_UNIFIED_LOG = mod.unified_log
+REAL_AUDIT_ROOTS = mod.AUDIT_ROOTS
+REAL_AUDIT_VOLUMES = mod.AUDIT_VOLUMES
 
 
 class GrantBase(unittest.TestCase):
@@ -57,6 +59,8 @@ class GrantBase(unittest.TestCase):
             "GRANTED_EPOCH": None,
             "LAUNCH_DIRS": (str(pathlib.Path(self.tmp.name) / "launch"),),
             "AUDIT_ROOTS": (),
+            "AUDIT_VOLUMES": str(pathlib.Path(self.tmp.name) / "no-volumes"),
+            "AUDIT_STAMP": str(self.dir / "audit-stamp"),
             "unified_log": lambda line: None,   # never write the real unified log from a test
         }
         for k, v in patches.items():
@@ -662,6 +666,235 @@ class PolicyTests(GrantBase):
         for sp in ("/usr/local/bin/mytool.py", "/opt/tools/run.py", "/usr/bin/true"):
             self.assertFalse(mod.LIBRARY_SCRIPT_RE.search(sp.casefold()), sp)
 
+    # ---- follow-up MED-2: setuid bypasses through chmod, install and extraction as root
+
+    def test_chmod_modes_follow_the_getopt_of_bsd_chmod(self) -> None:
+        # a cluster with a mode letter in it (-Rx, -fx) ENDS the options there: the next word is the mode
+        self.assertEqual(mod.chmod_modes(["-R", "-H", "644", "f"]), ["644"])
+        self.assertEqual(mod.chmod_modes(["-Rf", "-w,+s", "f"]), ["-w,+s", "f"])
+        self.assertEqual(mod.chmod_modes(["--", "-x,u+s", "f"]), ["-x,u+s"])
+        self.assertEqual(mod.chmod_modes(["-Rx", "4755", "f"]), ["-Rx", "4755"])
+        self.assertEqual(mod.chmod_modes(["-fx", "u+s", "f"]), ["-fx", "u+s"])
+        self.assertEqual(mod.chmod_modes(["-vvx", "4755", "f"]), ["-vvx", "4755"])
+        self.assertEqual(mod.chmod_modes(["-R", "-fx", "2755", "f"]), ["-fx", "2755"])
+        self.assertEqual(mod.chmod_modes(["-x", "f"]), ["-x"])             # exactly -x is itself the mode
+        self.assertEqual(mod.chmod_modes(["-x,u+s", "f"]), ["-x,u+s", "f"])
+        self.assertIsNone(mod.chmod_modes(["-Z", "644", "f"]))             # an unclassifiable cluster fails closed
+        self.assertIsNone(mod.chmod_modes(["-R", "-Rq", "644", "f"]))
+        self.assertEqual(mod.chmod_modes([]), [])
+        self.assertEqual(mod.chmod_modes(["-R"]), [])
+        f = self.work / "rs"
+        f.write_text("x")
+        for argv in (["chmod", "-x,u+s", str(f)], ["chmod", "-w,+s", str(f)], ["chmod", "-x+s", str(f)],
+                     ["chmod", "-R", "-x,u+s", str(f)], ["chmod", "-Rf", "-w,+s", str(f)], ["chmod", "--", "-x,u+s", str(f)],
+                     ["chmod", "-h", "-x+s", str(f)], ["chmod", "-ER", "4755", str(f)], ["chmod", "-C", "u+s", str(f)],
+                     # round-2 MED-1: the mode letter ends getopt, so the NEXT word is the mode
+                     ["chmod", "-Rx", "4755", str(f)], ["chmod", "-fx", "u+s", str(f)], ["chmod", "-vvx", "4755", str(f)],
+                     ["chmod", "-R", "-fx", "2755", str(f)], ["chmod", "-Rw", "g+s", str(f)], ["chmod", "-Rf", "-vx", "u+s", str(f)]):
+            with self.subTest(argv=argv):
+                self.assertIn("setuid", self.check(argv) or "")
+        for argv in (["chmod", "-Z", "644", str(f)], ["chmod", "-R", "-q", "644", str(f)], ["chmod", "-Rq", "644", str(f)]):
+            with self.subTest(argv=argv):
+                self.assertIn("not understood", self.check(argv) or "")
+        for c in "HLPRfhvECNiI":
+            with self.subTest(letter=c):
+                self.assertIn("setuid", self.check(["chmod", "-" + c, "-x+s", str(f)]) or "")
+        for argv in (["chmod", "-x", str(f)], ["chmod", "-w", str(f)], ["chmod", "-R", "-x", str(f)], ["chmod", "-Rf", "644", str(f)],
+                     ["chmod", "--", "-x", str(f)], ["chmod", "-x,g-w", str(f)], ["chmod", "-Rx", "644", str(f)],
+                     ["chmod", "-fx", "g-w", str(f)], ["chmod", "-R", "-fx", "0755", str(f)]):
+            with self.subTest(argv=argv):
+                self.assertAllowed(argv)
+
+    def test_install_modes_are_read_from_getopt_clusters(self) -> None:
+        self.assertEqual(mod.install_modes(["-pm", "4755", "a", "b"]), ["4755"])
+        self.assertEqual(mod.install_modes(["-Sm4755", "a", "b"]), ["4755"])
+        self.assertEqual(mod.install_modes(["-pm4755", "a", "b"]), ["4755"])
+        self.assertEqual(mod.install_modes(["-m", "u+s", "a"]), ["u+s"])
+        self.assertEqual(mod.install_modes(["-o", "root", "-g", "wheel", "-cbm", "2755", "a"]), ["2755"])
+        self.assertEqual(mod.install_modes(["--mode=u+s", "a"]), ["u+s"])
+        self.assertEqual(mod.install_modes(["--mode", "u+s", "a"]), ["u+s"])
+        self.assertEqual(mod.install_modes(["--mo=u+s", "a"]), ["u+s"])
+        self.assertEqual(mod.install_modes(["-gm4755", "a"]), [])        # g takes the rest of the cluster: a group name
+        self.assertEqual(mod.install_modes(["-g", "m4755", "a"]), [])
+        self.assertEqual(mod.install_modes(["-ogm4755", "a"]), [])       # o takes the rest of the cluster
+        self.assertEqual(mod.install_modes(["-m", "755", "--", "-m4755"]), ["755"])   # after `--`: file names
+        self.assertEqual(mod.install_modes(["-m"]), [""])
+        self.assertEqual(mod.install_modes([]), [])
+        f = self.work / "rs"
+        f.write_text("x")
+        o = str(self.work / "o")
+        for argv in (["install", "-pm", "4755", str(f), o], ["install", "-Sm4755", str(f), o], ["install", "-pm4755", str(f), o],
+                     ["install", "-cm", "2755", str(f), o], ["install", "-o", "root", "-m", "u+s", str(f), o],
+                     ["install", "--mode", "u+s", str(f), o], ["install", "-bpm", "6755", str(f), o],
+                     ["install", "-m", "755", "-pm4755", str(f), o]):
+            with self.subTest(argv=argv):
+                self.assertIn("setuid", self.check(argv) or "")
+        for argv in (["install", "-pm", "755", str(f), o], ["install", "-Sm755", str(f), o], ["install", "-gm4755", str(f), o],
+                     ["install", "-g", "m4755", str(f), o], ["install", "-pm", "0644", str(f), o]):
+            with self.subTest(argv=argv):
+                self.assertAllowed(argv)
+
+    def archive(self, argv):
+        """evaluate() with the program 'found' in a system place (these tools differ or are missing between machines)."""
+        with mock.patch.object(mod, "resolve", side_effect=lambda name, cwd, path: "/usr/bin/" + os.path.basename(name)), \
+                mock.patch.object(mod, "agent_writable", return_value=False), \
+                mock.patch.object(mod, "changed_since_grant", return_value=False):
+            return self.check(argv)
+
+    def test_extracting_an_archive_as_root_is_refused(self) -> None:
+        for argv in (["tar", "-xf", "a"], ["tar", "-xpf", "a"], ["tar", "xf", "a"], ["tar", "xpf", "a"], ["tar", "-zxvf", "a"],
+                     ["bsdtar", "-xf", "a"], ["gtar", "--extract", "-f", "a"], ["gnutar", "--get", "-f", "a"],
+                     ["tar", "--extr", "-f", "a"], ["tar", "--ge", "-f", "a"], ["tar", "-C", "/x", "-xf", "a"],
+                     ["tar", "-x", "--no-same-owner", "-f", "a"], ["tar", "-x", "--no-same-permissions", "-f", "a"],
+                     ["tar", "-x", "--no-same-o", "--no-same-permissions", "-f", "a"],
+                     # round-2 MED-2: no flags excuse a tar extraction (bsdtar applies options in order; -P / -C / names are not judged)
+                     ["tar", "-xf", "a", "--no-same-owner", "--no-same-permissions"],
+                     ["gtar", "--extract", "--no-same-owner", "--no-same-permissions", "-f", "a"],
+                     ["tar", "-xpf", "a", "--no-same-owner", "--no-same-permissions"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--same-permissions", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--preserve-permissions", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--same-owner", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "-p", "-f", "a"],
+                     ["tar", "-xPf", "a"], ["tar", "-xf", "a", "-C", "/"], ["bsdtar", "-xf", "a", "-s", "|^|/|"],
+                     ["pax", "-r", "-f", "a"], ["pax", "-rf", "a"], ["pax", "-rw", "a", "b"], ["pax", "-r", "-pe", "-f", "a"],
+                     ["cpio", "-i"], ["cpio", "-idmv"], ["cpio", "-p", "d"], ["cpio", "-pdm", "d"], ["cpio", "--extract"],
+                     ["cpio", "--pass-through", "d"], ["cpio", "--pas", "d"],
+                     ["ditto", "-x", "a", "d"], ["ditto", "-xk", "a", "d"], ["ditto", "-k", "a.zip", "d"],
+                     ["ditto", "-x", "-k", "a.zip", "d"], ["ditto", "-rsrc", "-k", "a.zip", "d"], ["ditto", "-V", "-x", "a", "d"],
+                     ["unzip", "a.zip"], ["unzip", "-o", "a.zip"], ["unzip", "-d", "out", "a.zip"], ["unzip", "-dltv", "a.zip"],
+                     ["unzip", "-q", "a.zip"], ["unzip", "-P", "pw", "a.zip"], ["unzip", "-Ppl", "a.zip"],
+                     ["unzip", "-d", "out", "-l", "a.zip"], ["unzip", "-x", "a.zip"], ["unzip"],
+                     ["sh", "-c", "tar -xf a"], ["nohup", "tar", "-xf", "a"], ["sh", "-c", "unzip a.zip"], ["env", "ditto", "-x", "a", "d"]):
+            with self.subTest(argv=argv):
+                self.assertIn("extracts", self.archive(argv) or "")
+
+    def test_a_tar_extraction_message_does_not_offer_the_no_same_flags(self) -> None:   # they excuse nothing now
+        self.assertNotIn("no-same", self.archive(["tar", "-xf", "a"]) or "")
+
+    def test_mtree_update_is_refused_and_a_plain_check_runs(self) -> None:   # round-2 LOW-2
+        for argv in (["mtree", "-U", "-f", "spec"], ["mtree", "-f", "spec", "-U"], ["mtree", "-Uf", "spec"], ["mtree", "-u", "-f", "spec"],
+                     ["mtree", "-ceU"], ["sh", "-c", "mtree -U -f spec"]):
+            with self.subTest(argv=argv):
+                self.assertIn("mtree", self.archive(argv) or "")
+        for argv in (["mtree", "-f", "spec"], ["mtree", "-c", "-p", "d"], ["mtree", "-e", "-f", "spec", "-p", "d"]):
+            with self.subTest(argv=argv):
+                self.assertIsNone(self.archive(argv))
+
+    def test_listing_and_creating_archives_still_runs(self) -> None:
+        for argv in (["tar", "-tf", "a"], ["tar", "tf", "a"], ["tar", "-tvf", "a"], ["tar", "-cf", "a", "b"], ["tar", "cf", "a", "b"],
+                     ["tar", "--exclude=x", "-czf", "a", "b"], ["bsdtar", "-tvf", "a"], ["gtar", "--list", "-f", "a"],
+                     ["tar", "--no-same-owner", "--no-same-permissions", "xf", "a"],   # tar reads old-style letters only as the FIRST word: no mode, no extraction
+                     ["pax", "-w", "-f", "a", "b"], ["pax", "-wf", "a", "b"], ["pax", "-f", "a"],
+                     ["cpio", "-o"], ["cpio", "-ov"], ["cpio", "-t"], ["cpio", "--create"],
+                     ["ditto", "-c", "a", "b"], ["ditto", "-c", "-k", "--keepParent", "a", "b.zip"], ["ditto", "-ck", "a", "b.zip"],
+                     ["ditto", "a", "b"], ["ditto", "-V", "a", "b"], ["ditto", "-rsrc", "a", "b"], ["ditto", "-extattr", "a", "b"],
+                     ["unzip", "-l", "a.zip"], ["unzip", "-t", "a.zip"], ["unzip", "-v", "a.zip"], ["unzip", "-p", "a.zip", "f"],
+                     ["unzip", "-Z", "a.zip"], ["unzip", "-Z1", "a.zip"], ["unzip", "-lq", "a.zip"], ["unzip", "-q", "-l", "a.zip"],
+                     ["unzip", "-tq", "a.zip"], ["unzip", "-o", "-p", "a.zip", "f"]):
+            with self.subTest(argv=argv):
+                self.assertIsNone(self.archive(argv))
+
+    def test_copying_a_setgid_only_file_is_refused(self) -> None:   # LOW-3 (mutant M6)
+        f = self.work / "sgid"
+        f.write_text("x")
+        os.chmod(f, 0o2755)
+        for prog in ("cp", "mv", "ditto", "rsync", "install"):
+            with self.subTest(prog=prog):
+                self.assertIn("setuid/setgid file", self.archive([prog, str(f), str(self.work / "o")]) or "")
+
+    def test_a_stat_error_in_changed_since_grant_counts_as_changed(self) -> None:   # LOW-3 (mutant M17)
+        with mock.patch.object(mod, "GRANTED_EPOCH", time.time()), mock.patch.object(mod.os, "stat", side_effect=OSError("x")):
+            self.assertTrue(mod.changed_since_grant("/x"))
+
+    # ---- follow-up MED-3: a program or script typed inside a wrapper or `sh -c` is run as typed
+
+    def test_swappable_link_walks_the_lexical_path(self) -> None:
+        work = pathlib.Path(os.path.realpath(self.work))   # /var is itself a link on macOS; a safe link is followed now
+        lnk = work / "lnk"
+        os.symlink("/bin/ls", lnk)
+        dlink = work / "dl"
+        os.symlink("/bin", dlink)
+        self.assertEqual(mod.swappable_link(str(lnk), "/"), str(lnk))
+        self.assertEqual(mod.swappable_link("lnk", str(work)), str(work / "lnk"))      # relative: cwd joined
+        self.assertEqual(mod.swappable_link(str(dlink / "ls"), "/"), str(dlink))                 # a link in the middle
+        self.assertEqual(mod.swappable_link("./lnk", str(work)), str(work / "lnk"))    # a `.` is skipped
+        self.assertEqual(mod.swappable_link(str(work) + "//lnk", "/"), str(lnk))            # so are empty components
+        self.assertIsNone(mod.swappable_link("/usr/bin/ls", "/"))
+        self.assertIsNone(mod.swappable_link(str(work / "plain"), "/"))                     # no link, nothing to repoint
+        self.assertIn("'..' component", mod.swappable_link("../x", str(work)) or "")
+        self.assertIn("'..' component", mod.swappable_link("/usr/bin/../bin/ls", "/") or "")
+        with mock.patch.object(mod, "agent_writable", return_value=False):
+            self.assertIsNone(mod.swappable_link(str(lnk), "/"))        # the directory holding the link is out of reach
+            self.assertIn("'..' component", mod.swappable_link("/usr/bin/../bin/ls", "/") or "")   # a `..` is suspect whatever the modes say
+
+    def test_swappable_link_follows_a_safe_link_to_a_target_through_an_unsafe_one(self) -> None:   # round-2 LOW-1
+        work = pathlib.Path(os.path.realpath(self.work))   # /var is itself a link on macOS; a safe link is followed now
+        unsafe = work / "unsafe"
+        os.symlink("/bin", unsafe)                 # a link in a directory the user can write
+        safe = work / "safe"
+        os.symlink(str(unsafe) + "/ls", safe)      # the "root-owned" link whose target goes through `unsafe`
+        loop = work / "loop"
+        os.symlink(str(loop), loop)
+        with mock.patch.object(mod, "agent_writable", return_value=True):
+            self.assertEqual(mod.swappable_link(str(unsafe / "ls"), "/"), str(unsafe))
+        calls = []
+        def agent(p):
+            calls.append(p)
+            return len(calls) > 1                 # the first directory (holding `safe`) is out of reach, the next one is not
+        with mock.patch.object(mod, "agent_writable", side_effect=agent):
+            self.assertEqual(mod.swappable_link(str(safe), "/"), str(unsafe))
+        with mock.patch.object(mod, "agent_writable", return_value=False):
+            self.assertIsNone(mod.swappable_link(str(safe), "/"))                      # nothing writable: fine
+            self.assertIn("too many links", mod.swappable_link(str(loop), "/") or "")  # a loop is refused, not walked forever
+
+    def test_swappable_link_asks_about_the_realpath_of_the_directory_holding_the_link(self) -> None:
+        lnk = self.work / "lnk"
+        os.symlink("/bin/ls", lnk)
+        asked = []
+        with mock.patch.object(mod, "agent_writable", lambda p: asked.append(p) or False):
+            mod.swappable_link(str(lnk), "/")
+        self.assertIn(os.path.realpath(self.work), asked)
+
+    def test_a_program_run_through_a_link_the_user_can_repoint_prompts_when_nested(self) -> None:
+        lnk = self.work / "lnk"
+        os.symlink("/bin/ls", lnk)
+        dlink = self.work / "dl"
+        os.symlink("/bin", dlink)
+        self.assertAllowed([str(lnk)])   # at the top level exec runs the realpath it judged, so a link is fine there
+        for argv in (["sh", "-c", "sleep 2; " + str(lnk)], ["sh", "-c", "sleep 2; exec " + str(lnk) + " -l"],
+                     ["nohup", str(lnk)], ["nice", str(lnk)], ["timeout", "5", str(lnk)], ["env", str(lnk)],
+                     ["find", str(self.work), "-exec", str(lnk), "{}", ";"], ["xargs", str(lnk)],
+                     ["nohup", str(dlink / "ls")], ["env", "FOO=1", "nice", "-n", "5", str(lnk)]):
+            with self.subTest(argv=argv):
+                self.assertIn("link", self.check(argv) or "")
+        for argv in (["nohup", "/bin/ls"], ["sh", "-c", "sleep 1; /bin/ls"], ["env", "ls"], ["nice", "ls"],
+                     ["find", str(self.work), "-exec", "/usr/bin/true", "{}", ";"]):
+            with self.subTest(argv=argv):
+                self.assertAllowed(argv)
+        with mock.patch.object(mod, "agent_writable", return_value=False):   # a link in a place the user cannot write
+            self.assertAllowed(["nohup", str(lnk)])
+        self.assertIn("'..' component", self.check(["nohup", "/bin/../bin/ls"]) or "")
+        cl = self.work / "cl"
+        os.symlink("/usr", cl)   # the working directory is reached through a link: a bare name is found on PATH, not there
+        self.assertAllowed(["nice", "ls"], cwd=cl)
+
+    def test_a_script_reached_through_a_link_the_user_can_repoint_prompts(self) -> None:
+        target = "/etc/passwd"
+        if not os.path.isfile(target):
+            self.skipTest("no /etc/passwd here")
+        slink = self.work / "slink"
+        os.symlink(target, slink)
+        self.assertAllowed(["sh", target])      # control: a root-owned file reached by its own path is fine
+        for argv in (["sh", str(slink)], ["sh", "-c", "sh " + str(slink)], ["nice", "sh", str(slink)],
+                     ["env", "bash", str(slink)], ["sh", "-c", "sleep 2; sh " + str(slink)]):
+            with self.subTest(argv=argv):
+                self.assertIn("link", self.check(argv) or "")
+        self.assertIn("link", mod.script_problem(str(slink), "/") or "")
+
+    def test_the_exec_path_has_no_user_owned_directory(self) -> None:
+        self.assertNotIn("/opt/homebrew", mod.EXEC_PATH)
+        self.assertEqual(mod.EXEC_PATH.split(":")[:4], ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+
 
 class ModeTests(GrantBase):
     """main() with the boundary patched: no root needed, execve captured."""
@@ -961,6 +1194,215 @@ class ModeTests(GrantBase):
         self.put()
         self.assertEqual(self.run_main("status", "--check", "--", "echo")[0], 0)
         self.assertEqual(self.run_main("status", "--check", "--", "visudo")[0], mod.EX_DENIED)
+
+    # ---- follow-up LOW-2 / LOW-4: what the sweep covers, and how often `status --audit` may run it
+
+    def test_the_sweep_covers_what_the_readme_says(self) -> None:
+        for r in ("/usr/local", "/opt", "/Applications", "/Library", "/private/etc", "/private/var/db", "/private/var/root",
+                  "/private/tmp", "/private/var/tmp"):
+            self.assertIn(r, REAL_AUDIT_ROOTS)
+        self.assertEqual(REAL_AUDIT_VOLUMES, "/Volumes")
+
+    def test_the_sweep_adds_each_mounted_volume_but_not_links_or_files(self) -> None:
+        vols = pathlib.Path(self.tmp.name) / "vols"
+        (vols / "A").mkdir(parents=True)
+        (vols / "B").mkdir()
+        os.symlink("/", vols / "Macintosh HD")
+        (vols / "file").write_text("x")
+        ran = []
+        def fake_run(argv, **kw):
+            ran.append(argv[1])
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        with mock.patch.object(mod, "AUDIT_VOLUMES", str(vols)), mock.patch.object(mod, "INVOKER_UID", None), \
+                mock.patch.object(mod, "AUDIT_ROOTS", (str(self.work),)), mock.patch.object(mod.subprocess, "run", fake_run):
+            mod.audit(0)
+        self.assertEqual(ran, [str(self.work), str(vols / "A"), str(vols / "B")])
+        with mock.patch.object(mod, "AUDIT_VOLUMES", str(vols / "none")), mock.patch.object(mod, "INVOKER_UID", None), \
+                mock.patch.object(mod, "AUDIT_ROOTS", (str(self.work),)), mock.patch.object(mod.subprocess, "run", fake_run):
+            ran.clear()
+            mod.audit(0)   # no volumes directory: no error
+        self.assertEqual(ran, [str(self.work)])
+
+    def test_the_sweep_has_a_total_time_limit(self) -> None:
+        seen = []
+        def fake_run(argv, **kw):
+            seen.append(kw["timeout"])
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        with mock.patch.object(mod, "INVOKER_UID", None), mock.patch.object(mod, "AUDIT_ROOTS", (str(self.work), "/usr")), \
+                mock.patch.object(mod.subprocess, "run", fake_run):
+            with mock.patch.object(mod, "AUDIT_TOTAL", 7):
+                mod.audit(0)
+            self.assertEqual(len(seen), 2)
+            self.assertTrue(all(0 < t <= 7 for t in seen), seen)
+            seen.clear()
+            mod.audit(0)
+            self.assertEqual(seen, [mod.AUDIT_TIMEOUT, mod.AUDIT_TIMEOUT])
+            seen.clear()
+            with mock.patch.object(mod, "AUDIT_TOTAL", 0), mock.patch.object(mod.time, "monotonic", return_value=100.0):
+                found = mod.audit(0)   # nothing left from the start: every root is reported as skipped
+            self.assertEqual(seen, [])
+            self.assertEqual(len([ln for ln in found if "skipped" in ln and "total time limit" in ln]), 2, found)
+
+    def test_audit_slot_allows_one_sweep_a_minute_and_stamps_before_it_starts(self) -> None:
+        stamp = pathlib.Path(mod.AUDIT_STAMP)
+        old_umask = os.umask(0o077)
+        try:
+            fd, why = mod.audit_slot(1000)
+        finally:
+            os.umask(old_umask)
+        self.assertIsNone(why)
+        self.assertEqual(stamp.read_text().strip(), "1000")
+        self.assertEqual(stat.S_IMODE(stamp.stat().st_mode), 0o644)
+        fd2, why = mod.audit_slot(5000)     # long after, but the first sweep still holds the lock
+        self.assertIsNone(fd2)
+        self.assertIn("another sweep is running", why)
+        os.close(fd)
+        fd2, why = mod.audit_slot(1030)
+        self.assertIsNone(fd2)
+        self.assertIn("wait 30 s", why)
+        self.assertEqual(stamp.read_text().strip(), "1000")   # a refusal does not move the stamp
+        fd3, why = mod.audit_slot(1000 + mod.AUDIT_MIN_GAP)   # exactly a minute later runs
+        self.assertIsNone(why)
+        os.close(fd3)
+        self.assertEqual(stamp.read_text().strip(), str(1000 + mod.AUDIT_MIN_GAP))
+        fd4, why = mod.audit_slot(10)       # a clock set back does not lock the sweep out
+        self.assertIsNone(why)
+        os.close(fd4)
+        self.assertEqual(stamp.read_text().strip(), "10")   # and a shorter number leaves no old digits behind
+
+    def test_audit_slot_fails_closed_on_an_untrusted_stamp_or_directory(self) -> None:
+        stamp = pathlib.Path(mod.AUDIT_STAMP)
+        stamp.write_text("1")
+        os.chmod(stamp, 0o666)
+        fd, why = mod.audit_slot(100000)
+        self.assertIsNone(fd)
+        self.assertIn("audit not run", why)
+        self.assertEqual(stamp.read_text(), "1")
+        stamp.unlink()
+        (self.dir / "real-stamp").write_text("1")   # a trusted file, so only the link itself can be what refuses
+        os.chmod(self.dir / "real-stamp", 0o644)
+        os.symlink(self.dir / "real-stamp", stamp)
+        fd, why = mod.audit_slot(100000)
+        self.assertIsNone(fd)
+        self.assertIn("cannot open the audit stamp", why)
+        stamp.unlink()
+        os.chmod(self.dir, 0o775)
+        fd, why = mod.audit_slot(100000)
+        self.assertIsNone(fd)
+        self.assertIn("grant dir", why)
+        self.assertFalse(stamp.exists())
+
+    def test_audit_slot_ignores_a_damaged_stamp(self) -> None:
+        stamp = pathlib.Path(mod.AUDIT_STAMP)
+        stamp.write_text("not a number")
+        os.chmod(stamp, 0o644)
+        fd, why = mod.audit_slot(500)
+        self.assertIsNone(why)
+        os.close(fd)
+        self.assertEqual(stamp.read_text().strip(), "500")
+
+    def test_status_audit_is_rate_limited_and_the_second_call_runs_no_find(self) -> None:
+        import io, contextlib
+        calls = []
+        def fake_audit(since):
+            calls.append((since, pathlib.Path(mod.AUDIT_STAMP).read_text().strip()))   # the stamp is there before the sweep
+            return ["setuid/setgid file changed: /x"]
+        buf = io.StringIO()
+        with mock.patch.object(mod, "audit", fake_audit), contextlib.redirect_stdout(buf):
+            rc1, _ = self.run_main("status", "--audit", "123")
+            rc2, _ = self.run_main("status", "--audit", "123")
+            rc3, _ = self.run_main("status", "--audit", "456")
+        self.assertEqual(rc1, 1)
+        self.assertEqual((rc2, rc3), (mod.EX_REFUSED, mod.EX_REFUSED))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 123)
+        self.assertLess(abs(int(calls[0][1]) - time.time()), 10)
+        self.assertEqual(buf.getvalue().count("AUDIT setuid"), 1)
+        self.assertIn("REFUSED(", self.log_text())
+        self.assertIn("wait", self.log_text())
+        later = int(time.time()) + 3600   # a later call (the clock moved on) runs again
+        with mock.patch.object(mod, "audit", fake_audit), contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(mod.time, "time", return_value=later):
+            rc4, _ = self.run_main("status", "--audit", "123")
+        self.assertEqual(rc4, 1)
+        self.assertEqual(len(calls), 2)
+
+    def test_status_audit_with_no_known_grant_time_uses_no_slot(self) -> None:
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc, _ = self.run_main("status", "--audit")
+        self.assertEqual(rc, 0)
+        self.assertIn("no grant time known", buf.getvalue())
+        self.assertFalse(pathlib.Path(mod.AUDIT_STAMP).exists())
+
+    def test_status_audit_refuses_an_epoch_out_of_range_before_spending_the_slot(self) -> None:   # round-2 LOW-4
+        ran = []
+        with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
+            for bad in ("9" * 31, str(int(time.time()) + 10 * 86400), "99999999999999999999"):
+                with self.subTest(since=bad):
+                    rc, _ = self.run_main("status", "--audit", bad)
+                    self.assertEqual(rc, mod.EX_USAGE)
+        self.assertEqual(ran, [])
+        self.assertFalse(pathlib.Path(mod.AUDIT_STAMP).exists())      # the one-a-minute slot was not spent
+        with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
+            rc, _ = self.run_main("status", "--audit", "0")
+        self.assertEqual((rc, ran), (0, [0]))
+
+    def test_status_audit_does_not_run_when_the_stamp_cannot_be_kept(self) -> None:
+        ran = []
+        os.chmod(self.dir, 0o775)
+        with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
+            rc, _ = self.run_main("status", "--audit", "5")
+        self.assertEqual((rc, ran), (mod.EX_REFUSED, []))
+
+    def write_log(self, path, *rows):
+        pathlib.Path(path).write_text("".join("%s\t501\t%s\t/\tx\n" % (mod.iso(ep), ev) for ep, ev in rows))
+        os.chmod(path, 0o600)
+
+    def test_revoke_with_the_grant_file_gone_says_when_the_window_was_never_revoked(self) -> None:   # round-2 LOW-3
+        import io, contextlib
+        ran = []
+        for name, rows, want in (
+                ("granted, never revoked", ((1000000, "GRANT(3600 until x)"),), True),
+                ("granted then revoked", ((1000000, "GRANT(3600 until x)"), (1000500, "REVOKE")), False),
+                ("revoked, then granted again", ((1000000, "GRANT(1 until x)"), (1000500, "REVOKE"), (1001000, "GRANT(2 until x)")), True),
+                ("no rows at all", ((1000000, "GRANTED-EXEC"),), False)):
+            with self.subTest(name):
+                self.write_log(mod.LOG_FILE, *rows)
+                buf = io.StringIO()
+                with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(buf):
+                    rc, _ = self.run_main("revoke")
+                self.assertEqual(rc, 0)
+                self.assertEqual("never revoked" in buf.getvalue(), want, buf.getvalue())
+                if want:
+                    self.assertIn("sudo-ask --status --audit %d" % rows[-1][0], buf.getvalue())
+        self.assertEqual(ran, [])                                      # still no sweep
+        # the rotated generation counts too when the current log has no grant rows
+        self.write_log(mod.LOG_FILE, (1002000, "GRANTED-EXEC"))
+        self.write_log(mod.LOG_FILE + ".1", (1000000, "GRANT(3600 until x)"))
+        buf = io.StringIO()
+        with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(buf):
+            self.run_main("revoke")
+        self.assertIn("never revoked", buf.getvalue())
+
+    def test_revoke_without_a_grant_file_runs_no_sweep(self) -> None:
+        import io, contextlib
+        f = self.work / "rs"
+        f.write_text("x")
+        os.chmod(f, 0o4755)
+        ran = []
+        buf = io.StringIO()
+        with mock.patch.object(mod, "AUDIT_ROOTS", (str(self.work),)), mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), \
+                contextlib.redirect_stdout(buf):
+            rc, _ = self.run_main("revoke")
+        self.assertEqual((rc, ran), (0, []))
+        self.assertIn("audit: skipped", buf.getvalue())
+        self.assertNotIn("never revoked", buf.getvalue())            # no grant row in the log: the old message
+        self.put()
+        with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(io.StringIO()):
+            self.run_main("revoke")
+        self.assertEqual(len(ran), 1)   # with a grant file it sweeps
 
 
 SUDO = "/usr/bin/sudo"
@@ -1351,18 +1793,39 @@ class SetupScriptTests(unittest.TestCase):
 
     ME = subprocess.run(["/usr/bin/id", "-un"], capture_output=True, text=True, check=True).stdout.strip()
 
-    def real_listing(self, user=("env_reset, timestamp_timeout=0",), runas=(), user_header=True):
-        """`sudo -l` in sudo's real layout: the user section, then the Runas/Command-specific section with the drop-in's own
-        `Defaults!HELPER ... timestamp_timeout=0` line LAST, then the rules."""
+    def real_listing(self, user=("env_reset, timestamp_timeout=0",), runas=(), user_header=True, helper=True,
+                     runas_header=None, stray=None, second_runas=False):
+        """`sudo -l` as sudo prints it (display_privs/display_bound_defaults): the user section, then the Runas/Command-specific
+        section: every Defaults> entry, then every Defaults! entry, one per line EXCEPT that the first Defaults! entry is glued
+        onto the end of the last Defaults> line (no newline, the next entry's 4 spaces of indent between). The drop-in's own
+        `Defaults!HELPER ... timestamp_timeout=0` is the last Defaults! entry. Then the rules."""
         me = self.ME
         out = []
         if user_header:
             out += ["Matching Defaults entries for %s on h:" % me] + ["    " + u for u in user] + [""]
-        out += ["Runas and Command-specific defaults for %s:" % me] + ["    " + r for r in runas]
-        out += ["    Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH, "",
-                "User %s may run the following commands on h:" % me,
+        gt = [r for r in runas if r.startswith("Defaults>")]
+        bang = [r for r in runas if not r.startswith("Defaults>")]
+        if helper:
+            bang.append("Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH)
+        lines = ["    " + r for r in gt]
+        if gt and bang:
+            lines[-1] += "    " + bang[0]
+            bang = bang[1:]
+        lines += ["    " + r for r in bang]
+        out += [runas_header or "Runas and Command-specific defaults for %s:" % me]
+        if stray:
+            out += [stray]
+        out += lines
+        if second_runas:
+            out += ["Runas and Command-specific defaults for %s:" % me, "    Defaults!/bin/x env_reset"]
+        out += ["", "User %s may run the following commands on h:" % me,
                 "    (root) NOPASSWD: %s exec *, %s status" % (HELPER_PATH, HELPER_PATH)]
         return "\n".join(out)
+
+    def test_the_fixture_is_sudos_real_layout(self) -> None:   # round-5 LOW-2: the glued line
+        text = self.real_listing(runas=("Defaults>root !requiretty",))
+        self.assertIn("    Defaults>root !requiretty    Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH, text)
+        self.assertEqual(len([ln for ln in text.splitlines() if "Defaults!" in ln]), 1)   # the entry is not also on its own line
 
     def test_install_passes_when_the_listing_says_the_ticket_is_off(self) -> None:
         for name, listing in (
@@ -1371,7 +1834,11 @@ class SetupScriptTests(unittest.TestCase):
                 ("a later 0 beats an earlier 5", self.real_listing(user=("timestamp_timeout=5, timestamp_type=global, timestamp_timeout=0",))),
                 ("a bare negation is 0", self.real_listing(user=("env_reset, timestamp_timeout=5", "!timestamp_timeout"))),
                 ("another command's Defaults! of 0", self.real_listing(runas=("Defaults!/usr/bin/foo timestamp_timeout=0",))),
-                ("other entries in the runas section", self.real_listing(runas=("Defaults>root !requiretty",)))):
+                ("a Defaults> entry (glued to the helper's line, as sudo prints it)", self.real_listing(runas=("Defaults>root !requiretty",))),
+                ("two Defaults> entries and another Defaults!", self.real_listing(
+                    runas=("Defaults>a env_keep+=X", "Defaults>root !requiretty", "Defaults!/usr/bin/foo !requiretty"))),
+                ("an explicit plus sign", self.real_listing(user=("timestamp_timeout=5, timestamp_timeout=+0",))),
+                ("noise before the user section", "sudo: some warning\n" + self.real_listing())):
             with self.subTest(name):
                 p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing))
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
@@ -1394,6 +1861,17 @@ class SetupScriptTests(unittest.TestCase):
                                               "Runas and Command-specific defaults for someone_else:\n    Defaults!x timestamp_timeout=0", 0),
             "no user section at all": (self.real_listing(user_header=False), 0),
             "a negated value is not valid": (self.real_listing(user=("!timestamp_timeout=5",)), 0),
+            "a Defaults> ticket, glued to the helper's line": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",)), 0),
+            "0_0 after a real 15": (self.real_listing(user=("timestamp_timeout=0, timestamp_timeout=15, timestamp_timeout=0_0",)), 0),
+            "0e5 after a real 15": (self.real_listing(user=("timestamp_timeout=15, timestamp_timeout=0e5",)), 0),
+            "a quoted list hides a zero": (self.real_listing(user=('timestamp_timeout=15, env_keep+="X ,timestamp_timeout=0, Y"',)), 0),
+            "a renamed Runas header": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",),
+                                                         runas_header="Runas and Command-specific settings for %s:" % self.ME), 0),
+            "a stray column-0 line in the Runas section": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",),
+                                                                             stray="sudo: unable to resolve host"), 0),
+            "the helper's own Defaults! line is missing": (self.real_listing(helper=False), 0),
+            "two Runas sections": (self.real_listing(second_runas=True), 0),
+            "a Runas section for another user": (self.real_listing(runas_header="Runas and Command-specific defaults for someone_else:"), 0),
             "listing fails": ("sudo: a password is required", 1),
             "empty listing": ("", 0)}
         for name, (listing, rc) in cases.items():
@@ -1402,8 +1880,13 @@ class SetupScriptTests(unittest.TestCase):
                 self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
                 self.assertIn("rolling it back", p.stderr)
                 self.assertNotIn("Traceback", p.stderr + p.stdout)
-                for prefix, said in (("a Defaults> entry", "a Defaults> entry sets"), ("an unrecognised", "an unrecognised entry sets"),
-                                     ("another command", "a Defaults! entry gives a ticket")):
+                for prefix, said in (("a Defaults> entry", "a Defaults> entry sets"), ("an unrecognised entry", "an unrecognised entry sets"),
+                                     ("another command", "a Defaults! entry gives a ticket"),
+                                     ("a Defaults> ticket, glued", "a Defaults> entry sets timestamp_timeout"),
+                                     ("0_0", "is unreadable"), ("0e5", "is unreadable"), ("a quoted list", "is unreadable"),
+                                     ("a renamed", "unrecognised line"), ("a stray", "unrecognised line"),
+                                     ("the helper's own", "own Defaults! line is missing"), ("two Runas", "has no single"),
+                                     ("a Runas section for another", "is not the one for")):
                     if name.startswith(prefix):
                         self.assertIn(said, p.stderr + p.stdout)   # for the right reason
                 if name.startswith("user line missing"):
@@ -1415,19 +1898,48 @@ class SetupScriptTests(unittest.TestCase):
                 self.assertEqual(len(undone), 1, calls)
                 self.assertLess(install[0], undone[0])
 
-    def test_the_listing_is_asked_for_in_the_c_locale(self) -> None:   # the section headers are gettext-translated
-        src = SETUP.read_text()
-        self.assertIn('listing=$(LC_ALL=C LANG=C "$1" -n -l 2>&1)', src)
+    def checks_sudo_dir(self, listing, true_rc=1):
+        """A fake sudo for --ticket-checks: `-n -l` prints the listing (a German header unless the C locale was asked for),
+        `-n /usr/bin/true` exits true_rc, and every call is logged with the locale it saw."""
+        d = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-fake-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        text = ('#!/bin/bash\necho "SUDO $* [LC_ALL=${LC_ALL-unset} LANG=${LANG-unset}]" >> "$FAKE_LOG"\n'
+                'if [ "$1 $2" = "-n -l" ]; then\n  if [ "${LC_ALL-}" = C ]; then cat <<\'L\'\n%s\nL\n'
+                '  else cat <<\'L\'\n%s\nL\n  fi\n  exit 0\nfi\nexit %d\n') % (
+            listing, listing.replace("Matching Defaults entries for", "Passende Standardwerte fuer").replace(
+                "Runas and Command-specific defaults for", "Runas- und befehlsspezifische Standardwerte fuer"), true_rc)
+        (d / "sudo").write_text(text)
+        (d / "sudo").chmod(0o755)
+        return d
 
-    def test_verify_fails_when_a_plain_sudo_succeeds(self) -> None:   # round 5: a cached ticket is a FAIL, not a WARN
-        src = SETUP.read_text()
-        code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
-        self.assertRegex(code, r"/usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then\n\s+bad ")
-        self.assertNotIn("WARN  a sudo ticket", code)
+    def test_ticket_checks_pass_when_listed_off_and_a_plain_sudo_is_refused(self) -> None:   # round-5 LOW-4
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(), true_rc=1))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("the sudo ticket is off", p.stdout)
+        self.assertNotIn("FAIL", p.stdout)
+        self.assertIn("SUDO -n /usr/bin/true", calls)
+
+    def test_ticket_checks_fail_when_a_plain_sudo_succeeds(self) -> None:   # the behavioural half, not a source-text check
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(), true_rc=0))
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("'sudo -n /usr/bin/true' succeeded", p.stdout)
+        self.assertIn("roll back", p.stdout)          # the advice: roll back, never "sudo -k and verify again"
+        self.assertNotIn("sudo -k", p.stdout)
+
+    def test_ticket_checks_ask_for_the_listing_in_the_c_locale(self) -> None:   # the fake prints a German header otherwise
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing()))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("SUDO -n -l [LC_ALL=C LANG=C]", calls)
+        self.assertNotIn("Standardwerte", p.stdout)
+
+    def test_ticket_checks_are_read_only_and_guarded(self) -> None:
+        p, calls = self.guarded("--ticket-checks", with_fake=False)
+        self.assertEqual(p.returncode, 2)             # no temp fake and no --live: refuses before any call
+        self.assertEqual(calls, "")
 
     def test_the_gate_and_the_verify_use_the_same_proof(self) -> None:
         src = SETUP.read_text()
-        self.assertIn("ticket_gate /usr/bin/sudo || fail=1", src)           # --verify on the real machine
+        self.assertIn("ticket_checks /usr/bin/sudo || fail=1", src)         # --verify on the real machine: the same two checks
         self.assertIn('"$0" --verify --live || gate_failed=1', src)         # a live install runs it and undoes itself
         self.assertIn("run_root /bin/sh -c \"$rollback_body\"", src)
         self.assertNotIn("NOTE  the ticket is off", src)                     # no longer a note: a failing check

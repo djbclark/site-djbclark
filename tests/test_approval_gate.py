@@ -89,7 +89,10 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(g[n]["policy"], "always-prompt", n)
 
     def test_fallback_parser_agrees_with_tomllib(self) -> None:
-        import tomllib
+        try:
+            import tomllib
+        except ImportError:
+            self.skipTest("no tomllib in this Python (< 3.11)")
         text = REGISTRY.read_text()
         self.assertEqual(gate.parse_registry(text), tomllib.loads(text))
         with self.assertRaises(ValueError):
