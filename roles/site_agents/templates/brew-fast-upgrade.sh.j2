@@ -391,17 +391,25 @@ run_chrome_use_pass() {
 
 # Macroscope local (prassoai/macroscope-local, operator 2026-11-22) installs
 # outside Homebrew: ~/.local/bin/macroscope plus its Claude Code plugin.
-# `macroscope update --yes` replaces both from the GitHub release (SHA-256
-# checked against GitHub's asset digest) for the agent tools saved at install
-# time (~/.local/state/macroscope/install.json). It runs no review and spends
+# `macroscope update --yes` runs Macroscope's installer script, fetched fresh
+# from macroscope.com and not separately verified, which replaces both for the
+# agent tools saved at install time (~/.local/state/macroscope/install.json).
+# The installer checks the downloaded binary against GitHub's asset digest when
+# GitHub reports one; MACROSCOPE_REQUIRE_CHECKSUM=1 makes a missing digest fail
+# the pass instead of installing unchecked. It runs no review and spends
 # nothing: reviews are billed per KB from a non-renewable budget, so this pass
 # never calls `codereview`. Skipped until installed; stdin from /dev/null so
-# the updater can never wait on a prompt.
+# the updater can never wait on a prompt. Called once per invocation (attempt
+# 1), not on every retry: each run downloads the binary and rewrites
+# ~/.claude/settings.json, and the CLI has no sign-in-free up-to-date check.
+# No --no-path: the `update` subcommand's forwarding of installer flags is
+# documented only for --tools (macroscope-local README), so it is unproven; the
+# saved install state (pathPolicy skip) already keeps shell rc files untouched.
 run_macroscope_pass() {
   local cli="$HOME/.local/bin/macroscope"
   [ -x "$cli" ] || return 0
   echo "[brew-fast-upgrade] macroscope: updating CLI + plugin"
-  "$cli" update --yes </dev/null || return 1
+  MACROSCOPE_REQUIRE_CHECKSUM=1 "$cli" update --yes </dev/null || return 1
 }
 
 # Outdated uv tools, one "name vX [required: …] [latest: Y]" line each (empty
@@ -644,7 +652,8 @@ run_upgrade_and_restart_apps() {
     if ! run_chrome_use_pass; then
       echo "[brew-fast-upgrade] chrome-use pass failed on attempt $attempt"
     fi
-    if ! run_macroscope_pass; then
+    # Once per invocation: a retry repeats a full download and settings.json rewrite.
+    if [ "$attempt" -eq 1 ] && ! run_macroscope_pass; then
       echo "[brew-fast-upgrade] macroscope pass failed on attempt $attempt"
     fi
 
