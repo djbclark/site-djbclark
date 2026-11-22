@@ -10,6 +10,7 @@ only --print and --check, plus the --live guard's refusals and a temp-dir fake.
 
 from __future__ import annotations
 
+import ctypes
 import importlib.machinery
 import importlib.util
 import json
@@ -677,7 +678,7 @@ class ModeTests(GrantBase):
                 mock.patch.dict(mod.os.environ, {"PATH": PATH, "SUDO_UID": "501", **(env or {})}), \
                 mock.patch("os.getcwd", return_value=str(self.work)):
             try:
-                rc = mod.main(["h", *args])
+                rc = mod.main([real if installed else "h", *args])
             except SystemExit as e:
                 rc = e.code
         return rc, calls
@@ -757,6 +758,16 @@ class ModeTests(GrantBase):
         self.assertFalse((self.dir / "grant").exists())
         self.assertIn("GRANT-REFUSED(sudo was not run with -k)", self.log_text())
 
+    def test_grant_refused_when_started_through_a_link_to_the_helper(self) -> None:   # round 3 MED-1 (ii)
+        calls = []
+        with mock.patch.object(mod, "need_root"), mock.patch.object(mod, "INSTALLED_PATH", os.path.realpath(str(HELPER))), \
+                mock.patch.object(mod, "fresh_auth_problem", return_value=None), \
+                mock.patch.dict(mod.os.environ, {"SUDO_UID": "501"}), mock.patch("os.getcwd", return_value=str(self.work)):
+            with self.assertRaises(SystemExit) as e:
+                mod.main([str(self.work / "lnk"), "grant", "1h"])   # same bytes, but not the exact path
+        self.assertEqual(e.exception.code, mod.EX_REFUSED)
+        self.assertFalse(pathlib.Path(mod.GRANT_FILE).exists())
+
     def test_grant_refused_from_a_copy_of_the_helper(self) -> None:   # MED-3
         rc, _ = self.run_main("grant", "24h", installed=False)
         self.assertEqual(rc, mod.EX_REFUSED)
@@ -769,7 +780,7 @@ class ModeTests(GrantBase):
                 mock.patch.object(mod, "INSTALLED_PATH", os.path.realpath(str(HELPER))), \
                 mock.patch.dict(mod.os.environ, {"SUDO_UID": "501"}), mock.patch("os.getcwd", return_value=str(self.work)):
             chain[100] = P(50, 501, [SUDO, "-k", mod.INSTALLED_PATH, "grant", "1h"])
-            self.assertEqual(mod.main(["h", "grant", "1h"]), 0)
+            self.assertEqual(mod.main([mod.INSTALLED_PATH, "grant", "1h"]), 0)
             chain[100] = P(50, 501, [SUDO, "-n", mod.INSTALLED_PATH, "grant", "1h"])
             with self.assertRaises(SystemExit) as cm:
                 mod.main(["h", "grant", "1h"])
@@ -819,6 +830,20 @@ class ModeTests(GrantBase):
         self.assertTrue(pathlib.Path(mod.LOG_FILE + ".1").exists())
         self.assertEqual(len(self.log_text().splitlines()), 1)
 
+
+    def test_revoke_shows_the_expiry_the_grant_file_really_had(self) -> None:   # round 3
+        import io, contextlib
+        self.put(granted_ago=300)
+        want = mod.read_grant(int(time.time()))[2]["expires_utc"]
+        buf = io.StringIO()
+        with mock.patch.object(mod, "AUDIT_ROOTS", ()), contextlib.redirect_stdout(buf):
+            rc, _ = self.run_main("revoke")
+        self.assertEqual(rc, 0)
+        self.assertIn("revoking: the grant file said expires_utc=%s" % want, buf.getvalue())
+        buf = io.StringIO()
+        with mock.patch.object(mod, "AUDIT_ROOTS", ()), contextlib.redirect_stdout(buf):
+            self.run_main("revoke")
+        self.assertIn("revoking: no readable grant file", buf.getvalue())
 
     def test_exec_runs_scripts_by_the_checked_realpath(self) -> None:   # MED-2 B4
         self.put()
@@ -942,8 +967,15 @@ SUDO = "/usr/bin/sudo"
 HELPER_PATH = "/usr/local/libexec/sudo-ask-granted"
 
 
-def P(ppid, ruid, argv, exec_path=None):
-    return mod.ProcInfo(ppid, ruid, exec_path or argv[0], list(argv))
+def P(ppid, ruid, argv, exec_path=None, **kernel):
+    """A fake kernel read. By default the kernel agrees with argv: a process whose argv[0] is /usr/bin/sudo is the real
+    setuid-root sudo (path, name, euid 0, svuid 0); anything else is a plain process of its real user. kernel overrides:
+    kernel_path, comm, euid, svuid."""
+    is_sudo = argv[0] == SUDO and (exec_path or argv[0]) == SUDO
+    k = dict(kernel_path=SUDO if is_sudo else (exec_path or argv[0]), comm="sudo" if is_sudo else os.path.basename(argv[0]).lstrip("-"),
+             euid=0 if is_sudo else ruid, svuid=0 if is_sudo else ruid)
+    k.update(kernel)
+    return mod.ProcInfo(ppid, ruid, exec_path or argv[0], list(argv), k["euid"], k["svuid"], k["comm"], k["kernel_path"])
 
 
 class FreshAuthTests(unittest.TestCase):
@@ -1021,6 +1053,45 @@ class FreshAuthTests(unittest.TestCase):
         fake2 = P(1, self.UID, ["/tmp/sudo", "-k", HELPER_PATH, "grant", "1h"], exec_path=SUDO)
         self.assertIsNotNone(mod.fresh_auth_problem("1h", info=lambda pid: fake2, start=100))
 
+
+    # ---- round 3 MED-1: the kernel decides what a process is; argv and the exec path are the process's own words
+
+    def test_a_user_process_with_the_right_argv_refuses(self) -> None:
+        forged = P(1, self.UID, self.GOOD, kernel_path="/private/tmp/x/fs", comm="fs", euid=self.UID, svuid=self.UID)
+        self.assertIn("kernel disagrees", mod.fresh_auth_problem("1h", info=lambda pid: forged, start=100) or "")
+        # above a real sudo that ran with no authentication (the adversary's chain): refused, not skipped over
+        real = P(101, 0, [SUDO, "-n", HELPER_PATH, "exec", "--", "/bin/sh"])
+        self.assertIn("kernel disagrees", self.problem_of({100: real, 101: forged}) or "")
+
+    def test_a_sudo_that_is_not_setuid_root_refuses(self) -> None:   # looks right in every field but the uids
+        for kw in (dict(euid=self.UID), dict(svuid=self.UID), dict(euid=self.UID, svuid=self.UID), dict(euid=1, svuid=0)):
+            with self.subTest(kw=kw):
+                p = P(1, self.UID, self.GOOD, **kw)
+                self.assertIn("kernel disagrees", mod.fresh_auth_problem("1h", info=lambda pid: p, start=100) or "")
+
+    def test_a_sudo_at_the_wrong_path_or_with_the_wrong_name_refuses(self) -> None:
+        for kw in (dict(kernel_path="/usr/local/bin/sudo"), dict(kernel_path="/private/tmp/sudo"), dict(kernel_path="/usr/bin/sudo/"),
+                   dict(comm="fs"), dict(comm="sudo2"), dict(comm="")):
+            with self.subTest(kw=kw):
+                p = P(1, self.UID, self.GOOD, **kw)
+                self.assertIn("kernel disagrees", mod.fresh_auth_problem("1h", info=lambda pid: p, start=100) or "")
+
+    def test_a_real_sudo_by_the_kernel_with_the_wrong_argv_still_refuses(self) -> None:
+        p = P(1, self.UID, [SUDO, "-n", HELPER_PATH, "grant", "1h"])
+        self.assertIn("not run exactly", mod.fresh_auth_problem("1h", info=lambda pid: p, start=100) or "")
+
+    def test_a_chain_with_a_plain_process_claiming_sudo_only_in_the_exec_path_refuses(self) -> None:
+        p = P(1, self.UID, ["fs", "-k", HELPER_PATH, "grant", "1h"], exec_path=SUDO, kernel_path="/tmp/fs", comm="fs")
+        self.assertIn("kernel disagrees", mod.fresh_auth_problem("1h", info=lambda pid: p, start=100) or "")
+
+    def test_kernel_read_errors_refuse(self) -> None:
+        for bad in (lambda pid: None, lambda pid: (_ for _ in ()).throw(OSError("proc_pidpath")),
+                    lambda pid: (_ for _ in ()).throw(ValueError("x"))):
+            self.assertIsNotNone(mod.fresh_auth_problem("1h", info=bad, start=100))
+
+    def problem_of(self, procs):
+        return mod.fresh_auth_problem("1h", info=procs.get, start=100)
+
     def test_unreadable_processes_refuse(self) -> None:
         self.assertIn("cannot read", mod.fresh_auth_problem("1h", info=lambda pid: None, start=100) or "")
         def boom(pid):
@@ -1049,7 +1120,7 @@ class ProcInfoTests(unittest.TestCase):
         def flip(libc, pid):
             calls.append(pid)
             r = real(libc, pid)
-            return r if len(calls) == 1 else (r[0], r[1], r[2] + 1, r[3])   # a different process start the second time
+            return r if len(calls) == 1 else (r[0], r[1], r[2] + 1) + tuple(r[3:])   # a different process start the second time
         with mock.patch.object(mod, "_bsdinfo", flip):
             self.assertIsNone(mod.proc_info(p.pid))
         self.assertEqual(len(calls), 2)
@@ -1062,6 +1133,54 @@ class ProcInfoTests(unittest.TestCase):
         self.assertEqual(pi.argv, ["/bin/sh", "-c", "sleep 30; :", "arg0", "x -k", "-p", ""])
         self.assertIn(pi.exec_path, ("/bin/sh", "/bin/bash", "/bin/dash"))   # sh is bash on this Mac
         self.assertEqual((pi.ppid, pi.ruid), (os.getpid(), os.getuid()))
+
+    def test_the_kernel_fields_are_real(self) -> None:
+        p = self.spawn("/bin/sleep", "30")
+        pi = mod.proc_info(p.pid)
+        self.assertEqual(pi.kernel_path, os.path.realpath("/bin/sleep"))
+        self.assertEqual(pi.comm, "sleep")
+        self.assertEqual((pi.euid, pi.svuid, pi.ruid), (os.getuid(), os.getuid(), os.getuid()))
+
+    def test_a_real_process_with_forged_argv_is_not_sudo(self) -> None:   # round 3 MED-1: the adversary's forgery
+        p = self.spawn("/bin/bash", "-c", "exec -a /usr/bin/sudo /bin/sleep 30")
+        pi = mod.proc_info(p.pid)
+        self.assertIsNotNone(pi)
+        self.assertEqual(pi.argv[0], "/usr/bin/sudo")                      # what it says
+        self.assertEqual(pi.kernel_path, os.path.realpath("/bin/sleep"))   # what the kernel holds
+        with mock.patch.object(mod, "INVOKER_UID", os.getuid()):
+            self.assertIn("kernel disagrees", mod.fresh_auth_problem("1h", start=p.pid) or "")
+
+    def test_bsdinfo_reads_each_field_at_its_documented_offset(self) -> None:   # round 4: a crafted proc_bsdinfo
+        import struct as st
+        raw = bytearray(136)
+        st.pack_into("=I", raw, 16, 111)           # pbi_ppid
+        st.pack_into("=I", raw, 20, 0)             # pbi_uid (effective)
+        st.pack_into("=I", raw, 28, 501)           # pbi_ruid
+        st.pack_into("=I", raw, 36, 7)             # pbi_svuid
+        raw[48:52] = b"sudo"                       # pbi_comm
+        raw[64:68] = b"evil"                       # pbi_name: NOT the kernel comm
+        st.pack_into("=QQ", raw, 120, 1234, 5678)  # start sec, usec
+
+        class Libc:
+            def proc_pidinfo(self, pid, flavor, arg, buf, size):
+                ctypes.memmove(buf, bytes(raw), 136)
+                return 136
+        self.assertEqual(mod._bsdinfo(Libc(), 5), (111, 501, 1234, 5678, 0, 7, "sudo"))
+
+        class Short:
+            def proc_pidinfo(self, *a):
+                return 0
+        self.assertIsNone(mod._bsdinfo(Short(), 5))
+
+    def test_an_unreadable_kernel_path_makes_the_process_unreadable(self) -> None:   # round 4: fail closed
+        p = self.spawn("/bin/sleep", "30")
+        self.assertIsNotNone(mod.proc_info(p.pid))
+        with mock.patch.object(mod, "_pidpath", return_value=None):
+            self.assertIsNone(mod.proc_info(p.pid))
+
+    def test_the_real_sudo_binary_looks_like_sudo_to_the_kernel_fields(self) -> None:
+        st = os.stat("/usr/bin/sudo")
+        self.assertTrue(st.st_mode & 0o4000 and st.st_uid == 0, "sudo must be setuid root for the euid/svuid rule")
 
     def test_a_gone_process_is_none(self) -> None:
         p = self.spawn("/bin/sleep", "30")
@@ -1219,6 +1338,55 @@ class SetupScriptTests(unittest.TestCase):
         self.assertIn("rm -f /etc/sudoers.d/sudo-ask-grant", calls)
         self.assertIn("PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f", calls)
         self.assertIn("rm -rf /var/db/sudo-ask", calls)
+
+    # ---- round 3 LOW-1: the install proves the shared ticket is off, or undoes itself
+
+    def fake_sudo_dir(self, listing, rc=0):
+        d = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-fake-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        text = "#!/bin/bash\necho \"SUDO $*\" >> \"$FAKE_LOG\"\ncat <<'LISTING'\n%s\nLISTING\nexit %d\n" % (listing, rc)
+        (d / "sudo").write_text(text)
+        (d / "sudo").chmod(0o755)
+        return d
+
+    def test_install_passes_when_the_listing_says_the_ticket_is_off(self) -> None:
+        for listing in ("Matching Defaults entries for u on h:\n    env_reset, timestamp_timeout=0.0, mail_badpass",
+                        "Matching Defaults entries for u on h:\n    timestamp_timeout=5, timestamp_type=global, timestamp_timeout=0"):
+            with self.subTest(listing=listing):
+                p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing))
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertIn("the sudo ticket is off", p.stdout)
+                self.assertIn("SUDO -n -l", calls)
+                self.assertNotIn("rm -f /etc/sudoers.d", calls)
+
+    def test_install_rolls_back_when_the_ticket_is_not_proven_off(self) -> None:
+        cases = {"another file sets it later": ("Matching Defaults entries for u on h:\n    timestamp_timeout=0, timestamp_timeout=5", 0),
+                 "never expires": ("Matching Defaults entries for u on h:\n    timestamp_timeout=-1", 0),
+                 "not mentioned (the default 5 minutes)": ("Matching Defaults entries for u on h:\n    env_reset", 0),
+                 "a command default is not the user's": ("Matching Defaults entries for u on h:\n    !timestamp_timeout=5", 0),
+                 "listing fails": ("sudo: a password is required", 1),
+                 "empty listing": ("", 0)}
+        for name, (listing, rc) in cases.items():
+            with self.subTest(name):
+                p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing, rc))
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertIn("rolling it back", p.stderr)
+                if name.startswith("not mentioned"):
+                    self.assertIn("has no timestamp_timeout", p.stderr + p.stdout)   # said so, not a crash
+                self.assertNotIn("Traceback", p.stderr + p.stdout)
+                lines = calls.splitlines()
+                install = [i for i, ln in enumerate(lines) if "visudo -cf" in ln]
+                undone = [i for i, ln in enumerate(lines) if ln.startswith("/bin/sh -c PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f /etc/sudoers.d/sudo-ask-grant")]
+                self.assertEqual(len(install), 1, calls)
+                self.assertEqual(len(undone), 1, calls)
+                self.assertLess(install[0], undone[0])
+
+    def test_the_gate_and_the_verify_use_the_same_proof(self) -> None:
+        src = SETUP.read_text()
+        self.assertIn("ticket_gate /usr/bin/sudo || fail=1", src)           # --verify on the real machine
+        self.assertIn('"$0" --verify --live || gate_failed=1', src)         # a live install runs it and undoes itself
+        self.assertIn("run_root /bin/sh -c \"$rollback_body\"", src)
+        self.assertNotIn("NOTE  the ticket is off", src)                     # no longer a note: a failing check
 
     def test_verify_never_runs_without_live(self) -> None:
         p, _ = self.guarded("--verify", with_fake=False)
@@ -1520,6 +1688,19 @@ exit 0
         self.assertFalse((self.state / "open_until").exists())
         self.assertTrue(any(c.startswith("ping: sudo-ask: approval window revoked") for c in self.calls()))
         self.assertIn("WINDOW-REVOKE", self.log())
+
+    def test_status_warns_when_the_grant_file_expires_later_than_the_grant_said(self) -> None:   # round 3: show the file's expiry
+        marker = self.state / "xdg" / "sudo-ask" / "window-expires"
+        marker.parent.mkdir(parents=True)
+        self.open_window(7200)
+        marker.write_text(str(int(time.time()) + 7200))
+        self.assertNotIn("WARNING", self.run_client("--status").stdout)        # as granted
+        marker.write_text(str(int(time.time()) + 1800))                        # granted for 30 min, the file now says 2 h
+        p = self.run_client("--status")
+        self.assertEqual(p.returncode, 0)
+        self.assertIn("OPEN until", p.stdout)
+        self.assertIn("WARNING: the grant file expires", p.stdout)
+        self.assertIn("extended since", p.stdout)
 
     def test_status_audit_runs_the_helpers_read_only_audit(self) -> None:
         p = self.run_client("--status", "--audit", "1700000000")

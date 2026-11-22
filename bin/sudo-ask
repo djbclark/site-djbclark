@@ -122,7 +122,15 @@ case $sub in
       "$SUDO" -n "$HELPER" status "$@"; exit $?
     fi
     [ $# -eq 0 ] || { echo "usage: sudo-ask --status [--audit [EPOCH]]" >&2; exit 64; }
-    if window_status; then describe_window; exit 0; fi
+    if window_status; then
+      describe_window   # the expiry shown is the one in the grant file itself (read through approval-gate)
+      # `--grant` records the expiry it was given; a file that now expires later was extended after the grant, by something running as root
+      m=$(cat "$MARKER" 2>/dev/null || true)
+      if [[ $m =~ ^[0-9]+$ ]] && [ "$W_EXPIRES_EPOCH" -gt $((m + 120)) ]; then
+        echo "WARNING: the grant file expires $(ny "$W_EXPIRES_EPOCH"), later than the $(ny "$m") recorded when the window was granted: it was extended since. Run: sudo-ask --revoke"
+      fi
+      exit 0
+    fi
     echo "sudo-ask window: none ($W_REASON)"; exit 1 ;;
   revoke)
     [ $# -eq 0 ] || { echo "usage: sudo-ask --revoke" >&2; exit 64; }

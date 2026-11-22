@@ -984,18 +984,32 @@ def split_command(rest):
     return rest[1:]
 
 
-ProcInfo = collections.namedtuple("ProcInfo", "ppid ruid exec_path argv")
+# exec_path and argv are what the process wrote onto its OWN stack (KERN_PROCARGS2): the process can rewrite both, so they
+# prove nothing alone. kernel_path (proc_pidpath: the executable vnode), comm and the uids are held by the kernel.
+ProcInfo = collections.namedtuple("ProcInfo", "ppid ruid exec_path argv euid svuid comm kernel_path")
+PROC_PIDPATHINFO_MAXSIZE = 4096
 
 
 def _bsdinfo(libc, pid):
-    """(ppid, real uid, start seconds, start microseconds) from proc_pidinfo(PROC_PIDTBSDINFO), or None."""
+    """(ppid, real uid, start sec, start usec, effective uid, saved uid, comm) from proc_pidinfo(PROC_PIDTBSDINFO,
+    struct proc_bsdinfo: pbi_ppid@16 pbi_uid@20 pbi_ruid@28 pbi_svuid@36 pbi_comm[16]@48 start@120), or None."""
     buf = ctypes.create_string_buffer(136)
     if libc.proc_pidinfo(ctypes.c_int(pid), ctypes.c_int(3), ctypes.c_uint64(0), buf, ctypes.c_int(136)) != 136:
         return None
     ppid, = struct.unpack_from("=I", buf.raw, 16)
+    euid, = struct.unpack_from("=I", buf.raw, 20)
     ruid, = struct.unpack_from("=I", buf.raw, 28)
+    svuid, = struct.unpack_from("=I", buf.raw, 36)
+    comm = buf.raw[48:64].split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
     sec, usec = struct.unpack_from("=QQ", buf.raw, 120)
-    return ppid, ruid, sec, usec
+    return ppid, ruid, sec, usec, euid, svuid, comm
+
+
+def _pidpath(libc, pid):
+    """The path of the process's executable, as the kernel holds it (proc_pidpath), or None."""
+    buf = ctypes.create_string_buffer(PROC_PIDPATHINFO_MAXSIZE)
+    n = libc.proc_pidpath(ctypes.c_int(pid), buf, ctypes.c_uint32(PROC_PIDPATHINFO_MAXSIZE))
+    return buf.raw[:n].decode("utf-8", "surrogateescape") if n > 0 else None
 
 
 def _procargs(libc, pid):
@@ -1024,10 +1038,11 @@ def proc_info(pid):
     first = _bsdinfo(libc, pid)
     if first is None:
         return None
+    kpath = _pidpath(libc, pid)
     pa = _procargs(libc, pid)
-    if pa is None or _bsdinfo(libc, pid) != first:
+    if kpath is None or pa is None or _bsdinfo(libc, pid) != first:
         return None
-    return ProcInfo(first[0], first[1], pa[0], pa[1])
+    return ProcInfo(first[0], first[1], pa[0], pa[1], first[4], first[5], first[6], kpath)
 
 
 def fresh_auth_problem(duration, info=None, start=None):
@@ -1038,7 +1053,12 @@ def fresh_auth_problem(duration, info=None, start=None):
     one thing: this helper's parent chain is sudo processes only (sudo and its pty monitor), and the outermost of them
     is `/usr/bin/sudo -k HELPER grant DURATION` run by the real user the helper was told (SUDO_UID, not root). Anything
     between (a shell, awk, a second sudo above the first) or any argv that is not that exact list fails, because words
-    are compared as words (no `-p 'x -k'`) and `sudo -k CMD` never uses a cached ticket."""
+    are compared as words (no `-p 'x -k'`) and `sudo -k CMD` never uses a cached ticket.
+
+    A process can write any argv and executable path it likes onto its own stack, so argv alone proves nothing. Every
+    link must also be sudo by what the KERNEL holds: the executable path (proc_pidpath) is /usr/bin/sudo, the kernel
+    name is `sudo`, and the effective and saved uids are 0 (sudo is setuid root; a user process never has that). A link
+    whose argv or exec path says sudo while the kernel says otherwise refuses at once."""
     info = info or proc_info
     uid = INVOKER_UID
     if not uid:
@@ -1054,7 +1074,12 @@ def fresh_auth_problem(duration, info=None, start=None):
             if outer is None:
                 return "cannot read the parent process, so fresh authentication cannot be proven"
             break
-        if pi.exec_path != SUDO or pi.argv[:1] != [SUDO]:
+        claims = SUDO in (pi.exec_path, pi.argv[:1] and pi.argv[0])      # what the process says about itself
+        real = (pi.kernel_path == SUDO and pi.comm == "sudo" and pi.euid == 0 and pi.svuid == 0)   # what the kernel holds
+        if claims and not real:
+            return ("a process above this one says it is /usr/bin/sudo but the kernel disagrees "
+                    "(pid %d: path %s, name %s, uid %s/%s)" % (pid, pi.kernel_path, pi.comm, pi.euid, pi.svuid))
+        if not real:
             break
         outer, pid = pi, pi.ppid
         if pid <= 1:
@@ -1215,8 +1240,8 @@ def main(argv):
             secs = parse_duration(argv[2])
         except ValueError as e:
             die(str(e), EX_USAGE)
-        if os.path.realpath(__file__) != INSTALLED_PATH:
-            die("grant runs only from %s" % INSTALLED_PATH, EX_REFUSED)
+        if os.path.realpath(__file__) != INSTALLED_PATH or argv[0] != INSTALLED_PATH:   # lexical too: a link to the helper cannot grant
+            die("grant runs only from %s, started by that exact path" % INSTALLED_PATH, EX_REFUSED)
         why = fresh_auth_problem(argv[2])
         if why:
             try:
@@ -1237,6 +1262,10 @@ def main(argv):
         if len(argv) != 2:
             die("usage: revoke", EX_USAGE)
         since = last_granted_epoch()   # before the file goes
+        was_open, why, d = read_grant(now)
+        print("revoking: the grant file said expires_utc=%s granted_utc=%s%s" % (
+            clean(str(d.get("expires_utc", "?"))), clean(str(d.get("granted_utc", "?"))),
+            "" if was_open else " (not a live window: %s)" % clean(why)) if d else "revoking: no readable grant file (%s)" % clean(why))
         try:
             log("REVOKE")
             os.unlink(GRANT_FILE)

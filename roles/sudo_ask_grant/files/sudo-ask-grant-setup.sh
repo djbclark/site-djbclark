@@ -118,6 +118,33 @@ if [ "$live" = 1 ]; then
   if [ -x "$HOME/.local/bin/sudo-ask" ]; then fake=$HOME/.local/bin/sudo-ask; else fake=/usr/bin/sudo; fi
 fi
 run_root() { "$fake" "$@"; }
+rollback_body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/grant $BIN; rm -rf $STATE_DIR"
+
+# Is the shared sudo ticket really off? The drop-in line can be overridden (a later file, a Defaults entry) and the
+# failure would be silent, so the install proves it. `sudo -n -l` asks sudo itself what Defaults apply to this user,
+# after ALL of sudoers (every drop-in, any order), and runs with no password because of the NOPASSWD lines. Sudo lists
+# defaults in the order it applies them, so the LAST timestamp_timeout it prints is the effective one: it must be 0.
+# An unreadable or unclear listing fails (an unproven ticket is not an off ticket). Reads the listing on stdin.
+ticket_state() {
+  /usr/bin/python3 -IS -c '
+import re, sys
+vals = re.findall(r"(?<![A-Za-z_!])timestamp_timeout=(-?[0-9]+(?:\.[0-9]+)?)", sys.stdin.read())
+if not vals:
+    print("the listing has no timestamp_timeout (the default, 5 minutes, would apply)"); sys.exit(1)
+if float(vals[-1]) != 0:
+    print("the effective timestamp_timeout is %s, not 0" % vals[-1]); sys.exit(1)
+print("effective timestamp_timeout=0")'
+}
+ticket_gate() {   # $1: the sudo to ask for the listing
+  local listing msg
+  if ! listing=$("$1" -n -l 2>&1); then
+    echo "FAIL  cannot read the sudoers listing ('sudo -n -l' failed): the ticket state is unproven"; return 1
+  fi
+  if msg=$(printf '%s\n' "$listing" | ticket_state); then echo "ok    the sudo ticket is off for $operator ($msg)"; return 0; fi
+  echo "FAIL  the sudo ticket is NOT off for $operator: $msg"
+  printf '%s\n' "$listing" | /usr/bin/grep -i 'timestamp' || true
+  return 1
+}
 
 case $mode in
   install)
@@ -133,10 +160,23 @@ case $mode in
     [ ${#shown} -le 700 ] || { echo "sudo-ask-grant-setup: dialog text is ${#shown} chars (>700); sudo-ask would hide the tail" >&2; exit 1; }
     run_root /bin/sh -c "$body" sh "$keep" "$tmp/s.copy" "$h1" "$h2"
     echo "sudo-ask-grant-setup: installed $BIN and $SUDOERS for $operator"
-    if [ "$live" = 1 ]; then "$0" --verify --live; else echo "sudo-ask-grant-setup: not live: skipped --verify"; fi ;;
+    # The ticket-off line must be proven, or the install is undone: otherwise one Touch ID for any sudo gives every agent root.
+    gate_failed=0
+    if [ "$live" = 1 ]; then
+      "$0" --verify --live || gate_failed=1
+    elif [ -x "$(dirname "$fake")/sudo" ]; then   # a test: a fake sudo next to the fake sudo-ask (never reachable when live)
+      ticket_gate "$(dirname "$fake")/sudo" || gate_failed=1
+    else
+      echo "sudo-ask-grant-setup: not live: skipped --verify"
+    fi
+    if [ "$gate_failed" = 1 ]; then
+      echo "sudo-ask-grant-setup: the install did not verify: rolling it back" >&2
+      run_root /bin/sh -c "$rollback_body" || echo "sudo-ask-grant-setup: ROLLBACK FAILED: run: $0 --rollback --live" >&2
+      echo "sudo-ask-grant-setup: rolled back (drop-in, helper and grant file removed)" >&2
+      exit 1
+    fi ;;
   rollback)
-    body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/grant $BIN; rm -rf $STATE_DIR"
-    run_root /bin/sh -c "$body"
+    run_root /bin/sh -c "$rollback_body"
     echo "sudo-ask-grant-setup: removed the drop-in (so the sudo ticket behaves as before), helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
   verify)
     fail=0
@@ -145,10 +185,10 @@ case $mode in
     [ -x "$BIN" ] && ok "helper installed" || { bad "helper missing ($BIN)"; exit 1; }
     # A cached machine-wide ticket is what would let `sudo -n /bin/sh -c "<helper> grant 24h"` open a window: say so.
     if /usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then
-      echo "WARN  a sudo ticket is cached (an earlier sudo ran with no -k). The helper's own check still refuses a grant" \
-           "that was not run as 'sudo -k'; end the ticket with: sudo -k"
+      echo "WARN  a sudo ticket is cached (an earlier sudo ran with no -k). Whoever holds a ticket is root and can write the" \
+           "grant file itself, so no check inside the helper helps; end the ticket with: sudo -k"
     fi
-    echo "NOTE  the ticket is off for $operator (Defaults:$operator timestamp_timeout=0): after one authentication, a plain 'sudo -n true' must still fail"
+    ticket_gate /usr/bin/sudo || fail=1
     /usr/bin/sudo -k
     # grant must NOT be reachable without a password. If this succeeds a 60 s window just opened: roll back.
     if /usr/bin/sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi

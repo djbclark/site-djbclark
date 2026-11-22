@@ -63,15 +63,20 @@ user can ride, including `sudo -n /bin/sh -c '<helper> grant 24h'`. Three layers
 1. **The ticket is switched off** (operator ruling). The setup script's install mode puts
    `Defaults:OPERATOR timestamp_timeout=0` in the same drop-in. A later drop-in wins over an earlier one, so this beats
    `10-timestamp-global` without editing or deleting it: nothing else is touched, there is no second file to back up,
-   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install.
+   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install. **The install proves it works**, or undoes itself: after installing, the script asks `sudo -n -l` (sudo's own answer after reading ALL of sudoers, every drop-in in any order; it needs no password because of the NOPASSWD lines) and requires the last `timestamp_timeout` it lists to be 0. A later file that overrides the line, a missing or unreadable listing, or a value other than 0 fails the check, and a failed check removes the drop-in, helper and grant file again (`--verify` runs the same check on demand).
    (The alternative, removing `10-timestamp-global`, is root-only 0440 and would need a byte-exact root-side backup and
    restore; it also changes the file for every user.) `--print`, `--check` and `--diff` show it. After install, one
    `sudo -v` followed by `sudo -n true` must still ask.
 2. `sudo-ask` runs its own sudo as `sudo -k CMD` (and `--grant` as `sudo -k HELPER grant DUR`): sudo ignores any
    cached ticket and does not leave one.
-3. `grant` itself proves the authentication from the process tree, exactly. It reads each ancestor's real uid and its
-   exact argument vector from the kernel (`proc_pidinfo` and `sysctl KERN_PROCARGS2`; no `ps`, no word splitting), checks
-   the process start time before and after to catch a reused pid, and accepts only: the chain of ancestors is **all
+3. `grant` itself proves the authentication from the process tree, exactly. A process writes its own argv and its own
+   executable path onto its stack and can put anything there, so those are only claims. Every ancestor is therefore
+   judged by what **the kernel holds**: the executable path (`proc_pidpath`) is `/usr/bin/sudo`, the kernel name
+   (`comm`) is `sudo`, and the effective and saved uids are 0 (sudo is setuid root; a user process never has that). The
+   claims are read too (`proc_pidinfo` for the real uid and start time, `sysctl KERN_PROCARGS2` for the argument words, no
+   `ps`, no word splitting) and the start time is read before and after to catch a reused pid. A link that claims to be
+   sudo while the kernel says otherwise refuses at once, and any read error refuses. `grant` also requires to have been
+   started by the exact installed path, not a link to it. What is accepted: the chain of ancestors is **all
    `/usr/bin/sudo`**, and the outermost one has argv exactly `[/usr/bin/sudo, -k, /usr/local/libexec/sudo-ask-granted,
    grant, DURATION]` with the real uid equal to `SUDO_UID` and not 0. So a nested sudo, a `-p 'x -k'` prompt, a shell or
    any other program between sudo and the helper, a window that is already running (`exec` chain), or a sudo started by
@@ -81,9 +86,17 @@ user can ride, including `sudo -n /bin/sh -c '<helper> grant 24h'`. Three layers
 Limits, stated plainly: (a) the proof is that sudo was told to ignore the cached ticket (so it asked for authentication), not
 that a person touched the sensor; an agent that runs `sudo -k <helper> grant` itself still meets the Touch ID prompt,
 which it cannot satisfy. (b) It assumes `sudo` stays an ancestor of the helper with identical argv (sudo's `use_pty`
-monitor). **That has not been exercised on the live machine** (no privileged command was run building this); if sudo
-runs the command in a way that breaks it, `grant` fails closed and `--verify` / the first `sudo-ask --grant` will say so.
+monitor) and that sudo's `euid` and saved uid read as 0 while it runs. **Neither has been exercised on the live machine** (no
+privileged command was run building this); if either is wrong, `grant` fails closed and the first `sudo-ask --grant` will say so.
 (c) `grant` only runs from `/usr/local/libexec/sudo-ask-granted` (a copy elsewhere refuses), and the denylist protects that path.
+
+**Accepted limit (operator ruling): a window can be extended from inside itself.** An open window runs agent code as root
+(see below), and root can write the grant file directly: it can extend the window or open a new one with no Touch ID. Nothing
+in the helper can prevent that; the checks above stop an agent that is NOT yet root from opening or extending a window, and
+anyone who holds a sudo ticket is root (layer 1, the ticket being off, is what stops that; layers 2 and 3 do not). `revoke` ends
+a window only if nothing persistent was left behind. `sudo-ask --status` shows the expiry **in the grant file itself** and warns
+when it is later than the expiry recorded when the window was granted (that record is in the user's own state directory, so
+it is a hint, not a proof); `revoke` prints the expiry the file really had.
 
 `revoke` needs no authentication on purpose: it only lowers privilege, so an agent or the operator can end a window
 from a panic button without a sensor. It takes no arguments (the sudoers line is `revoke ""`, the helper also refuses
@@ -169,7 +182,7 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
 
 ## What an agent can and cannot do during a window
 
-Cannot: open or extend a window (a fresh Touch ID is needed, see above); run a denylisted command without the
+Cannot, as long as it is not already root: open or extend a window (a fresh Touch ID is needed, see above). Cannot: run a denylisted command without the
 dialog; run an unchecked program or a script it can edit without the dialog (ruling 1); change the grant file, the
 helper, the drop-in, PAM, sudoers or the secretspec broker through a command line the helper can parse; run when the
 log cannot be written. Can: end the window (`revoke`, no sensor needed).
