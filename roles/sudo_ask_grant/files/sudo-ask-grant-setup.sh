@@ -122,22 +122,73 @@ rollback_body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/gra
 
 # Is the shared sudo ticket really off? The drop-in line can be overridden (a later file, a Defaults entry) and the
 # failure would be silent, so the install proves it. `sudo -n -l` asks sudo itself what Defaults apply to this user,
-# after ALL of sudoers (every drop-in, any order), and runs with no password because of the NOPASSWD lines. Sudo lists
-# defaults in the order it applies them, so the LAST timestamp_timeout it prints is the effective one: it must be 0.
-# An unreadable or unclear listing fails (an unproven ticket is not an off ticket). Reads the listing on stdin.
+# after ALL of sudoers (every drop-in, any order), and runs with no password because of the NOPASSWD lines. It prints
+# two sections, in this order (sudo's display_privs): "Matching Defaults entries for USER on HOST:" (generic, host and
+# user entries, in the order sudo applies them: the LAST timestamp_timeout is the effective one) and then
+# "Runas and Command-specific defaults for USER:" (every Defaults> and Defaults! entry, which holds this drop-in's own
+# `Defaults!HELPER ... timestamp_timeout=0` line LAST, so the listing as a whole proves nothing). Therefore:
+#   1. the user section must exist and its last timestamp_timeout must be 0 (a bare `!timestamp_timeout` counts as 0);
+#   2. no Defaults> entry may mention timestamp_timeout (it applies after the user entries to every command run as that user);
+#   3. no Defaults! entry may carry a non-zero or unreadable timestamp_timeout (it would give a ticket to that command).
+# The headers are translated by gettext, so the listing is asked for in the C locale. A failed, unreadable or unclear
+# listing fails (an unproven ticket is not an off ticket). The listing is read on stdin.
 ticket_state() {
   /usr/bin/python3 -IS -c '
 import re, sys
-vals = re.findall(r"(?<![A-Za-z_!])timestamp_timeout=(-?[0-9]+(?:\.[0-9]+)?)", sys.stdin.read())
+operator = sys.argv[1]
+sections = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    if line[0] in " \t":
+        if sections:
+            sections[-1][1].append(line.strip())
+    else:
+        sections.append((line.strip(), []))
+def values(text):
+    out = []
+    for tok in text.split(","):
+        m = re.fullmatch(r"\s*(!?)timestamp_timeout(?:=([^\s,]+))?\s*", tok)
+        if not m:
+            continue
+        neg, val = m.groups()
+        if neg:
+            out.append(0.0 if val is None else None)
+            continue
+        try:
+            out.append(float(val))
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
+def fail(msg):
+    print(msg); sys.exit(1)
+mine = [ls for hdr, ls in sections if hdr.startswith("Matching Defaults entries for %s on " % operator)]
+if len(mine) != 1:
+    fail("the listing has no single \"Matching Defaults entries for %s on\" section" % operator)
+vals = [v for line in mine[0] for v in values(line)]
 if not vals:
-    print("the listing has no timestamp_timeout (the default, 5 minutes, would apply)"); sys.exit(1)
-if float(vals[-1]) != 0:
-    print("the effective timestamp_timeout is %s, not 0" % vals[-1]); sys.exit(1)
-print("effective timestamp_timeout=0")'
+    fail("the listing has no timestamp_timeout for %s (the default, 5 minutes, would apply)" % operator)
+if vals[-1] is None or vals[-1] != 0:
+    fail("the effective timestamp_timeout for %s is %s, not 0" % (operator, "unreadable" if vals[-1] is None else "%g" % vals[-1]))
+for hdr, ls in sections:
+    if not hdr.startswith("Runas and Command-specific defaults for"):
+        continue
+    for line in ls:
+        if "timestamp_timeout" not in line:
+            continue
+        head, _, rest = line.partition(" ")
+        if head.startswith("Defaults>"):
+            fail("a Defaults> entry sets timestamp_timeout and applies after the user entries: %s" % line)
+        if not head.startswith("Defaults!"):
+            fail("an unrecognised entry sets timestamp_timeout: %s" % line)
+        vs = values(rest)
+        if not vs or any(v is None or v != 0 for v in vs):
+            fail("a Defaults! entry gives a ticket to %s: %s" % (head[len("Defaults!"):], line))
+print("effective timestamp_timeout=0 for %s" % operator)' "$operator"
 }
 ticket_gate() {   # $1: the sudo to ask for the listing
   local listing msg
-  if ! listing=$("$1" -n -l 2>&1); then
+  if ! listing=$(LC_ALL=C LANG=C "$1" -n -l 2>&1); then
     echo "FAIL  cannot read the sudoers listing ('sudo -n -l' failed): the ticket state is unproven"; return 1
   fi
   if msg=$(printf '%s\n' "$listing" | ticket_state); then echo "ok    the sudo ticket is off for $operator ($msg)"; return 0; fi
@@ -184,9 +235,10 @@ case $mode in
     bad() { echo "FAIL  $1"; fail=1; }
     [ -x "$BIN" ] && ok "helper installed" || { bad "helper missing ($BIN)"; exit 1; }
     # A cached machine-wide ticket is what would let `sudo -n /bin/sh -c "<helper> grant 24h"` open a window: say so.
+    # With the ticket off, no cached ticket is honoured for /usr/bin/true: a success means a ticket is live (or a NOPASSWD
+    # rule covers true), and whoever holds a ticket is root and can write the grant file itself. That is a failure.
     if /usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then
-      echo "WARN  a sudo ticket is cached (an earlier sudo ran with no -k). Whoever holds a ticket is root and can write the" \
-           "grant file itself, so no check inside the helper helps; end the ticket with: sudo -k"
+      bad "'sudo -n /usr/bin/true' succeeded: a sudo ticket is honoured (or a NOPASSWD rule covers true), so the ticket is not off. End it with 'sudo -k' and run --verify again; if it still succeeds, find the later sudoers entry"
     fi
     ticket_gate /usr/bin/sudo || fail=1
     /usr/bin/sudo -k

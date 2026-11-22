@@ -9,9 +9,11 @@
 # sudoers (see the setup script) lets the operator's user run, WITHOUT a password:
 #     sudo-ask-granted exec *      sudo-ask-granted status [*]
 # and nothing else. `grant` and `revoke` only ever reach this file through the normal
-# password/Touch ID rule, and the drop-in sets `timestamp_timeout=0` for this command so a
-# cached sudo ticket never satisfies it. An agent (running as the operator) therefore can
-# use an open window but cannot open, extend or close one.
+# password/Touch ID rule, and the drop-in sets `timestamp_timeout=0` for this command (and for
+# the operator) so a cached sudo ticket never satisfies it. `revoke` (no arguments) needs no
+# password on purpose: it only lowers privilege. An agent running as the operator can therefore
+# use an open window and end it, but cannot open or extend one unless it already is root (a
+# sudo ticket holder, or code run as root inside an open window: the accepted limit).
 #
 #   exec -- CMD...       run CMD as root IF a valid window is open and CMD is not denylisted
 #   status               print key=value lines about the window; exit 0 open, 1 not open
@@ -1048,8 +1050,9 @@ def proc_info(pid):
 def fresh_auth_problem(duration, info=None, start=None):
     """Why this process cannot prove that sudo asked for authentication afresh (None when it can).
 
-    The machine has a global sudo ticket (10-timestamp-global) and `timestamp_timeout=0` covers only the helper's own
-    path, so a cached ticket could otherwise let `sudo -n <anything> grant` through. What is accepted is exactly
+    The machine has a global sudo ticket (10-timestamp-global); the drop-in switches it off for the operator
+    (`Defaults:USER timestamp_timeout=0`, checked by the install), and this proof is the second layer: without it a
+    cached ticket could otherwise let `sudo -n <anything> grant` through. What is accepted is exactly
     one thing: this helper's parent chain is sudo processes only (sudo and its pty monitor), and the outermost of them
     is `/usr/bin/sudo -k HELPER grant DURATION` run by the real user the helper was told (SUDO_UID, not root). Anything
     between (a shell, awk, a second sudo above the first) or any argv that is not that exact list fails, because words

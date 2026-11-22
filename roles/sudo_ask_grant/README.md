@@ -63,7 +63,7 @@ user can ride, including `sudo -n /bin/sh -c '<helper> grant 24h'`. Three layers
 1. **The ticket is switched off** (operator ruling). The setup script's install mode puts
    `Defaults:OPERATOR timestamp_timeout=0` in the same drop-in. A later drop-in wins over an earlier one, so this beats
    `10-timestamp-global` without editing or deleting it: nothing else is touched, there is no second file to back up,
-   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install. **The install proves it works**, or undoes itself: after installing, the script asks `sudo -n -l` (sudo's own answer after reading ALL of sudoers, every drop-in in any order; it needs no password because of the NOPASSWD lines) and requires the last `timestamp_timeout` it lists to be 0. A later file that overrides the line, a missing or unreadable listing, or a value other than 0 fails the check, and a failed check removes the drop-in, helper and grant file again (`--verify` runs the same check on demand).
+   `--rollback` (which removes the drop-in) restores the exact prior state, and `visudo -cf` checks it before install. **The install checks it, and undoes itself if the check fails**: after installing, the script asks `LC_ALL=C sudo -n -l` (sudo's own answer after reading ALL of sudoers, every drop-in in any order; it needs no password because of the NOPASSWD lines) and reads its two sections apart. In "Matching Defaults entries for OPERATOR" the last `timestamp_timeout` must be 0 (a bare `!timestamp_timeout` counts as 0; a missing line fails). In "Runas and Command-specific defaults" no `Defaults>` entry may mention `timestamp_timeout`, and no `Defaults!` entry (the helper's own included) may carry a value other than 0. The drop-in's own `Defaults!HELPER ... timestamp_timeout=0` line sits last in that second section, which is why the listing is not read as one text. A failed or unreadable listing fails too, and a failed check removes the drop-in, helper and grant file again (`--verify` runs the same check on demand). **What this proves and what it does not:** it proves that the defaults sudo lists for this user and host say 0. It does not prove behaviour. The behavioural proof is `sudo -v; sudo -n /usr/bin/true; echo exit=$?; sudo -k` (must print `exit=1`), and it is a mandatory step of the reinstall runbook before the first `--grant`. Anything the listing does not show is not covered by it; the behavioural check is.
    (The alternative, removing `10-timestamp-global`, is root-only 0440 and would need a byte-exact root-side backup and
    restore; it also changes the file for every user.) `--print`, `--check` and `--diff` show it. After install, one
    `sudo -v` followed by `sudo -n true` must still ask.
@@ -85,7 +85,9 @@ user can ride, including `sudo -n /bin/sh -c '<helper> grant 24h'`. Three layers
 
 Limits, stated plainly: (a) the proof is that sudo was told to ignore the cached ticket (so it asked for authentication), not
 that a person touched the sensor; an agent that runs `sudo -k <helper> grant` itself still meets the Touch ID prompt,
-which it cannot satisfy. (b) It assumes `sudo` stays an ancestor of the helper with identical argv (sudo's `use_pty`
+which it cannot satisfy. More exactly, the proof is that a real `sudo -k` was asked, not that it finished authenticating: a real
+`/usr/bin/sudo -k HELPER grant 24h` that is still waiting at its prompt passes every check above, so anything root that sits below
+such a process (or reuses its pid between two reads) could use it. That needs root already, which is the accepted in-window limit. (b) It assumes `sudo` stays an ancestor of the helper with identical argv (sudo's `use_pty`
 monitor) and that sudo's `euid` and saved uid read as 0 while it runs. **Neither has been exercised on the live machine** (no
 privileged command was run building this); if either is wrong, `grant` fails closed and the first `sudo-ask --grant` will say so.
 (c) `grant` only runs from `/usr/local/libexec/sudo-ask-granted` (a copy elsewhere refuses), and the denylist protects that path.
@@ -93,7 +95,7 @@ privileged command was run building this); if either is wrong, `grant` fails clo
 **Accepted limit (operator ruling): a window can be extended from inside itself.** An open window runs agent code as root
 (see below), and root can write the grant file directly: it can extend the window or open a new one with no Touch ID. Nothing
 in the helper can prevent that; the checks above stop an agent that is NOT yet root from opening or extending a window, and
-anyone who holds a sudo ticket is root (layer 1, the ticket being off, is what stops that; layers 2 and 3 do not). `revoke` ends
+anyone who holds a sudo ticket is root (only layer 1, the ticket being off, stops a ticket holder; layers 2 and 3 do not). `revoke` ends
 a window only if nothing persistent was left behind. `sudo-ask --status` shows the expiry **in the grant file itself** and warns
 when it is later than the expiry recorded when the window was granted (that record is in the user's own state directory, so
 it is a hint, not a proof); `revoke` prints the expiry the file really had.
@@ -102,7 +104,7 @@ it is a hint, not a proof); `revoke` prints the expiry the file really had.
 from a panic button without a sensor. It takes no arguments (the sudoers line is `revoke ""`, the helper also refuses
 extras).
 
-`--verify` proves this on the installed system: it warns if a sudo ticket is cached (and prints how to see the ticket is off); then, with the ticket dropped,
+`--verify` checks this on the installed system: it runs the ticket check above, and it FAILS if a plain `sudo -n /usr/bin/true` succeeds (with the ticket off no cached ticket is honoured, so a success means a live ticket or a NOPASSWD rule for `true`); then, with the ticket dropped,
 `sudo -n helper grant` must fail, `sudo -n -l helper revoke` must be allowed and `... revoke extra` refused (a sudoers
 question, nothing is revoked), `status` must work, and `exec` with no window must exit 75.
 
@@ -182,7 +184,8 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
 
 ## What an agent can and cannot do during a window
 
-Cannot, as long as it is not already root: open or extend a window (a fresh Touch ID is needed, see above). Cannot: run a denylisted command without the
+Cannot, outside a window and without a sudo ticket: open or extend a window (a fresh Touch ID is needed, see above). Inside a window
+it is root through `exec` and can (the accepted limit above). Cannot: run a denylisted command without the
 dialog; run an unchecked program or a script it can edit without the dialog (ruling 1); change the grant file, the
 helper, the drop-in, PAM, sudoers or the secretspec broker through a command line the helper can parse; run when the
 log cannot be written. Can: end the window (`revoke`, no sensor needed).

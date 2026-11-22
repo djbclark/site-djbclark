@@ -1250,7 +1250,7 @@ class SetupScriptTests(unittest.TestCase):
         self.assertIn('run_root() { "$fake" "$@"; }', code)              # root steps go through one absolute path
         self.assertNotIn('sudo -n "$BIN" revoke', code)                  # no live revoke probe
         self.assertIn('-l "$BIN" revoke extra', code)
-        self.assertIn("a sudo ticket is cached", code)                   # MED-1: verify warns
+        self.assertIn("a sudo ticket is honoured", code)                 # MED-1: verify fails on a live ticket
 
     def test_check_is_read_only_and_reports(self) -> None:
         p = self.run_setup("--check", "--diff")
@@ -1349,10 +1349,30 @@ class SetupScriptTests(unittest.TestCase):
         (d / "sudo").chmod(0o755)
         return d
 
+    ME = subprocess.run(["/usr/bin/id", "-un"], capture_output=True, text=True, check=True).stdout.strip()
+
+    def real_listing(self, user=("env_reset, timestamp_timeout=0",), runas=(), user_header=True):
+        """`sudo -l` in sudo's real layout: the user section, then the Runas/Command-specific section with the drop-in's own
+        `Defaults!HELPER ... timestamp_timeout=0` line LAST, then the rules."""
+        me = self.ME
+        out = []
+        if user_header:
+            out += ["Matching Defaults entries for %s on h:" % me] + ["    " + u for u in user] + [""]
+        out += ["Runas and Command-specific defaults for %s:" % me] + ["    " + r for r in runas]
+        out += ["    Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH, "",
+                "User %s may run the following commands on h:" % me,
+                "    (root) NOPASSWD: %s exec *, %s status" % (HELPER_PATH, HELPER_PATH)]
+        return "\n".join(out)
+
     def test_install_passes_when_the_listing_says_the_ticket_is_off(self) -> None:
-        for listing in ("Matching Defaults entries for u on h:\n    env_reset, timestamp_timeout=0.0, mail_badpass",
-                        "Matching Defaults entries for u on h:\n    timestamp_timeout=5, timestamp_type=global, timestamp_timeout=0"):
-            with self.subTest(listing=listing):
+        for name, listing in (
+                ("plain", self.real_listing()),
+                ("0.0 among other entries", self.real_listing(user=("env_reset, timestamp_timeout=0.0, mail_badpass",))),
+                ("a later 0 beats an earlier 5", self.real_listing(user=("timestamp_timeout=5, timestamp_type=global, timestamp_timeout=0",))),
+                ("a bare negation is 0", self.real_listing(user=("env_reset, timestamp_timeout=5", "!timestamp_timeout"))),
+                ("another command's Defaults! of 0", self.real_listing(runas=("Defaults!/usr/bin/foo timestamp_timeout=0",))),
+                ("other entries in the runas section", self.real_listing(runas=("Defaults>root !requiretty",)))):
+            with self.subTest(name):
                 p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing))
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
                 self.assertIn("the sudo ticket is off", p.stdout)
@@ -1360,26 +1380,50 @@ class SetupScriptTests(unittest.TestCase):
                 self.assertNotIn("rm -f /etc/sudoers.d", calls)
 
     def test_install_rolls_back_when_the_ticket_is_not_proven_off(self) -> None:
-        cases = {"another file sets it later": ("Matching Defaults entries for u on h:\n    timestamp_timeout=0, timestamp_timeout=5", 0),
-                 "never expires": ("Matching Defaults entries for u on h:\n    timestamp_timeout=-1", 0),
-                 "not mentioned (the default 5 minutes)": ("Matching Defaults entries for u on h:\n    env_reset", 0),
-                 "a command default is not the user's": ("Matching Defaults entries for u on h:\n    !timestamp_timeout=5", 0),
-                 "listing fails": ("sudo: a password is required", 1),
-                 "empty listing": ("", 0)}
+        cases = {
+            "another file sets it later": (self.real_listing(user=("timestamp_timeout=0, timestamp_timeout=5",)), 0),
+            "never expires": (self.real_listing(user=("timestamp_timeout=-1",)), 0),
+            "user line missing (only the helper's own Defaults! says 0)": (self.real_listing(user=("env_reset",)), 0),
+            "a Defaults> entry for root": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",)), 0),
+            "a Defaults> entry, negated": (self.real_listing(runas=("Defaults>root !timestamp_timeout",)), 0),
+            "an unrecognised entry": (self.real_listing(runas=("Defaults@somehost timestamp_timeout=15",)), 0),
+            "another command gets a ticket": (self.real_listing(runas=("Defaults!/usr/bin/foo timestamp_timeout=15",)), 0),
+            "another command never expires": (self.real_listing(runas=("Defaults!/usr/bin/foo timestamp_timeout=-1",)), 0),
+            "an unreadable value": (self.real_listing(user=("timestamp_timeout=abc",)), 0),
+            "the header names another user": ("Matching Defaults entries for someone_else on h:\n    timestamp_timeout=0\n\n"
+                                              "Runas and Command-specific defaults for someone_else:\n    Defaults!x timestamp_timeout=0", 0),
+            "no user section at all": (self.real_listing(user_header=False), 0),
+            "a negated value is not valid": (self.real_listing(user=("!timestamp_timeout=5",)), 0),
+            "listing fails": ("sudo: a password is required", 1),
+            "empty listing": ("", 0)}
         for name, (listing, rc) in cases.items():
             with self.subTest(name):
                 p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing, rc))
                 self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
                 self.assertIn("rolling it back", p.stderr)
-                if name.startswith("not mentioned"):
-                    self.assertIn("has no timestamp_timeout", p.stderr + p.stdout)   # said so, not a crash
                 self.assertNotIn("Traceback", p.stderr + p.stdout)
+                for prefix, said in (("a Defaults> entry", "a Defaults> entry sets"), ("an unrecognised", "an unrecognised entry sets"),
+                                     ("another command", "a Defaults! entry gives a ticket")):
+                    if name.startswith(prefix):
+                        self.assertIn(said, p.stderr + p.stdout)   # for the right reason
+                if name.startswith("user line missing"):
+                    self.assertIn("has no timestamp_timeout", p.stderr + p.stdout)   # said so, and the helper's line did not count
                 lines = calls.splitlines()
                 install = [i for i, ln in enumerate(lines) if "visudo -cf" in ln]
                 undone = [i for i, ln in enumerate(lines) if ln.startswith("/bin/sh -c PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f /etc/sudoers.d/sudo-ask-grant")]
                 self.assertEqual(len(install), 1, calls)
                 self.assertEqual(len(undone), 1, calls)
                 self.assertLess(install[0], undone[0])
+
+    def test_the_listing_is_asked_for_in_the_c_locale(self) -> None:   # the section headers are gettext-translated
+        src = SETUP.read_text()
+        self.assertIn('listing=$(LC_ALL=C LANG=C "$1" -n -l 2>&1)', src)
+
+    def test_verify_fails_when_a_plain_sudo_succeeds(self) -> None:   # round 5: a cached ticket is a FAIL, not a WARN
+        src = SETUP.read_text()
+        code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+        self.assertRegex(code, r"/usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then\n\s+bad ")
+        self.assertNotIn("WARN  a sudo ticket", code)
 
     def test_the_gate_and_the_verify_use_the_same_proof(self) -> None:
         src = SETUP.read_text()
