@@ -3,9 +3,15 @@
 #
 #   sudo-ask-grant-setup.sh --print            show the sudoers drop-in and the planned actions (no root)
 #   sudo-ask-grant-setup.sh --check [--diff]   compare the installed files with the repo (no root, read-only)
-#   sudo-ask-grant-setup.sh                    install: ONE sudo-ask step (dialog + Touch ID)
-#   sudo-ask-grant-setup.sh --verify           prove the split: grant needs a password, exec needs a window
-#   sudo-ask-grant-setup.sh --rollback         remove the drop-in, helper and grant file (sudo-ask then prompts again)
+#   sudo-ask-grant-setup.sh --live             install: ONE sudo-ask step (dialog + Touch ID)
+#   sudo-ask-grant-setup.sh --verify --live    prove the split: grant needs a password, exec needs a window
+#   sudo-ask-grant-setup.sh --rollback --live  remove the drop-in, helper and grant file (sudo-ask then prompts again)
+#
+# GUARD: install, --verify and --rollback change or probe the REAL machine, so they refuse (exit 2, before any
+# privileged call) unless you pass --live. The one exception, for tests: install and --rollback also run when
+# the `sudo-ask` they would call resolves (realpath) inside a temp directory (/tmp, /var/folders, $TMPDIR),
+# i.e. a fake. --verify always needs --live (it calls sudo itself). A test must give its fake by absolute
+# path or set PATH inside the test process, never rely on the shell's PATH (a shell startup can reorder it).
 #
 # Run it from a shell YOU are watching: the install opens a sudo-ask dialog that names the two files and
 # their SHA-256 prefixes; compare them with `--print`. Root re-hashes its own copy of both files before
@@ -36,12 +42,12 @@ sha24() { shasum -a 256 <"$1" | cut -c1-24; }
 tmp=$(mktemp -d /tmp/sag.XXXXXX); trap 'rm -rf "$tmp"' EXIT
 render_sudoers > "$tmp/sudoers"
 
-mode=install; diff_flag=0
+mode=install; diff_flag=0; live=0; explicit=0
 for a in "$@"; do
   case $a in
     --print) mode=print ;; --check) mode=check ;; --diff) diff_flag=1 ;;
-    --verify) mode=verify ;; --rollback) mode=rollback ;;
-    *) echo "usage: $0 [--print | --check [--diff] | --verify | --rollback]" >&2; exit 64 ;;
+    --verify) mode=verify ;; --rollback) mode=rollback ;; --live) live=1 ;;
+    *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --rollback --live]" >&2; exit 64 ;;
   esac
 done
 
@@ -74,7 +80,25 @@ case $mode in
     exit $rc ;;
 esac
 
-run_root() { if command -v sudo-ask >/dev/null 2>&1; then sudo-ask "$@"; else sudo "$@"; fi; }
+# The guard. Nothing below this line may run a privileged command before it has passed.
+in_temp_prefix() {
+  /usr/bin/python3 -IS -c '
+import os, sys
+p = os.path.realpath(sys.argv[1])
+roots = {os.path.realpath(d) for d in ("/tmp", "/var/folders", os.environ.get("TMPDIR") or "/tmp")}
+sys.exit(0 if any(p.startswith(r.rstrip("/") + "/") for r in roots) else 1)' "$1"
+}
+if [ "$live" != 1 ]; then
+  fake=$(command -v sudo-ask 2>/dev/null || true)
+  if [ "$mode" = verify ] || [ -z "$fake" ] || ! in_temp_prefix "$fake"; then
+    echo "sudo-ask-grant-setup: refusing to run '$mode': it changes or probes the REAL machine (sudoers, /usr/local, /var/db)." >&2
+    echo "  Read-only modes: --print, --check [--diff]. To do it for real, from a shell you are watching, add --live." >&2
+    echo "  (Tests: only install/--rollback run, and only when sudo-ask resolves inside a temp dir; resolved: ${fake:-none})" >&2
+    exit 2
+  fi
+fi
+
+run_root() { if [ "$live" != 1 ]; then "$fake" "$@"; elif command -v sudo-ask >/dev/null 2>&1; then sudo-ask "$@"; else sudo "$@"; fi; }
 
 case $mode in
   install)
@@ -87,7 +111,7 @@ case $mode in
     [ ${#shown} -le 700 ] || { echo "sudo-ask-grant-setup: dialog text is ${#shown} chars (>700); sudo-ask would hide the tail" >&2; exit 1; }
     run_root /bin/sh -c "$body" sh "$keep" "$tmp/s.copy" "$h1" "$h2"
     echo "sudo-ask-grant-setup: installed $BIN and $SUDOERS for $operator"
-    "$0" --verify ;;
+    if [ "$live" = 1 ]; then "$0" --verify --live; else echo "sudo-ask-grant-setup: not live: skipped --verify"; fi ;;
   rollback)
     body="rm -f $SUDOERS $STATE_DIR/grant $BIN; rmdir $STATE_DIR"
     run_root /bin/sh -c "$body"
@@ -109,5 +133,5 @@ case $mode in
     else bad "exec with no window exited $e (want 75)"; fi
     [ "$(/usr/bin/stat -f '%Su:%Sg %Lp' "$STATE_DIR")" = "root:wheel 755" ] && ok "$STATE_DIR root:wheel 755" || bad "$STATE_DIR ownership/mode"
     [ $fail -eq 0 ] && { echo "sudo-ask-grant-setup: verified"; exit 0; }
-    echo "sudo-ask-grant-setup: VERIFY FAILED; run: $0 --rollback" >&2; exit 1 ;;
+    echo "sudo-ask-grant-setup: VERIFY FAILED; run: $0 --rollback --live" >&2; exit 1 ;;
 esac

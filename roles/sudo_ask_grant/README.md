@@ -17,11 +17,34 @@ sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_Y
 | Piece | Where it ends up | What it does |
 |---|---|---|
 | `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION`, `revoke`. Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
-| `files/sudo-ask-grant-setup.sh` | run by hand | `--print`, `--check [--diff]`, install, `--verify`, `--rollback`. |
+| `files/sudo-ask-grant-setup.sh` | run by hand | `--print`, `--check [--diff]` (read-only); install, `--verify`, `--rollback` refuse unless given `--live` (see the guard below). |
 | drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` only**; `Defaults!helper timestamp_timeout=0`. |
 | `/var/db/sudo-ask/grant` | root:wheel 0644 in a root:wheel 0755 dir | `{expires_utc, granted_utc, granted_by_uid, duration_s, nonce}`; written only by `grant`. |
 | `/var/log/sudo-ask-grant.log` | root:wheel 0644 | one line per grant, revoke, refusal, denylist hit and run (UTC). The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
-| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. |
+| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. |
+| `bin/approval-gate` | `~/.local/bin/approval-gate` (symlink, like `sudo-ask`) | The ONE place that decides whether a window covers a gate: `status`, `check --gate NAME [--max-ttl S] [-- CMD...]` (exit 0 covered, 1 must prompt), `ask --gate NAME --reason TEXT -- CMD...`. `sudo-ask` and `bgrun` call it and reimplement nothing. |
+| `config/approval-gates.toml` | the repo | The registry of gates, see below. |
+
+## approval-gate and its registry
+
+`bin/approval-gate` reads the grant file (world-readable, so no sudo) through the installed root helper's own plain
+functions (`read_grant`, `evaluate`; it loads `/usr/local/libexec/sudo-ask-granted` only if root-owned and not
+group/world-writable), so the window rules and the denylist exist once. Library vs CLI: a CLI, because the callers are bash
+(`sudo-ask`, `bgrun`) and agents in other tools (`djbclark-ade`'s `load-watch`); the Python-importable `decide()` is there for
+tests. `check` prints `ttl=` (seconds, the window's remainder capped by the gate's `max_ttl` and `--max-ttl`),
+`expires_epoch=` and `expires_utc=`; exit 0 covered, 1 prompt, 2 usage. An unknown gate, an `always-prompt` gate, a closed or
+damaged window, a missing helper and a denylisted `-- CMD` are all 1. The registry is convenience policy, not a security
+boundary: the boundary is the root helper, which re-checks the window and denylist itself.
+
+`config/approval-gates.toml`, one `[[gate]]` per gate, four keys: `name`; `owner` (repo-relative file that implements the
+gate); `policy` (`window-ok`: an open window may stand in for the prompt; `always-prompt`: never); `max_ttl` (seconds a grant
+made on the window's strength may last, `0` = until the window ends; always capped at the window's end). Seeded with
+`sudo-ask`, `bgrun-approve-local` (1 h), `bgrun-ticket`, and one `always-prompt` entry per denylist class. Python < 3.11
+parses the file with a small built-in reader for exactly this subset.
+
+bgrun: `approve-local` (one-shot token) and tickets ask `~/.local/bin/approval-gate` first. Covered: no dialog, no Touch ID, no
+sudo (the plain `sudo -k /usr/bin/true` fallback included), a token or ticket never outlives the window, and `--ask` skips the
+duration chooser (a ticket until the window's end). `bin/tired` and `sudo-askpass-osascript` are not changed yet (follow-up).
 
 ## Why an agent cannot open or extend a window
 
@@ -79,10 +102,18 @@ text.
 ```
 roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --print        # what will be installed, with hashes
 roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --check --diff # installed vs repo, read-only
-just sudo-ask-grant-setup                                          # ONE sudo-ask dialog; root re-hashes its copies
-just sudo-ask-grant-verify                                         # grant/revoke need auth; exec refuses with no window
-just sudo-ask-grant-rollback                                       # remove drop-in, helper, grant file (log kept)
+just sudo-ask-grant-setup                                          # ONE sudo-ask dialog; root re-hashes its copies (--live)
+just sudo-ask-grant-verify                                         # grant/revoke need auth; exec refuses with no window (--live)
+just sudo-ask-grant-rollback                                       # remove drop-in, helper, grant file, log kept (--live)
+ln -s ../../ops/site-public-djbclark/bin/approval-gate ~/.local/bin/approval-gate   # once, for bgrun (sudo-ask finds it by itself)
 ```
+
+**The `--live` guard.** Install, `--verify` and `--rollback` change or probe the real machine, so the script refuses
+(exit 2, before any privileged call) unless you pass `--live`. The one exception is for tests: install and `--rollback` also
+run when the `sudo-ask` they would call resolves (realpath) inside a temp directory, i.e. a fake. `--verify` always needs
+`--live`. (Reason: a test once ran the install mode with a fake `sudo-ask` that the shell's PATH reordering ignored, and the
+real installer ran; see the PR's Threat notes.) A test must name its fake by absolute path or set PATH inside the test
+process, never rely on the shell's PATH.
 
 The install dialog shows the two source files' SHA-256 prefixes; root copies both files to a
 root-owned temp directory, re-hashes them, runs `visudo -cf` and only then installs, so a file swapped
@@ -94,5 +125,8 @@ after approval cannot be installed. Rollback leaves `sudo-ask` prompting as befo
 future-dated, >24h, wrong owner, writable, symlink, damaged), each denylist class, wrapper unwrapping and
 unparseable wrappers, case-insensitive paths, `main()` modes against a temp boundary (the installed helper
 has no test hook: the test patches module constants in-process), the sudoers rule shape, and the
-client as a patched copy driven by absolute-path fakes. Nothing in the suite calls real `sudo`, touches
-`/var/db`, `/etc` or `/usr/local`, or runs the setup script's install, verify or rollback modes.
+client as a patched copy driven by absolute-path fakes (including a fake `approval-gate` and the `-k` probe form), the
+setup script's `--live` guard (refusals, and a temp-dir fake that only logs). `tests/test_approval_gate.py`: the registry,
+the ttl caps, the denylist through the gate, a missing or untrusted helper, the CLI exit codes, `ask`'s two exec targets.
+`tests/test_bgrun_window.py`: bgrun with a fake gate in a throwaway HOME. Nothing in the suite calls real `sudo`, touches
+`/var/db`, `/etc` or `/usr/local`, or runs a real install, verify or rollback.

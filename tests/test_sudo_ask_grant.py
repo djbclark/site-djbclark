@@ -5,7 +5,7 @@ Nothing here touches the live privileged boundary. The helper is loaded in-proce
 paths are patched to a temp directory (the installed file has no hook for that: no env var, no
 argument). The client runs as a PATCHED COPY whose sudo, osascript, helper and hermes-ping are
 absolute-path fakes (never rely on PATH order: the shell startup reorders it). The setup script runs
-only --print and --check.
+only --print and --check, plus the --live guard's refusals and a temp-dir fake.
 """
 
 from __future__ import annotations
@@ -470,6 +470,62 @@ class SetupScriptTests(unittest.TestCase):
     def test_unknown_flag(self) -> None:
         self.assertEqual(self.run_setup("--bogus").returncode, 64)
 
+    # The --live guard. Every case below puts a FAKE sudo-ask (it only logs its arguments) first on a PATH set
+    # inside the subprocess env, so even a broken guard could not reach the real one. PATH has no real sudo-ask.
+    def guarded(self, *args, fake_dir=None, with_fake=True):
+        log = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-log-")) / "calls"
+        self.addCleanup(lambda: __import__("shutil").rmtree(log.parent, ignore_errors=True))
+        path = PATH
+        if with_fake:
+            d = pathlib.Path(fake_dir or tempfile.mkdtemp(prefix="sag-guard-fake-"))
+            self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+            fake = d / "sudo-ask"
+            fake.write_text('#!/bin/bash\necho "$*" >> "$FAKE_LOG"\n')
+            fake.chmod(0o755)
+            path = "%s:%s" % (d, PATH)
+        env = {"PATH": path, "HOME": str(log.parent), "FAKE_LOG": str(log), "TMPDIR": "/tmp"}
+        p = subprocess.run([str(SETUP), *args], capture_output=True, text=True, env=env, check=False)
+        return p, (log.read_text() if log.exists() else "")
+
+    def test_live_guard_refuses_without_a_temp_fake_or_live(self) -> None:
+        outside = tempfile.mkdtemp(prefix="sag-guard-out-", dir=str(ROOT / "tests"))  # a real, non-temp location
+        if any(os.path.realpath(outside).startswith(os.path.realpath(t) + "/") for t in ("/tmp", "/var/folders")):
+            self.skipTest("the repo itself lives in a temp dir")
+        for args, kw in (((), {"with_fake": False}), (("--rollback",), {"with_fake": False}),
+                         ((), {"fake_dir": outside}), (("--rollback",), {"fake_dir": outside}),
+                         (("--verify",), {}), (("--verify",), {"fake_dir": outside})):
+            with self.subTest(args=args, **{k: bool(v) for k, v in kw.items()}):
+                p, calls = self.guarded(*args, **kw)
+                self.assertEqual(p.returncode, 2, p.stderr)
+                self.assertIn("refusing to run", p.stderr)
+                self.assertEqual(calls, "")
+        __import__("shutil").rmtree(outside, ignore_errors=True)
+
+    def test_temp_fake_runs_install_and_rollback_without_verify(self) -> None:
+        p, calls = self.guarded()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("skipped --verify", p.stdout)
+        self.assertEqual(len(calls.splitlines()), 1)
+        self.assertIn("visudo -cf", calls)
+        p, calls = self.guarded("--rollback")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("rm -f /etc/sudoers.d/sudo-ask-grant", calls)
+
+    def test_verify_never_runs_without_live(self) -> None:
+        p, _ = self.guarded("--verify", with_fake=False)
+        self.assertEqual(p.returncode, 2)
+
+    def test_read_only_modes_need_no_guard(self) -> None:
+        for args in (("--print",), ("--check",)):
+            p, calls = self.guarded(*args, with_fake=False)
+            self.assertIn(p.returncode, (0, 3), p.stderr)
+            self.assertEqual(calls, "")
+
+    def test_justfile_recipes_pass_live(self) -> None:
+        jf = (ROOT / "justfile").read_text()
+        for mode in ("", " --verify", " --rollback"):
+            self.assertIn("sudo-ask-grant-setup.sh%s --live\n" % mode, jf)
+
     def test_script_syntax(self) -> None:
         for f in (SETUP, CLIENT):
             self.assertEqual(subprocess.run(["bash", "-n", str(f)], check=False).returncode, 0)
@@ -491,14 +547,11 @@ cat "$FAKE_STATE/answer" 2>/dev/null || echo "Allow|false"
     FAKE_PING = """#!/bin/bash
 echo "ping: $*" >> "$FAKE_STATE/calls"
 """
-    FAKE_HELPER = """#!/bin/bash
-echo "helper $*" >> "$FAKE_STATE/calls"
+    # The fake approval-gate: status/check/ask driven by files in FAKE_STATE (open_until, check_rc, exec_rc).
+    FAKE_GATE = """#!/bin/bash
+echo "gate $*" >> "$FAKE_STATE/calls"
 case $1 in
   status)
-    if [ "$2" = --check ]; then
-      [ -f "$FAKE_STATE/open_until" ] || exit 1
-      exit "$(cat "$FAKE_STATE/check_rc" 2>/dev/null || echo 0)"
-    fi
     if [ -f "$FAKE_STATE/open_until" ]; then
       e=$(cat "$FAKE_STATE/open_until")
       echo open=1; echo reason=window open; echo expires_epoch=$e
@@ -506,7 +559,18 @@ case $1 in
       exit 0
     fi
     echo open=0; echo reason="no window is open"; exit 1 ;;
-  exec) shift 2; echo "ran: $*" >> "$FAKE_STATE/calls"; exit "$(cat "$FAKE_STATE/exec_rc" 2>/dev/null || echo 0)" ;;
+  check)
+    [ -f "$FAKE_STATE/open_until" ] || exit 1
+    [ "$(cat "$FAKE_STATE/check_rc" 2>/dev/null || echo 0)" = 0 ] || exit 1
+    exit 0 ;;
+  ask) while [ "$1" != -- ]; do shift; done; shift
+       echo "ran: $*" >> "$FAKE_STATE/calls"; exit "$(cat "$FAKE_STATE/exec_rc" 2>/dev/null || echo 0)" ;;
+esac
+exit 0
+"""
+    FAKE_HELPER = """#!/bin/bash
+echo "helper $*" >> "$FAKE_STATE/calls"
+case $1 in
   grant) date +%s >/dev/null; echo $(( $(gdate +%s) + 28800 )) > "$FAKE_STATE/open_until" ;;
   revoke) rm -f "$FAKE_STATE/open_until" ;;
 esac
@@ -519,7 +583,8 @@ exit 0
         base = pathlib.Path(cls.tmp.name)
         cls.fakes = {}
         for name, body in (("sudo", cls.FAKE_SUDO), ("osascript", cls.FAKE_OSA),
-                           ("hermes-ping", cls.FAKE_PING), ("sudo-ask-granted", cls.FAKE_HELPER)):
+                           ("hermes-ping", cls.FAKE_PING), ("sudo-ask-granted", cls.FAKE_HELPER),
+                           ("approval-gate", cls.FAKE_GATE)):
             f = base / name
             f.write_text(body)
             f.chmod(0o755)
@@ -528,7 +593,9 @@ exit 0
         for old, new in (("HELPER=/usr/local/libexec/sudo-ask-granted\n", "HELPER=%s\n" % cls.fakes["sudo-ask-granted"]),
                          ("SUDO=/usr/bin/sudo\n", "SUDO=%s\n" % cls.fakes["sudo"]),
                          ("OSASCRIPT=/usr/bin/osascript\n", "OSASCRIPT=%s\n" % cls.fakes["osascript"]),
-                         ("PING=hermes-ping\n", "PING=%s\n" % cls.fakes["hermes-ping"])):
+                         ("PING=hermes-ping\n", "PING=%s\n" % cls.fakes["hermes-ping"]),
+                         ('GATE=$(dirname "$(/usr/bin/readlink -f "${BASH_SOURCE[0]}")")/approval-gate\n',
+                          "GATE=%s\n" % cls.fakes["approval-gate"])):
             assert src.count(old) == 1, old
             src = src.replace(old, new)
         cls.client = base / "sudo-ask"
@@ -581,6 +648,18 @@ exit 0
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(len(self.dialogs()), 1)
 
+    def test_gate_absent_normal_path(self) -> None:
+        self.open_window()
+        client = self.state / "sudo-ask"
+        client.write_text(self.client.read_text().replace(str(self.fakes["approval-gate"]), "/nonexistent/gate"))
+        client.chmod(0o755)
+        env = {"PATH": PATH, "HOME": str(self.state), "XDG_STATE_HOME": str(self.state / "xdg"),
+               "FAKE_STATE": str(self.state), "SUDO_ASK_MAX_WAIT": "1"}
+        p = subprocess.run([str(client), "echo", "x"], capture_output=True, text=True, env=env, cwd=str(self.state), check=False)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(self.dialogs()), 1)
+        self.assertNotIn("GRANTED-WINDOW", self.log())
+
     def test_deny_still_denies(self) -> None:
         (self.state / "answer").write_text("Deny|false")
         p = self.run_client("echo", "x")
@@ -617,6 +696,51 @@ exit 0
                 self.run_client(*args)
                 self.assertEqual(len(self.dialogs()), 1)
                 self.assertFalse([c for c in self.calls() if c.startswith("ran:")])
+
+    def test_k_probe_in_a_window_has_no_dialog_and_no_fresh_auth(self) -> None:
+        self.open_window()
+        for args in (("-k", "/usr/bin/printf", "x y"), ("-k", "-k", "/usr/bin/printf", "x y")):
+            with self.subTest(args=args):
+                (self.state / "calls").unlink(missing_ok=True)
+                p = self.run_client(*args)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(self.dialogs(), [])
+                calls = self.calls()
+                self.assertIn("gate check --gate sudo-ask -- /usr/bin/printf x y", calls)
+                self.assertIn("gate ask --gate sudo-ask --reason sudo-ask -- /usr/bin/printf x y", calls)
+                self.assertIn("ran: /usr/bin/printf x y", calls)
+                self.assertFalse([c for c in calls if c.startswith("sudo")], "no sudo, so no -k and no fresh auth")
+                self.assertIn("GRANTED-WINDOW", self.log())
+
+    def test_k_probe_without_a_window_is_the_normal_dialog_with_k_kept(self) -> None:
+        p = self.run_client("-k", "/usr/bin/printf", "x")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(self.dialogs()), 1)
+        self.assertIn("sudo -k /usr/bin/printf x", self.calls())
+        self.assertNotIn("GRANTED-WINDOW", self.log())
+
+    def test_k_probe_denied_by_the_gate_inside_a_window_prompts(self) -> None:
+        self.open_window()
+        (self.state / "check_rc").write_text("1")
+        self.run_client("-k", "visudo")
+        self.assertEqual(len(self.dialogs()), 1)
+        self.assertIn("sudo -k visudo", self.calls())
+        self.assertFalse([c for c in self.calls() if c.startswith("ran:")])
+
+    def test_k_alone_or_before_another_option_never_takes_the_window_path(self) -> None:
+        self.open_window()
+        for args in (("-k",), ("-k", "-n", "true"), ("-k", "FOO=1", "true")):
+            with self.subTest(args=args):
+                (self.state / "calls").unlink(missing_ok=True)
+                self.run_client(*args)
+                self.assertEqual(len(self.dialogs()), 1)
+                self.assertFalse([c for c in self.calls() if c.startswith("ran:")])
+                self.assertFalse([c for c in self.calls() if c.startswith("gate check")])
+
+    def test_window_is_decided_by_the_gate_not_reimplemented(self) -> None:
+        src = CLIENT.read_text()
+        for name in ("status --check", "read_grant", "exec --"):
+            self.assertNotIn(name, src)
 
     def test_status(self) -> None:
         p = self.run_client("--status")

@@ -21,6 +21,10 @@
 #   sudo-ask --status             is a window open, and until when (exit 0 open, 1 not)
 # `grant`, `revoke` and `status` without the dashes work too, but only when no program of that
 # name is on PATH. No helper installed (or no window): the dialog path below, unchanged.
+# Whether a window covers a command is decided by ONE tool, bin/approval-gate (next to this script;
+# registry config/approval-gates.toml); this script only asks it. `sudo-ask -k CMD...` is the
+# approval-probe form (bgrun, load-watch): inside a window it runs with no dialog and no fresh
+# authentication, `-k` dropped; with no window it is the normal dialog path, `-k` and all.
 
 export PATH="/opt/homebrew/bin:$PATH"
 set -u
@@ -28,6 +32,7 @@ HELPER=/usr/local/libexec/sudo-ask-granted
 SUDO=/usr/bin/sudo
 OSASCRIPT=/usr/bin/osascript
 PING=hermes-ping
+GATE=$(dirname "$(/usr/bin/readlink -f "${BASH_SOURCE[0]}")")/approval-gate
 [ $# -gt 0 ] || { echo "usage: sudo-ask <command...> | --grant [DURATION] | --revoke | --status" >&2; exit 64; }
 
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/sudo-ask"
@@ -57,13 +62,13 @@ ping_op() {  # best effort: a failed or missing hermes-ping never blocks anythin
   command -v "$PING" >/dev/null 2>&1 || return 0
   { timeout 15 "$PING" "$1" || true; } >/dev/null 2>&1
 }
-# window_status: sets W_OPEN (1/0), W_EXPIRES_EPOCH, W_EXPIRES_UTC, W_REMAINING, W_REASON from the helper.
+# window_status: sets W_OPEN (1/0), W_EXPIRES_EPOCH, W_EXPIRES_UTC, W_REMAINING, W_REASON from approval-gate.
 window_status() {
-  W_OPEN=0 W_EXPIRES_EPOCH= W_EXPIRES_UTC= W_REMAINING= W_REASON="no window helper installed"
-  [ -x "$HELPER" ] || return 1
+  W_OPEN=0 W_EXPIRES_EPOCH= W_EXPIRES_UTC= W_REMAINING= W_REASON="approval-gate is missing"
+  [ -x "$GATE" ] || return 1
   local out k v
-  out=$("$SUDO" -n "$HELPER" status 2>/dev/null) || true
-  W_REASON="the helper did not answer (not in sudoers?)"
+  out=$("$GATE" status 2>/dev/null) || true
+  W_REASON="approval-gate did not answer"
   while IFS== read -r k v; do
     case $k in
       open) [[ $v == [01] ]] && W_OPEN=$v ;;
@@ -78,6 +83,15 @@ window_status() {
 describe_window() {
   local r=$W_REMAINING
   echo "sudo-ask window: OPEN until $(ny "$W_EXPIRES_EPOCH") ($W_EXPIRES_UTC; $((r / 3600))h$(((r % 3600) / 60))m left)"
+}
+# try_window CMD...: the window covers it (approval-gate check: gate registry, open window, denylist) -> run it
+# through the gate and never return. An option first, or VAR=value first, is sudo syntax this path does not take.
+try_window() {
+  [ $# -gt 0 ] && [ "${1#-}" = "$1" ] && [[ $1 != *=* ]] && [ -x "$GATE" ] || return 1
+  "$GATE" check --gate sudo-ask -- "$@" >/dev/null 2>&1 || return 1
+  cmd=""; local a; for a in "$@"; do cmd+="$(quote_arg "$a") "; done; cmd=${cmd% }
+  log GRANTED-WINDOW
+  exec "$GATE" ask --gate sudo-ask --reason "sudo-ask" -- "$@"
 }
 # The first use after a window ended tells the operator once (best effort).
 note_expiry_once() {
@@ -124,16 +138,12 @@ case $sub in
     note="OPENS AN APPROVAL WINDOW for $dur: every agent's sudo-ask then runs as root with NO dialog and NO Touch ID, except denylisted commands. Touch ID follows."
     ;;
   *)
-    # Plain command. Window open and the helper says this command is allowed: run it, no dialog.
-    # (An option first, or VAR=value first, is sudo syntax this path does not take: normal path.)
-    if [ "${1#-}" = "$1" ] && [[ $1 != *=* ]] && [ -x "$HELPER" ]; then
-      if "$SUDO" -n "$HELPER" status --check -- "$@" >/dev/null 2>&1; then
-        cmd=""; for a in "$@"; do cmd+="$(quote_arg "$a") "; done; cmd=${cmd% }
-        log GRANTED-WINDOW
-        exec "$SUDO" -n "$HELPER" exec -- "$@"
-      fi
-      note_expiry_once
-    fi ;;
+    # Plain command. Window open and approval-gate says it covers this command: run it, no dialog. Leading
+    # `-k` words (the approval-probe form) are dropped for that decision only; without a window the original
+    # arguments, `-k` included, take the dialog path below.
+    nk=0; for a in "$@"; do [ "$a" = -k ] || break; nk=$((nk + 1)); done
+    try_window "${@:nk+1}"
+    note_expiry_once ;;
 esac
 
 cmd=""

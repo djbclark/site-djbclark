@@ -1,0 +1,70 @@
+# Registry of approval gates (read by bin/approval-gate). One [[gate]] table per gate:
+#   name    unique id a caller passes as `approval-gate check --gate NAME`
+#   owner   repo-relative file that implements the gate (where to look when it misbehaves)
+#   policy  "window-ok"      an open sudo-ask approval window may stand in for the gate's prompt
+#           "always-prompt"  the window never covers it: the caller must prompt (also the answer for an unknown gate)
+#   max_ttl seconds a thing granted on the strength of a window (a bgrun ticket, ...) may last, 0 = until the window ends;
+#           always capped at the window's expiry whatever this says
+# This file is policy for convenience gates, not a security boundary: the privilege boundary is the root helper
+# (roles/sudo_ask_grant/files/sudo-ask-granted), which re-checks the window and its denylist itself.
+
+[[gate]]
+name = "sudo-ask"
+owner = "bin/sudo-ask"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "bgrun-approve-local"
+owner = "bin/bgrun"
+policy = "window-ok"
+max_ttl = 3600
+
+[[gate]]
+name = "bgrun-ticket"
+owner = "bin/bgrun"
+policy = "window-ok"
+max_ttl = 0
+
+# The denylist classes of the window helper: always the normal dialog + Touch ID.
+[[gate]]
+name = "denylist-sudoers-pam"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-grant-helper"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-secretspec-broker"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-tcc-keychain"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-disk-erase"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-csrutil-nvram"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "denylist-accounts"
+owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0

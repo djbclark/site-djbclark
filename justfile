@@ -304,13 +304,13 @@ sudo-ask-grant-check:
     roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --check --diff
 
 sudo-ask-grant-setup:
-    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --live
 
 sudo-ask-grant-verify:
-    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --verify
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --verify --live
 
 sudo-ask-grant-rollback:
-    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --rollback
+    roles/sudo_ask_grant/files/sudo-ask-grant-setup.sh --rollback --live
 
 # launchd's per-user PATH = the login-shell PATH (roles/launchd_path). Takes
 # effect at the next reboot. `launchd-path-setup` is the one privileged step
