@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""approval-gate: the ONE place that decides whether the sudo-ask approval window stands in for a prompt.
+
+  approval-gate status                          is a window open? (key=value lines; exit 0 open, 1 not)
+  approval-gate check --gate NAME [--max-ttl S] [-- CMD...]
+                                                exit 0: the open window covers this gate (and CMD is not
+                                                denylisted); prints ttl=, expires_epoch=, expires_utc=.
+                                                exit 1: the caller must prompt. exit 2: usage.
+  approval-gate ask --gate NAME --reason TEXT -- CMD...
+                                                run CMD as root through the window if `check` passes, else
+                                                through sudo-ask's normal dialog + Touch ID.
+
+Gates come from config/approval-gates.toml (name, owner, policy window-ok|always-prompt, max_ttl). An unknown
+gate, an always-prompt gate, a closed window, a damaged grant file and a denylisted command all mean "prompt".
+
+The window itself (root-owned grant file, denylist, audit log) lives in the root helper
+/usr/local/libexec/sudo-ask-granted; this tool loads that root-owned file's plain functions (read_grant, evaluate)
+and never reimplements them. It never uses sudo to READ the window (the grant file is world-readable); only `ask`
+uses sudo, and only for the helper's NOPASSWD `exec`.
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import sys
+import re
+import time
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11 (Apple's /usr/bin/python3 is 3.9): the registry's tiny subset is parsed below
+    tomllib = None
+
+HELPER_PATH = "/usr/local/libexec/sudo-ask-granted"
+TRUSTED_UID = 0  # the helper file must belong to root
+SUDO = "/usr/bin/sudo"
+REGISTRY = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "config", "approval-gates.toml")
+SUDO_ASK = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sudo-ask")
+LOG = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+                   "approval-gate", "log")
+
+_helper = None
+
+
+def load_helper():
+    """The helper module, or None if it is missing or not a root-owned, non-writable file (then: no window)."""
+    global _helper
+    if _helper is not None:
+        return _helper
+    try:
+        st = os.stat(HELPER_PATH)
+        if st.st_uid != TRUSTED_UID or st.st_mode & 0o022:
+            return None
+        loader = importlib.machinery.SourceFileLoader("sudo_ask_granted_installed", HELPER_PATH)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+    except (OSError, SyntaxError, ImportError):
+        return None
+    _helper = mod
+    return mod
+
+
+def window(now=None):
+    """(open, reason, data) exactly as the helper's read_grant says; closed if the helper is not there."""
+    h = load_helper()
+    if h is None:
+        return False, "no window helper installed", {}
+    return h.read_grant(int(now if now is not None else time.time()))
+
+
+def parse_registry(text):
+    """The registry subset only: `[[gate]]` tables of `key = "string"` / `key = integer`, `#` comment lines."""
+    out, cur = [], None
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "[[gate]]":
+            cur = {}
+            out.append(cur)
+            continue
+        m = re.fullmatch(r'([a-z_]+)\s*=\s*(?:"([^"\\]*)"|(\d+))\s*(?:#.*)?', line)
+        if cur is None or not m:
+            raise ValueError("line %d is outside the registry's subset: %r" % (n, raw))
+        cur[m.group(1)] = m.group(2) if m.group(2) is not None else int(m.group(3))
+    return {"gate": out}
+
+
+def gates():
+    try:
+        with open(REGISTRY, "rb") as f:
+            raw = f.read().decode("utf-8")
+        data = tomllib.loads(raw) if tomllib else parse_registry(raw)
+        return {g["name"]: g for g in data.get("gate", [])}
+    except (OSError, ValueError, KeyError, UnicodeDecodeError):  # tomllib.TOMLDecodeError is a ValueError
+        return {}
+
+
+def decide(gate, max_ttl=None, cmd=None, now=None):
+    """-> (covered, reason, info). The whole policy: registry, window, ttl cap, denylist."""
+    g = gates().get(gate)
+    if g is None:
+        return False, "unknown gate %r" % gate, {}
+    if g.get("policy") != "window-ok":
+        return False, "gate %r always prompts" % gate, {}
+    is_open, reason, data = window(now)
+    if not is_open:
+        return False, reason, {}
+    ttl = data["remaining_s"]
+    for cap in (g.get("max_ttl") or 0, max_ttl or 0):
+        if isinstance(cap, int) and cap > 0:
+            ttl = min(ttl, cap)
+    if ttl < 1:
+        return False, "no time left in the window", {}
+    if cmd:
+        h = load_helper()
+        h.INVOKER_UID = os.getuid()  # the root helper sees the same user as SUDO_UID, so both judge the same writable paths
+        try:
+            h.GRANTED_EPOCH = h.parse_iso(data["granted_utc"])  # programs changed since the window opened prompt, as in the helper
+        except (KeyError, ValueError):
+            return False, "grant time unknown", {}
+        why = h.evaluate(list(cmd), os.getcwd(), h.EXEC_PATH)
+        if why:
+            return False, why, {}
+    return True, "covered", {"ttl": ttl, "expires_epoch": data["expires_epoch"], "expires_utc": data["expires_utc"]}
+
+
+def log(line):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write("%s\t%s\n" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), line.replace("\n", " ")[:500]))
+    except OSError:
+        pass
+
+
+def parse(argv):
+    """-> (opts, cmd). Options: --gate, --max-ttl, --reason; everything after -- is the command."""
+    opts, cmd, i = {}, None, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            cmd = argv[i + 1:]
+            break
+        if a in ("--gate", "--max-ttl", "--reason") and i + 1 < len(argv):
+            opts[a[2:].replace("-", "_")] = argv[i + 1]
+            i += 2
+        else:
+            raise ValueError("unexpected argument %r" % a)
+    if "max_ttl" in opts:
+        if not opts["max_ttl"].isdigit() or int(opts["max_ttl"]) < 1:
+            raise ValueError("--max-ttl must be a positive number of seconds")
+        opts["max_ttl"] = int(opts["max_ttl"])
+    return opts, cmd
+
+
+def main(argv):
+    sub = argv[1] if len(argv) > 1 else ""
+    try:
+        opts, cmd = parse(argv[2:])
+    except ValueError as e:
+        print("approval-gate: %s" % e, file=sys.stderr)
+        return 2
+    if sub == "status":
+        if opts or cmd is not None:
+            print("usage: approval-gate status", file=sys.stderr)
+            return 2
+        is_open, reason, d = window()
+        print("open=%d" % is_open)
+        print("reason=" + "".join(c if " " <= c < "\x7f" else "?" for c in reason))
+        for k in ("expires_epoch", "expires_utc", "granted_utc", "remaining_s", "duration_s", "expired_utc"):
+            if k in d:
+                print("%s=%s" % (k, d[k]))
+        return 0 if is_open else 1
+    if sub in ("check", "ask"):
+        if "gate" not in opts or (sub == "ask" and (not cmd or "reason" not in opts)) or (cmd is not None and not cmd):
+            print("usage: approval-gate check --gate NAME [--max-ttl S] [-- CMD...] | "
+                  "ask --gate NAME --reason TEXT -- CMD...", file=sys.stderr)
+            return 2
+        ok, reason, info = decide(opts["gate"], opts.get("max_ttl"), cmd)
+        if sub == "check":
+            if ok:
+                for k in ("ttl", "expires_epoch", "expires_utc"):
+                    print("%s=%s" % (k, info[k]))
+                return 0
+            print("approval-gate: prompt: %s" % reason, file=sys.stderr)
+            return 1
+        log("%s\t%s\t%s\t%s" % (opts["gate"], "WINDOW" if ok else "PROMPT(%s)" % reason, opts["reason"], " ".join(cmd)))
+        if ok:
+            os.execv(SUDO, [SUDO, "-n", HELPER_PATH, "exec", "--"] + cmd)
+        os.execv(SUDO_ASK, [SUDO_ASK] + cmd)
+    print("usage: approval-gate status | check ... | ask ...", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

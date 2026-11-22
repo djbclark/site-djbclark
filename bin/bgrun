@@ -287,9 +287,29 @@ bg_scrub_run() {
   [[ "$user" =~ ^[A-Za-z0-9_.@-]+$ ]] || user=$(/usr/bin/id -un)
   /usr/bin/env -i PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" USER="$user" LANG="$lang" TERM="$term" "$@"
 }
+# bg_gate_window GATE [MAXTTL]: 0 when an OPEN sudo-ask approval window (roles/sudo_ask_grant) covers GATE. The decision is made
+# by bin/approval-gate (registry config/approval-gates.toml), never here: it is ~/.local/bin/approval-gate (a symlink into the site
+# repo, like sudo-ask; a throwaway HOME without one has no window), is run through bg_scrub_run, and has no environment override. Sets bg_gw_ttl (seconds the
+# window can still back a grant, capped by the gate's max_ttl and MAXTTL) and bg_gw_expires (the window's end, epoch). No window,
+# no gate, a damaged grant file, an always-prompt or unknown gate: 1, and the caller prompts exactly as before.
+bg_gw_ttl= bg_gw_expires=
+bg_gate_window() {
+  local g="$HOME/.local/bin/approval-gate" out k v
+  bg_gw_ttl= bg_gw_expires=
+  [ -x "$g" ] || return 1
+  if [ -n "${2:-}" ]; then out=$(bg_scrub_run "$g" check --gate "$1" --max-ttl "$2" 2>/dev/null) || return 1
+  else out=$(bg_scrub_run "$g" check --gate "$1" 2>/dev/null) || return 1; fi
+  while IFS== read -r k v; do
+    case $k in
+      ttl) [[ $v =~ ^[0-9]{1,9}$ ]] && bg_gw_ttl=$((10#$v)) ;;
+      expires_epoch) [[ $v =~ ^[0-9]{1,12}$ ]] && bg_gw_expires=$((10#$v)) ;;
+    esac
+  done <<<"$out"
+  [ -n "$bg_gw_ttl" ] && [ -n "$bg_gw_expires" ] && [ "$bg_gw_ttl" -ge 1 ]
+}
 # bg_approve_one_shot [--ttl T] -- CMD...: the one-shot token (header).
 bg_approve_one_shot() {
-  local ttl=1h secs unit key tmp now sa="$HOME/.local/bin/sudo-ask" shown
+  local ttl=1h secs unit key tmp now exp gw_end= sa="$HOME/.local/bin/sudo-ask" shown
   while [ $# -gt 0 ]; do
     case "$1" in
       --ttl) [ $# -ge 2 ] || { echo "bg approve-local: --ttl needs a value (30m, 1h, 90s)" >&2; return 2; }; ttl=$2; shift 2 ;;
@@ -311,21 +331,29 @@ bg_approve_one_shot() {
   fi
   key=$(bg_appr_key "$@") || { echo "bg approve-local: cannot hash the command" >&2; return 1; }
   shown=$(printf '%q ' "$@"); shown=${shown% }
-  echo "bg approve-local: asking djbclark to approve ONE local run in $(pwd -P): $shown" >&2
-  if [ -x "$sa" ]; then
-    # The Allow dialog shows the command and directory (mouse click only); sudo then asks for Touch ID or the password.
-    # -k: sudo ignores any cached credential for this one command (the machine's sudo timestamp is global), so Touch ID is asked
-    bg_scrub_run "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
-      echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
+  if bg_gate_window bgrun-approve-local "$secs"; then
+    # An open approval window is djbclark's standing approval: no dialog, no Touch ID, no sudo (the plain `sudo -k` fallback
+    # below included). The token never outlives the window.
+    secs=$bg_gw_ttl; gw_end=$bg_gw_expires
+    echo "bg approve-local: the open sudo-ask approval window (until $(bg_ticket_fmt "$bg_gw_expires")) approves ONE local run in $(pwd -P): $shown" >&2
   else
-    # -k with a command: ask afresh, run /usr/bin/true, and leave the machine's sudo ticket neither cleared nor refreshed
-    # (`sudo -k` then `sudo -v` would cache a new global ticket for every session; lead adversary B4)
-    bg_scrub_run /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+    echo "bg approve-local: asking djbclark to approve ONE local run in $(pwd -P): $shown" >&2
+    if [ -x "$sa" ]; then
+      # The Allow dialog shows the command and directory (mouse click only); sudo then asks for Touch ID or the password.
+      # -k: sudo ignores any cached credential for this one command (the machine's sudo timestamp is global), so Touch ID is asked
+      bg_scrub_run "$sa" -k /usr/bin/printf 'bg approve-local (one run, %s s) in %s: %s\n' "$secs" "$(pwd -P)" "$shown" >/dev/null || {
+        echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
+    else
+      # -k with a command: ask afresh, run /usr/bin/true, and leave the machine's sudo ticket neither cleared nor refreshed
+      # (`sudo -k` then `sudo -v` would cache a new global ticket for every session; lead adversary B4)
+      bg_scrub_run /usr/bin/sudo -k /usr/bin/true || { echo "bg approve-local: authentication failed; nothing was written" >&2; return 1; }
+    fi
   fi
   mkdir -p "$bg_appr_dir" && chmod 700 "$bg_appr_dir" || return 1
   tmp=$(mktemp "$bg_appr_dir/.tmp.XXXXXX") || return 1
   now=$(gdate +%s)
-  printf 'key=%s\nexpires=%s\ncreated=%s\n' "$key" "$((now + secs))" "$now" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$bg_appr_dir/$key" || {
+  exp=$((now + secs)); [ -z "$gw_end" ] || [ "$exp" -le "$gw_end" ] || exp=$gw_end   # never past the window's end, whatever the clock did meanwhile
+  printf 'key=%s\nexpires=%s\ncreated=%s\n' "$key" "$exp" "$now" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$bg_appr_dir/$key" || {
     rm -f "$tmp"; echo "bg approve-local: could not write the approval" >&2; return 1; }
   bg_appr_log approved "$key" "$1"
   echo "bg approve-local: approved; the next identical run here (same directory and arguments, within ${ttl}) runs locally once" >&2
@@ -499,7 +527,7 @@ bg_approve_choose() {
 }
 # bg_approve_local: subcommands status | revoke [ID...] | check [DIR]; a ticket when --for/--until/--ask is given; else the one-shot token.
 bg_approve_local() {
-  local long ttl_seen=0 forv= untilv= scope='*' ask=0 narrow=0 pick="" a before=1 secs now exp sa="$HOME/.local/bin/sudo-ask" shown where what msg id argh tmp
+  local long ttl_seen=0 forv= untilv= scope='*' ask=0 narrow=0 pick="" a before=1 secs now exp gw=0 sa="$HOME/.local/bin/sudo-ask" shown where what msg id argh tmp
   case "${1:-}" in
     status) shift; bg_ticket_status; return $? ;;
     revoke) shift; bg_ticket_revoke "$@"; return $? ;;
@@ -527,7 +555,12 @@ bg_approve_local() {
   [ "${#rest[@]}" -gt 0 ] && narrow=1
   if [ "$ask" = 1 ]; then
     [ -z "$forv$untilv" ] || { echo "bg approve-local: --ask asks for the duration; do not combine it with --for/--until" >&2; return 2; }
-    pick=$(bg_approve_choose) || { echo "bg approve-local: no duration chosen; nothing was written" >&2; return 1; }
+    if bg_gate_window bgrun-ticket; then
+      # An open approval window answers the question the chooser asks: a ticket for as long as the window lasts, no dialog.
+      pick="for:$bg_gw_ttl"
+    else
+      pick=$(bg_approve_choose) || { echo "bg approve-local: no duration chosen; nothing was written" >&2; return 1; }
+    fi
     case "$pick" in
       once) [ "${#rest[@]}" -gt 0 ] || { echo "usage: bgrun approve-local --ask -- <command> [args...]" >&2; return 2; }
             [ "$scope" = '*' ] || { echo "bg approve-local: --scope narrows a ticket; 'this run only' is one command here" >&2; return 2; }
@@ -553,6 +586,15 @@ bg_approve_local() {
   fi
   # No upper cap (operator's ruling), but a period that cannot be shown as a date cannot be shown to the operator either
   bg_ticket_fmt "$exp" >/dev/null 2>&1 || { echo "bg approve-local: that expiry is too far away to be shown as a date; nothing was written" >&2; return 2; }
+  # An open approval window backs the ticket instead of a fresh Touch ID, and the ticket never outlives it.
+  gw=0
+  if bg_gate_window bgrun-ticket && [ "$bg_gw_expires" -gt "$now" ]; then
+    gw=1
+    if [ "$exp" -gt "$bg_gw_expires" ]; then
+      exp=$bg_gw_expires; secs=$((exp - now))
+      echo "bg approve-local: the open sudo-ask approval window ends $(bg_ticket_fmt "$exp"); the ticket is capped there" >&2
+    fi
+  fi
   if [ "$scope" != '*' ]; then
     scope=$(cd "$scope" 2>/dev/null && pwd -P) || { echo "bg approve-local: --scope is not a directory" >&2; return 2; }
     # The path goes into the dialog, so only characters sudo-ask shows 1:1 are allowed: no quote (sudo-ask turns each ' into 4
@@ -575,7 +617,9 @@ bg_approve_local() {
   long=; [ "$secs" -gt 2592000 ] && long="LONG-LIVED (over 30 days): "
   msg="bgrun TICKET ${long}until $(bg_ticket_fmt "$exp") ($(bg_ticket_left "$secs") from now), $where: allow $what. Revoke: bgrun approve-local revoke"
   echo "bg approve-local: asking djbclark for a ticket: $what $where until $(bg_ticket_fmt "$exp")" >&2
-  if [ -x "$sa" ]; then
+  if [ "$gw" = 1 ]; then
+    echo "bg approve-local: backed by the open sudo-ask approval window; no dialog, no Touch ID" >&2
+  elif [ -x "$sa" ]; then
     bg_scrub_run "$sa" -k /usr/bin/printf '%s\n' "$msg" >/dev/null || { echo "bg approve-local: not approved; nothing was written" >&2; return 1; }
   else
     # A bare sudo prompt says nothing about an open-ended ticket, so it is no consent for one (a one-shot token still falls back to it).
