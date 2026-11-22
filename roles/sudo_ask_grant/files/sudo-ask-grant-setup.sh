@@ -6,6 +6,8 @@
 #   sudo-ask-grant-setup.sh --live             install: ONE sudo-ask step (dialog + Touch ID)
 #   sudo-ask-grant-setup.sh --verify --live    prove the split: grant needs a password, revoke needs none,
 #                                              exec needs a window; fails when the sudo ticket is not off
+#   sudo-ask-grant-setup.sh --ticket-checks    only the two ticket checks --verify runs (the `sudo -n -l` listing says the
+#                                              ticket is off; a plain `sudo -n /usr/bin/true` fails); a test gives a fake sudo
 #   sudo-ask-grant-setup.sh --rollback --live  remove the drop-in, helper and grant file (sudo-ask then prompts again)
 #
 # GUARD: install, --verify and --rollback change or probe the REAL machine, so they refuse (exit 2, before any
@@ -57,7 +59,7 @@ for a in "$@"; do
     --print) mode=print ;; --check) mode=check ;; --diff) diff_flag=1 ;;
     --verify) mode=verify ;; --rollback) mode=rollback ;; --live) live=1 ;;
     --ticket-checks) mode=ticketchecks ;;   # tests (and a manual re-check): the two ticket checks, nothing else
-    *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --rollback --live]" >&2; exit 64 ;;
+    *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --ticket-checks [--live] | --rollback --live]" >&2; exit 64 ;;
   esac
 done
 

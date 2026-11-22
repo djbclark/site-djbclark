@@ -137,7 +137,8 @@ afterwards changes nothing there. A program or script typed **inside** something
 `timeout`, `env`; `sh -c` text; `find -exec`; `xargs`; a script named inside `sh -c`) is run by the path as typed, so it is
 covered by a link check instead: such a path prompts when any component of it (walked lexically from the working directory)
 is a symbolic link that sits in a directory the invoking user can write (the user could repoint it between the check and
-the run, for example during a `sleep`), or contains `..`. A script typed as the top-level argument gets the same link check
+the run, for example during a `sleep`), or contains `..`; a link that passes is followed, and its target is walked the same
+way (a root-owned link whose target goes through a link the user can repoint is swappable too; 16 links at most). A script typed as the top-level argument gets the same link check
 (stricter than needed there, on purpose). What this does not cover: a program that is a real file in a directory the user
 cannot write is safe; one in a directory the user can write already prompts by the realpath rule above.
 
@@ -179,11 +180,16 @@ conservative tokenizer), `env -S`, `xargs`, `find -exec`.
   `--upload-pack`, `--receive-pack`, `--exec`, `--config`, `--template`, `-O`.
 - Persistence beyond the paths above: `chmod`/`install -m`/`rsync --chmod` that sets a setuid or setgid bit (octal or
   symbolic) and any copy or move (`cp ditto rsync mv pax tar cpio install scp`) of a setuid or setgid file. For `chmod`
-  the mode is the first word that is not one of BSD chmod's real option clusters (`-[HLPRfhvECNiI]+`; `--` ends them), so
-  `-x,u+s`, `-w,+s` and `-x+s` count as modes. For `install` the `-m` is read out of BSD install's getopt clusters
+  both the cluster and the word after it are judged when the cluster holds a character that is not one of BSD chmod's
+  option letters (`HLPRfhvECNiI`): BSD getopt also takes the mode letters (`rwxXstugoa`), so `-Rx 4755 F`, `-fx u+s F` and
+  `-vvx 4755 F` end the options at the `x` and the NEXT word is the mode; only exactly `-x`, or a word with a comma or sign in
+  it (`-x,u+s`, `-w,+s`), is itself the mode (`--` ends the options). A cluster that is neither option letters nor a mode
+  start (`-Z`) cannot be classified, and the command prompts. For `install` the `-m` is read out of BSD install's getopt clusters
   (`-pm 4755`, `-Sm4755`, `-pm4755`, also `--mode`). Extracting an archive as root restores owners and setuid files from
-  it, so inside a window these prompt: `tar`/`bsdtar`/`gtar`/`gnutar` extracting (`-x`, `--extract`, `--get`, a cluster such as
-  `-xpf`, old-style `xf`) unless **both** `--no-same-owner` and `--no-same-permissions` are given; `pax -r`; `cpio -i` and
+  it, so inside a window these prompt: **every** `tar`/`bsdtar`/`gtar`/`gnutar` extraction (`-x`, `--extract`, `--get`, a
+  cluster such as `-xpf`, old-style `xf`), whatever flags it carries (`--no-same-owner`/`--no-same-permissions` excuse
+  nothing: bsdtar applies its options in order, so a later `-p`, `--same-permissions` or `--same-owner` undoes them, and the
+  member names, `-C` and `-P` are not judged); `mtree -U`/`-u` (it sets owners and modes from the spec); `pax -r`; `cpio -i` and
   `-p`; `ditto -x` and `-k` alone (extract; `-c`, with or without `-k`, creates); `unzip` unless its leading options include
   `-l`, `-t`, `-v`, `-p` or `-Z`. Listing and creating (`tar -tf`/`-cf`, `pax -w`, `ditto -c`, `cpio -o`) run. This is a
   judgment on the options of these named programs, not a parse of every extractor: others (`xar`, `7z`, `jar`, `pkgutil`,
@@ -240,7 +246,10 @@ root-owned `/var/db/sudo-ask/audit-stamp` under an exclusive lock; a stamp or di
 non-writable makes the sweep refuse. `--status --audit` with no grant time known runs no sweep and uses no slot. `--revoke`
 sweeps only when a grant file existed (it is a NOPASSWD line too, so it cannot be a free way to start sweeps) and is not
 subject to the one-a-minute limit, which keeps the end-of-window report; a second `revoke` with no grant file prints that it
-skipped the sweep.
+skipped the sweep. When the file is missing but the log shows a `GRANT(` with no `REVOKE` after it (the file was removed, or
+the window ended oddly), `revoke` says so, with the time and the `sudo-ask --status --audit EPOCH` command to run, and still
+sweeps nothing. `status --audit EPOCH` takes an epoch from 0 to a day from now; anything else is a usage error that does not
+spend the one-a-minute slot.
 
 ## Install and roll back (operator, Touch ID)
 

@@ -377,18 +377,30 @@ def mode_sets_id(mode):
     return "s" in mode.lower() and re.fullmatch(r"[ugoaA-Za-z,+\-=]+", mode) is not None
 
 
-CHMOD_OPT = re.compile(r"-[HLPRfhvECNiI]+")
+CHMOD_OPT_LETTERS = "HLPRfhvECNiI"      # BSD chmod's real options
+CHMOD_MODE_START = "rwxXstugoa0123456789,+=-"   # what a mode (or a getopt-ending mode letter) starts with
 
 
-def chmod_mode(args):
-    """The MODE word of a BSD chmod: the first word that is not one of its option clusters (-R -H -L -P -f -h -v -E -C -N
-    -i -I); `--` ends the options. A word such as `-x,u+s` or `-w,+s` is the MODE (chmod reads it as one), not an option."""
+def chmod_modes(args):
+    """The words that may be chmod's MODE, or None when an option cluster cannot be classified (refuse). BSD chmod's
+    getopt knows the mode letters too: a cluster such as `-Rx` or `-fx` ends the options at the x, and the NEXT word is
+    the mode (`chmod -Rx 4755 F` sets setuid); only a word that is exactly `-` and one letter (`-x`), or one with a
+    comma or sign in it (`-x,u+s`), is itself the mode. Judging the cluster and the word after it covers both."""
     i = 0
-    while i < len(args) and CHMOD_OPT.fullmatch(args[i]):
-        i += 1
-    if i < len(args) and args[i] == "--":
-        i += 1
-    return args[i] if i < len(args) else None
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return args[i + 1:i + 2]
+        if not a.startswith("-") or a == "-":
+            return [a]
+        rest = a[1:].lstrip(CHMOD_OPT_LETTERS)
+        if not rest:
+            i += 1
+            continue
+        if rest[0] not in CHMOD_MODE_START:
+            return None
+        return [a] if len(a) == 2 else [a] + args[i + 1:i + 2]
+    return []
 
 
 INSTALL_ARG_OPTS = frozenset("BDfghlMmoT")   # BSD install: getopt string B:bCcdD:f:g:h:l:M:m:o:pSsT:Uv
@@ -450,9 +462,12 @@ def archive_problem(names, args):
     if names & TAR_NAMES:
         old = args[0] if args and not args[0].startswith("-") else ""   # `tar xf a`
         longs = _long_names(args)
-        if ("x" in old or "x" in _short_letters(args) or longs & EXTRACT_LONG) and not (
-                {"no-same-owner", "no-same-permissions"} <= longs):
-            return why % "tar" + " (use both --no-same-owner and --no-same-permissions)"
+        if "x" in old or "x" in _short_letters(args) or longs & EXTRACT_LONG:
+            # No flags excuse it: bsdtar applies its options in order, so a later -p / --same-permissions / --same-owner
+            # undoes --no-same-*, and the members' paths (-C /, -P) are not judged at all.
+            return why % "tar"
+    if "mtree" in names and any(re.fullmatch(r"-[A-Za-z]*[Uu][A-Za-z]*", a) for a in args):
+        return "mtree -U changes owners and permissions (a spec line can make a setuid root file)"
     if "pax" in names and "r" in _short_letters(args):
         return why % "pax -r"
     if "cpio" in names and (set("ip") & set(_short_letters(args)) or _long_names(args) & (EXTRACT_LONG | PASS_LONG)):
@@ -577,22 +592,32 @@ def changed_since_grant(real):
     return st.st_ctime >= GRANTED_EPOCH or st.st_mtime >= GRANTED_EPOCH
 
 
-def swappable_link(path, cwd):
+def swappable_link(path, cwd, _depth=0):
     """A description when the invoking user could repoint something on the way to PATH between the check and the run,
     else None. Walks the LEXICAL absolute path (cwd joined) one component at a time: a `..` is treated as swappable
     (what it names depends on the link before it), and a component that is a link is swappable when the directory
-    holding it is agent-writable (agent_writable on the realpath of that directory). The realpath that was judged only
-    protects what exec rewrites (the top-level program and script words); a program or script typed inside a wrapper,
-    `sh -c`, find or xargs is run by the path as typed, so it must not go through a link the user can repoint."""
+    holding it is agent-writable (agent_writable on the realpath of that directory). A link that passes is then
+    followed: its target, with the rest of the path, is walked the same way (a root-owned link whose target goes
+    through a link the user can repoint is just as swappable). The realpath that was judged only protects what exec
+    rewrites (the top-level program and script words); a program or script typed inside a wrapper, `sh -c`, find or
+    xargs is run by the path as typed, so it must not go through a link the user can repoint."""
+    if _depth > 16:
+        return "%r goes through too many links" % path
+    parts = [c for c in os.path.join(cwd, path).split("/") if c not in ("", ".")]
     cur = "/"
-    for comp in os.path.join(cwd, path).split("/"):
-        if comp in ("", "."):
-            continue
+    for k, comp in enumerate(parts):
         if comp == "..":
             return "%r has a '..' component" % path
         cur = os.path.join(cur, comp)
-        if os.path.islink(cur) and agent_writable(os.path.realpath(os.path.dirname(cur))):
-            return cur
+        if os.path.islink(cur):
+            here = os.path.dirname(cur)
+            if agent_writable(os.path.realpath(here)):
+                return cur
+            try:
+                target = os.readlink(cur)
+            except OSError:
+                return cur
+            return swappable_link(os.path.join(target, *parts[k + 1:]), here, _depth + 1)
     return None
 
 
@@ -853,8 +878,10 @@ def evaluate(argv, cwd, path, depth=0):
         return "rm --no-preserve-root"
 
     if hit("chmod"):
-        mode = chmod_mode(args)
-        if mode is not None and mode_sets_id(mode):
+        modes = chmod_modes(args)
+        if modes is None:
+            return "chmod options are not understood"
+        if any(mode_sets_id(m) for m in modes):
             return "chmod would set a setuid or setgid bit"
     if hit("install") and any(mode_sets_id(m) for m in install_modes(args)):
         return "install would set a setuid or setgid bit"
@@ -1249,6 +1276,28 @@ def last_granted_epoch():
     return None
 
 
+def unrevoked_grant_epoch():
+    """The epoch of the newest GRANT( record in the log when no REVOKE record came after it, else None: a window that
+    was granted and never ended through revoke."""
+    for f in (LOG_FILE, LOG_FILE + ".1"):
+        try:
+            with open(f, errors="replace") as fh:
+                rows = [ln.split("\t") for ln in fh if "\tGRANT(" in ln or "\tREVOKE" in ln]
+        except OSError:
+            continue
+        if not rows:
+            continue
+        for ln in reversed(rows):
+            if any(c.startswith("REVOKE") for c in ln[1:]):
+                return None
+            if any(c.startswith("GRANT(") for c in ln[1:]):
+                try:
+                    return parse_iso(ln[0])
+                except (ValueError, IndexError):
+                    return None
+    return None
+
+
 def audit(since):
     """Lines describing setuid/setgid files and root launchd targets (plus their plists) that changed at or after
     SINCE (epoch seconds): persistence a window can leave behind, which `revoke` does not undo."""
@@ -1364,6 +1413,8 @@ def main(argv):
             if len(argv) > 4 or (len(argv) == 4 and not argv[3].isdigit()):
                 die("usage: status --audit [SINCE_EPOCH]", EX_USAGE)
             since = int(argv[3]) if len(argv) == 4 else last_granted_epoch()
+            if since is not None and not 0 <= since <= now + 86400:
+                die("usage: status --audit [SINCE_EPOCH] (an epoch from 0 to a day from now)", EX_USAGE)   # before the slot is spent
             if since is None:
                 return print_audit(None)
             slot, why = audit_slot(now)
@@ -1456,7 +1507,8 @@ def main(argv):
         if len(argv) != 2:
             die("usage: revoke", EX_USAGE)
         since = last_granted_epoch()   # before the file goes
-        had_file = os.path.lexists(GRANT_FILE)   # revoke needs no password: with no grant file there is nothing to sweep for
+        had_file = os.path.lexists(GRANT_FILE)
+        lost = None if had_file else unrevoked_grant_epoch()   # granted, never revoked, and the file is gone   # revoke needs no password: with no grant file there is nothing to sweep for
         was_open, why, d = read_grant(now)
         print("revoking: the grant file said expires_utc=%s granted_utc=%s%s" % (
             clean(str(d.get("expires_utc", "?"))), clean(str(d.get("granted_utc", "?"))),
@@ -1470,6 +1522,9 @@ def main(argv):
             die("cannot revoke: %s" % e.strerror, EX_NOEXEC)
         if had_file:
             print_audit(since)   # after: ending the window never waits for the sweep. Revoke does not undo what was left behind
+        elif lost is not None:
+            print("audit: skipped, but a window was granted at %s and was never revoked, and its file is missing: it was removed "
+                  "or the window ended oddly. Run: sudo-ask --status --audit %d" % (iso(lost), lost))
         else:
             print("audit: skipped, there was no grant file (sudo-ask --status --audit sweeps on request)")
         return 0

@@ -668,26 +668,40 @@ class PolicyTests(GrantBase):
 
     # ---- follow-up MED-2: setuid bypasses through chmod, install and extraction as root
 
-    def test_chmod_mode_is_the_first_word_that_is_not_an_option_cluster(self) -> None:
-        self.assertEqual(mod.chmod_mode(["-R", "-H", "644", "f"]), "644")
-        self.assertEqual(mod.chmod_mode(["-Rf", "-w,+s", "f"]), "-w,+s")
-        self.assertEqual(mod.chmod_mode(["--", "-x,u+s", "f"]), "-x,u+s")
-        self.assertEqual(mod.chmod_mode(["-Rx", "f"]), "-Rx")        # x is not an option letter: this word is the mode
-        self.assertEqual(mod.chmod_mode(["-x,u+s", "f"]), "-x,u+s")
-        self.assertIsNone(mod.chmod_mode([]))
-        self.assertIsNone(mod.chmod_mode(["-R"]))
+    def test_chmod_modes_follow_the_getopt_of_bsd_chmod(self) -> None:
+        # a cluster with a mode letter in it (-Rx, -fx) ENDS the options there: the next word is the mode
+        self.assertEqual(mod.chmod_modes(["-R", "-H", "644", "f"]), ["644"])
+        self.assertEqual(mod.chmod_modes(["-Rf", "-w,+s", "f"]), ["-w,+s", "f"])
+        self.assertEqual(mod.chmod_modes(["--", "-x,u+s", "f"]), ["-x,u+s"])
+        self.assertEqual(mod.chmod_modes(["-Rx", "4755", "f"]), ["-Rx", "4755"])
+        self.assertEqual(mod.chmod_modes(["-fx", "u+s", "f"]), ["-fx", "u+s"])
+        self.assertEqual(mod.chmod_modes(["-vvx", "4755", "f"]), ["-vvx", "4755"])
+        self.assertEqual(mod.chmod_modes(["-R", "-fx", "2755", "f"]), ["-fx", "2755"])
+        self.assertEqual(mod.chmod_modes(["-x", "f"]), ["-x"])             # exactly -x is itself the mode
+        self.assertEqual(mod.chmod_modes(["-x,u+s", "f"]), ["-x,u+s", "f"])
+        self.assertIsNone(mod.chmod_modes(["-Z", "644", "f"]))             # an unclassifiable cluster fails closed
+        self.assertIsNone(mod.chmod_modes(["-R", "-Rq", "644", "f"]))
+        self.assertEqual(mod.chmod_modes([]), [])
+        self.assertEqual(mod.chmod_modes(["-R"]), [])
         f = self.work / "rs"
         f.write_text("x")
         for argv in (["chmod", "-x,u+s", str(f)], ["chmod", "-w,+s", str(f)], ["chmod", "-x+s", str(f)],
                      ["chmod", "-R", "-x,u+s", str(f)], ["chmod", "-Rf", "-w,+s", str(f)], ["chmod", "--", "-x,u+s", str(f)],
-                     ["chmod", "-h", "-x+s", str(f)], ["chmod", "-ER", "4755", str(f)], ["chmod", "-C", "u+s", str(f)]):
+                     ["chmod", "-h", "-x+s", str(f)], ["chmod", "-ER", "4755", str(f)], ["chmod", "-C", "u+s", str(f)],
+                     # round-2 MED-1: the mode letter ends getopt, so the NEXT word is the mode
+                     ["chmod", "-Rx", "4755", str(f)], ["chmod", "-fx", "u+s", str(f)], ["chmod", "-vvx", "4755", str(f)],
+                     ["chmod", "-R", "-fx", "2755", str(f)], ["chmod", "-Rw", "g+s", str(f)], ["chmod", "-Rf", "-vx", "u+s", str(f)]):
             with self.subTest(argv=argv):
                 self.assertIn("setuid", self.check(argv) or "")
+        for argv in (["chmod", "-Z", "644", str(f)], ["chmod", "-R", "-q", "644", str(f)], ["chmod", "-Rq", "644", str(f)]):
+            with self.subTest(argv=argv):
+                self.assertIn("not understood", self.check(argv) or "")
         for c in "HLPRfhvECNiI":
             with self.subTest(letter=c):
                 self.assertIn("setuid", self.check(["chmod", "-" + c, "-x+s", str(f)]) or "")
         for argv in (["chmod", "-x", str(f)], ["chmod", "-w", str(f)], ["chmod", "-R", "-x", str(f)], ["chmod", "-Rf", "644", str(f)],
-                     ["chmod", "--", "-x", str(f)], ["chmod", "-x,g-w", str(f)]):
+                     ["chmod", "--", "-x", str(f)], ["chmod", "-x,g-w", str(f)], ["chmod", "-Rx", "644", str(f)],
+                     ["chmod", "-fx", "g-w", str(f)], ["chmod", "-R", "-fx", "0755", str(f)]):
             with self.subTest(argv=argv):
                 self.assertAllowed(argv)
 
@@ -732,7 +746,16 @@ class PolicyTests(GrantBase):
                      ["bsdtar", "-xf", "a"], ["gtar", "--extract", "-f", "a"], ["gnutar", "--get", "-f", "a"],
                      ["tar", "--extr", "-f", "a"], ["tar", "--ge", "-f", "a"], ["tar", "-C", "/x", "-xf", "a"],
                      ["tar", "-x", "--no-same-owner", "-f", "a"], ["tar", "-x", "--no-same-permissions", "-f", "a"],
-                     ["tar", "-x", "--no-same-o", "--no-same-permissions", "-f", "a"],   # only the exact long names count
+                     ["tar", "-x", "--no-same-o", "--no-same-permissions", "-f", "a"],
+                     # round-2 MED-2: no flags excuse a tar extraction (bsdtar applies options in order; -P / -C / names are not judged)
+                     ["tar", "-xf", "a", "--no-same-owner", "--no-same-permissions"],
+                     ["gtar", "--extract", "--no-same-owner", "--no-same-permissions", "-f", "a"],
+                     ["tar", "-xpf", "a", "--no-same-owner", "--no-same-permissions"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--same-permissions", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--preserve-permissions", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "--same-owner", "-f", "a"],
+                     ["tar", "-x", "--no-same-owner", "--no-same-permissions", "-p", "-f", "a"],
+                     ["tar", "-xPf", "a"], ["tar", "-xf", "a", "-C", "/"], ["bsdtar", "-xf", "a", "-s", "|^|/|"],
                      ["pax", "-r", "-f", "a"], ["pax", "-rf", "a"], ["pax", "-rw", "a", "b"], ["pax", "-r", "-pe", "-f", "a"],
                      ["cpio", "-i"], ["cpio", "-idmv"], ["cpio", "-p", "d"], ["cpio", "-pdm", "d"], ["cpio", "--extract"],
                      ["cpio", "--pass-through", "d"], ["cpio", "--pas", "d"],
@@ -745,12 +768,22 @@ class PolicyTests(GrantBase):
             with self.subTest(argv=argv):
                 self.assertIn("extracts", self.archive(argv) or "")
 
+    def test_a_tar_extraction_message_does_not_offer_the_no_same_flags(self) -> None:   # they excuse nothing now
+        self.assertNotIn("no-same", self.archive(["tar", "-xf", "a"]) or "")
+
+    def test_mtree_update_is_refused_and_a_plain_check_runs(self) -> None:   # round-2 LOW-2
+        for argv in (["mtree", "-U", "-f", "spec"], ["mtree", "-f", "spec", "-U"], ["mtree", "-Uf", "spec"], ["mtree", "-u", "-f", "spec"],
+                     ["mtree", "-ceU"], ["sh", "-c", "mtree -U -f spec"]):
+            with self.subTest(argv=argv):
+                self.assertIn("mtree", self.archive(argv) or "")
+        for argv in (["mtree", "-f", "spec"], ["mtree", "-c", "-p", "d"], ["mtree", "-e", "-f", "spec", "-p", "d"]):
+            with self.subTest(argv=argv):
+                self.assertIsNone(self.archive(argv))
+
     def test_listing_and_creating_archives_still_runs(self) -> None:
         for argv in (["tar", "-tf", "a"], ["tar", "tf", "a"], ["tar", "-tvf", "a"], ["tar", "-cf", "a", "b"], ["tar", "cf", "a", "b"],
                      ["tar", "--exclude=x", "-czf", "a", "b"], ["bsdtar", "-tvf", "a"], ["gtar", "--list", "-f", "a"],
-                     ["tar", "-xf", "a", "--no-same-owner", "--no-same-permissions"],
-                     ["tar", "--no-same-owner", "--no-same-permissions", "xf", "a"], ["gtar", "--extract", "--no-same-owner",
-                                                                                   "--no-same-permissions", "-f", "a"],
+                     ["tar", "--no-same-owner", "--no-same-permissions", "xf", "a"],   # tar reads old-style letters only as the FIRST word: no mode, no extraction
                      ["pax", "-w", "-f", "a", "b"], ["pax", "-wf", "a", "b"], ["pax", "-f", "a"],
                      ["cpio", "-o"], ["cpio", "-ov"], ["cpio", "-t"], ["cpio", "--create"],
                      ["ditto", "-c", "a", "b"], ["ditto", "-c", "-k", "--keepParent", "a", "b.zip"], ["ditto", "-ck", "a", "b.zip"],
@@ -776,22 +809,43 @@ class PolicyTests(GrantBase):
     # ---- follow-up MED-3: a program or script typed inside a wrapper or `sh -c` is run as typed
 
     def test_swappable_link_walks_the_lexical_path(self) -> None:
-        lnk = self.work / "lnk"
+        work = pathlib.Path(os.path.realpath(self.work))   # /var is itself a link on macOS; a safe link is followed now
+        lnk = work / "lnk"
         os.symlink("/bin/ls", lnk)
-        dlink = self.work / "dl"
+        dlink = work / "dl"
         os.symlink("/bin", dlink)
         self.assertEqual(mod.swappable_link(str(lnk), "/"), str(lnk))
-        self.assertEqual(mod.swappable_link("lnk", str(self.work)), str(self.work / "lnk"))      # relative: cwd joined
+        self.assertEqual(mod.swappable_link("lnk", str(work)), str(work / "lnk"))      # relative: cwd joined
         self.assertEqual(mod.swappable_link(str(dlink / "ls"), "/"), str(dlink))                 # a link in the middle
-        self.assertEqual(mod.swappable_link("./lnk", str(self.work)), str(self.work / "lnk"))    # a `.` is skipped
-        self.assertEqual(mod.swappable_link(str(self.work) + "//lnk", "/"), str(lnk))            # so are empty components
+        self.assertEqual(mod.swappable_link("./lnk", str(work)), str(work / "lnk"))    # a `.` is skipped
+        self.assertEqual(mod.swappable_link(str(work) + "//lnk", "/"), str(lnk))            # so are empty components
         self.assertIsNone(mod.swappable_link("/usr/bin/ls", "/"))
-        self.assertIsNone(mod.swappable_link(str(self.work / "plain"), "/"))                     # no link, nothing to repoint
-        self.assertIn("'..' component", mod.swappable_link("../x", str(self.work)) or "")
+        self.assertIsNone(mod.swappable_link(str(work / "plain"), "/"))                     # no link, nothing to repoint
+        self.assertIn("'..' component", mod.swappable_link("../x", str(work)) or "")
         self.assertIn("'..' component", mod.swappable_link("/usr/bin/../bin/ls", "/") or "")
         with mock.patch.object(mod, "agent_writable", return_value=False):
             self.assertIsNone(mod.swappable_link(str(lnk), "/"))        # the directory holding the link is out of reach
             self.assertIn("'..' component", mod.swappable_link("/usr/bin/../bin/ls", "/") or "")   # a `..` is suspect whatever the modes say
+
+    def test_swappable_link_follows_a_safe_link_to_a_target_through_an_unsafe_one(self) -> None:   # round-2 LOW-1
+        work = pathlib.Path(os.path.realpath(self.work))   # /var is itself a link on macOS; a safe link is followed now
+        unsafe = work / "unsafe"
+        os.symlink("/bin", unsafe)                 # a link in a directory the user can write
+        safe = work / "safe"
+        os.symlink(str(unsafe) + "/ls", safe)      # the "root-owned" link whose target goes through `unsafe`
+        loop = work / "loop"
+        os.symlink(str(loop), loop)
+        with mock.patch.object(mod, "agent_writable", return_value=True):
+            self.assertEqual(mod.swappable_link(str(unsafe / "ls"), "/"), str(unsafe))
+        calls = []
+        def agent(p):
+            calls.append(p)
+            return len(calls) > 1                 # the first directory (holding `safe`) is out of reach, the next one is not
+        with mock.patch.object(mod, "agent_writable", side_effect=agent):
+            self.assertEqual(mod.swappable_link(str(safe), "/"), str(unsafe))
+        with mock.patch.object(mod, "agent_writable", return_value=False):
+            self.assertIsNone(mod.swappable_link(str(safe), "/"))                      # nothing writable: fine
+            self.assertIn("too many links", mod.swappable_link(str(loop), "/") or "")  # a loop is refused, not walked forever
 
     def test_swappable_link_asks_about_the_realpath_of_the_directory_holding_the_link(self) -> None:
         lnk = self.work / "lnk"
@@ -1282,12 +1336,55 @@ class ModeTests(GrantBase):
         self.assertIn("no grant time known", buf.getvalue())
         self.assertFalse(pathlib.Path(mod.AUDIT_STAMP).exists())
 
+    def test_status_audit_refuses_an_epoch_out_of_range_before_spending_the_slot(self) -> None:   # round-2 LOW-4
+        ran = []
+        with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
+            for bad in ("9" * 31, str(int(time.time()) + 10 * 86400), "99999999999999999999"):
+                with self.subTest(since=bad):
+                    rc, _ = self.run_main("status", "--audit", bad)
+                    self.assertEqual(rc, mod.EX_USAGE)
+        self.assertEqual(ran, [])
+        self.assertFalse(pathlib.Path(mod.AUDIT_STAMP).exists())      # the one-a-minute slot was not spent
+        with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
+            rc, _ = self.run_main("status", "--audit", "0")
+        self.assertEqual((rc, ran), (0, [0]))
+
     def test_status_audit_does_not_run_when_the_stamp_cannot_be_kept(self) -> None:
         ran = []
         os.chmod(self.dir, 0o775)
         with mock.patch.object(mod, "audit", lambda since: ran.append(since) or []):
             rc, _ = self.run_main("status", "--audit", "5")
         self.assertEqual((rc, ran), (mod.EX_REFUSED, []))
+
+    def write_log(self, path, *rows):
+        pathlib.Path(path).write_text("".join("%s\t501\t%s\t/\tx\n" % (mod.iso(ep), ev) for ep, ev in rows))
+        os.chmod(path, 0o600)
+
+    def test_revoke_with_the_grant_file_gone_says_when_the_window_was_never_revoked(self) -> None:   # round-2 LOW-3
+        import io, contextlib
+        ran = []
+        for name, rows, want in (
+                ("granted, never revoked", ((1000000, "GRANT(3600 until x)"),), True),
+                ("granted then revoked", ((1000000, "GRANT(3600 until x)"), (1000500, "REVOKE")), False),
+                ("revoked, then granted again", ((1000000, "GRANT(1 until x)"), (1000500, "REVOKE"), (1001000, "GRANT(2 until x)")), True),
+                ("no rows at all", ((1000000, "GRANTED-EXEC"),), False)):
+            with self.subTest(name):
+                self.write_log(mod.LOG_FILE, *rows)
+                buf = io.StringIO()
+                with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(buf):
+                    rc, _ = self.run_main("revoke")
+                self.assertEqual(rc, 0)
+                self.assertEqual("never revoked" in buf.getvalue(), want, buf.getvalue())
+                if want:
+                    self.assertIn("sudo-ask --status --audit %d" % rows[-1][0], buf.getvalue())
+        self.assertEqual(ran, [])                                      # still no sweep
+        # the rotated generation counts too when the current log has no grant rows
+        self.write_log(mod.LOG_FILE, (1002000, "GRANTED-EXEC"))
+        self.write_log(mod.LOG_FILE + ".1", (1000000, "GRANT(3600 until x)"))
+        buf = io.StringIO()
+        with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(buf):
+            self.run_main("revoke")
+        self.assertIn("never revoked", buf.getvalue())
 
     def test_revoke_without_a_grant_file_runs_no_sweep(self) -> None:
         import io, contextlib
@@ -1301,6 +1398,7 @@ class ModeTests(GrantBase):
             rc, _ = self.run_main("revoke")
         self.assertEqual((rc, ran), (0, []))
         self.assertIn("audit: skipped", buf.getvalue())
+        self.assertNotIn("never revoked", buf.getvalue())            # no grant row in the log: the old message
         self.put()
         with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(io.StringIO()):
             self.run_main("revoke")
