@@ -7,7 +7,8 @@ set -euo pipefail
 # Homebrew's own), pnpm globals (@deepseek-ai/dsh and friends, plus each
 # ~/.dsh/profiles/<name> plugin tree), native Codex, uv tools, Kiri
 # (`kiri update`) and chrome-use (`chrome-use upgrade` + a fast-forward pull of
-# ~/src/chrome-use, the skill-everywhere skill-data root), under the
+# ~/src/chrome-use, the skill-everywhere skill-data root) and the Macroscope
+# local CLI + its agent plugin (`macroscope update --yes`), under the
 # exclusive site advisory lock (Phase F4). Paseo plugins are left to Cafe
 # (auto-update on by default: ~30s after daemon start, then every six hours;
 # failures stay isolated per plugin). zcode-app-cli and
@@ -388,6 +389,21 @@ run_chrome_use_pass() {
   return 0
 }
 
+# Macroscope local (prassoai/macroscope-local, operator 2026-11-22) installs
+# outside Homebrew: ~/.local/bin/macroscope plus its Claude Code plugin.
+# `macroscope update --yes` replaces both from the GitHub release (SHA-256
+# checked against GitHub's asset digest) for the agent tools saved at install
+# time (~/.local/state/macroscope/install.json). It runs no review and spends
+# nothing: reviews are billed per KB from a non-renewable budget, so this pass
+# never calls `codereview`. Skipped until installed; stdin from /dev/null so
+# the updater can never wait on a prompt.
+run_macroscope_pass() {
+  local cli="$HOME/.local/bin/macroscope"
+  [ -x "$cli" ] || return 0
+  echo "[brew-fast-upgrade] macroscope: updating CLI + plugin"
+  "$cli" update --yes </dev/null || return 1
+}
+
 # Outdated uv tools, one "name vX [required: …] [latest: Y]" line each (empty
 # when clean). An exact `==` pin shows up here on purpose (nothing may be
 # pinned). Tools installed from a local path or git (e.g. pytgcli from
@@ -628,6 +644,9 @@ run_upgrade_and_restart_apps() {
     if ! run_chrome_use_pass; then
       echo "[brew-fast-upgrade] chrome-use pass failed on attempt $attempt"
     fi
+    if ! run_macroscope_pass; then
+      echo "[brew-fast-upgrade] macroscope pass failed on attempt $attempt"
+    fi
 
     if verify_clean && [ "$codex_rc" -eq 0 ]; then
       echo "[brew-fast-upgrade] Verification passed: nothing outdated remains (attempt $attempt)."
@@ -646,7 +665,7 @@ run_upgrade_and_restart_apps() {
 }
 
 if [ -f "$LOCK_BIN" ]; then
-  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_kiri_pass run_venicecode_pass run_chrome_use_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
+  "$LOCK_BIN" -- bash -c "$(declare -f run_brew_update sudo_casks missing_app_casks held_casks brew_outdated_upgradable report_sudo_casks unquarantine_casks run_brew_pass restart_stale_brew_services restart_stale_launchd_jobs run_codex_pass run_uv_pass run_kiri_pass run_venicecode_pass run_chrome_use_pass run_macroscope_pass uv_outdated_tools npm_global_prefixes npm_outdated_globals run_npm_pass run_dsh_profile_plugin_pass dsh_outdated run_pnpm_pass verify_clean run_upgrade_and_restart_apps); run_upgrade_and_restart_apps"
   rc=$?
 else
   run_upgrade_and_restart_apps
