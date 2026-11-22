@@ -1351,18 +1351,39 @@ class SetupScriptTests(unittest.TestCase):
 
     ME = subprocess.run(["/usr/bin/id", "-un"], capture_output=True, text=True, check=True).stdout.strip()
 
-    def real_listing(self, user=("env_reset, timestamp_timeout=0",), runas=(), user_header=True):
-        """`sudo -l` in sudo's real layout: the user section, then the Runas/Command-specific section with the drop-in's own
-        `Defaults!HELPER ... timestamp_timeout=0` line LAST, then the rules."""
+    def real_listing(self, user=("env_reset, timestamp_timeout=0",), runas=(), user_header=True, helper=True,
+                     runas_header=None, stray=None, second_runas=False):
+        """`sudo -l` as sudo prints it (display_privs/display_bound_defaults): the user section, then the Runas/Command-specific
+        section: every Defaults> entry, then every Defaults! entry, one per line EXCEPT that the first Defaults! entry is glued
+        onto the end of the last Defaults> line (no newline, the next entry's 4 spaces of indent between). The drop-in's own
+        `Defaults!HELPER ... timestamp_timeout=0` is the last Defaults! entry. Then the rules."""
         me = self.ME
         out = []
         if user_header:
             out += ["Matching Defaults entries for %s on h:" % me] + ["    " + u for u in user] + [""]
-        out += ["Runas and Command-specific defaults for %s:" % me] + ["    " + r for r in runas]
-        out += ["    Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH, "",
-                "User %s may run the following commands on h:" % me,
+        gt = [r for r in runas if r.startswith("Defaults>")]
+        bang = [r for r in runas if not r.startswith("Defaults>")]
+        if helper:
+            bang.append("Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH)
+        lines = ["    " + r for r in gt]
+        if gt and bang:
+            lines[-1] += "    " + bang[0]
+            bang = bang[1:]
+        lines += ["    " + r for r in bang]
+        out += [runas_header or "Runas and Command-specific defaults for %s:" % me]
+        if stray:
+            out += [stray]
+        out += lines
+        if second_runas:
+            out += ["Runas and Command-specific defaults for %s:" % me, "    Defaults!/bin/x env_reset"]
+        out += ["", "User %s may run the following commands on h:" % me,
                 "    (root) NOPASSWD: %s exec *, %s status" % (HELPER_PATH, HELPER_PATH)]
         return "\n".join(out)
+
+    def test_the_fixture_is_sudos_real_layout(self) -> None:   # round-5 LOW-2: the glued line
+        text = self.real_listing(runas=("Defaults>root !requiretty",))
+        self.assertIn("    Defaults>root !requiretty    Defaults!%s env_reset, timestamp_timeout=0" % HELPER_PATH, text)
+        self.assertEqual(len([ln for ln in text.splitlines() if "Defaults!" in ln]), 1)   # the entry is not also on its own line
 
     def test_install_passes_when_the_listing_says_the_ticket_is_off(self) -> None:
         for name, listing in (
@@ -1371,7 +1392,11 @@ class SetupScriptTests(unittest.TestCase):
                 ("a later 0 beats an earlier 5", self.real_listing(user=("timestamp_timeout=5, timestamp_type=global, timestamp_timeout=0",))),
                 ("a bare negation is 0", self.real_listing(user=("env_reset, timestamp_timeout=5", "!timestamp_timeout"))),
                 ("another command's Defaults! of 0", self.real_listing(runas=("Defaults!/usr/bin/foo timestamp_timeout=0",))),
-                ("other entries in the runas section", self.real_listing(runas=("Defaults>root !requiretty",)))):
+                ("a Defaults> entry (glued to the helper's line, as sudo prints it)", self.real_listing(runas=("Defaults>root !requiretty",))),
+                ("two Defaults> entries and another Defaults!", self.real_listing(
+                    runas=("Defaults>a env_keep+=X", "Defaults>root !requiretty", "Defaults!/usr/bin/foo !requiretty"))),
+                ("an explicit plus sign", self.real_listing(user=("timestamp_timeout=5, timestamp_timeout=+0",))),
+                ("noise before the user section", "sudo: some warning\n" + self.real_listing())):
             with self.subTest(name):
                 p, calls = self.guarded(fake_dir=self.fake_sudo_dir(listing))
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
@@ -1394,6 +1419,17 @@ class SetupScriptTests(unittest.TestCase):
                                               "Runas and Command-specific defaults for someone_else:\n    Defaults!x timestamp_timeout=0", 0),
             "no user section at all": (self.real_listing(user_header=False), 0),
             "a negated value is not valid": (self.real_listing(user=("!timestamp_timeout=5",)), 0),
+            "a Defaults> ticket, glued to the helper's line": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",)), 0),
+            "0_0 after a real 15": (self.real_listing(user=("timestamp_timeout=0, timestamp_timeout=15, timestamp_timeout=0_0",)), 0),
+            "0e5 after a real 15": (self.real_listing(user=("timestamp_timeout=15, timestamp_timeout=0e5",)), 0),
+            "a quoted list hides a zero": (self.real_listing(user=('timestamp_timeout=15, env_keep+="X ,timestamp_timeout=0, Y"',)), 0),
+            "a renamed Runas header": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",),
+                                                         runas_header="Runas and Command-specific settings for %s:" % self.ME), 0),
+            "a stray column-0 line in the Runas section": (self.real_listing(runas=("Defaults>root timestamp_timeout=15",),
+                                                                             stray="sudo: unable to resolve host"), 0),
+            "the helper's own Defaults! line is missing": (self.real_listing(helper=False), 0),
+            "two Runas sections": (self.real_listing(second_runas=True), 0),
+            "a Runas section for another user": (self.real_listing(runas_header="Runas and Command-specific defaults for someone_else:"), 0),
             "listing fails": ("sudo: a password is required", 1),
             "empty listing": ("", 0)}
         for name, (listing, rc) in cases.items():
@@ -1402,8 +1438,13 @@ class SetupScriptTests(unittest.TestCase):
                 self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
                 self.assertIn("rolling it back", p.stderr)
                 self.assertNotIn("Traceback", p.stderr + p.stdout)
-                for prefix, said in (("a Defaults> entry", "a Defaults> entry sets"), ("an unrecognised", "an unrecognised entry sets"),
-                                     ("another command", "a Defaults! entry gives a ticket")):
+                for prefix, said in (("a Defaults> entry", "a Defaults> entry sets"), ("an unrecognised entry", "an unrecognised entry sets"),
+                                     ("another command", "a Defaults! entry gives a ticket"),
+                                     ("a Defaults> ticket, glued", "a Defaults> entry sets timestamp_timeout"),
+                                     ("0_0", "is unreadable"), ("0e5", "is unreadable"), ("a quoted list", "is unreadable"),
+                                     ("a renamed", "unrecognised line"), ("a stray", "unrecognised line"),
+                                     ("the helper's own", "own Defaults! line is missing"), ("two Runas", "has no single"),
+                                     ("a Runas section for another", "is not the one for")):
                     if name.startswith(prefix):
                         self.assertIn(said, p.stderr + p.stdout)   # for the right reason
                 if name.startswith("user line missing"):
@@ -1415,19 +1456,48 @@ class SetupScriptTests(unittest.TestCase):
                 self.assertEqual(len(undone), 1, calls)
                 self.assertLess(install[0], undone[0])
 
-    def test_the_listing_is_asked_for_in_the_c_locale(self) -> None:   # the section headers are gettext-translated
-        src = SETUP.read_text()
-        self.assertIn('listing=$(LC_ALL=C LANG=C "$1" -n -l 2>&1)', src)
+    def checks_sudo_dir(self, listing, true_rc=1):
+        """A fake sudo for --ticket-checks: `-n -l` prints the listing (a German header unless the C locale was asked for),
+        `-n /usr/bin/true` exits true_rc, and every call is logged with the locale it saw."""
+        d = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-fake-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        text = ('#!/bin/bash\necho "SUDO $* [LC_ALL=${LC_ALL-unset} LANG=${LANG-unset}]" >> "$FAKE_LOG"\n'
+                'if [ "$1 $2" = "-n -l" ]; then\n  if [ "${LC_ALL-}" = C ]; then cat <<\'L\'\n%s\nL\n'
+                '  else cat <<\'L\'\n%s\nL\n  fi\n  exit 0\nfi\nexit %d\n') % (
+            listing, listing.replace("Matching Defaults entries for", "Passende Standardwerte fuer").replace(
+                "Runas and Command-specific defaults for", "Runas- und befehlsspezifische Standardwerte fuer"), true_rc)
+        (d / "sudo").write_text(text)
+        (d / "sudo").chmod(0o755)
+        return d
 
-    def test_verify_fails_when_a_plain_sudo_succeeds(self) -> None:   # round 5: a cached ticket is a FAIL, not a WARN
-        src = SETUP.read_text()
-        code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
-        self.assertRegex(code, r"/usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then\n\s+bad ")
-        self.assertNotIn("WARN  a sudo ticket", code)
+    def test_ticket_checks_pass_when_listed_off_and_a_plain_sudo_is_refused(self) -> None:   # round-5 LOW-4
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(), true_rc=1))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("the sudo ticket is off", p.stdout)
+        self.assertNotIn("FAIL", p.stdout)
+        self.assertIn("SUDO -n /usr/bin/true", calls)
+
+    def test_ticket_checks_fail_when_a_plain_sudo_succeeds(self) -> None:   # the behavioural half, not a source-text check
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(), true_rc=0))
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("'sudo -n /usr/bin/true' succeeded", p.stdout)
+        self.assertIn("roll back", p.stdout)          # the advice: roll back, never "sudo -k and verify again"
+        self.assertNotIn("sudo -k", p.stdout)
+
+    def test_ticket_checks_ask_for_the_listing_in_the_c_locale(self) -> None:   # the fake prints a German header otherwise
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing()))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("SUDO -n -l [LC_ALL=C LANG=C]", calls)
+        self.assertNotIn("Standardwerte", p.stdout)
+
+    def test_ticket_checks_are_read_only_and_guarded(self) -> None:
+        p, calls = self.guarded("--ticket-checks", with_fake=False)
+        self.assertEqual(p.returncode, 2)             # no temp fake and no --live: refuses before any call
+        self.assertEqual(calls, "")
 
     def test_the_gate_and_the_verify_use_the_same_proof(self) -> None:
         src = SETUP.read_text()
-        self.assertIn("ticket_gate /usr/bin/sudo || fail=1", src)           # --verify on the real machine
+        self.assertIn("ticket_checks /usr/bin/sudo || fail=1", src)         # --verify on the real machine: the same two checks
         self.assertIn('"$0" --verify --live || gate_failed=1', src)         # a live install runs it and undoes itself
         self.assertIn("run_root /bin/sh -c \"$rollback_body\"", src)
         self.assertNotIn("NOTE  the ticket is off", src)                     # no longer a note: a failing check

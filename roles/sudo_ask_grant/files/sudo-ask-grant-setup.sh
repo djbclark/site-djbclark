@@ -5,7 +5,7 @@
 #   sudo-ask-grant-setup.sh --check [--diff]   compare the installed files with the repo (no root, read-only)
 #   sudo-ask-grant-setup.sh --live             install: ONE sudo-ask step (dialog + Touch ID)
 #   sudo-ask-grant-setup.sh --verify --live    prove the split: grant needs a password, revoke needs none,
-#                                              exec needs a window; warns when a sudo ticket is cached
+#                                              exec needs a window; fails when the sudo ticket is not off
 #   sudo-ask-grant-setup.sh --rollback --live  remove the drop-in, helper and grant file (sudo-ask then prompts again)
 #
 # GUARD: install, --verify and --rollback change or probe the REAL machine, so they refuse (exit 2, before any
@@ -56,6 +56,7 @@ for a in "$@"; do
   case $a in
     --print) mode=print ;; --check) mode=check ;; --diff) diff_flag=1 ;;
     --verify) mode=verify ;; --rollback) mode=rollback ;; --live) live=1 ;;
+    --ticket-checks) mode=ticketchecks ;;   # tests (and a manual re-check): the two ticket checks, nothing else
     *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --rollback --live]" >&2; exit 64 ;;
   esac
 done
@@ -121,47 +122,67 @@ run_root() { "$fake" "$@"; }
 rollback_body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/grant $BIN; rm -rf $STATE_DIR"
 
 # Is the shared sudo ticket really off? The drop-in line can be overridden (a later file, a Defaults entry) and the
-# failure would be silent, so the install proves it. `sudo -n -l` asks sudo itself what Defaults apply to this user,
+# failure would be silent, so the install checks it. `sudo -n -l` asks sudo itself what Defaults apply to this user,
 # after ALL of sudoers (every drop-in, any order), and runs with no password because of the NOPASSWD lines. It prints
 # two sections, in this order (sudo's display_privs): "Matching Defaults entries for USER on HOST:" (generic, host and
 # user entries, in the order sudo applies them: the LAST timestamp_timeout is the effective one) and then
 # "Runas and Command-specific defaults for USER:" (every Defaults> and Defaults! entry, which holds this drop-in's own
-# `Defaults!HELPER ... timestamp_timeout=0` line LAST, so the listing as a whole proves nothing). Therefore:
+# `Defaults!HELPER ... timestamp_timeout=0` line LAST, so the listing as a whole proves nothing). sudo also glues the
+# first Defaults! entry onto the end of the last Defaults> line (no newline between them), so those lines are split
+# again before they are judged. Therefore:
 #   1. the user section must exist and its last timestamp_timeout must be 0 (a bare `!timestamp_timeout` counts as 0);
+#      a value is read only in sudo's own number grammar ([+-]digits[.digits]): anything else is unreadable, and so is
+#      a quoted value that mentions timestamp_timeout (a list value can hide a `,timestamp_timeout=0,`);
 #   2. no Defaults> entry may mention timestamp_timeout (it applies after the user entries to every command run as that user);
-#   3. no Defaults! entry may carry a non-zero or unreadable timestamp_timeout (it would give a ticket to that command).
+#   3. no Defaults! entry may carry a non-zero or unreadable timestamp_timeout (it would give a ticket to that command);
+#   4. the Runas section must exist exactly once and hold the helper's own Defaults! line, and after the user section
+#      no unknown line may start at column 0 (a renamed header or a stray line would leave entries unchecked).
 # The headers are translated by gettext, so the listing is asked for in the C locale. A failed, unreadable or unclear
-# listing fails (an unproven ticket is not an off ticket). The listing is read on stdin.
+# listing fails (an unchecked ticket is not an off ticket). The listing is read on stdin.
 ticket_state() {
   /usr/bin/python3 -IS -c '
 import re, sys
-operator = sys.argv[1]
+operator, helper = sys.argv[1], sys.argv[2]
+GLUE = re.compile(r"\s+(?=Defaults[>!])")
+NUMBER = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)")
+def fail(msg):
+    print(msg); sys.exit(1)
 sections = []
+seen_user_section = False
 for line in sys.stdin.read().splitlines():
     if not line.strip():
         continue
     if line[0] in " \t":
         if sections:
             sections[-1][1].append(line.strip())
-    else:
-        sections.append((line.strip(), []))
+        continue
+    hdr = line.strip()
+    if hdr.startswith("Matching Defaults entries for "):
+        seen_user_section = True
+    elif seen_user_section and not hdr.startswith(("Runas and Command-specific defaults for ", "User ")):
+        fail("an unrecognised line follows the defaults in the listing: %s" % hdr)
+    sections.append((hdr, []))
 def values(text):
+    if "timestamp_timeout" not in text:
+        return []
+    if "\"" in text or "\x27" in text:
+        return [None]
     out = []
     for tok in text.split(","):
+        if "timestamp_timeout" not in tok:
+            continue
         m = re.fullmatch(r"\s*(!?)timestamp_timeout(?:=([^\s,]+))?\s*", tok)
         if not m:
+            out.append(None)
             continue
         neg, val = m.groups()
         if neg:
             out.append(0.0 if val is None else None)
-            continue
-        try:
-            out.append(float(val))
-        except (TypeError, ValueError):
+        elif val is None or not NUMBER.fullmatch(val):
             out.append(None)
+        else:
+            out.append(float(val))
     return out
-def fail(msg):
-    print(msg); sys.exit(1)
 mine = [ls for hdr, ls in sections if hdr.startswith("Matching Defaults entries for %s on " % operator)]
 if len(mine) != 1:
     fail("the listing has no single \"Matching Defaults entries for %s on\" section" % operator)
@@ -170,21 +191,27 @@ if not vals:
     fail("the listing has no timestamp_timeout for %s (the default, 5 minutes, would apply)" % operator)
 if vals[-1] is None or vals[-1] != 0:
     fail("the effective timestamp_timeout for %s is %s, not 0" % (operator, "unreadable" if vals[-1] is None else "%g" % vals[-1]))
-for hdr, ls in sections:
-    if not hdr.startswith("Runas and Command-specific defaults for"):
+want = "Runas and Command-specific defaults for %s:" % operator
+if any(hdr.startswith("Runas and Command-specific defaults for") and hdr != want for hdr, _ in sections):
+    fail("a Runas and Command-specific section is not the one for %s" % operator)
+runas = [ls for hdr, ls in sections if hdr == want]
+if len(runas) != 1:
+    fail("the listing has no single \"%s\" section" % want)
+entries = [e for line in runas[0] for e in GLUE.split(line) if e]
+if not any(e.split(None, 1)[0] == "Defaults!" + helper for e in entries):
+    fail("the helper\x27s own Defaults! line is missing from the Runas section")
+for entry in entries:
+    if "timestamp_timeout" not in entry:
         continue
-    for line in ls:
-        if "timestamp_timeout" not in line:
-            continue
-        head, _, rest = line.partition(" ")
-        if head.startswith("Defaults>"):
-            fail("a Defaults> entry sets timestamp_timeout and applies after the user entries: %s" % line)
-        if not head.startswith("Defaults!"):
-            fail("an unrecognised entry sets timestamp_timeout: %s" % line)
-        vs = values(rest)
-        if not vs or any(v is None or v != 0 for v in vs):
-            fail("a Defaults! entry gives a ticket to %s: %s" % (head[len("Defaults!"):], line))
-print("effective timestamp_timeout=0 for %s" % operator)' "$operator"
+    head, _, rest = entry.partition(" ")
+    if head.startswith("Defaults>"):
+        fail("a Defaults> entry sets timestamp_timeout and applies after the user entries: %s" % entry)
+    if not head.startswith("Defaults!"):
+        fail("an unrecognised entry sets timestamp_timeout: %s" % entry)
+    vs = values(rest)
+    if not vs or any(v is None or v != 0 for v in vs):
+        fail("a Defaults! entry gives a ticket to %s: %s" % (head[len("Defaults!"):], entry))
+print("effective timestamp_timeout=0 for %s" % operator)' "$operator" "$BIN"
 }
 ticket_gate() {   # $1: the sudo to ask for the listing
   local listing msg
@@ -195,6 +222,18 @@ ticket_gate() {   # $1: the sudo to ask for the listing
   echo "FAIL  the sudo ticket is NOT off for $operator: $msg"
   printf '%s\n' "$listing" | /usr/bin/grep -i 'timestamp' || true
   return 1
+}
+
+ticket_checks() {   # $1: the sudo to ask. The listing check, then the plain-sudo behaviour check; 1 if either fails.
+  local rc=0
+  ticket_gate "$1" || rc=1
+  # With the ticket off, no cached ticket is honoured for /usr/bin/true: a success means a ticket is live (or a NOPASSWD
+  # rule covers true), and whoever holds a ticket is root and can write the grant file itself. That is a failure.
+  if "$1" -n /usr/bin/true >/dev/null 2>&1; then
+    echo "FAIL  'sudo -n /usr/bin/true' succeeded: a sudo ticket is honoured (or a NOPASSWD rule covers true), so the ticket is not off. Do not open a window: roll back (--rollback --live) and report"
+    rc=1
+  fi
+  return $rc
 }
 
 case $mode in
@@ -226,6 +265,9 @@ case $mode in
       echo "sudo-ask-grant-setup: rolled back (drop-in, helper and grant file removed)" >&2
       exit 1
     fi ;;
+  ticketchecks)
+    if [ "$live" = 1 ]; then ticket_checks /usr/bin/sudo; else ticket_checks "$(dirname "$fake")/sudo"; fi
+    exit $? ;;
   rollback)
     run_root /bin/sh -c "$rollback_body"
     echo "sudo-ask-grant-setup: removed the drop-in (so the sudo ticket behaves as before), helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
@@ -235,12 +277,7 @@ case $mode in
     bad() { echo "FAIL  $1"; fail=1; }
     [ -x "$BIN" ] && ok "helper installed" || { bad "helper missing ($BIN)"; exit 1; }
     # A cached machine-wide ticket is what would let `sudo -n /bin/sh -c "<helper> grant 24h"` open a window: say so.
-    # With the ticket off, no cached ticket is honoured for /usr/bin/true: a success means a ticket is live (or a NOPASSWD
-    # rule covers true), and whoever holds a ticket is root and can write the grant file itself. That is a failure.
-    if /usr/bin/sudo -n /usr/bin/true >/dev/null 2>&1; then
-      bad "'sudo -n /usr/bin/true' succeeded: a sudo ticket is honoured (or a NOPASSWD rule covers true), so the ticket is not off. End it with 'sudo -k' and run --verify again; if it still succeeds, find the later sudoers entry"
-    fi
-    ticket_gate /usr/bin/sudo || fail=1
+    ticket_checks /usr/bin/sudo || fail=1
     /usr/bin/sudo -k
     # grant must NOT be reachable without a password. If this succeeds a 60 s window just opened: roll back.
     if /usr/bin/sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi
