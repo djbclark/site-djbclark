@@ -21,9 +21,10 @@ RAM guard (basedpyright, marksman, typescript-language-server):
   line goes to stderr (visible with `claude --debug`). When the cause is
   `unavailable` (not the switch) the line, with a UTC time, is also appended to
   `~/.local/state/lsp-guard/unguarded.log`; djbclark-ade `bin/ram-census
-  --roots` reports that log. A deliberate `off` is not logged, so (from
-  djbclark-ade PR 922, pending until it merges) the same command also says
-  whether the switch is set. Tests: `tests/test_local_lsp_entries.py`.
+  --roots` reports that log. A deliberate `off` is not logged, so (djbclark-ade PR 922)
+  the same command also says whether the switch is set to `off` in
+  `~/.claude/settings.json` `env` or in its own environment (other
+  settings layers and running sessions are not checked). Tests: `tests/test_local_lsp_entries.py`.
 - Off switch: `ADE_LSP_ROOT_GUARD=off` in `~/.claude/settings.json` `env`,
   then restart sessions (only the exact lowercase `off` counts). A guard that
   starts and then crashes is not covered.
