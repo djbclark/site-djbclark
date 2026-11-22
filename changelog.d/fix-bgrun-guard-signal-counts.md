@@ -1,0 +1,1 @@
+- bgrun-container-guard: a repeated forwarded signal within 0.25 s is dropped (a gtimeout TERM no longer reaches the CLI three times), and Ctrl-C delivery is decided by the controlling terminal, not stdin (291 r2 LOW 1, LOW 2, M8). (#PR)
