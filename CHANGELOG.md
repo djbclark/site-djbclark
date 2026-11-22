@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `claude/local-marketplace` README (the LOW finding of the review of #298; no version change, docs only): `ram-census --roots` reads `ADE_LSP_ROOT_GUARD` from the environment of the shell that runs it, not from a Claude Code session's environment; the old "its own environment" could be read as Claude's. The lines are rewrapped to the file's width. (2026-11-22)
 - `tests/test_local_lsp_entries.py` (the adversary review of #294; plugin stays at 1.0.7): the unguarded log must be appended (two runs, two lines) and stamped in UTC (`TZ=XXX-14` must not skew it), so a `tee -a` to `tee` or `date -u` to `date` slip now fails; the unwritable-log case uses a mode 0500 HOME (skipped as root) and the unset-HOME case is its own test; the guarded set is pinned to basedpyright, marksman and typescript and keyed on `args[2] == "lsp-guard"`. (2026-11-21)
 
 - `claude/local-marketplace` `local-lsp` (no version change, tests and docs only; follow-up to #295's review): the unset-`HOME` test is skipped when run as root (root can write `/.local`, so the test would fail in a root CI container); the README says that `ram-census --roots` also reports whether `ADE_LSP_ROOT_GUARD` is set to `off` in `~/.claude/settings.json` `env` or in its own environment (djbclark-ade PR 922, merged; other settings layers and running sessions are not checked; a deliberate `off` leaves no log line, so a forgotten switch needs this reader). (2026-11-21)
