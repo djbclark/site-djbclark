@@ -27,6 +27,7 @@
 import calendar
 import collections
 import ctypes
+import fcntl
 import json
 import os
 import plistlib
@@ -52,7 +53,9 @@ MAX_DEPTH = 6
 EX_USAGE, EX_REFUSED, EX_DENIED, EX_NOEXEC = 64, 75, 76, 126
 INSTALLED_PATH = "/usr/local/libexec/sudo-ask-granted"   # `grant` runs only from here (a copy elsewhere cannot open a window)
 # What `exec` resolves programs with and runs them with (never the caller's PATH or HOME): system dirs first.
-EXEC_PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin"
+# /opt/homebrew/{bin,sbin} are left out on purpose: the invoking user owns them, so a bare program name inside a
+# wrapper or `sh -c` (found there only after the check) could be created there while the command sleeps.
+EXEC_PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 EXEC_HOME = "/var/root"
 INVOKER_UID = None   # the user who ran sudo (SUDO_UID); set by main(). None or 0 = unknown: code outside system dirs prompts.
 LOG_MAX_BYTES = 8 * 1024 * 1024   # the log rotates (LOG_FILE -> .1 -> .2 ...) above this
@@ -64,8 +67,13 @@ SUDO = "/usr/bin/sudo"
 GRANTED_EPOCH = None   # when the open window was granted (set by main/approval-gate): programs and scripts changed since are refused
 CHECKED_ARGS = {}      # script argument as typed -> the realpath that was judged; exec runs the realpath
 LAUNCH_DIRS = ("/Library/LaunchDaemons", "/Library/LaunchAgents")   # their Program/ProgramArguments targets are protected
-AUDIT_ROOTS = ("/usr/local", "/opt", "/Applications", "/Library", "/private/var/root", "/private/tmp", "/private/var/tmp", "/Users/Shared")
-AUDIT_TIMEOUT = 60
+AUDIT_ROOTS = ("/usr/local", "/opt", "/Applications", "/Library", "/private/etc", "/private/var/db", "/private/var/root",
+               "/private/tmp", "/private/var/tmp", "/Users/Shared")   # plus each volume directly under AUDIT_VOLUMES and the user's home
+AUDIT_VOLUMES = "/Volumes"
+AUDIT_TIMEOUT = 60     # per root
+AUDIT_TOTAL = 120      # all roots together: a root not reached by then is reported as skipped
+AUDIT_MIN_GAP = 60     # `status --audit` (no window needed) runs at most one sweep per this many seconds
+AUDIT_STAMP = GRANT_DIR + "/audit-stamp"   # root-owned; its content is the epoch of the last `status --audit` sweep
 # Agent-writable by definition, whatever the mode bits say (compared case-insensitively on a realpath).
 TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders", "/var/tmp", "/private/var/tmp")
 
@@ -369,6 +377,103 @@ def mode_sets_id(mode):
     return "s" in mode.lower() and re.fullmatch(r"[ugoaA-Za-z,+\-=]+", mode) is not None
 
 
+CHMOD_OPT = re.compile(r"-[HLPRfhvECNiI]+")
+
+
+def chmod_mode(args):
+    """The MODE word of a BSD chmod: the first word that is not one of its option clusters (-R -H -L -P -f -h -v -E -C -N
+    -i -I); `--` ends the options. A word such as `-x,u+s` or `-w,+s` is the MODE (chmod reads it as one), not an option."""
+    i = 0
+    while i < len(args) and CHMOD_OPT.fullmatch(args[i]):
+        i += 1
+    if i < len(args) and args[i] == "--":
+        i += 1
+    return args[i] if i < len(args) else None
+
+
+INSTALL_ARG_OPTS = frozenset("BDfghlMmoT")   # BSD install: getopt string B:bCcdD:f:g:h:l:M:m:o:pSsT:Uv
+
+
+def install_modes(args):
+    """Every MODE a BSD install is given: -m in any getopt cluster (-m4755, -pm 4755, -Sm4755: a letter that takes an
+    argument takes the rest of the cluster, or the next word when nothing is left) and --mode MODE / --mode=MODE."""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            break
+        if a.startswith("--"):
+            name, eq, val = a[2:].partition("=")
+            if name and "mode".startswith(name):
+                if not eq:
+                    val = args[i] if i < len(args) else ""
+                    i += 1
+                out.append(val)
+        elif a.startswith("-") and len(a) > 1:
+            for j in range(1, len(a)):
+                if a[j] in INSTALL_ARG_OPTS:
+                    val = a[j + 1:]
+                    if not val:
+                        val = args[i] if i < len(args) else ""
+                        i += 1
+                    if a[j] == "m":
+                        out.append(val)
+                    break
+    return out
+
+
+# ---- A3: extraction as root restores owners and setuid/setgid bits
+TAR_NAMES = frozenset(("tar", "bsdtar", "gtar", "gnutar"))
+EXTRACT_LONG = frozenset(["extract"[:n] for n in range(3, 8)] + ["get"[:n] for n in (2, 3)])   # unambiguous abbreviations
+PASS_LONG = frozenset("pass-through"[:n] for n in range(3, 13))
+DITTO_MULTI = frozenset("-rsrc -extattr -noextattr -qtn -noqtn -acl -noacl -bom -arch -sequesterRsrc -keepParent "
+                        "-preserveHFSCompression -nopreserveHFSCompression -hfsCompression -nohfsCompression "
+                        "-zlibCompressionLevel".split())
+
+
+def _short_letters(args, skip=frozenset()):
+    """The letters of every single-dash word (`-xpf` -> xpf), except words in SKIP."""
+    return "".join(a[1:] for a in args if re.fullmatch(r"-[A-Za-z0-9]+", a) and a not in skip)
+
+
+def _long_names(args):
+    return {a[2:].split("=", 1)[0] for a in args if a.startswith("--") and len(a) > 2}
+
+
+def archive_problem(names, args):
+    """Extracting an archive as root restores the owners and the permission bits it stores, setuid and setgid
+    included: a root-owned setuid file anywhere the caller chooses. Refused (so: the dialog) unless tar is told
+    neither to keep owners nor permissions. Only listing and creating run. A judgment on the options, not a parse of
+    every program: other extractors (xar, 7z, jar, pkgutil, installer ...) are not looked at."""
+    why = "%s extracts an archive, and as root that restores setuid and setgid files"
+    if names & TAR_NAMES:
+        old = args[0] if args and not args[0].startswith("-") else ""   # `tar xf a`
+        longs = _long_names(args)
+        if ("x" in old or "x" in _short_letters(args) or longs & EXTRACT_LONG) and not (
+                {"no-same-owner", "no-same-permissions"} <= longs):
+            return why % "tar" + " (use both --no-same-owner and --no-same-permissions)"
+    if "pax" in names and "r" in _short_letters(args):
+        return why % "pax -r"
+    if "cpio" in names and (set("ip") & set(_short_letters(args)) or _long_names(args) & (EXTRACT_LONG | PASS_LONG)):
+        return why % "cpio -i/-p"
+    if "ditto" in names:
+        letters = _short_letters(args, DITTO_MULTI)
+        if "x" in letters or ("k" in letters and "c" not in letters):   # -c -k creates a zip, -k alone extracts one
+            return why % "ditto -x/-k"
+    if "unzip" in names:
+        lead = []
+        for a in args:
+            if not a.startswith("-") or a == "-":
+                break
+            lead.append(a)   # the options before the archive name
+        # list / test / pipe / zipinfo only: -d and -x can carry a joined argument (-dltv is a directory), -P a password
+        if not any(a.startswith("-Z") or (re.fullmatch(r"-[A-Za-z0-9]+", a) and set(a[1:]) & set("ltvp")
+                                          and not set(a[1:]) & set("dxP")) for a in lead):
+            return why % "unzip"
+    return None
+
+
 def canon(p, cwd):
     return os.path.realpath(os.path.join(cwd, p)).casefold()
 
@@ -472,9 +577,33 @@ def changed_since_grant(real):
     return st.st_ctime >= GRANTED_EPOCH or st.st_mtime >= GRANTED_EPOCH
 
 
+def swappable_link(path, cwd):
+    """A description when the invoking user could repoint something on the way to PATH between the check and the run,
+    else None. Walks the LEXICAL absolute path (cwd joined) one component at a time: a `..` is treated as swappable
+    (what it names depends on the link before it), and a component that is a link is swappable when the directory
+    holding it is agent-writable (agent_writable on the realpath of that directory). The realpath that was judged only
+    protects what exec rewrites (the top-level program and script words); a program or script typed inside a wrapper,
+    `sh -c`, find or xargs is run by the path as typed, so it must not go through a link the user can repoint."""
+    cur = "/"
+    for comp in os.path.join(cwd, path).split("/"):
+        if comp in ("", "."):
+            continue
+        if comp == "..":
+            return "%r has a '..' component" % path
+        cur = os.path.join(cur, comp)
+        if os.path.islink(cur) and agent_writable(os.path.realpath(os.path.dirname(cur))):
+            return cur
+    return None
+
+
 def script_problem(arg, cwd):
-    """A script an interpreter or shell would run as root must be a file the invoking user cannot change. The
-    realpath judged here is what exec then runs (CHECKED_ARGS), so a link switched afterwards changes nothing."""
+    """A script an interpreter or shell would run as root must be a file the invoking user cannot change, reached by a
+    path the user cannot repoint (swappable_link). A script typed as a top-level argument is run by the realpath that was
+    judged (CHECKED_ARGS), so a link switched afterwards changes nothing there; a script named inside `sh -c` text or
+    a wrapper is run as typed, which is what the link check covers."""
+    link = swappable_link(arg, cwd)
+    if link:
+        return "script %s runs through a link (%s) the invoking user can repoint" % (arg, link)
     sp = os.path.realpath(os.path.join(cwd, arg))
     if sp.startswith("/dev/") or not os.path.isfile(sp):
         return "script %r is not a plain file (stdin, a device or missing)" % arg
@@ -670,6 +799,10 @@ def evaluate(argv, cwd, path, depth=0):
     if prog is None:
         return "program %r not found" % argv[0]
     real = os.path.realpath(prog)
+    if depth > 0 and "/" in argv[0]:
+        link = swappable_link(argv[0], cwd)   # run as typed (only the top-level word is rewritten to its realpath)
+        if link:
+            return "program %s runs through a link (%s) the invoking user can repoint" % (argv[0], link)
     names = {os.path.basename(argv[0]).lower(), os.path.basename(prog).lower(),
              os.path.basename(real).lower()}
     name, args = os.path.basename(real).lower(), argv[1:]
@@ -720,15 +853,11 @@ def evaluate(argv, cwd, path, depth=0):
         return "rm --no-preserve-root"
 
     if hit("chmod"):
-        modes = [a for a in args if not a.startswith("-")][:1]
-        if any(mode_sets_id(m) for m in modes):
+        mode = chmod_mode(args)
+        if mode is not None and mode_sets_id(mode):
             return "chmod would set a setuid or setgid bit"
-    if hit("install"):
-        for i, a in enumerate(args):
-            m = args[i + 1] if a == "-m" and i + 1 < len(args) else (
-                a[2:] if a.startswith("-m") and len(a) > 2 else (a.split("=", 1)[1] if a.startswith("--mode=") else None))
-            if m is not None and mode_sets_id(m):
-                return "install would set a setuid or setgid bit"
+    if hit("install") and any(mode_sets_id(m) for m in install_modes(args)):
+        return "install would set a setuid or setgid bit"
     if names & COPIERS:
         for a in args:
             if a.startswith("--chmod=") and any(mode_sets_id(m) for m in a.split("=", 1)[1].split(",")):
@@ -739,6 +868,9 @@ def evaluate(argv, cwd, path, depth=0):
                 continue
             if stat.S_ISREG(st.st_mode) and st.st_mode & 0o6000:
                 return "%s would copy or move a setuid/setgid file (%s)" % (name, a)
+    why = archive_problem(names, args)
+    if why:
+        return why
     if hit("defaults") and any("loginwindow" in a.casefold() for a in args) and args[:1] not in (
             ["read"], ["read-type"], ["domains"], ["find"], ["help"]):
         return "defaults may change the login window (LoginHook/LogoutHook run as root)"
@@ -1123,6 +1255,13 @@ def audit(since):
     found, ref = [], None
     roots = [r for r in AUDIT_ROOTS if os.path.isdir(r)]
     try:
+        for n in sorted(os.listdir(AUDIT_VOLUMES)):   # each mounted volume (a link such as the boot volume's is skipped)
+            p = os.path.join(AUDIT_VOLUMES, n)
+            if os.path.isdir(p) and not os.path.islink(p):
+                roots.append(p)
+    except OSError:
+        pass
+    try:
         home = pwd.getpwuid(INVOKER_UID).pw_dir if INVOKER_UID else None
     except KeyError:
         home = None
@@ -1132,10 +1271,16 @@ def audit(since):
         fd, ref = tempfile.mkstemp(prefix=".audit.", dir=GRANT_DIR)
         os.close(fd)
         os.utime(ref, (since, since))
+        deadline = time.monotonic() + AUDIT_TOTAL
         for root in roots:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                found.append("audit of %s skipped: the total time limit was reached (incomplete)" % root)
+                continue
             try:
                 r = subprocess.run(["/usr/bin/find", root, "-xdev", "-type", "f", "(", "-perm", "-4000", "-o", "-perm", "-2000", ")",
-                                    "-cnewer", ref, "-print"], capture_output=True, text=True, timeout=AUDIT_TIMEOUT, env={}, check=False)
+                                    "-cnewer", ref, "-print"], capture_output=True, text=True, timeout=min(AUDIT_TIMEOUT, left),
+                                   env={}, check=False)
             except subprocess.TimeoutExpired:
                 found.append("audit of %s timed out (incomplete)" % root)
                 continue
@@ -1156,6 +1301,38 @@ def audit(since):
         if st.st_ctime >= since or st.st_mtime >= since:
             found.append("root launchd program or plist changed: " + t)
     return found
+
+
+def audit_slot(now):
+    """The right to run one `status --audit` sweep: (fd, None), the fd holding an exclusive lock on the root-owned stamp
+    file (close it when the sweep ends), or (None, reason). A sweep within AUDIT_MIN_GAP seconds of the last one, or while
+    another runs, is refused, and the time is written before the find starts. `status` needs no window, so any agent can
+    call it: this bounds how much root IO it can cause. Fails closed on anything it cannot read or write."""
+    try:
+        if not _trusted(os.lstat(GRANT_DIR), True):
+            return None, "grant dir is not a root-owned, non-writable directory"
+        fd = os.open(AUDIT_STAMP, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644)
+    except OSError as e:
+        return None, "cannot open the audit stamp (%s)" % e.strerror
+    try:
+        if not _trusted(os.fstat(fd), False):
+            raise OSError(0, "not a root-owned, non-writable file")
+        os.fchmod(fd, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise OSError(0, "another sweep is running")
+        raw = os.pread(fd, 32, 0).strip()
+        last = int(raw) if raw.isdigit() else None
+        if last is not None and 0 <= now - last < AUDIT_MIN_GAP:
+            raise OSError(0, "the last sweep started %d s ago; wait %d s" % (now - last, AUDIT_MIN_GAP - (now - last)))
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, b"%d\n" % int(now), 0)
+        os.fsync(fd)
+        return fd, None
+    except (OSError, ValueError) as e:
+        os.close(fd)
+        return None, "audit not run: " + (e.strerror or str(e))
 
 
 def print_audit(since):
@@ -1186,7 +1363,20 @@ def main(argv):
         if len(argv) > 2 and argv[2] == "--audit":
             if len(argv) > 4 or (len(argv) == 4 and not argv[3].isdigit()):
                 die("usage: status --audit [SINCE_EPOCH]", EX_USAGE)
-            return print_audit(int(argv[3]) if len(argv) == 4 else last_granted_epoch())
+            since = int(argv[3]) if len(argv) == 4 else last_granted_epoch()
+            if since is None:
+                return print_audit(None)
+            slot, why = audit_slot(now)
+            if slot is None:
+                try:
+                    log("REFUSED(%s)" % why)
+                except OSError:
+                    pass
+                die("REFUSED: " + why, EX_REFUSED)
+            try:
+                return print_audit(since)
+            finally:
+                os.close(slot)
         if len(argv) > 2:
             if argv[2] != "--check":
                 die("usage: status [--check -- COMMAND...] | status --audit [SINCE_EPOCH]", EX_USAGE)
@@ -1229,7 +1419,8 @@ def main(argv):
         if target != checked:
             log("DENYLISTED(program changed during the check)", text)
             die("REFUSED: the program changed during the check", EX_DENIED)
-        # a script is run by the realpath that was judged, so a link switched after the check changes nothing
+        # the program and the script words typed at the top level are run by the realpath that was judged, so a link switched
+        # after the check changes nothing there; programs and scripts typed inside a wrapper or `sh -c` are covered by swappable_link
         cmd = [cmd[0]] + [CHECKED_ARGS.get(a, a) for a in cmd[1:]]
         try:
             os.execve(target, cmd, clean_env(os.environ, cwd))
@@ -1265,6 +1456,7 @@ def main(argv):
         if len(argv) != 2:
             die("usage: revoke", EX_USAGE)
         since = last_granted_epoch()   # before the file goes
+        had_file = os.path.lexists(GRANT_FILE)   # revoke needs no password: with no grant file there is nothing to sweep for
         was_open, why, d = read_grant(now)
         print("revoking: the grant file said expires_utc=%s granted_utc=%s%s" % (
             clean(str(d.get("expires_utc", "?"))), clean(str(d.get("granted_utc", "?"))),
@@ -1276,7 +1468,10 @@ def main(argv):
             pass
         except OSError as e:
             die("cannot revoke: %s" % e.strerror, EX_NOEXEC)
-        print_audit(since)   # after: ending the window never waits for the sweep. Revoke does not undo what was left behind
+        if had_file:
+            print_audit(since)   # after: ending the window never waits for the sweep. Revoke does not undo what was left behind
+        else:
+            print("audit: skipped, there was no grant file (sudo-ask --status --audit sweeps on request)")
         return 0
     die("usage: exec -- CMD... | status [--check -- CMD...] | grant DURATION | revoke", EX_USAGE)
 
