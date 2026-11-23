@@ -36,9 +36,9 @@
 #                      default: the first python3 >= 3.11 in
 #                      /opt/homebrew/bin, /usr/local/bin, on PATH or in
 #                      ~/.local/bin)
-#   --sudo CMD         command used for the privilege re-exec (default sudo);
-#                      e.g. --sudo sudo-ask to get a per-command Allow/Deny
-#                      dialog from an agent shell with no terminal
+#   --sudo CMD         command used for the privilege re-exec (default sudo-ask
+#                      when installed, else sudo); e.g. --sudo sudo to force
+#                      plain sudo instead of sudo-ask
 #   --keep-mds         skip the final mds bootout deliberately
 #   --restore-root     at teardown re-enable indexing on the volumes that had
 #                      it before this run (default: leave every volume off;
@@ -157,7 +157,7 @@ EXPORT=0
 EXPORT_DONE=0      # internal: set by --_exported in the re-exec'd root phase
 CATALOGS=()
 PYTHON=
-SUDO_CMD=sudo
+SUDO_CMD=
 
 # Teardown bookkeeping: what this run actually changed (all checked by the
 # idempotent teardown, which runs on EXIT/INT/TERM).
@@ -207,6 +207,16 @@ if [ ${#CATALOGS[@]} -gt 0 ] && [ "$EXPORT" -eq 0 ]; then
   echo "Error: --catalog only means something with --export." >&2; exit 2
 fi
 [ "$STAGING" != "/" ] && STAGING=${STAGING%/}
+
+if [ -z "$SUDO_CMD" ]; then
+  if [ -x "$HOME/.local/bin/sudo-ask" ]; then
+    SUDO_CMD="$HOME/.local/bin/sudo-ask"
+  elif command -v sudo-ask >/dev/null 2>&1; then
+    SUDO_CMD="$(command -v sudo-ask)"
+  else
+    SUDO_CMD=sudo
+  fi
+fi
 
 # run CMD...: echo the command prefixed "+ ", then execute it — unless
 # --dry-run, in which case nothing runs. The echoed line is display only

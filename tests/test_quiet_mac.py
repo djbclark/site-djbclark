@@ -489,6 +489,44 @@ class VersionAndGuideTests(unittest.TestCase):
         self.assertEqual(note_true, "disabled")
         self.assertNotIn("enabled = true", flipped)
 
+    def test_sudo_prefix_passes_k_only_when_fresh_requested(self) -> None:
+        from unittest import mock
+
+        with mock.patch.object(qm.shutil, "which", return_value="/usr/local/bin/sudo-ask"):
+            self.assertEqual(qm._sudo_prefix(), ["sudo-ask"])
+            self.assertEqual(qm._sudo_prefix(fresh=True), ["sudo-ask", "-k"])
+        with mock.patch.object(qm.shutil, "which", return_value=None):
+            self.assertEqual(qm._sudo_prefix(), ["sudo"])
+            self.assertEqual(qm._sudo_prefix(fresh=True), ["sudo", "-k"])
+
+    def test_sudoers_operations_pass_fresh_k_while_normal_ops_do_not(self) -> None:
+        from unittest import mock
+
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_helper = pathlib.Path(tmp) / "quiet-mac-root"
+            fake_helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            with mock.patch.object(qm.shutil, "which", return_value="/usr/local/bin/sudo-ask"), \
+                    mock.patch.object(qm.subprocess, "run", side_effect=fake_run), \
+                    mock.patch.object(qm, "HELPER", fake_helper):
+                qm.remove_root_files()
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][:3], ["sudo-ask", "-k", "/bin/rm"])
+        self.assertIn(str(qm.SUDOERS), seen[0])
+
+        # Verify source wiring: --install-root and remove_root_files use fresh=True;
+        # brew services, system-flags, and --factory-root use plain _sudo_prefix().
+        src = QUIET.read_text(encoding="utf-8")
+        self.assertEqual(src.count("_sudo_prefix(fresh=True)"), 2)
+        self.assertEqual(src.count("_sudo_prefix()"), 3)
+        self.assertIn("*_sudo_prefix(fresh=True),\n                python,\n                str(Path(__file__).resolve()),\n                \"--install-root\"", src)
+        self.assertIn("*_sudo_prefix(fresh=True),\n            \"/bin/rm\"", src)
+
 
 if __name__ == "__main__":
     unittest.main()

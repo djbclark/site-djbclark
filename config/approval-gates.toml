@@ -1,6 +1,6 @@
 # Registry of approval gates (read by bin/approval-gate). One [[gate]] table per gate:
 #   name    unique id a caller passes as `approval-gate check --gate NAME`
-#   owner   repo-relative file that implements the gate (where to look when it misbehaves)
+#   owner   repo-relative file (or "<repo>:<path>" for another repo) that implements the gate (where to look when it misbehaves)
 #   policy  "window-ok"      an open sudo-ask approval window may stand in for the gate's prompt
 #           "always-prompt"  the window never covers it: the caller must prompt (also the answer for an unknown gate)
 #   max_ttl seconds a thing granted on the strength of a window (a bgrun ticket, ...) may last, 0 = until the window ends;
@@ -66,5 +66,140 @@ max_ttl = 0
 [[gate]]
 name = "denylist-accounts"
 owner = "roles/sudo_ask_grant/files/sudo-ask-granted"
+policy = "always-prompt"
+max_ttl = 0
+
+# Additional window-ok convenience gates (non-sudoers / non-secret operations).
+[[gate]]
+name = "load-watch-ci-local"
+owner = "djbclark-ade:bin/load-watch"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "tired-pmset"
+owner = "bin/tired"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "neofinder-spotlight-batch"
+owner = "macos/neofinder/neofinder-spotlight-batch.sh"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "neofinder-just-sudo"
+owner = "macos/neofinder/justfile"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "sip-doit-with-sudo"
+owner = "macos/sip-doit-with-sudo.sh"
+policy = "window-ok"
+max_ttl = 0
+
+[[gate]]
+name = "quiet-mac-ops"
+owner = "macos/quiet/quiet_mac.py"
+policy = "window-ok"
+max_ttl = 0
+
+# Always-prompt boundaries: sudoers installers, secret brokers/vaults, PR merge sign-off,
+# OS profile/UI gates, and legacy askpass. An open window never covers these.
+[[gate]]
+name = "ade-merge-ready-approve-post"
+owner = "djbclark-ade:bin/ade-merge-ready"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "quiet-mac-install-root"
+owner = "macos/quiet/quiet_mac.py"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "mac-dns-setup"
+owner = "roles/mac_dns/files/mac-dns-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "launchd-path-setup"
+owner = "roles/launchd_path/files/launchd-path-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "container-route-setup"
+owner = "roles/container_route/files/container-route-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "tart-route-setup"
+owner = "roles/tart_route/files/tart-route-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "mds-xpc-clients-setup"
+owner = "macos/mds-xpc-clients/mds-xpc-clients-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "neofinder-index-setup"
+owner = "macos/neofinder/neofinder-index-setup.sh"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "sudo-secretspec-admin"
+owner = "sudo-secretspec:sudo-secretspec-cli/src/main.rs"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "sudo-secretspec-backup"
+owner = "sudo-secretspec:backup/install.py"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "op-sync-grok"
+owner = "bin/op-sync-grok"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "ade-install-keys-collect"
+owner = "djbclark-ade:bin/ade_install.py"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "gui-hog-dialog"
+owner = "djbclark-ade:macos/gui-hog/UI.swift"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "quiet-mac-mobileconfig"
+owner = "macos/quiet/quiet_mac.py"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "ade-auto-permit-prompts"
+owner = "djbclark-ade:bin/ade-auto-permit"
+policy = "always-prompt"
+max_ttl = 0
+
+[[gate]]
+name = "sudo-askpass-osascript"
+owner = "bin/sudo-askpass-osascript"
 policy = "always-prompt"
 max_ttl = 0

@@ -24,45 +24,47 @@ HIBERNATE_DISK_THRESHOLD_GB="${HIBERNATE_DISK_THRESHOLD_GB:-25}"
 # ---- known-good "normal" profile for this machine (MacBook Air M1) --------
 # Captured 2026-07-19 / restored 2026-07-20. A live snapshot is also saved
 # whenever awake is entered from a non-awake state.
-apply_normal_defaults() {
-    /usr/bin/pmset -a disablesleep 0
-    # Battery
-    /usr/bin/pmset -b sleep 1
-    /usr/bin/pmset -b displaysleep 2
-    /usr/bin/pmset -b disksleep 10
-    /usr/bin/pmset -b standby 1
-    /usr/bin/pmset -b hibernatemode 3
-    /usr/bin/pmset -b lowpowermode 0
-    /usr/bin/pmset -b powernap 0
-    /usr/bin/pmset -b ttyskeepawake 1
-    /usr/bin/pmset -b tcpkeepalive 0
-    /usr/bin/pmset -b womp 0
-    /usr/bin/pmset -b lessbright 0
-    # AC
-    /usr/bin/pmset -c sleep 0
-    /usr/bin/pmset -c displaysleep 180
-    /usr/bin/pmset -c disksleep 10
-    /usr/bin/pmset -c standby 1
-    /usr/bin/pmset -c hibernatemode 3
-    /usr/bin/pmset -c lowpowermode 0
-    /usr/bin/pmset -c powernap 0
-    /usr/bin/pmset -c ttyskeepawake 1
-    /usr/bin/pmset -c tcpkeepalive 0
-    /usr/bin/pmset -c womp 0
+normal_defaults_cmds() {
+    cat <<'EOF'
+/usr/bin/pmset -a disablesleep 0
+/usr/bin/pmset -b sleep 1
+/usr/bin/pmset -b displaysleep 2
+/usr/bin/pmset -b disksleep 10
+/usr/bin/pmset -b standby 1
+/usr/bin/pmset -b hibernatemode 3
+/usr/bin/pmset -b lowpowermode 0
+/usr/bin/pmset -b powernap 0
+/usr/bin/pmset -b ttyskeepawake 1
+/usr/bin/pmset -b tcpkeepalive 0
+/usr/bin/pmset -b womp 0
+/usr/bin/pmset -b lessbright 0
+/usr/bin/pmset -c sleep 0
+/usr/bin/pmset -c displaysleep 180
+/usr/bin/pmset -c disksleep 10
+/usr/bin/pmset -c standby 1
+/usr/bin/pmset -c hibernatemode 3
+/usr/bin/pmset -c lowpowermode 0
+/usr/bin/pmset -c powernap 0
+/usr/bin/pmset -c ttyskeepawake 1
+/usr/bin/pmset -c tcpkeepalive 0
+/usr/bin/pmset -c womp 0
+EOF
 }
 
-apply_awake() {
+awake_cmds() {
     # Ignore lid close and never auto-sleep on any power source.
     # Keep the display on while the lid is open; the backlight watchdog
     # darkens the panel and keyboard within seconds of the lid closing.
-    /usr/bin/pmset -a disablesleep 1
-    /usr/bin/pmset -a sleep 0
-    /usr/bin/pmset -a disksleep 0
-    /usr/bin/pmset -a displaysleep 0
-    /usr/bin/pmset -a standby 0
-    /usr/bin/pmset -a autopoweroff 0 2>/dev/null || true
-    /usr/bin/pmset -a hibernatemode 0
-    /usr/bin/pmset -a ttyskeepawake 1
+    cat <<'EOF'
+/usr/bin/pmset -a disablesleep 1
+/usr/bin/pmset -a sleep 0
+/usr/bin/pmset -a disksleep 0
+/usr/bin/pmset -a displaysleep 0
+/usr/bin/pmset -a standby 0
+/usr/bin/pmset -a autopoweroff 0 || /usr/bin/true
+/usr/bin/pmset -a hibernatemode 0
+/usr/bin/pmset -a ttyskeepawake 1
+EOF
 }
 
 # ---- helpers ---------------------------------------------------------------
@@ -481,10 +483,56 @@ reconcile_awake_caffeinate() {
     fi
 }
 
+find_sudo_ask() {
+    if [[ -n "${SUDO_ASK_BIN+x}" ]]; then
+        [[ -n "$SUDO_ASK_BIN" && -x "$SUDO_ASK_BIN" ]] && { printf '%s\n' "$SUDO_ASK_BIN"; return 0; }
+        return 1
+    fi
+    if [[ -x "$HOME/.local/bin/sudo-ask" ]]; then
+        printf '%s\n' "$HOME/.local/bin/sudo-ask"
+        return 0
+    fi
+    local script_dir
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    if [[ -x "$script_dir/sudo-ask" ]]; then
+        printf '%s\n' "$script_dir/sudo-ask"
+        return 0
+    fi
+    return 1
+}
+
 run_privileged() {
-    # Run a shell script body as root. Prefer sudo (TTY password); fall back
-    # to an osascript admin dialog when sudo cannot prompt.
+    # Run pmset commands as root. Prefer sudo-ask (honours an open approval
+    # window via /bin/sh -c without a temp script in agent-writable /tmp);
+    # fall back to sudo / osascript when sudo-ask is not installed.
     local body="$1"
+    local sudo_ask=""
+    if sudo_ask=$(find_sudo_ask); then
+        local oneliner="" line
+        while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            if [[ -n "$oneliner" ]]; then
+                oneliner+="; $line"
+            else
+                oneliner="$line"
+            fi
+        done <<< "$body"
+        if [[ -z "$oneliner" ]]; then
+            return 0
+        fi
+        # Single plain command (no shell operators): invoke directly without sh -c.
+        if [[ "$oneliner" != *[\;\&\|\<\>\$\`\(\)\{\}\*\?\[\]\'\"]* ]]; then
+            local -a words
+            read -r -a words <<< "$oneliner"
+            "$sudo_ask" "${words[@]}"
+            return $?
+        fi
+        "$sudo_ask" /bin/sh -c "$oneliner"
+        return $?
+    fi
+
     local tmp rc=0
     tmp=$(mktemp "${TMPDIR:-/tmp}/tired-pmset.XXXXXX")
     printf '%s\n' "$body" > "$tmp"
@@ -604,8 +652,7 @@ cmd_awake() {
 
     echo
     echo "Applying awake profile (requires admin)..."
-    run_privileged "$(declare -f apply_awake)
-apply_awake"
+    run_privileged "$(awake_cmds)"
     start_awake_caffeinate
     echo "awake" > "$MODE_FILE"
 
@@ -629,8 +676,7 @@ cmd_normal() {
     echo "Restoring normal profile (requires admin)..."
     
     local script_body
-    script_body="$(declare -f apply_normal_defaults)
-apply_normal_defaults"
+    script_body="$(normal_defaults_cmds)"
     run_privileged "$script_body"
     stop_awake_caffeinate
     echo "normal" > "$MODE_FILE"
@@ -661,8 +707,7 @@ cmd_revert() {
 $script_body"
     else
         echo "No snapshot found, using hardcoded fallback defaults."
-        script_body="$(declare -f apply_normal_defaults)
-apply_normal_defaults"
+        script_body="$(normal_defaults_cmds)"
     fi
 
     run_privileged "$script_body"

@@ -237,10 +237,13 @@ time) runs a sweep and prints what changed since the grant: setuid/setgid files 
 different volume inside one is not entered) under exactly these: `/usr/local`, `/opt`, `/Applications`, `/Library`,
 `/private/etc`, `/private/var/db`, `/private/var/root`, `/private/tmp`, `/private/var/tmp`, `/Users/Shared`, each volume
 directly under `/Volumes` (listed when the sweep runs; links such as the boot volume's are skipped), plus scoped paths in
-the invoking user's home — top-level files (`-maxdepth 1`, covering dotfiles/shell rc files and top-level binaries) and
+the invoking user's home — top-level files (`-maxdepth 1`) and
 the real (non-symlink) subdirectories `bin`, `.local/bin`, `.local/libexec`, `.ssh`, `.gnupg`, `.config`, `.claude`,
-`.codex`, `.paseo`, `Library/LaunchAgents`, and `Applications` (`AUDIT_HOME_SUBDIRS`) —
-and every launchd `Program`/`ProgramArguments` target or plist changed since. **Not swept:** `/private/var/folders`, other
+`.codex`, `.paseo`, `Library/LaunchAgents`, and `Applications` (`AUDIT_HOME_SUBDIRS`), each opened step-by-step with
+`O_NOFOLLOW` immediately before `find` runs — checking **setuid/setgid regular files only** (not ordinary non-SUID edits
+such as `~/.zshrc` or user LaunchAgent plists) —
+and every launchd `Program`/`ProgramArguments` target or plist changed since. Unexpected non-zero `find` errors (with
+non-empty stderr) are reported as findings rather than silently ignored. **Not swept:** `/private/var/folders`, other
 users' homes, the rest of the invoking user's home outside top-level files and `AUDIT_HOME_SUBDIRS` (e.g. `~/src`,
 `~/Library/Caches`, `~/Library/CloudStorage`, media/backup trees, and symlinked subdirectories — walking all of `$HOME`
 times out on large developer homes), everything else on the data volume outside the roots above, and anything on a volume
