@@ -32,35 +32,17 @@ jobs:
       - name: Find third-party issues opened by djbclark
         id: discover
         run: |
-          # Find issues I opened in repos I don't own, output as JSON
+          # Owner-level exclusions come from the script (Daniel's user plus
+          # orgs from `gh api user/orgs` on 2026-11-23). Qualifiers go after
+          # -- so gh does not treat -user/-org as its own flags.
+          mapfile -t QUALIFIERS < <(python3 .github/scripts/sync_tracked_issues.py search-qualifiers)
           gh search issues --author djbclark --limit 100 \
             --json repository,number,title,state,url \
+            -- "${QUALIFIERS[@]}" \
             > /tmp/raw-issues.json 2>/dev/null || echo '[]' > /tmp/raw-issues.json
 
-          # Filter to repos I don't own and save as text for next step
-          python3 << 'PYEOF'
-          import json
-
-          OWNED = ['djbclark/stayturgid', 'djbclark/site-djbclark', 'djbclark/site-private']
-
-          with open('/tmp/raw-issues.json') as f:
-            issues = json.load(f)
-
-          filtered = [i for i in issues if i['repository']['nameWithOwner'] not in OWNED]
-
-          with open('/tmp/discovered-issues.json', 'w') as f:
-            json.dump(filtered, f, indent=2)
-
-          with open('/tmp/discovered-issues.txt', 'w') as f:
-            for item in filtered:
-              repo = item['repository']['nameWithOwner']
-              num = item['number']
-              title = item['title']
-              url = item.get('url', f'https://github.com/{repo}/issues/{num}')
-              f.write(f"{repo}|||{num}|||{title}|||{item.get('state','open')}|||{url}\n")
-
-          print(f"Found {len(filtered)} third-party issues")
-          PYEOF
+          # Safety-net filter: same owners, plus the existing exact-repo list.
+          python3 .github/scripts/sync_tracked_issues.py discover
 
       - name: Check for new issues against current matrix
         id: compare

@@ -178,3 +178,101 @@ def test_compare_and_update_append_only_new_entries(tmp_path):
         ]
     ) == 0
     assert json.loads(new_path.read_text()) == []
+
+
+def test_owned_owners_include_user_and_orgs_from_user_orgs():
+    assert "djbclark" in sti.OWNED_OWNERS
+    for org in (
+        "bcfg2",
+        "maynard-daycare",
+        "djbcsipb",
+        "frdminc",
+        "pikans",
+        "pkb-rocks",
+    ):
+        assert org in sti.OWNED_OWNERS
+    # Qualifiers use -user for the login and -org for each org, not a repo list.
+    qualifiers = sti.search_qualifiers()
+    assert "-user:djbclark" in qualifiers
+    assert "-org:frdminc" in qualifiers
+    assert "-org:pkb-rocks" in qualifiers
+    assert "-org:Bcfg2" in qualifiers
+    assert "-org:Maynard-Daycare" in qualifiers
+    assert "-org:djbcsipb" in qualifiers
+    assert "-org:pikans" in qualifiers
+    assert all(q.startswith("-user:") or q.startswith("-org:") for q in qualifiers)
+    assert not any("/" in q for q in qualifiers)
+
+
+def test_is_excluded_repo_is_owner_level_and_keeps_explicit_list():
+    for nwo in (
+        "djbclark/upstream-releases",
+        "DJBClark/site-djbclark",
+        "frdminc/tendcf",
+        "pkb-rocks/plektra",
+        "djbcsipb/libkrun-sipb",
+        "pikans/something",
+        "Bcfg2/core",
+        "Maynard-Daycare/handbook",
+        "djbclark/stayturgid",
+        "djbclark/site-private",
+    ):
+        assert sti.is_excluded_repo(nwo), nwo
+    for nwo in (
+        "getpaseo/paseo",
+        "omercnet/paseo-plugins",
+        "libkrun/libkrun",
+        "cachix/secretspec",
+        "trailhq/Trail-Code",
+    ):
+        assert not sti.is_excluded_repo(nwo), nwo
+
+
+def test_discover_filters_own_owners_and_keeps_third_party(tmp_path):
+    raw = tmp_path / "raw.json"
+    raw.write_text(
+        json.dumps(
+            [
+                {"repository": {"nameWithOwner": "djbclark/upstream-releases"}, "number": 111, "title": "own user", "state": "open", "url": "https://example.com/111"},
+                {"repository": {"nameWithOwner": "frdminc/tendcf"}, "number": 99, "title": "own org", "state": "open", "url": "https://example.com/99"},
+                {"repository": {"nameWithOwner": "djbclark/site-private"}, "number": 1, "title": "explicit", "state": "open", "url": "https://example.com/1"},
+                {"repository": {"nameWithOwner": "getpaseo/paseo"}, "number": 10543, "title": "third party", "state": "open", "url": "https://github.com/getpaseo/paseo/issues/10543"},
+                {"repository": {"nameWithOwner": "omercnet/paseo-plugins"}, "number": 673, "title": "also third", "state": "open", "url": "https://github.com/omercnet/paseo-plugins/issues/673"},
+            ]
+        )
+    )
+    discovered = tmp_path / "discovered.txt"
+    discovered_json = tmp_path / "discovered.json"
+    assert (
+        sti.main(
+            [
+                "discover",
+                "--raw",
+                str(raw),
+                "--discovered",
+                str(discovered),
+                "--discovered-json",
+                str(discovered_json),
+            ]
+        )
+        == 0
+    )
+    kept = json.loads(discovered_json.read_text())
+    assert [sti.raw_item_repo(i) + "#" + str(i["number"]) for i in kept] == [
+        "getpaseo/paseo#10543",
+        "omercnet/paseo-plugins#673",
+    ]
+    text = discovered.read_text()
+    assert "getpaseo/paseo|||10543|||" in text
+    assert "djbclark/" not in text
+    assert "frdminc/" not in text
+
+
+def test_workflow_uses_owner_qualifiers_and_discover_script():
+    text = WORKFLOW.read_text()
+    assert "sync_tracked_issues.py search-qualifiers" in text
+    assert "sync_tracked_issues.py discover" in text
+    assert "OWNED = ['djbclark/stayturgid'" not in text
+    assert "djbclark/stayturgid" in sti.EXCLUDED_REPOS
+    assert "djbclark/site-djbclark" in sti.EXCLUDED_REPOS
+    assert "djbclark/site-private" in sti.EXCLUDED_REPOS

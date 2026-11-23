@@ -3,6 +3,8 @@
 
 The tracked list lives in a data file, not a workflow, so the nightly job can
 open a PR with GITHUB_TOKEN (which cannot push changes to workflow files).
+Discovery skips repos owned by Daniel's user and orgs (owner-level, plus the
+existing exact-repo exclusions).
 """
 
 from __future__ import annotations
@@ -15,6 +17,78 @@ from pathlib import Path
 DEFAULT_TRACKED = Path(".github/tracked-issues.json")
 DEFAULT_DISCOVERED = Path("/tmp/discovered-issues.txt")
 DEFAULT_NEW = Path("/tmp/new-issues.json")
+DEFAULT_RAW = Path("/tmp/raw-issues.json")
+
+# Daniel's GitHub login, plus every org from `gh api user/orgs` on 2026-11-23
+# (America/New_York). The workflow's GITHUB_TOKEN cannot list those orgs as
+# him, so the list is maintained here rather than fetched at runtime.
+DANIEL_USER = "djbclark"
+DANIEL_ORGS = (
+    "Bcfg2",
+    "Maynard-Daycare",
+    "djbcsipb",
+    "frdminc",
+    "pikans",
+    "pkb-rocks",
+)
+OWNED_OWNERS = frozenset({DANIEL_USER.lower(), *(org.lower() for org in DANIEL_ORGS)})
+
+# Existing exact-repo exclusions; kept even though the owner filter already
+# covers these (they are all under djbclark).
+EXCLUDED_REPOS = frozenset(
+    {
+        "djbclark/stayturgid",
+        "djbclark/site-djbclark",
+        "djbclark/site-private",
+    }
+)
+
+
+def search_qualifiers() -> list[str]:
+    """GitHub search qualifiers that skip Daniel's user and orgs."""
+    return [f"-user:{DANIEL_USER}", *(f"-org:{org}" for org in DANIEL_ORGS)]
+
+
+def repo_owner(name_with_owner: str) -> str:
+    return name_with_owner.split("/", 1)[0].lower()
+
+
+def is_excluded_repo(name_with_owner: str) -> bool:
+    nwo = name_with_owner.strip()
+    if not nwo or "/" not in nwo:
+        return False
+    if nwo.lower() in EXCLUDED_REPOS:
+        return True
+    return repo_owner(nwo) in OWNED_OWNERS
+
+
+def raw_item_repo(item: dict) -> str:
+    repo = item.get("repository") or {}
+    if isinstance(repo, dict):
+        return str(repo.get("nameWithOwner") or "")
+    return str(item.get("repo") or "")
+
+
+def filter_raw_issues(issues: list[dict]) -> list[dict]:
+    kept = []
+    for item in issues:
+        nwo = raw_item_repo(item)
+        if nwo and not is_excluded_repo(nwo):
+            kept.append(item)
+    return kept
+
+
+def write_discovered_outputs(issues: list[dict], json_path: Path, txt_path: Path) -> None:
+    json_path.write_text(json.dumps(issues, indent=2) + "\n")
+    lines = []
+    for item in issues:
+        repo = raw_item_repo(item)
+        num = item["number"]
+        title = item.get("title", "")
+        url = item.get("url") or f"https://github.com/{repo}/issues/{num}"
+        state = item.get("state", "open")
+        lines.append(f"{repo}|||{num}|||{title}|||{state}|||{url}")
+    txt_path.write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
 def load_tracked(path: Path = DEFAULT_TRACKED) -> list[dict]:
@@ -105,6 +179,23 @@ def cmd_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    raw = args.raw.read_text() if args.raw.exists() else "[]"
+    issues = json.loads(raw or "[]")
+    if not isinstance(issues, list):
+        raise ValueError(f"{args.raw} must contain a JSON list")
+    kept = filter_raw_issues(issues)
+    write_discovered_outputs(kept, args.discovered_json, args.discovered)
+    print(f"Found {len(kept)} third-party issues")
+    return 0
+
+
+def cmd_search_qualifiers(_args: argparse.Namespace) -> int:
+    for qualifier in search_qualifiers():
+        print(qualifier)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -116,6 +207,15 @@ def main(argv: list[str] | None = None) -> int:
     p_cmp.set_defaults(func=cmd_compare)
     p_upd = sub.add_parser("update", parents=[common])
     p_upd.set_defaults(func=cmd_update)
+    p_disc = sub.add_parser("discover")
+    p_disc.add_argument("--raw", type=Path, default=DEFAULT_RAW)
+    p_disc.add_argument("--discovered", type=Path, default=DEFAULT_DISCOVERED)
+    p_disc.add_argument(
+        "--discovered-json", type=Path, default=Path("/tmp/discovered-issues.json")
+    )
+    p_disc.set_defaults(func=cmd_discover)
+    p_qual = sub.add_parser("search-qualifiers")
+    p_qual.set_defaults(func=cmd_search_qualifiers)
     args = parser.parse_args(argv)
     return args.func(args)
 
