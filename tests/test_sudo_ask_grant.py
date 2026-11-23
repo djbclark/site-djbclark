@@ -37,6 +37,7 @@ mod = importlib.util.module_from_spec(_spec)
 _loader.exec_module(mod)
 REAL_UNIFIED_LOG = mod.unified_log
 REAL_AUDIT_ROOTS = mod.AUDIT_ROOTS
+REAL_AUDIT_HOME_SUBDIRS = mod.AUDIT_HOME_SUBDIRS
 REAL_AUDIT_VOLUMES = mod.AUDIT_VOLUMES
 
 
@@ -1201,7 +1202,66 @@ class ModeTests(GrantBase):
         for r in ("/usr/local", "/opt", "/Applications", "/Library", "/private/etc", "/private/var/db", "/private/var/root",
                   "/private/tmp", "/private/var/tmp"):
             self.assertIn(r, REAL_AUDIT_ROOTS)
+        for sub in ("bin", ".local/bin", ".local/libexec", ".ssh", ".gnupg", ".config",
+                    ".claude", ".codex", ".paseo", "Library/LaunchAgents", "Applications"):
+            self.assertIn(sub, REAL_AUDIT_HOME_SUBDIRS)
         self.assertEqual(REAL_AUDIT_VOLUMES, "/Volumes")
+
+    def test_audit_home_sweeps_top_level_and_scoped_subdirs_only(self) -> None:
+        fake_home = pathlib.Path(self.tmp.name) / "home"
+        fake_home.mkdir()
+        top_suid = fake_home / ".zshrc_suid"
+        top_suid.write_text("x")
+        os.chmod(top_suid, 0o4755)
+        for rel in ("bin", ".local/bin", "Library/LaunchAgents", "src/huge", "Library/Caches"):
+            (fake_home / rel).mkdir(parents=True)
+        bin_suid = fake_home / "bin" / "b"
+        bin_suid.write_text("x")
+        os.chmod(bin_suid, 0o4755)
+        lbin_suid = fake_home / ".local" / "bin" / "lb"
+        lbin_suid.write_text("x")
+        os.chmod(lbin_suid, 0o4755)
+        la_suid = fake_home / "Library" / "LaunchAgents" / "la"
+        la_suid.write_text("x")
+        os.chmod(la_suid, 0o2755)
+        unscoped_src = fake_home / "src" / "huge" / "u1"
+        unscoped_src.write_text("x")
+        os.chmod(unscoped_src, 0o4755)
+        unscoped_cache = fake_home / "Library" / "Caches" / "u2"
+        unscoped_cache.write_text("x")
+        os.chmod(unscoped_cache, 0o4755)
+
+        fake_pw = mock.Mock(pw_dir=str(fake_home))
+        with mock.patch.object(mod, "AUDIT_ROOTS", ()), mock.patch.object(mod, "INVOKER_UID", 501), \
+                mock.patch.object(mod.pwd, "getpwuid", return_value=fake_pw):
+            found = mod.audit(self.now - 100)
+        joined = "\n".join(found)
+        for p in (top_suid, bin_suid, lbin_suid, la_suid):
+            self.assertIn(str(p), joined)
+        for p in (unscoped_src, unscoped_cache):
+            self.assertNotIn(str(p), joined)
+
+    def test_audit_home_skips_symlinked_subdirs_and_uses_maxdepth_on_home(self) -> None:
+        fake_home = pathlib.Path(self.tmp.name) / "home2"
+        outside = pathlib.Path(self.tmp.name) / "outside"
+        (fake_home / "bin").mkdir(parents=True)
+        (outside / "bin").mkdir(parents=True)
+        os.symlink(outside, fake_home / ".ssh")       # direct symlinked subdir
+        os.symlink(outside, fake_home / ".local")     # symlinked parent of .local/bin
+        ran = []
+        def fake_run(argv, **kw):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        fake_pw = mock.Mock(pw_dir=str(fake_home))
+        with mock.patch.object(mod, "AUDIT_ROOTS", ()), mock.patch.object(mod, "INVOKER_UID", 501), \
+                mock.patch.object(mod.pwd, "getpwuid", return_value=fake_pw), \
+                mock.patch.object(mod.subprocess, "run", fake_run):
+            mod.audit(0)
+        roots = [a[1] for a in ran]
+        self.assertEqual(roots, [str(fake_home), str(fake_home / "bin")])
+        self.assertIn("-maxdepth", ran[0])
+        self.assertEqual(ran[0][ran[0].index("-maxdepth") + 1], "1")
+        self.assertNotIn("-maxdepth", ran[1])
 
     def test_the_sweep_adds_each_mounted_volume_but_not_links_or_files(self) -> None:
         vols = pathlib.Path(self.tmp.name) / "vols"
@@ -1385,6 +1445,25 @@ class ModeTests(GrantBase):
         with mock.patch.object(mod, "audit", lambda s: ran.append(s) or []), contextlib.redirect_stdout(buf):
             self.run_main("revoke")
         self.assertIn("never revoked", buf.getvalue())
+
+    def test_refused_exec_named_revoke_does_not_suppress_the_revoke_hint(self) -> None:   # PR #305 LOW-R2-1
+        import io, contextlib
+        # Any unprivileged agent can run `sudo -n HELPER exec -- REVOKE`, which logs REFUSED(...) with cmd column `REVOKE`.
+        # Only the event column (column 2) may match REVOKE or GRANT(.
+        pathlib.Path(mod.LOG_FILE).write_text(
+            "%s\t501\tGRANT(3600 until x)\t/\t\n"
+            "%s\t501\tREFUSED(no window is open)\t/\tREVOKE\n"
+            "%s\t501\tREFUSED(no window is open)\t/\tGRANT(999 until y)\n"
+            % (mod.iso(1000000), mod.iso(1000100), mod.iso(1000200)))
+        os.chmod(mod.LOG_FILE, 0o600)
+        self.assertEqual(mod.unrevoked_grant_epoch(), 1000000)
+        self.assertEqual(mod.last_granted_epoch(), 1000000)
+        buf = io.StringIO()
+        with mock.patch.object(mod, "audit", lambda s: []), contextlib.redirect_stdout(buf):
+            rc, _ = self.run_main("revoke")
+        self.assertEqual(rc, 0)
+        self.assertIn("never revoked", buf.getvalue())
+        self.assertIn("sudo-ask --status --audit 1000000", buf.getvalue())
 
     def test_revoke_without_a_grant_file_runs_no_sweep(self) -> None:
         import io, contextlib
@@ -1675,8 +1754,8 @@ class SetupScriptTests(unittest.TestCase):
         self.assertIn("Defaults!/usr/local/libexec/sudo-ask-granted env_reset, timestamp_timeout=0", p.stdout)
 
     def test_revoke_rule_has_no_empty_string_arg_and_passes_visudo(self) -> None:
-        # Regression: in sudoers(5), `""` means "no arguments" only as the sole arg (`cmd ""`).
-        # After `revoke`, `cmd revoke ""` requires a literal empty second arg and refuses `sudo -n cmd revoke`.
+        # Regression: in sudoers(5), `""` is the empty-arg sentinel only as the sole argument (`cmd ""`).
+        # After `revoke`, `""` is matched literally (two quote characters, not stripped), so `sudo -n cmd revoke` is refused.
         p = self.run_setup("--print")   # --print validates the rendered drop-in with `visudo -cf`
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn('revoke ""', p.stdout)
@@ -1971,6 +2050,10 @@ class SetupScriptTests(unittest.TestCase):
             "a single-quoted ticket value": "timestamp_timeout=\'0\'",
             "an unterminated quote swallows the zero": 'timestamp_timeout=15, env_keep+="X, timestamp_timeout=0',
             "an escaped quote does not end it": r'timestamp_timeout=15, env_keep+="X\" , timestamp_timeout=0, Y"',
+            "a backslash-escaped comma outside quotes": r"timestamp_timeout=5, lecture_file=/x\,timestamp_timeout=0",
+            "an apostrophe in an unquoted value before a quoted list": "timestamp_timeout=5, lecture_file=/it's, env_keep+=\"x', timestamp_timeout=0, y z\"",
+            "a backslash before an escaped quote inside quotes": r'timestamp_timeout=5, env_keep+="a\\"b, timestamp_timeout=0, c d"',
+            "backslash before closing quote followed by quoted list": r'timestamp_timeout=5, env_keep+="a\\", x="b, timestamp_timeout=0, c"',
             "the real line with a later 15": REAL_MACOS_USER_LINE + ", timestamp_timeout=15",
             "the real line, last quoted": REAL_MACOS_USER_LINE + ', env_keep+="timestamp_timeout=0"',
         }
@@ -1992,12 +2075,15 @@ class SetupScriptTests(unittest.TestCase):
     # ---- the grant/revoke/status/exec checks run the commands: `sudo -n -l CMD` only asks whether CMD is allowed at all
     PW = "sudo: a password is required"
 
-    def behaviour_sudo_dir(self, **over):
+    def behaviour_sudo_dir(self, status_out=None, **over):
         """A fake sudo for --behaviour-checks. Each key is the command after `sudo -n BIN`: (rc, stderr) as an admin with a
         password on a real macOS prints them (the default scenario is a healthy install). Messages are German unless LC_ALL=C."""
         sc = {"grant": (1, self.PW), "revoke": (0, ""), "revoke extra": (1, self.PW), "status": (1, ""),
               "exec": (75, "sudo-ask-granted: no open window")}
         sc.update(over)
+        if status_out is None:
+            s_rc, s_err = sc["status"]
+            status_out = "" if s_err else ("open=1\nreason=window open\n" if s_rc == 0 else "open=0\nreason=no window is open\n")
         d = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-fake-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         import shlex
@@ -2006,18 +2092,20 @@ class SetupScriptTests(unittest.TestCase):
                          ("exec", "exec -- /usr/bin/true")):
             rc, err = sc[key]
             msg = '"$(tr_msg)"' if err == self.PW else shlex.quote(err)
-            arms.append("  %s) msg=%s; code=%d ;;" % (shlex.quote("-n %s %s" % (HELPER_PATH, pat)), msg, rc))
+            out = shlex.quote(status_out) if key == "status" else "''"
+            arms.append("  %s) out=%s; msg=%s; code=%d ;;" % (shlex.quote("-n %s %s" % (HELPER_PATH, pat)), out, msg, rc))
         text = ('#!/bin/bash\necho "SUDO $* [LC_ALL=${LC_ALL-unset} LANG=${LANG-unset}]" >> "$FAKE_LOG"\n'
                 'tr_msg() { if [ "${LC_ALL-}" = C ]; then printf "%s" "sudo: a password is required"; '
                 'else printf "%s" "sudo: ein Passwort ist erforderlich"; fi; }\n'
-                'case "$*" in\n' + "\n".join(arms) + '\n  *) msg="unexpected: $*"; code=99 ;;\nesac\n'
+                'case "$*" in\n' + "\n".join(arms) + '\n  *) out=""; msg="unexpected: $*"; code=99 ;;\nesac\n'
+                '[ -n "$out" ] && printf "%s" "$out"\n'
                 '[ -n "$msg" ] && echo "$msg" >&2\nexit $code\n')
         (d / "sudo").write_text(text)
         (d / "sudo").chmod(0o755)
         return d
 
-    def behaviour(self, **over):
-        p, calls = self.guarded("--behaviour-checks", fake_dir=self.behaviour_sudo_dir(**over))
+    def behaviour(self, status_out=None, **over):
+        p, calls = self.guarded("--behaviour-checks", fake_dir=self.behaviour_sudo_dir(status_out=status_out, **over))
         return p, calls
 
     def test_behaviour_checks_pass_on_a_healthy_install(self) -> None:
@@ -2030,33 +2118,46 @@ class SetupScriptTests(unittest.TestCase):
         for call in ("grant 60s", "revoke", "revoke extra", "status", "exec -- /usr/bin/true"):
             self.assertIn("SUDO -n %s %s [LC_ALL=C LANG=C]" % (HELPER_PATH, call), calls)    # run, never `-n -l`, in the C locale
         self.assertNotIn(" -l ", calls)
+        # LOW-3: status must run BEFORE revoke so an open window is never revoked
+        lines = calls.splitlines()
+        i_status = next(i for i, ln in enumerate(lines) if " status [" in ln)
+        i_revoke = next(i for i, ln in enumerate(lines) if " revoke [" in ln)
+        self.assertLess(i_status, i_revoke, calls)
 
-    def test_behaviour_checks_pass_when_a_window_is_open(self) -> None:
-        p, _ = self.behaviour(status=(0, ""), exec=(0, ""))
+    def test_behaviour_checks_pass_when_a_window_is_open_and_skip_revoke(self) -> None:
+        p, calls = self.behaviour(status=(0, ""), exec=(0, ""))
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("a window is open; revoke check skipped", p.stdout)
         self.assertIn("a window is open; exec check skipped", p.stdout)
+        self.assertNotIn("SUDO -n %s revoke [" % HELPER_PATH, calls)   # active window must not be revoked
+        self.assertIn("SUDO -n %s revoke extra [" % HELPER_PATH, calls)
 
     def test_behaviour_checks_catch_each_failure_for_the_right_reason(self) -> None:
-        for name, over, said in (
+        for name, kw, said in (
                 ("grant ran without a password", {"grant": (0, "")}, "grant ran WITHOUT a password"),
                 ("grant failed on its own, not sudo's refusal", {"grant": (1, "helper: fresh authentication needed")}, "not because sudo wanted a password"),
+                ("grant helper text mimicking sudo refusal is rejected (anchored)", {"grant": (1, "sudo-ask-granted: a password is required")}, "not because sudo wanted a password"),
+                ("grant helper text mimicking may not run sudo is rejected (anchored)", {"grant": (1, "helper: user may not run sudo")}, "not because sudo wanted a password"),
                 ("revoke needs a password", {"revoke": (1, self.PW)}, "revoke needs a password"),
                 ("revoke failed", {"revoke": (3, "helper: boom")}, "revoke failed (exit 3)"),
                 ("revoke extra let through", {"revoke extra": (0, "")}, "revoke with extra arguments was let through"),
                 ("revoke extra failed on its own", {"revoke extra": (2, "helper: usage")}, "not because sudo refused it"),
                 ("status needs a password", {"status": (1, self.PW)}, "status needs a password"),
+                ("status localized refusal with no open= line fails closed", {"status": (1, "sudo: ein Passwort ist notwendig"), "status_out": ""}, "status failed (exit 1)"),
+                ("status exit 0 without open=1 line fails closed", {"status": (0, ""), "status_out": "something else\n"}, "status failed (exit 0)"),
                 ("status crashed", {"status": (70, "helper: crash")}, "status failed (exit 70)"),
                 ("exec needs a password", {"exec": (1, self.PW)}, "exec needs a password"),
                 ("exec ran", {"exec": (0, "")}, "exec with no window exited 0")):
             with self.subTest(name):
-                p, _ = self.behaviour(**over)
+                p, _ = self.behaviour(**kw)
                 self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
                 self.assertIn("FAIL  ", p.stdout)
                 self.assertIn(said, p.stdout)
 
     def test_behaviour_checks_accept_not_allowed_as_sudos_refusal(self) -> None:   # a non-admin user: no password rule at all
         na = "Sorry, user x is not allowed to execute '/usr/local/libexec/sudo-ask-granted grant 60s' as root on h."
-        p, _ = self.behaviour(grant=(1, na), **{"revoke extra": (1, na.replace("grant 60s", "revoke extra"))})
+        mn = "Sorry, user x may not run sudo on h."
+        p, _ = self.behaviour(grant=(1, na), **{"revoke extra": (1, mn)})
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
     def test_behaviour_checks_are_guarded(self) -> None:

@@ -106,13 +106,12 @@ from a panic button without a sensor. It takes no arguments (the sudoers line is
 extras).
 
 `--verify` checks this on the installed system: it runs the ticket check above, and it FAILS if a plain `sudo -n /usr/bin/true` succeeds (with the ticket off no cached ticket is honoured, so a success means a live ticket or a NOPASSWD rule for `true`); then, with the ticket dropped,
-`sudo -n helper grant` must be refused by sudo itself (its "a password is required" message, in the C locale), `sudo -n helper
-revoke` must run (at install time no window exists, so it changes nothing) and `... revoke extra` must be refused by sudo, `status`
-must run (exit 0 or 1, and not a sudo refusal), and `exec` with no window must exit 75. Every one of these RUNS the command: `sudo -n
+`sudo -n helper grant` must be refused by sudo itself (its anchored `^sudo: a password is required$` or `^Sorry, user ...` message, in the C locale), `status`
+must run BEFORE `revoke` and print the helper's `open=0`/`open=1` line on stdout (not just exit 0 or 1), `sudo -n helper
+revoke` must run when no window is open (if a window is currently open, `--verify --live` and `--behaviour-checks --live` skip the `revoke` test and note why, so re-verifying never revokes the operator's active window), `... revoke extra` must be refused by sudo, and `exec` with no window must exit 75. Every one of these RUNS the command: `sudo -n
 -l CMD` only asks whether CMD is allowed at all, and an admin with a password is allowed everything, so it can prove nothing about
-NOPASSWD. The ticket check reads the listing with its commas split outside quotes, because macOS lists `env_keep+="COLORFGBG
-COLORTERM"` and similar quoted values in the same line as the `timestamp_timeout` entries; only a quoted value that itself mentions
-`timestamp_timeout` is unreadable. `--behaviour-checks` runs just these five checks (a test gives it a fake `sudo`).
+NOPASSWD. The ticket check splits the listing on commas outside double quotes using sudo's output grammar (only `"` quotes; `\` escapes outside quotes and `\"` inside double quotes; any line mentioning `timestamp_timeout` that contains a backslash or a quoted `timestamp_timeout` fails closed), because macOS lists `env_keep+="COLORFGBG
+COLORTERM"` and similar quoted values in the same line as the `timestamp_timeout` entries. `--behaviour-checks` runs just these five checks (a test gives it a fake `sudo`).
 
 ## Agent-writable code prompts, even in a window (ruling 1)
 
@@ -237,10 +236,15 @@ launchd job, a login hook or a changed root-owned program stays. So `--revoke` (
 time) runs a sweep and prints what changed since the grant: setuid/setgid files (each root with `find -xdev`, so a
 different volume inside one is not entered) under exactly these: `/usr/local`, `/opt`, `/Applications`, `/Library`,
 `/private/etc`, `/private/var/db`, `/private/var/root`, `/private/tmp`, `/private/var/tmp`, `/Users/Shared`, each volume
-directly under `/Volumes` (listed when the sweep runs; links such as the boot volume's are skipped) and the invoking user's home,
+directly under `/Volumes` (listed when the sweep runs; links such as the boot volume's are skipped), plus scoped paths in
+the invoking user's home — top-level files (`-maxdepth 1`, covering dotfiles/shell rc files and top-level binaries) and
+the real (non-symlink) subdirectories `bin`, `.local/bin`, `.local/libexec`, `.ssh`, `.gnupg`, `.config`, `.claude`,
+`.codex`, `.paseo`, `Library/LaunchAgents`, and `Applications` (`AUDIT_HOME_SUBDIRS`) —
 and every launchd `Program`/`ProgramArguments` target or plist changed since. **Not swept:** `/private/var/folders`, other
-users' homes, everything else on the data volume outside the roots above, and anything on a volume mounted below one
-of these roots. It is a best-effort list, not a proof; read it
+users' homes, the rest of the invoking user's home outside top-level files and `AUDIT_HOME_SUBDIRS` (e.g. `~/src`,
+`~/Library/Caches`, `~/Library/CloudStorage`, media/backup trees, and symlinked subdirectories — walking all of `$HOME`
+times out on large developer homes), everything else on the data volume outside the roots above, and anything on a volume
+mounted below one of these roots. It is a best-effort list, not a proof; read it
 after every window and treat a finding as an incident.
 
 Limits on the sweep, because `status --audit` has a NOPASSWD sudoers line (any agent can call it, with no window) and runs
