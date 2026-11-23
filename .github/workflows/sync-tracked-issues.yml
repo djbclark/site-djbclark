@@ -189,7 +189,13 @@ jobs:
           echo "" >> /tmp/pr-body.txt
           echo "$total" >> /tmp/pr-body.txt
 
-          git commit -m "ci: auto-add $new_count new tracked issue(s)" --file /tmp/pr-body.txt
+          # Git 2.55+ (GitHub-hosted runners) rejects combining -m and -F/--file.
+          {
+            echo "ci: auto-add $new_count new tracked issue(s)"
+            echo
+            cat /tmp/pr-body.txt
+          } > /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
           git push origin "$branch"
 
           gh pr create \
