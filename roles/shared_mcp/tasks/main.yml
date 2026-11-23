@@ -27,6 +27,7 @@
     fail_msg: Invalid OpenAlex OA fallback setting or forbidden OPENALEX_API_KEY in LaunchAgent plist env.
   loop: "{{ shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list }}"
   loop_control: {label: "{{ item.name }}"}
+  no_log: true
 
 # Daemons this repo owns (bin/greptile-mcp-proxy) are symlinked into the bin dir, as firecrawl-router is.
 - name: Link repo-owned shared MCP daemons into the bin dir
