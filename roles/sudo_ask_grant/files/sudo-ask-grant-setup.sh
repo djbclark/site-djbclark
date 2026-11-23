@@ -319,6 +319,7 @@ behaviour_checks() {   # $1: the sudo to ask. Sets fail=1 on any failure.
   if sudo_refused; then bad "exec needs a password: $try_err"
   elif [ "$status_ok" -eq 1 ] && [ "$window_open" -eq 0 ] && [ "$e" -eq 75 ]; then ok "exec refuses with no window (75)"
   elif [ "$window_open" -eq 1 ]; then ok "a window is open; exec check skipped"
+  elif [ "$status_ok" -eq 0 ]; then bad "exec check inconclusive (status failed; exec exited $e)"
   else bad "exec with no window exited $e (want 75)"; fi
 }
 

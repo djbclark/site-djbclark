@@ -26,6 +26,9 @@
 # registry config/approval-gates.toml); this script only asks it. `sudo-ask -k CMD...` is the
 # approval-probe form (bgrun, load-watch): inside a window it runs with no dialog and no fresh
 # authentication, `-k` dropped; with no window it is the normal dialog path, `-k` and all.
+# `sudo-ask --no-window [-k] CMD...` bypasses any open approval window unconditionally and always
+# shows the Allow/Deny dialog + fresh `sudo -k` Touch ID (used by always-prompt boundaries such as
+# sudoers installers and PR-merge sign-off).
 
 export PATH="/opt/homebrew/bin:$PATH"
 set -u
@@ -34,7 +37,7 @@ SUDO=/usr/bin/sudo
 OSASCRIPT=/usr/bin/osascript
 PING=hermes-ping
 GATE=$(dirname "$(/usr/bin/readlink -f "${BASH_SOURCE[0]}")")/approval-gate
-[ $# -gt 0 ] || { echo "usage: sudo-ask <command...> | --grant [DURATION] | --revoke | --status" >&2; exit 64; }
+[ $# -gt 0 ] || { echo "usage: sudo-ask [--no-window] <command...> | --grant [DURATION] | --revoke | --status" >&2; exit 64; }
 
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/sudo-ask"
 mkdir -p "$LOG_DIR"
@@ -108,12 +111,24 @@ note_expiry_once() {
 grant_mode=
 note=
 sub=
+no_window=0
 nk=0   # leading `-k` words (the approval-probe form)
-case $1 in
-  --grant|--revoke|--status) sub=${1#--}; shift ;;
-  grant|revoke|status)
-    if ! command -v "$1" >/dev/null 2>&1; then sub=$1; shift; fi ;;
-esac
+while [ $# -gt 0 ] && [ "$1" = "--no-window" ]; do
+  no_window=1; shift
+done
+[ $# -gt 0 ] || { echo "usage: sudo-ask [--no-window] <command...> | --grant [DURATION] | --revoke | --status" >&2; exit 64; }
+if [ "$no_window" = 0 ]; then
+  case $1 in
+    --grant|--revoke|--status) sub=${1#--}; shift ;;
+    grant|revoke|status)
+      if ! command -v "$1" >/dev/null 2>&1; then sub=$1; shift; fi ;;
+  esac
+else
+  case $1 in
+    --grant|--revoke|--status)
+      echo "sudo-ask: --no-window cannot be combined with $1" >&2; exit 64 ;;
+  esac
+fi
 case $sub in
   status)
     if [ "${1:-}" = "--audit" ]; then   # what changed since the grant: setuid files, launchd targets (read-only; the sudoers `status *` line)
@@ -155,10 +170,14 @@ case $sub in
     ;;
   *)
     # Plain command. Window open and approval-gate says it covers this command: run it, no dialog. Leading
-    # `-k` words (the approval-probe form) are dropped for that decision only; without a window the original
-    # arguments, `-k` included, take the dialog path below.
+    # `-k` words (the approval-probe form) are dropped for that decision only; without a window (or when
+    # `--no-window` is set) the dialog path runs below with `sudo -k`.
     for a in "$@"; do [ "$a" = -k ] || break; nk=$((nk + 1)); done
-    try_window "${@:nk+1}"
+    if [ "$no_window" = 1 ]; then
+      [ $((nk + 1)) -le $# ] || { echo "usage: sudo-ask --no-window [-k] <command...>" >&2; exit 64; }
+    else
+      try_window "${@:nk+1}"
+    fi
     note_expiry_once ;;
 esac
 

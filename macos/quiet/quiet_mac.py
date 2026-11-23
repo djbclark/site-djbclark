@@ -1663,10 +1663,10 @@ def bootout_agent(label: str) -> None:
         plist.unlink()
 
 
-def _sudo_prefix() -> list[str]:
+def _sudo_prefix(fresh: bool = False) -> list[str]:
     if shutil.which("sudo-ask"):
-        return ["sudo-ask"]
-    return ["sudo"]
+        return ["sudo-ask", "--no-window", "-k"] if fresh else ["sudo-ask"]
+    return ["sudo", "-k"] if fresh else ["sudo"]
 
 
 def install_root_as_root(user: str) -> int:
@@ -1766,7 +1766,7 @@ def cmd_install() -> int:
         )
         root = subprocess.run(
             [
-                *_sudo_prefix(),
+                *_sudo_prefix(fresh=True),
                 python,
                 str(Path(__file__).resolve()),
                 "--install-root",
@@ -1973,7 +1973,7 @@ def remove_root_files() -> None:
         return
     subprocess.run(
         [
-            *_sudo_prefix(),
+            *_sudo_prefix(fresh=True),
             "/bin/rm",
             "-f",
             str(SUDOERS),

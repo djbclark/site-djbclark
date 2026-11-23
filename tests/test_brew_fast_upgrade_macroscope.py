@@ -96,6 +96,43 @@ def test_macroscope_pass_skips_without_install_state(tmp_path):
     assert not (out / "argv").exists()
 
 
+def test_macroscope_pass_respects_xdg_state_home(tmp_path):
+    """site#302 carried LOW: honour XDG_STATE_HOME for macroscope/install.json."""
+    out = tmp_path / "out"
+    out.mkdir()
+    home = tmp_path / "home"
+    cli = home / ".local/bin/macroscope"
+    cli.parent.mkdir(parents=True)
+    cli.write_text(FAKE)
+    cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
+
+    xdg_with_state = tmp_path / "xdg-present"
+    state_file = xdg_with_state / "macroscope/install.json"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text('{"tools": ["claude"], "pathPolicy": "skip"}')
+
+    env = dict(os.environ, HOME=str(home), XDG_STATE_HOME=str(xdg_with_state), FAKE_OUT=str(out), FAKE_RC="0")
+    env.pop("MACROSCOPE_REQUIRE_CHECKSUM", None)
+    script = _function("run_macroscope_pass") + "\nrun_macroscope_pass"
+    res = subprocess.run(["bash", "-c", script], env=env, text=True, input="", capture_output=True)
+    assert res.returncode == 0
+    assert "macroscope: updating CLI + plugin" in res.stdout
+    assert (out / "argv").read_text().split() == ["update", "--yes"]
+
+    # Even when $HOME/.local/state has install.json, an explicit XDG_STATE_HOME without it skips.
+    default_state = home / ".local/state/macroscope/install.json"
+    default_state.parent.mkdir(parents=True)
+    default_state.write_text('{"tools": ["claude"], "pathPolicy": "skip"}')
+    (out / "argv").unlink()
+    xdg_empty = tmp_path / "xdg-empty"
+    xdg_empty.mkdir()
+    env_empty = dict(env, XDG_STATE_HOME=str(xdg_empty))
+    res_skip = subprocess.run(["bash", "-c", script], env=env_empty, text=True, input="", capture_output=True)
+    assert res_skip.returncode == 0
+    assert f"no install state at {xdg_empty}/macroscope/install.json" in res_skip.stdout
+    assert not (out / "argv").exists()
+
+
 def test_macroscope_pass_runs_only_on_first_attempt():
     source = SOURCE.read_text()
     calls = [

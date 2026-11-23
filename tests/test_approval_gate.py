@@ -73,20 +73,67 @@ class GateBase(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
+    EXPECTED_WINDOW_OK = {
+        "sudo-ask",
+        "bgrun-approve-local",
+        "bgrun-ticket",
+        "load-watch-ci-local",
+        "tired-pmset",
+        "neofinder-spotlight-batch",
+        "neofinder-just-sudo",
+        "sip-doit-with-sudo",
+        "quiet-mac-ops",
+    }
+    EXPECTED_ALWAYS_PROMPT = {
+        "denylist-sudoers-pam",
+        "denylist-grant-helper",
+        "denylist-secretspec-broker",
+        "denylist-tcc-keychain",
+        "denylist-disk-erase",
+        "denylist-csrutil-nvram",
+        "denylist-accounts",
+        "ade-merge-ready-approve-post",
+        "quiet-mac-install-root",
+        "mac-dns-setup",
+        "launchd-path-setup",
+        "container-route-setup",
+        "tart-route-setup",
+        "mds-xpc-clients-setup",
+        "neofinder-index-setup",
+        "sudo-secretspec-admin",
+        "sudo-secretspec-backup",
+        "op-sync-grok",
+        "ade-install-keys-collect",
+        "gui-hog-dialog",
+        "quiet-mac-mobileconfig",
+        "ade-auto-permit-prompts",
+        "sudo-askpass-osascript",
+    }
+
     def test_seed_registry_is_well_formed(self) -> None:
+        raw_entries = gate.parse_registry(REGISTRY.read_text())["gate"]
         g = gate.gates()
         self.assertTrue(g)
+        self.assertEqual(len(raw_entries), len(g), "duplicate gate name in registry")
         for name, e in g.items():
             self.assertEqual(set(e), {"name", "owner", "policy", "max_ttl"}, name)
             self.assertIn(e["policy"], ("window-ok", "always-prompt"), name)
             self.assertIsInstance(e["max_ttl"], int, name)
-            self.assertTrue((ROOT / e["owner"]).exists(), "owner file of %s is missing: %s" % (name, e["owner"]))
-        for name in ("sudo-ask", "bgrun-approve-local", "bgrun-ticket"):
-            self.assertEqual(g[name]["policy"], "window-ok")
-        denies = [n for n, e in g.items() if n.startswith("denylist-")]
+            self.assertNotIsInstance(e["max_ttl"], bool, name)
+            self.assertGreaterEqual(e["max_ttl"], 0, name)
+            owner = e["owner"]
+            if ":" in owner:
+                repo, rel = owner.split(":", 1)
+                self.assertIn(repo, ("djbclark-ade", "sudo-secretspec"), name)
+                self.assertTrue(rel and not rel.startswith("/") and ".." not in pathlib.PurePosixPath(rel).parts, owner)
+            else:
+                self.assertTrue((ROOT / owner).exists(), "owner file of %s is missing: %s" % (name, owner))
+        window_ok = {n for n, e in g.items() if e["policy"] == "window-ok"}
+        always_prompt = {n for n, e in g.items() if e["policy"] == "always-prompt"}
+        self.assertEqual(window_ok, self.EXPECTED_WINDOW_OK)
+        self.assertEqual(always_prompt, self.EXPECTED_ALWAYS_PROMPT)
+        denies = [n for n in always_prompt if n.startswith("denylist-")]
         self.assertGreaterEqual(len(denies), 5)
-        for n in denies:
-            self.assertEqual(g[n]["policy"], "always-prompt", n)
 
     def test_fallback_parser_agrees_with_tomllib(self) -> None:
         try:
@@ -229,6 +276,23 @@ class CliTests(GateBase):
         self.assertEqual(self.run_main("check", "--gate", "denylist-sudoers-pam")[0], 1)
         self.assertEqual(self.run_main("check", "--gate", "sudo-ask", "--", "visudo")[0], 1)
         self.assertEqual(self.run_main("check", "--gate", "sudo-ask", "--", "/usr/bin/true")[0], 0)
+
+    def test_check_every_registered_gate_honours_its_policy_in_an_open_window(self) -> None:
+        self.open_window(3600)
+        for name, entry in gate.gates().items():
+            with self.subTest(gate=name, policy=entry["policy"]):
+                if entry["policy"] == "window-ok":
+                    rc, out, err = self.run_main("check", "--gate", name, "--", "/usr/bin/true")
+                    self.assertEqual(rc, 0, err)
+                    self.assertIn("ttl=", out)
+                    rc_deny, _, _ = self.run_main("check", "--gate", name, "--", "visudo")
+                    self.assertEqual(rc_deny, 1)
+                else:
+                    rc_plain, out_plain, err_plain = self.run_main("check", "--gate", name)
+                    self.assertEqual((rc_plain, out_plain), (1, ""))
+                    self.assertIn("always prompts", err_plain)
+                    rc_cmd, out_cmd, _ = self.run_main("check", "--gate", name, "--", "/usr/bin/true")
+                    self.assertEqual((rc_cmd, out_cmd), (1, ""))
 
     def test_usage_errors_exit_2(self) -> None:
         for argv in ((), ("bogus",), ("status", "--gate", "x"), ("check",), ("check", "--gate"),
