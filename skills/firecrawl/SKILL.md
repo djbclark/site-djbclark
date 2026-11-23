@@ -57,6 +57,16 @@ TUI links it through `skill-everywhere`; edit only here.
    backend: `firecrawl-router --listen 127.0.0.1:18805 --open`. `--open` drops
    the bearer token and refuses non-loopback addresses. Hermes never reroutes a
    failed search itself, so the router is its fallback.
+6. **MIT Libraries Mac bridge (`bin/firecrawl_mit_bridge.py`, 2026-11-22):**
+   Hyades-first, fail-closed fallback inside `firecrawl-router` for `POST /v1/scrape`
+   and `POST /v2/scrape` on exact hosts present in a fresh (`<= 7d`, `0600`)
+   enrollment snapshot (`FIRECRAWL_ROUTER_MIT_SNAPSHOT`). Mode `"pdf"` runs
+   `fetch.py --artifact --enrolled-only` + `pdftotext`/`pdfinfo` (`X-Firecrawl-Backend:
+   mit-fetch`); mode `"all"` adds `browserfetch.py` over `127.0.0.1:18830` +
+   `pandoc --sandbox` (with `page.txt` fallback, `X-Firecrawl-Backend: mit-browser`).
+   Non-enrolled hosts, non-scrape routes, stale/invalid snapshots, and any bridge
+   error fail closed to the untouched Hyades reply (`X-Firecrawl-MIT-Bridge: skipped:<reason>`).
+   Instant rollback: set `FIRECRAWL_ROUTER_MIT_BRIDGE=off` + `launchctl kickstart -k`.
 
 ## `query` and `json` formats (LLM extraction, router-side)
 

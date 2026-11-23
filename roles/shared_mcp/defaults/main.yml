@@ -116,6 +116,13 @@ shared_mcp_servers:
       # first, then the free LiteLLM pool. The router hides both keys from firecrawl-mcp.
       FIRECRAWL_ROUTER_SIPB_KEY: "{{ lookup('env', 'MIT_SIPB_API_KEY') | default('', true) }}"
       FIRECRAWL_ROUTER_LITELLM_KEY: "{{ lookup('env', 'LITELLM_MASTER_KEY') | default('', true) }}"
+      FIRECRAWL_ROUTER_LLM_ORDER: "{{ shared_mcp_firecrawl_llm_order }}"
+      # MIT Libraries Mac bridge (2026-11-22): Hyades-first, fail-closed, exact enrolled hosts only.
+      # Instant rollback: set shared_mcp_firecrawl_mit_bridge to "off" (or override in plist) + kickstart.
+      FIRECRAWL_ROUTER_MIT_BRIDGE: "{{ shared_mcp_firecrawl_mit_bridge }}"
+      FIRECRAWL_ROUTER_MIT_SNAPSHOT: "{{ shared_mcp_firecrawl_mit_snapshot }}"
+      FIRECRAWL_ROUTER_MIT_FETCH_BIN: "{{ shared_mcp_firecrawl_mit_fetch_bin }}"
+      FIRECRAWL_ROUTER_MIT_BROWSER_BIN: "{{ shared_mcp_firecrawl_mit_browser_bin }}"
   # greptile (2026-11-01): Greptile's hosted MCP server (https://api.greptile.com/mcp, 21 tools, ~47.7 KB of
   # schemas) behind ONE keyless local endpoint with an 8-tool review allowlist (bin/greptile-mcp-proxy in
   # this repo, linked into shared_mcp_bin_dir by the role). The daemon reads GREPTILE_API_KEY itself, once,
@@ -143,3 +150,14 @@ shared_mcp_firecrawl_api_key: "{{ lookup('env', 'FIRECRAWL_SELFHOST_API_KEY') | 
 # FIRECRAWL_API_KEY), and apply again without it afterwards.
 shared_mcp_firecrawl_commercial_enabled: false
 shared_mcp_firecrawl_fallback_api_key: "{{ (lookup('env', 'FIRECRAWL_API_KEY') | default('', true)) if shared_mcp_firecrawl_commercial_enabled | bool else '' }}"
+
+# MIT Libraries Mac bridge (Slices 1a + 1b; operator-approved activation only).
+# Modes: "off" (default in router), "pdf" (fetch.py + pdftotext), "all" (adds browserfetch.py + pandoc --sandbox).
+# Requires a fresh (<= 7d), mode-0600, user-owned snapshot at shared_mcp_firecrawl_mit_snapshot.
+shared_mcp_firecrawl_mit_bridge: "all"
+shared_mcp_firecrawl_mit_snapshot: "{{ shared_mcp_home }}/.local/state/mitnet-routing/enrolled-snapshot.json"
+shared_mcp_firecrawl_mit_fetch_bin: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/fetch.py"
+shared_mcp_firecrawl_mit_browser_bin: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/browserfetch.py"
+# LLM extractor order for query/json formats: "oneshot-first" keeps SIPB for short/medium pages
+# (<= ~24k tokens) and uses 1M-context LiteLLM (gemini-free, gemini-free-lite) one-shot for long papers.
+shared_mcp_firecrawl_llm_order: "oneshot-first"
