@@ -1,0 +1,23 @@
+---
+all:
+  children:
+    stayturgid:
+      hosts:
+        hd8:
+          ansible_host: 100.124.55.39       # Tailscale IP
+          device_usb_serial: GN43T503430603PS
+          device_lan_ip: "-"                # unknown: .1.157 now belongs to m11 (seen 2026-11-21); reserve when hd8 is back online
+          device_label: Kindle Fire HD 8
+          # Fire OS deploys are operator-managed (2026-10-06): never auto-heal over USB.
+          device_usb_heal: false
+          firerpa_enabled: true
+          # Fire OS prevents Termux from executing shell_data_file content and
+          # tears down direct rish children. Mac ADB supplies persistent
+          # UID 2000.
+          firerpa_recovery_mode: control-node-adb
+    android_11:
+      hosts: {hd8: {}}
+    vendor_amazon:
+      hosts: {hd8: {}}
+    model_kindle_hd8:
+      hosts: {hd8: {}}

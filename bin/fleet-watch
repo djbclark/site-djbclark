@@ -169,7 +169,23 @@ STATE_DIR="$HOME/.local/state/fleet-watch"
 LAST="$STATE_DIR/last"
 LOG="$STATE_DIR/fleet-watch.log"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-HOSTS="${FLEET_WATCH_HOSTS:-s24 p7a t2e hd8}"
+_discover_fleet_hosts() {
+  local conf="${STAYTURGID_DEVICES_CONF:-$HOME/.config/stayturgid/devices.conf}"
+  if [[ -r "$conf" ]]; then
+    gawk 'NF >= 3 && $1 !~ /^#/ {print $1}' "$conf" | tr '\n' ' ' | gsed 's/ *$//'
+    return
+  fi
+  local devdir="$REPO_ROOT/inventory/devices.d"
+  if [[ -d "$devdir" ]]; then
+    local f names=()
+    for f in "$devdir"/*.yml "$devdir"/*.yaml; do
+      [[ -f "$f" ]] || continue
+      names+=("$(basename "${f%.*}")")
+    done
+    printf '%s\n' "${names[*]}"
+  fi
+}
+HOSTS="${FLEET_WATCH_HOSTS:-$(_discover_fleet_hosts)}"
 INTERVAL="${FLEET_WATCH_INTERVAL:-300}"
 REPOS="${FLEET_WATCH_REPOS-pkb-rocks/plektra}"
 REPO_INTERVAL="${FLEET_WATCH_REPO_INTERVAL:-3600}"

@@ -32,7 +32,7 @@ import tempfile
 import yaml
 
 OPS = os.environ.get("OPS_ROOT", os.path.expanduser("~/ops"))
-INVENTORY = os.path.join(OPS, "site-public-djbclark", "inventory", "hosts.yml")
+INVENTORY = os.path.join(OPS, "site-public-djbclark", "inventory", "devices.d")
 STATE = os.path.join(
     os.path.expanduser("~"), ".local", "state", "lan-ip-check", "state.json"
 )
@@ -156,6 +156,22 @@ def notify(problems: list[str], state: dict, dry_run: bool) -> None:
     state["last_pinged"] = key if not dry_run else state.get("last_pinged", "")
 
 
+def load_phones(path: str) -> dict[str, dict[str, str]]:
+    """Load phone records from a single YAML inventory file or a devices.d/ directory."""
+    if os.path.isdir(path):
+        merged: dict[str, dict[str, str]] = {}
+        for entry in sorted(os.listdir(path)):
+            if not entry.endswith((".yml", ".yaml")):
+                continue
+            full = os.path.join(path, entry)
+            if os.path.isfile(full):
+                with open(full) as f:
+                    merged.update(phones(yaml.safe_load(f) or {}))
+        return merged
+    with open(path) as f:
+        return phones(yaml.safe_load(f) or {})
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--inventory", default=INVENTORY)
@@ -166,8 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         help="with --notify: print the ping instead of sending it",
     )
     args = ap.parse_args(argv)
-    with open(args.inventory) as f:
-        devices = phones(yaml.safe_load(f) or {})
+    devices = load_phones(args.inventory)
     if not devices:
         print(f"no host with device_lan_ip in {args.inventory}", file=sys.stderr)
         return 2

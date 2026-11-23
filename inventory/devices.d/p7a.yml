@@ -1,0 +1,25 @@
+---
+all:
+  children:
+    stayturgid:
+      hosts:
+        p7a:
+          ansible_host: 100.65.230.108      # Tailscale IP
+          device_usb_serial: 35261JEHN12374
+          device_lan_ip: "-"                # unknown: .74 now belongs to another host; reserve when p7a is back online
+          device_label: Pixel 7a
+          # Redundant native-agent peer for hd8. This converges automatically
+          # when p7a next participates in a normal fleet deploy.
+          stayturgid_native_agent_peer_targets:
+            - "100.124.55.39:5555"
+          # FIRERPA v10 exited before listening on this API 37 / Android 17 OS
+          # (firerpa/lamda#147). v10.9 fixes it and was proven here on
+          # 2026-10-03: listening on :65000, no "unsupported sdk", patched
+          # coexistence driver active, five accessibility services still bound.
+          firerpa_enabled: true
+    android_16:
+      hosts: {p7a: {}}
+    vendor_google:
+      hosts: {p7a: {}}
+    model_pixel_7a:
+      hosts: {p7a: {}}

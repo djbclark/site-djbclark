@@ -1,36 +1,36 @@
 """Site desired-state guards for native-agent peer redundancy."""
 
-import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
+DEVICES_DIR = ROOT / "inventory" / "devices.d"
+
+
+def _load_device_vars(alias: str) -> dict:
+    data = yaml.safe_load((DEVICES_DIR / f"{alias}.yml").read_text(encoding="utf-8"))
+    return data["all"]["children"]["stayturgid"]["hosts"][alias]
 
 
 class NativeAgentInventoryTest(unittest.TestCase):
     """Keep peer redundancy in the normal fleet-deploy source of truth."""
 
     def test_phone_peers_converge_hd8_assignment_via_normal_deploy(self):
-        inventory = (ROOT / "inventory/hosts.yml").read_text(encoding="utf-8")
-        s24_block = inventory.split("        s24:\n", 1)[1].split(
-            "        p7a:\n", 1
-        )[0]
-        p7a_block = inventory.split("        p7a:\n", 1)[1].split(
-            "        hd8:\n", 1
-        )[0]
-        hd8_block = inventory.split("        hd8:\n", 1)[1].split(
-            "      vars:\n", 1
-        )[0]
-        hd8_address = re.search(
-            r"^\s+ansible_host:\s+(\S+)", hd8_block, flags=re.MULTILINE
-        )
-        self.assertIsNotNone(hd8_address)
-        assert hd8_address is not None
-        peer_assignment = (
-            "stayturgid_native_agent_peer_targets:\n"
-            f'            - "{hd8_address.group(1)}:5555"'
-        )
+        s24 = _load_device_vars("s24")
+        p7a = _load_device_vars("p7a")
+        hd8 = _load_device_vars("hd8")
 
-        self.assertIn(peer_assignment, s24_block)
-        self.assertIn(peer_assignment, p7a_block)
-        self.assertNotIn("stayturgid_native_agent_peer_targets", hd8_block)
+        hd8_address = hd8.get("ansible_host")
+        self.assertTrue(hd8_address)
+        expected_target = f"{hd8_address}:5555"
+
+        self.assertIn(
+            expected_target, s24.get("stayturgid_native_agent_peer_targets", [])
+        )
+        self.assertIn(
+            expected_target, p7a.get("stayturgid_native_agent_peer_targets", [])
+        )
+        self.assertNotIn("stayturgid_native_agent_peer_targets", hd8)
+        self.assertIs(hd8.get("device_usb_heal"), False)

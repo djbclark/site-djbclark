@@ -1,0 +1,24 @@
+---
+all:
+  children:
+    stayturgid:
+      hosts:
+        m11:
+          # Added 2026-11-20 (docs/plans/new-devices-2026-11-20/PLAN.md). Joined the
+          # tailnet by 2026-11-21 (tailscale status: m11 100.92.162.72), so ansible_host
+          # is now the Tailscale IP.
+          ansible_host: 100.92.162.72
+          device_usb_serial: HA2PMV18
+          device_lan_ip: 192.168.68.77      # DHCP lease seen 2026-11-21 late (was .1.157, .68.74); reserve it
+          device_label: Lenovo Idea Tab 11 (TB336FU)
+          # USB-attached to the Mac: keep the Mac as the persistent adb (hd8 pattern).
+          firerpa_recovery_mode: control-node-adb
+          # Tailscale 1.104.6 was installed before the fleet pin (1.104.2); the role
+          # refuses a downgrade, so it is held at the installed build until the pin moves.
+          stayturgid_bootstrap_apks_hold: [com.tailscale.ipn]
+    android_16:
+      hosts: {m11: {}}
+    vendor_lenovo:
+      hosts: {m11: {}}
+    model_idea_tab_11:
+      hosts: {m11: {}}

@@ -1,0 +1,23 @@
+---
+all:
+  children:
+    stayturgid:
+      hosts:
+        s24:
+          ansible_host: 100.123.218.30      # Tailscale IP
+          device_usb_serial: RFCX219CHKA
+          device_lan_ip: 192.168.68.56      # router DHCP reservation (2026-10-25)
+          device_label: Galaxy S24
+          # Native-agent desired state: independently keep hd8's Shizuku up.
+          # Normal fleet deploy owns peer.json; do not provision it ad hoc.
+          stayturgid_native_agent_peer_targets:
+            - "100.124.55.39:5555"
+          firerpa_enabled: true
+    android_16:
+      hosts: {s24: {}}
+    vendor_samsung:
+      hosts: {s24: {}}
+    oneui_7:
+      hosts: {s24: {}}
+    model_galaxy_s24:
+      hosts: {s24: {}}
