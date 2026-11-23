@@ -48,15 +48,28 @@ openobserve_root_email: djbclark@gmail.com
 # the fleet/control-node service set changes; no product code change needed.
 serverapp_victoriametrics_blackbox_targets:
   # Termux SSH on fleet devices — derived dynamically from inventory/devices.d/*.yml
-  # via the Ansible `stayturgid` group so adding/removing a device needs no edit here.
+  # (works both in full-inventory plays via groups['stayturgid'] and in own-mode
+  # `-i localhost,` serverapp_victoriametrics runs via site_dir + fileglob).
   ssh_banner: >-
     {%- set out = [] -%}
-    {%- for h in groups.get('stayturgid', []) | sort -%}
-      {%- set hv = hostvars[h] | default({}) -%}
-      {%- if hv.ansible_host is defined -%}
-        {%- set _ = out.append({'target': hv.ansible_host ~ ':' ~ (hv.ansible_port | default(8022)), 'labels': {'machine_name': h}}) -%}
-      {%- endif -%}
-    {%- endfor -%}
+    {%- if groups.get('stayturgid', []) | length > 0 -%}
+      {%- for h in groups.get('stayturgid', []) | sort -%}
+        {%- set hv = hostvars[h] | default({}) -%}
+        {%- if hv.ansible_host is defined -%}
+          {%- set _ = out.append({'target': hv.ansible_host ~ ':' ~ (hv.ansible_port | default(8022)), 'labels': {'machine_name': h}}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- elif site_dir is defined -%}
+      {%- for p in (query('fileglob', site_dir ~ '/inventory/devices.d/*.yml') | sort) -%}
+        {%- set doc = (lookup('file', p) | from_yaml) | default({}) -%}
+        {%- set hosts = (((doc.get('all') or {}).get('children') or {}).get('stayturgid') or {}).get('hosts') or {} -%}
+        {%- for h, hv in hosts.items() | sort -%}
+          {%- if hv and hv.ansible_host is defined -%}
+            {%- set _ = out.append({'target': hv.ansible_host ~ ':' ~ (hv.ansible_port | default(8022)), 'labels': {'machine_name': h}}) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+    {%- endif -%}
     {{ out }}
   # Caddy front door. HTTPS target uses the real tailnet hostname, not
   # 127.0.0.1 — the cert (real Let's Encrypt via Tailscale's cert
