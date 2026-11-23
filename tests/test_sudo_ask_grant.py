@@ -1407,6 +1407,12 @@ class ModeTests(GrantBase):
 
 SUDO = "/usr/bin/sudo"
 HELPER_PATH = "/usr/local/libexec/sudo-ask-granted"
+REAL_MACOS_USER_LINE = (
+    'env_reset, env_keep+=BLOCKSIZE, env_keep+="COLORFGBG COLORTERM", env_keep+=__CF_USER_TEXT_ENCODING, '
+    'env_keep+="CHARSET LANG LANGUAGE LC_ALL LC_COLLATE LC_CTYPE", env_keep+="LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME", '
+    'env_keep+="LINES COLUMNS", env_keep+=LSCOLORS, env_keep+=SSH_AUTH_SOCK, env_keep+=TZ, '
+    'env_keep+="DISPLAY XAUTHORIZATION XAUTHORITY", env_keep+="EDITOR VISUAL", env_keep+="HOME MAIL", '
+    'lecture_file=/etc/sudo_lecture, !log_allowed, timestamp_type=global, timestamp_timeout=5, timestamp_timeout=0')
 
 
 def P(ppid, ruid, argv, exec_path=None, **kernel):
@@ -1690,8 +1696,8 @@ class SetupScriptTests(unittest.TestCase):
         self.assertNotIn("/opt/homebrew", code)
         self.assertNotRegex(code, r"(?m)(^|[;&|(])\s*sudo ")                  # no PATH-resolved sudo call
         self.assertIn('run_root() { "$fake" "$@"; }', code)              # root steps go through one absolute path
-        self.assertNotIn('sudo -n "$BIN" revoke', code)                  # no live revoke probe
-        self.assertIn('-l "$BIN" revoke extra', code)
+        self.assertNotIn('-l "$BIN"', code)                              # `-l CMD` says only that CMD is allowed at all: run it
+        self.assertIn('sudo_try "$1" "$BIN" revoke extra', code)         # (a revoke with no window changes nothing)
         self.assertIn("a sudo ticket is honoured", code)                 # MED-1: verify fails on a live ticket
 
     def test_check_is_read_only_and_reports(self) -> None:
@@ -1936,6 +1942,121 @@ class SetupScriptTests(unittest.TestCase):
         p, calls = self.guarded("--ticket-checks", with_fake=False)
         self.assertEqual(p.returncode, 2)             # no temp fake and no --live: refuses before any call
         self.assertEqual(calls, "")
+
+    def test_the_listing_macos_prints_passes_the_gate(self) -> None:   # the live install of 2026-11-23 rolled back on this
+        listing = self.real_listing(user=(REAL_MACOS_USER_LINE,), runas=(
+            "Defaults!/usr/local/bin/sudo-secretspec timestamp_timeout=0",
+            "Defaults!/opt/sudo-secretspec-test/bin/sudo-secretspec timestamp_timeout=0"))
+        p, calls = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(listing))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("the sudo ticket is off", p.stdout)
+        self.assertNotIn("unreadable", p.stdout)
+
+    def test_quoted_values_are_ignored_unless_they_mention_the_ticket(self) -> None:
+        bad = {
+            "a quoted list hides a zero": 'env_keep+="X ,timestamp_timeout=0, Y", timestamp_timeout=15',
+            "a quoted ticket value": 'timestamp_timeout="0"',
+            "a single-quoted ticket value": "timestamp_timeout=\'0\'",
+            "an unterminated quote swallows the zero": 'timestamp_timeout=15, env_keep+="X, timestamp_timeout=0',
+            "an escaped quote does not end it": r'timestamp_timeout=15, env_keep+="X\" , timestamp_timeout=0, Y"',
+            "the real line with a later 15": REAL_MACOS_USER_LINE + ", timestamp_timeout=15",
+            "the real line, last quoted": REAL_MACOS_USER_LINE + ', env_keep+="timestamp_timeout=0"',
+        }
+        for name, line in bad.items():
+            with self.subTest(name):
+                p, _ = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(user=(line,))))
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertNotIn("Traceback", p.stdout + p.stderr)
+        good = {
+            "quoted values with spaces and commas elsewhere": 'env_keep+="A B, C", timestamp_timeout=0',
+            "a quote with a trailing 0 after it": 'env_keep+="A,B", timestamp_timeout=5, timestamp_timeout=0',
+            "single quotes elsewhere": "env_keep+=\'A B\', timestamp_timeout=0",
+        }
+        for name, line in good.items():
+            with self.subTest(name):
+                p, _ = self.guarded("--ticket-checks", fake_dir=self.checks_sudo_dir(self.real_listing(user=(line,))))
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+    # ---- the grant/revoke/status/exec checks run the commands: `sudo -n -l CMD` only asks whether CMD is allowed at all
+    PW = "sudo: a password is required"
+
+    def behaviour_sudo_dir(self, **over):
+        """A fake sudo for --behaviour-checks. Each key is the command after `sudo -n BIN`: (rc, stderr) as an admin with a
+        password on a real macOS prints them (the default scenario is a healthy install). Messages are German unless LC_ALL=C."""
+        sc = {"grant": (1, self.PW), "revoke": (0, ""), "revoke extra": (1, self.PW), "status": (1, ""),
+              "exec": (75, "sudo-ask-granted: no open window")}
+        sc.update(over)
+        d = pathlib.Path(tempfile.mkdtemp(prefix="sag-guard-fake-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        import shlex
+        arms = []
+        for key, pat in (("grant", "grant 60s"), ("revoke extra", "revoke extra"), ("revoke", "revoke"), ("status", "status"),
+                         ("exec", "exec -- /usr/bin/true")):
+            rc, err = sc[key]
+            msg = '"$(tr_msg)"' if err == self.PW else shlex.quote(err)
+            arms.append("  %s) msg=%s; code=%d ;;" % (shlex.quote("-n %s %s" % (HELPER_PATH, pat)), msg, rc))
+        text = ('#!/bin/bash\necho "SUDO $* [LC_ALL=${LC_ALL-unset} LANG=${LANG-unset}]" >> "$FAKE_LOG"\n'
+                'tr_msg() { if [ "${LC_ALL-}" = C ]; then printf "%s" "sudo: a password is required"; '
+                'else printf "%s" "sudo: ein Passwort ist erforderlich"; fi; }\n'
+                'case "$*" in\n' + "\n".join(arms) + '\n  *) msg="unexpected: $*"; code=99 ;;\nesac\n'
+                '[ -n "$msg" ] && echo "$msg" >&2\nexit $code\n')
+        (d / "sudo").write_text(text)
+        (d / "sudo").chmod(0o755)
+        return d
+
+    def behaviour(self, **over):
+        p, calls = self.guarded("--behaviour-checks", fake_dir=self.behaviour_sudo_dir(**over))
+        return p, calls
+
+    def test_behaviour_checks_pass_on_a_healthy_install(self) -> None:
+        p, calls = self.behaviour()
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        for line in ("grant needs authentication", "revoke needs no password", "revoke with extra arguments is refused by sudo",
+                     "status works without a password (exit 1)", "exec refuses with no window (75)"):
+            self.assertIn("ok    " + line, p.stdout)
+        self.assertNotIn("FAIL", p.stdout)
+        for call in ("grant 60s", "revoke", "revoke extra", "status", "exec -- /usr/bin/true"):
+            self.assertIn("SUDO -n %s %s [LC_ALL=C LANG=C]" % (HELPER_PATH, call), calls)    # run, never `-n -l`, in the C locale
+        self.assertNotIn(" -l ", calls)
+
+    def test_behaviour_checks_pass_when_a_window_is_open(self) -> None:
+        p, _ = self.behaviour(status=(0, ""), exec=(0, ""))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("a window is open; exec check skipped", p.stdout)
+
+    def test_behaviour_checks_catch_each_failure_for_the_right_reason(self) -> None:
+        for name, over, said in (
+                ("grant ran without a password", {"grant": (0, "")}, "grant ran WITHOUT a password"),
+                ("grant failed on its own, not sudo's refusal", {"grant": (1, "helper: fresh authentication needed")}, "not because sudo wanted a password"),
+                ("revoke needs a password", {"revoke": (1, self.PW)}, "revoke needs a password"),
+                ("revoke failed", {"revoke": (3, "helper: boom")}, "revoke failed (exit 3)"),
+                ("revoke extra let through", {"revoke extra": (0, "")}, "revoke with extra arguments was let through"),
+                ("revoke extra failed on its own", {"revoke extra": (2, "helper: usage")}, "not because sudo refused it"),
+                ("status needs a password", {"status": (1, self.PW)}, "status needs a password"),
+                ("status crashed", {"status": (70, "helper: crash")}, "status failed (exit 70)"),
+                ("exec needs a password", {"exec": (1, self.PW)}, "exec needs a password"),
+                ("exec ran", {"exec": (0, "")}, "exec with no window exited 0")):
+            with self.subTest(name):
+                p, _ = self.behaviour(**over)
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertIn("FAIL  ", p.stdout)
+                self.assertIn(said, p.stdout)
+
+    def test_behaviour_checks_accept_not_allowed_as_sudos_refusal(self) -> None:   # a non-admin user: no password rule at all
+        na = "Sorry, user x is not allowed to execute '/usr/local/libexec/sudo-ask-granted grant 60s' as root on h."
+        p, _ = self.behaviour(grant=(1, na), **{"revoke extra": (1, na.replace("grant 60s", "revoke extra"))})
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+    def test_behaviour_checks_are_guarded(self) -> None:
+        p, calls = self.guarded("--behaviour-checks", with_fake=False)
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(calls, "")
+
+    def test_verify_runs_the_same_behaviour_checks_and_never_asks_with_dash_l(self) -> None:
+        src = SETUP.read_text()
+        self.assertIn("behaviour_checks /usr/bin/sudo\n", src)
+        self.assertNotRegex(src, r'sudo -n -l "\$BIN"')             # `-l CMD` says only that CMD is allowed at all
+        self.assertNotRegex(src, r'"\$[0-9A-Za-z_]+" -n -l "\$BIN"')
 
     def test_the_gate_and_the_verify_use_the_same_proof(self) -> None:
         src = SETUP.read_text()
