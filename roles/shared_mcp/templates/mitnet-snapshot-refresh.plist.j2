@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.{{ site_ns }}.mitnet-snapshot-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/sudo-secretspec</string>
+        <string>run</string>
+        <string>--reason</string>
+        <string>scheduled MITnet enrollment snapshot refresh</string>
+        <string>--</string>
+        <string>{{ shared_mcp_firecrawl_mit_python }}</string>
+        <string>-E</string>
+        <string>-s</string>
+        <string>-S</string>
+        <string>{{ shared_mcp_firecrawl_mit_transport_bin }}</string>
+        <string>snapshot</string>
+        <string>--live</string>
+        <string>--replace</string>
+        <string>--tailnet</string>
+        <string>{{ shared_mcp_firecrawl_mit_tailnet }}</string>
+        <string>--output</string>
+        <string>{{ shared_mcp_firecrawl_mit_snapshot }}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{ shared_mcp_home }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ shared_mcp_home }}</string>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>{{ shared_mcp_firecrawl_mit_snapshot_refresh_interval | int }}</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{ shared_mcp_logs_dir }}/mitnet-snapshot-refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ shared_mcp_logs_dir }}/mitnet-snapshot-refresh.log</string>
