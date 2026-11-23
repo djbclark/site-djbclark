@@ -1668,10 +1668,22 @@ class SetupScriptTests(unittest.TestCase):
         self.assertIn("/usr/local/libexec/sudo-ask-granted exec *", line)
         self.assertIn("sudo-ask-granted status", line)
         self.assertNotRegex(line, r"\bgrant\b|NOPASSWD: ALL")
-        # ruling 3: revoke needs no password, with an EMPTY argument list ("" matches no arguments, never a wildcard)
-        self.assertIn('/usr/local/libexec/sudo-ask-granted revoke ""', line)
-        self.assertNotRegex(line, r"revoke( \*|\s*,|\s*$)")
+        # ruling 3: revoke needs no password, with no wildcard so sudo matches only `revoke` with no extra arguments
+        self.assertRegex(line, r", /usr/local/libexec/sudo-ask-granted revoke$")
+        self.assertNotIn('revoke ""', line)
+        self.assertNotRegex(line, r"revoke\s+\*")
         self.assertIn("Defaults!/usr/local/libexec/sudo-ask-granted env_reset, timestamp_timeout=0", p.stdout)
+
+    def test_revoke_rule_has_no_empty_string_arg_and_passes_visudo(self) -> None:
+        # Regression: in sudoers(5), `""` means "no arguments" only as the sole arg (`cmd ""`).
+        # After `revoke`, `cmd revoke ""` requires a literal empty second arg and refuses `sudo -n cmd revoke`.
+        p = self.run_setup("--print")   # --print validates the rendered drop-in with `visudo -cf`
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn('revoke ""', p.stdout)
+        rules = [ln for ln in p.stdout.splitlines() if "NOPASSWD" in ln and not ln.startswith("#")]
+        self.assertEqual(len(rules), 1)
+        self.assertTrue(rules[0].endswith("/usr/local/libexec/sudo-ask-granted revoke"), rules[0])
+        self.assertNotRegex(rules[0], r"revoke\s+\*")
 
     def test_the_drop_in_turns_the_shared_sudo_ticket_off(self) -> None:   # MED-1 fix 3 (operator ruling)
         p = self.run_setup("--print")   # --print runs visudo -cf on the rendered drop-in: rc 0 means it parses
