@@ -19,7 +19,7 @@ actions:
     timeout: 300
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just health
   - id: stayturgid_fleet_deploy_check
     title: "Deploy check — all hosts (dry-run)"
@@ -27,7 +27,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy-check
   - id: stayturgid_fleet_deploy
     title: "Deploy fleet — all hosts"
@@ -35,26 +35,8 @@ actions:
     timeout: 3600
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy
-
-  - id: stayturgid_deploy_hd8
-    title: "Deploy Kindle Fire HD 8 (hd8)"
-    icon: "&#128640;"
-    timeout: 1800
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
-      just deploy hd8
-
-  - id: stayturgid_deploy_m11
-    title: "Deploy Lenovo Idea Tab 11 (TB336FU) (m11)"
-    icon: "&#128640;"
-    timeout: 1800
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
-      just deploy m11
 
   - id: stayturgid_deploy_mac
     title: "Deploy mac (mac)"
@@ -62,7 +44,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy mac
 
   - id: stayturgid_deploy_mac_mini_intel
@@ -71,35 +53,8 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy mac-mini-intel
-
-  - id: stayturgid_deploy_p7a
-    title: "Deploy Pixel 7a (p7a)"
-    icon: "&#128640;"
-    timeout: 1800
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
-      just deploy p7a
-
-  - id: stayturgid_deploy_s24
-    title: "Deploy Galaxy S24 (s24)"
-    icon: "&#128640;"
-    timeout: 1800
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
-      just deploy s24
-
-  - id: stayturgid_deploy_t2e
-    title: "Deploy Unihertz Titan 2 (t2e)"
-    icon: "&#128640;"
-    timeout: 1800
-    shell: |
-      export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
-      just deploy t2e
 
   - id: stayturgid_deploy_vps_hub
     title: "Deploy vps-hub (vps-hub)"
@@ -107,7 +62,7 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy vps-hub
 
   - id: stayturgid_deploy_vps_primary
@@ -116,6 +71,6 @@ actions:
     timeout: 1800
     shell: |
       export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid-firerpa
+      cd ${OPS_ROOT:-/Users/djbclark/ops}/stayturgid
       just deploy vps-primary
 
