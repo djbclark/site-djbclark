@@ -106,8 +106,13 @@ from a panic button without a sensor. It takes no arguments (the sudoers line is
 extras).
 
 `--verify` checks this on the installed system: it runs the ticket check above, and it FAILS if a plain `sudo -n /usr/bin/true` succeeds (with the ticket off no cached ticket is honoured, so a success means a live ticket or a NOPASSWD rule for `true`); then, with the ticket dropped,
-`sudo -n helper grant` must fail, `sudo -n -l helper revoke` must be allowed and `... revoke extra` refused (a sudoers
-question, nothing is revoked), `status` must work, and `exec` with no window must exit 75.
+`sudo -n helper grant` must be refused by sudo itself (its "a password is required" message, in the C locale), `sudo -n helper
+revoke` must run (at install time no window exists, so it changes nothing) and `... revoke extra` must be refused by sudo, `status`
+must run (exit 0 or 1, and not a sudo refusal), and `exec` with no window must exit 75. Every one of these RUNS the command: `sudo -n
+-l CMD` only asks whether CMD is allowed at all, and an admin with a password is allowed everything, so it can prove nothing about
+NOPASSWD. The ticket check reads the listing with its commas split outside quotes, because macOS lists `env_keep+="COLORFGBG
+COLORTERM"` and similar quoted values in the same line as the `timestamp_timeout` entries; only a quoted value that itself mentions
+`timestamp_timeout` is unreadable. `--behaviour-checks` runs just these five checks (a test gives it a fake `sudo`).
 
 ## Agent-writable code prompts, even in a window (ruling 1)
 

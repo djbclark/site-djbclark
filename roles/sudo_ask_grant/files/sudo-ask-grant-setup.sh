@@ -8,6 +8,8 @@
 #                                              exec needs a window; fails when the sudo ticket is not off
 #   sudo-ask-grant-setup.sh --ticket-checks    only the two ticket checks --verify runs (the `sudo -n -l` listing says the
 #                                              ticket is off; a plain `sudo -n /usr/bin/true` fails); a test gives a fake sudo
+#   sudo-ask-grant-setup.sh --behaviour-checks only the grant/revoke/status/exec checks --verify runs (each RUNS the command: `sudo -n -l CMD`
+#                                              only says CMD is allowed at all); a test gives a fake sudo
 #   sudo-ask-grant-setup.sh --rollback --live  remove the drop-in, helper and grant file (sudo-ask then prompts again)
 #
 # GUARD: install, --verify and --rollback change or probe the REAL machine, so they refuse (exit 2, before any
@@ -58,8 +60,9 @@ for a in "$@"; do
   case $a in
     --print) mode=print ;; --check) mode=check ;; --diff) diff_flag=1 ;;
     --verify) mode=verify ;; --rollback) mode=rollback ;; --live) live=1 ;;
+    --behaviour-checks) mode=behaviourchecks ;;   # tests: the grant/revoke/status/exec checks against a fake sudo
     --ticket-checks) mode=ticketchecks ;;   # tests (and a manual re-check): the two ticket checks, nothing else
-    *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --ticket-checks [--live] | --rollback --live]" >&2; exit 64 ;;
+    *) echo "usage: $0 [--print | --check [--diff] | --live | --verify --live | --ticket-checks [--live] | --behaviour-checks [--live] | --rollback --live]" >&2; exit 64 ;;
   esac
 done
 
@@ -133,8 +136,10 @@ rollback_body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/gra
 # first Defaults! entry onto the end of the last Defaults> line (no newline between them), so those lines are split
 # again before they are judged. Therefore:
 #   1. the user section must exist and its last timestamp_timeout must be 0 (a bare `!timestamp_timeout` counts as 0);
-#      a value is read only in sudo's own number grammar ([+-]digits[.digits]): anything else is unreadable, and so is
-#      a quoted value that mentions timestamp_timeout (a list value can hide a `,timestamp_timeout=0,`);
+#      a value is read only in sudo's own number grammar ([+-]digits[.digits]): anything else is unreadable. The line is
+#      split on commas OUTSIDE quotes (macOS lists env_keep+="COLORFGBG COLORTERM" and the like in the same line): a
+#      quoted token that does not mention timestamp_timeout is ignored, one that does (a list value can hide a
+#      `,timestamp_timeout=0,`) is unreadable;
 #   2. no Defaults> entry may mention timestamp_timeout (it applies after the user entries to every command run as that user);
 #   3. no Defaults! entry may carry a non-zero or unreadable timestamp_timeout (it would give a ticket to that command);
 #   4. the Runas section must exist exactly once and hold the helper's own Defaults! line, and after the user section
@@ -164,14 +169,35 @@ for line in sys.stdin.read().splitlines():
     elif seen_user_section and not hdr.startswith(("Runas and Command-specific defaults for ", "User ")):
         fail("an unrecognised line follows the defaults in the listing: %s" % hdr)
     sections.append((hdr, []))
+def tokens(text):
+    toks, cur, q, i = [], [], None, 0
+    while i < len(text):
+        c = text[i]
+        if q:
+            cur.append(c)
+            if c == "\\" and i + 1 < len(text):
+                i += 1
+                cur.append(text[i])
+            elif c == q:
+                q = None
+        elif c in "\"\x27":
+            q = c
+            cur.append(c)
+        elif c == ",":
+            toks.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    toks.append("".join(cur))
+    return toks
 def values(text):
-    if "timestamp_timeout" not in text:
-        return []
-    if "\"" in text or "\x27" in text:
-        return [None]
     out = []
-    for tok in text.split(","):
+    for tok in tokens(text):
         if "timestamp_timeout" not in tok:
+            continue
+        if "\"" in tok or "\x27" in tok:
+            out.append(None)
             continue
         m = re.fullmatch(r"\s*(!?)timestamp_timeout(?:=([^\s,]+))?\s*", tok)
         if not m:
@@ -238,6 +264,41 @@ ticket_checks() {   # $1: the sudo to ask. The listing check, then the plain-sud
   return $rc
 }
 
+ok() { echo "ok    $1"; }
+bad() { echo "FAIL  $1"; fail=1; }
+# `sudo -n -l CMD` only asks whether CMD is allowed AT ALL: an admin with a password is allowed everything, so it says
+# nothing about NOPASSWD. These checks run the commands. sudo_try $1=sudo, then its arguments after -n; sets try_rc and
+# try_err (stderr, C locale). sudo_refused: sudo itself said no (for a password, or not allowed), as opposed to the
+# command having run (and maybe failed on its own). status and exec exit 1 and 75 themselves, so the exit code alone cannot tell.
+sudo_try() { local s=$1; shift; try_rc=0; try_err=$(LC_ALL=C LANG=C "$s" -n "$@" 2>&1 >/dev/null) || try_rc=$?; }
+sudo_refused() { [ "$try_rc" -ne 0 ] && printf '%s' "$try_err" | /usr/bin/grep -Eq 'a password is required|is not allowed to (execute|run)|may not run sudo'; }
+behaviour_checks() {   # $1: the sudo to ask. Sets fail=1 on any failure.
+  local s e
+  # grant must NOT be reachable without a password, and the refusal must be sudo's. If it ran, a 60 s window just opened: roll back.
+  sudo_try "$1" "$BIN" grant 60s
+  if [ "$try_rc" -eq 0 ]; then bad "grant ran WITHOUT a password: run --rollback now"
+  elif sudo_refused; then ok "grant needs authentication"
+  else bad "grant failed, but not because sudo wanted a password: $try_err"; fi
+  # revoke only lowers privilege and needs none (at install time no window exists, so it changes nothing) but takes no arguments.
+  sudo_try "$1" "$BIN" revoke
+  if [ "$try_rc" -eq 0 ]; then ok "revoke needs no password"
+  elif sudo_refused; then bad "revoke needs a password, sudo refused it: $try_err"
+  else bad "revoke failed (exit $try_rc): $try_err"; fi
+  sudo_try "$1" "$BIN" revoke extra
+  if [ "$try_rc" -eq 0 ]; then bad "revoke with extra arguments was let through"
+  elif sudo_refused; then ok "revoke with extra arguments is refused by sudo"
+  else bad "revoke with extra arguments failed, but not because sudo refused it: $try_err"; fi
+  sudo_try "$1" "$BIN" status; s=$try_rc
+  if sudo_refused; then bad "status needs a password: $try_err"
+  elif [ "$s" -le 1 ]; then ok "status works without a password (exit $s)"
+  else bad "status failed (exit $s): $try_err"; fi
+  sudo_try "$1" "$BIN" exec -- /usr/bin/true; e=$try_rc
+  if sudo_refused; then bad "exec needs a password: $try_err"
+  elif [ "$s" -eq 1 ] && [ "$e" -eq 75 ]; then ok "exec refuses with no window (75)"
+  elif [ "$s" -eq 0 ]; then ok "a window is open; exec check skipped"
+  else bad "exec with no window exited $e (want 75)"; fi
+}
+
 case $mode in
   install)
     validate
@@ -270,28 +331,20 @@ case $mode in
   ticketchecks)
     if [ "$live" = 1 ]; then ticket_checks /usr/bin/sudo; else ticket_checks "$(dirname "$fake")/sudo"; fi
     exit $? ;;
+  behaviourchecks)
+    fail=0
+    if [ "$live" = 1 ]; then behaviour_checks /usr/bin/sudo; else behaviour_checks "$(dirname "$fake")/sudo"; fi
+    exit $fail ;;
   rollback)
     run_root /bin/sh -c "$rollback_body"
     echo "sudo-ask-grant-setup: removed the drop-in (so the sudo ticket behaves as before), helper and grant file. $LOGF is kept as the audit record; sudo-ask prompts again." ;;
   verify)
     fail=0
-    ok() { echo "ok    $1"; }
-    bad() { echo "FAIL  $1"; fail=1; }
     [ -x "$BIN" ] && ok "helper installed" || { bad "helper missing ($BIN)"; exit 1; }
     # A cached machine-wide ticket is what would let `sudo -n /bin/sh -c "<helper> grant 24h"` open a window: say so.
     ticket_checks /usr/bin/sudo || fail=1
     /usr/bin/sudo -k
-    # grant must NOT be reachable without a password. If this succeeds a 60 s window just opened: roll back.
-    if /usr/bin/sudo -n "$BIN" grant 60s >/dev/null 2>&1; then bad "grant ran WITHOUT a password: run --rollback now"; else ok "grant needs authentication"; fi
-    # revoke only lowers privilege and needs none, but takes no arguments. `sudo -l CMD` asks sudoers without running it.
-    if /usr/bin/sudo -n -l "$BIN" revoke >/dev/null 2>&1; then ok "revoke needs no password"; else bad "revoke is not allowed without a password"; fi
-    if /usr/bin/sudo -n -l "$BIN" revoke extra >/dev/null 2>&1; then bad "revoke with extra arguments is allowed"; else ok "revoke with extra arguments is refused"; fi
-    s=0; /usr/bin/sudo -n "$BIN" status >/dev/null 2>&1 || s=$?
-    if [ $s -le 1 ]; then ok "status works without a password (exit $s)"; else bad "status needs a password (exit $s)"; fi
-    e=0; /usr/bin/sudo -n "$BIN" exec -- /usr/bin/true >/dev/null 2>&1 || e=$?
-    if [ $s -eq 1 ] && [ $e -eq 75 ]; then ok "exec refuses with no window (75)"
-    elif [ $s -eq 0 ]; then ok "a window is open; exec check skipped"
-    else bad "exec with no window exited $e (want 75)"; fi
+    behaviour_checks /usr/bin/sudo
     [ "$(/usr/bin/stat -f '%Su:%Sg %Lp' "$STATE_DIR")" = "root:wheel 755" ] && ok "$STATE_DIR root:wheel 755" || bad "$STATE_DIR ownership/mode"
     [ $fail -eq 0 ] && { echo "sudo-ask-grant-setup: verified"; exit 0; }
     echo "sudo-ask-grant-setup: VERIFY FAILED; run: $0 --rollback --live" >&2; exit 1 ;;
