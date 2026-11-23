@@ -15,6 +15,19 @@
   when: shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list | length > 0
   no_log: true
 
+- name: Validate OpenAlex OA fallback config and ensure no OPENALEX_API_KEY is rendered in plist
+  ansible.builtin.assert:
+    that:
+      - shared_mcp_firecrawl_oa_fallback in ['off', 'allowlist', 'pinned']
+      - shared_mcp_firecrawl_oa_versions in ['all', 'peer-reviewed']
+      - shared_mcp_firecrawl_oa_content_api in ['off', 'on']
+      - shared_mcp_firecrawl_oa_enrolled in ['off', 'on']
+      - "'OPENALEX_API_KEY' not in (item.env | default({}))"
+      - "'FIRECRAWL_ROUTER_OPENALEX_KEY' not in (item.env | default({}))"
+    fail_msg: Invalid OpenAlex OA fallback setting or forbidden OPENALEX_API_KEY in LaunchAgent plist env.
+  loop: "{{ shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+
 # Daemons this repo owns (bin/greptile-mcp-proxy) are symlinked into the bin dir, as firecrawl-router is.
 - name: Link repo-owned shared MCP daemons into the bin dir
   ansible.builtin.file:
