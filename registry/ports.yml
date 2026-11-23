@@ -118,6 +118,12 @@ hosts:
       - {port: 18830, bind: "127.0.0.1", owner: unmanaged, service: mitnet-socks, status: active,
          must_be_up: false,  # operator-approved pilot; removed by undo.sh
          note: "2026-11-21: MITnet selective-routing Chrome pilot. Per-user LaunchAgent com.djbclark.mitnet-socks runs `ssh -N -D 127.0.0.1:18830 pastebin` (MIT egress 18.25.134.227); a Default-profile chrome.proxy extension sends only www.nature.com and www.cambridge.org to it (exact-host PAC, SOCKS5 remote DNS, DIRECT fallback). Unauthenticated loopback SOCKS. Drafts, enable and undo: ~/.local/state/mitnet-routing/20261117-inventory/slices/chrome-pac-prep/. Release this row when undo.sh exits 0."}
+      - {port: 18831, bind: "127.0.0.1", owner: unmanaged, service: mitbridge-test-router, status: default-claim,
+         must_be_up: false,  # ephemeral test only
+         note: "2026-11-22: MITnet bridge-impl isolated smoke test: a test firecrawl-router instance (never the live 18805). Started and stopped by the test; release when the bridge-impl slice is merged or abandoned."}
+      - {port: 18832, bind: "127.0.0.1", owner: unmanaged, service: mitbridge-test-fake-hyades, status: default-claim,
+         must_be_up: false,  # ephemeral test only
+         note: "2026-11-22: MITnet bridge-impl isolated smoke test: fake Hyades upstream for the test router on 18831. Started and stopped by the test; release with the 18831 row."}
       - {port: 28787, bind: "127.0.0.1", owner: unmanaged, service: aiuse-serve, status: default-claim,
          note: "2026-10-03: `aiuse serve` (github.com/djbclark/aiuse, ~/src/aiuse) — on-demand loopback HTTP for agents, auto-started by the operator/agents, not a launchd service we manage (same class as opencli :19825). Its CLI default was 8787 until 2026-10-03, which silently collided with collie-bridge above: collie answers every path with HTML 200, so an agent hitting http://127.0.0.1:8787/v1/snapshot got plausible HTML from collie while aiuse serve wasn't running. aiuse commit 11d67f4 moved the default to 28787 AND made serve fail loudly when the port is held by a non-aiuse responder; clients identity-check via GET /v1/health -> {\"service\": \"aiuse\"}. Do not reassign 8787 or 28787 without checking both repos."}
       # ollama :11434 — uninstalled 2026-07-29 (operator); do not reclaim without sign-off.
