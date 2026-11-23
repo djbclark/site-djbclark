@@ -494,7 +494,7 @@ class VersionAndGuideTests(unittest.TestCase):
 
         with mock.patch.object(qm.shutil, "which", return_value="/usr/local/bin/sudo-ask"):
             self.assertEqual(qm._sudo_prefix(), ["sudo-ask"])
-            self.assertEqual(qm._sudo_prefix(fresh=True), ["sudo-ask", "-k"])
+            self.assertEqual(qm._sudo_prefix(fresh=True), ["sudo-ask", "--no-window", "-k"])
         with mock.patch.object(qm.shutil, "which", return_value=None):
             self.assertEqual(qm._sudo_prefix(), ["sudo"])
             self.assertEqual(qm._sudo_prefix(fresh=True), ["sudo", "-k"])
@@ -516,8 +516,20 @@ class VersionAndGuideTests(unittest.TestCase):
                     mock.patch.object(qm, "HELPER", fake_helper):
                 qm.remove_root_files()
         self.assertEqual(len(seen), 1)
-        self.assertEqual(seen[0][:3], ["sudo-ask", "-k", "/bin/rm"])
+        self.assertEqual(seen[0][:4], ["sudo-ask", "--no-window", "-k", "/bin/rm"])
         self.assertIn(str(qm.SUDOERS), seen[0])
+
+        seen.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_helper = pathlib.Path(tmp) / "quiet-mac-root"
+            fake_helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            with mock.patch.object(qm.shutil, "which", return_value=None), \
+                    mock.patch.object(qm.subprocess, "run", side_effect=fake_run), \
+                    mock.patch.object(qm, "HELPER", fake_helper):
+                qm.remove_root_files()
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][:3], ["sudo", "-k", "/bin/rm"])
+        self.assertNotIn("--no-window", seen[0])
 
         # Verify source wiring: --install-root and remove_root_files use fresh=True;
         # brew services, system-flags, and --factory-root use plain _sudo_prefix().

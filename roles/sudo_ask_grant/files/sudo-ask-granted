@@ -289,6 +289,15 @@ INTERPRETERS = re.compile(
     r"lua[0-9.]*|luajit|tclsh[0-9.]*|wish|swift)$")
 INLINE_FLAGS = {"python": "c", "pypy": "c", "perl": "eE", "ruby": "e", "node": "ep", "nodejs": "ep",
                 "php": "r", "lua": "e", "luajit": "e", "bun": "e", "deno": ""}
+# Tight allowlist of zero-argument short options per interpreter; any other leading `-` option
+# (especially argument-taking flags like Python `-X`/`-W` or Perl/Ruby `-I`) fails closed so it
+# cannot shift a benign token into script position and hide an unchecked script after it.
+INTERP_ZERO_ARG_FLAGS = {
+    "python": frozenset("BEIOPSbqsuv"),
+    "pypy": frozenset("BEIOPSbqsuv"),
+    "perl": frozenset("TtwW"),
+    "ruby": frozenset("wWv"),
+}
 CRITICAL_RECURSIVE = {"rm": "rR", "chmod": "R", "chown": "R", "chgrp": "R", "chflags": "R"}
 SH_BAD_FIRST = {"cd", "pushd", "popd", "eval", "source", ".", "alias", "unalias", "trap", "set",
                 "builtin", "ulimit", "hash", "enable", "shopt", "local", "declare", "typeset",
@@ -840,6 +849,8 @@ def evaluate(argv, cwd, path, depth=0):
         return "program %s is in a location the invoking user can write" % real
     if changed_since_grant(real):
         return "program %s changed after the window was granted" % real
+    if "quiet_mac.py" in names and "--install-root" in args:
+        return "quiet_mac.py --install-root modifies /etc/sudoers.d"
     ro = name in READ_ONLY   # judged on the REAL program: a link named `cat` that points at cp is cp
     ccwd = canon(".", cwd)
     for root in PROTECTED:
@@ -931,30 +942,40 @@ def evaluate(argv, cwd, path, depth=0):
             return "%s reads files from the working directory, which the invoking user can write" % name
     if INTERPRETERS.match(name):
         flag = INLINE_FLAGS.get(base_interp, "")
-        opts = []
-        for a in args:
-            if not a.startswith("-") or a == "--":
+        zero_arg = INTERP_ZERO_ARG_FLAGS.get(base_interp, frozenset())
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--":
+                i += 1
                 break
-            opts.append(a)
-        for a in opts:
-            if (base_interp in ("python", "pypy") and re.fullmatch(r"-[A-Za-z]*m[A-Za-z]*", a)) or (
+            if not a.startswith("-"):
+                break
+            if a == "-":
+                return "%s with no script reads code from stdin" % name
+            if (base_interp in ("python", "pypy") and re.match(r"-[A-Za-z]*m", a)) or (
                     base_interp in ("node", "nodejs", "bun", "deno") and a in (
                         "-r", "--require", "--import", "--loader", "--experimental-loader")) or (
                     base_interp == "perl" and re.match(r"-[Mm]", a)
                     and not re.fullmatch(r"-[Mm][A-Za-z0-9_:]+(=[A-Za-z0-9_,]*)?", a)):
                 return "%s option %s loads code that cannot be checked" % (name, a)
-        for a in args:
-            if a == "--":
-                break
             if a in ("--eval", "--print", "--exec") or (
                     flag and re.fullmatch(r"-[A-Za-z]*[%s][A-Za-z]*" % re.escape(flag), a)):
                 return "%s with inline code cannot be checked" % name
-        scripts = [a for a in args if not a.startswith("-")]
-        if not scripts:
+            if base_interp == "perl" and re.fullmatch(r"-[Mm][A-Za-z0-9_:]+(=[A-Za-z0-9_,]*)?", a):
+                i += 1
+                continue
+            if len(a) >= 2 and not a.startswith("--") and all(ch in zero_arg for ch in a[1:]):
+                i += 1
+                continue
+            return "%s option %s cannot be checked" % (name, a)
+        if i >= len(args) or args[i] == "-":
             return "%s with no script reads code from stdin" % name
-        if os.path.basename(scripts[0]).lower() == "quiet_mac.py" and "--install-root" in args:
+        script = args[i]
+        sp = os.path.realpath(os.path.join(cwd, script))
+        if "quiet_mac.py" in (os.path.basename(script).lower(), os.path.basename(sp).lower()) and "--install-root" in args[i + 1:]:
             return "quiet_mac.py --install-root modifies /etc/sudoers.d"
-        why = script_problem(scripts[0], cwd)
+        why = script_problem(script, cwd)
         if why:
             return why
     if hit("launchctl") and args[:1] in (["submit"], ["asuser"], ["bootstrap"], ["load"], ["enable"], ["kickstart"],
@@ -1308,6 +1329,7 @@ def _open_home_audit_dir(home, rel):
     Returns an open directory fd or None if any component is missing, not a directory, or a symlink."""
     if not home:
         return None
+    home = home.rstrip("/") or "/"
     try:
         fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError:
@@ -1330,6 +1352,7 @@ def _home_audit_roots(home):
     step-by-step with O_NOFOLLOW immediately before find runs so an intermediate symlink swap cannot race."""
     if not home:
         return []
+    home = home.rstrip("/") or "/"
     out = [(home, 1, None)]
     for rel in AUDIT_HOME_SUBDIRS:
         out.append((os.path.join(home, rel), None, rel))
@@ -1340,8 +1363,8 @@ def _prefix_find_path(root, line):
     if line == ".":
         return root
     if line.startswith("./"):
-        return os.path.join(root, line[2:])
-    return os.path.join(root, line)
+        line = line[2:]
+    return root.rstrip("/") + "/" + line
 
 
 def audit(since):
@@ -1396,13 +1419,16 @@ def audit(since):
             except subprocess.TimeoutExpired:
                 found.append("audit of %s timed out (incomplete)" % root)
                 continue
+            except (OSError, subprocess.SubprocessError) as e:
+                found.append("audit of %s failed (%s) (incomplete)" % (root, clean(str(e))[:200]))
+                continue
             finally:
                 if dir_fd is not None:
                     os.close(dir_fd)
             lines = r.stdout.splitlines()[:50]
             if dir_fd is not None:
                 lines = [_prefix_find_path(root, ln) for ln in lines]
-            found += ["setuid/setgid file changed: " + ln for ln in lines]
+            found += ["setuid/setgid file changed: " + clean(ln) for ln in lines]
             if r.returncode != 0 and r.stderr.strip():
                 err_line = clean(r.stderr.strip().splitlines()[0])[:200]
                 found.append("audit of %s reported error (exit %d): %s" % (root, r.returncode, err_line))

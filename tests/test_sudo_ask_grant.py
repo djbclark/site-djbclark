@@ -1319,13 +1319,98 @@ class ModeTests(GrantBase):
 
     def test_quiet_mac_install_root_is_always_denied_even_if_root_owned(self) -> None:
         script = self.work / "quiet_mac.py"
-        script.write_text("print(1)\n")
+        script.write_text("#!/usr/bin/env python3\nprint(1)\n")
+        script.chmod(0o755)
+        link = self.work / "quiet-mac"
+        os.symlink(script, link)
         with mock.patch.object(mod, "agent_writable", return_value=False), \
                 mock.patch.object(mod, "changed_since_grant", return_value=False):
-            why = mod.evaluate(["/usr/bin/python3", str(script), "--install-root", "--user", "djbclark"],
+            for argv in (
+                ["/usr/bin/python3", str(script), "--install-root", "--user", "djbclark"],
+                ["/usr/bin/python3", str(link), "--install-root", "--user", "djbclark"],
+                [str(script), "--install-root", "--user", "djbclark"],
+                [str(link), "--install-root", "--user", "djbclark"],
+            ):
+                with self.subTest(argv=argv):
+                    why = mod.evaluate(argv, str(self.work), mod.EXEC_PATH)
+                    self.assertIsNotNone(why)
+                    self.assertIn("sudoers", why)
+            # Control: non-sudoers --factory-root is not blocked by the --install-root denylist.
+            self.assertIsNone(mod.evaluate([str(script), "--factory-root"], str(self.work), mod.EXEC_PATH))
+
+    def test_interpreter_option_taking_arg_cannot_smuggle_script(self) -> None:   # PR #311 HIGH-1
+        evil_py = self.work / "evil.py"
+        evil_py.write_text("print('evil')\n")
+        evil_pl = self.work / "evil.pl"
+        evil_pl.write_text("print 1;\n")
+        root_qm = self.work / "quiet_mac.py"
+        root_qm.write_text("print(1)\n")
+        root_ok = self.work / "ok.py"
+        root_ok.write_text("print(1)\n")
+        # Agent-writable scripts smuggled behind -X / -W / -I must be refused.
+        for argv in (
+            ["/usr/bin/python3", "-X", "/usr/bin/true", str(evil_py)],
+            ["/usr/bin/python3", "-W", "ignore", str(evil_py)],
+            ["/usr/bin/perl", "-I", "/usr/bin/true", str(evil_pl)],
+        ):
+            with self.subTest(argv=argv):
+                why = mod.evaluate(argv, str(self.work), mod.EXEC_PATH)
+                self.assertIsNotNone(why)
+                self.assertIn("cannot be checked", why)
+        # Even for root-owned quiet_mac.py, -X /usr/bin/true cannot bypass the --install-root check.
+        with mock.patch.object(mod, "agent_writable", return_value=False), \
+                mock.patch.object(mod, "changed_since_grant", return_value=False):
+            why = mod.evaluate(["/usr/bin/python3", "-X", "/usr/bin/true", str(root_qm), "--install-root", "--user", "djbclark"],
                                str(self.work), mod.EXEC_PATH)
-        self.assertIsNotNone(why)
-        self.assertIn("sudoers", why)
+            self.assertIsNotNone(why)
+            self.assertIn("cannot be checked", why)
+            # Valid zero-argument flags still work for root-owned scripts.
+            self.assertIsNone(mod.evaluate(["/usr/bin/python3", "-u", str(root_ok)], str(self.work), mod.EXEC_PATH))
+            self.assertIsNone(mod.evaluate(["/usr/bin/python3", "-IS", str(root_ok)], str(self.work), mod.EXEC_PATH))
+
+    def test_audit_catches_subprocess_error_and_continues(self) -> None:   # PR #311 LOW-1
+        other = self.work / "other"
+        other.mkdir()
+        suid = other / "s"
+        suid.write_text("x")
+        os.chmod(suid, 0o4755)
+        real_run = mod.subprocess.run
+        def flaky_run(argv, **kw):
+            if str(self.work / "bad") in argv:
+                raise subprocess.SubprocessError("preexec fchdir failed")
+            return real_run(argv, **kw)
+        bad = self.work / "bad"
+        bad.mkdir()
+        with mock.patch.object(mod, "AUDIT_ROOTS", (str(bad), str(other))), mock.patch.object(mod, "INVOKER_UID", None), \
+                mock.patch.object(mod.subprocess, "run", side_effect=flaky_run):
+            found = mod.audit(self.now - 100)
+        self.assertTrue(any("failed (preexec fchdir failed) (incomplete)" in ln for ln in found), found)
+        self.assertTrue(any(str(suid) in ln for ln in found), found)
+
+    def test_open_home_audit_dir_refuses_symlink_even_with_trailing_slash(self) -> None:   # PR #311 LOW-2
+        target = pathlib.Path(self.tmp.name) / "real_target"
+        target.mkdir()
+        link = pathlib.Path(self.tmp.name) / "link_home"
+        os.symlink(target, link)
+        self.assertIsNone(mod._open_home_audit_dir(str(link), None))
+        self.assertIsNone(mod._open_home_audit_dir(str(link) + "/", None))
+
+    def test_prefix_find_path_keeps_root_and_audit_sanitizes_output(self) -> None:   # PR #311 INFO-2
+        self.assertEqual(mod._prefix_find_path("/Users/x/bin", "./sub/f"), "/Users/x/bin/sub/f")
+        self.assertEqual(mod._prefix_find_path("/Users/x/bin", "/spoof"), "/Users/x/bin//spoof")
+        self.assertEqual(mod._prefix_find_path("/Users/x/bin", "."), "/Users/x/bin")
+        def fake_run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, stdout="./ok\tbad\x07file\n", stderr="")
+        fake_home = pathlib.Path(self.tmp.name) / "home_clean"
+        fake_home.mkdir()
+        fake_pw = mock.Mock(pw_dir=str(fake_home))
+        with mock.patch.object(mod, "AUDIT_ROOTS", ()), mock.patch.object(mod, "INVOKER_UID", 501), \
+                mock.patch.object(mod.pwd, "getpwuid", return_value=fake_pw), \
+                mock.patch.object(mod.subprocess, "run", fake_run):
+            found = mod.audit(0)
+        self.assertEqual(len(found), 1)
+        self.assertIn("\\x09", found[0])
+        self.assertIn("\\x07", found[0])
 
     def test_the_sweep_adds_each_mounted_volume_but_not_links_or_files(self) -> None:
         vols = pathlib.Path(self.tmp.name) / "vols"
@@ -2473,6 +2558,33 @@ exit 0
                 self.assertEqual(len(self.dialogs()), 1)
                 self.assertFalse([c for c in self.calls() if c.startswith("ran:")])
                 self.assertFalse([c for c in self.calls() if c.startswith("gate check")])
+
+    def test_no_window_bypasses_open_window_and_never_passes_flag_to_sudo(self) -> None:
+        self.open_window()
+        for args, want_sudo in (
+            (("--no-window", "/usr/bin/true"), "sudo -k /usr/bin/true"),
+            (("--no-window", "-k", "/usr/bin/printf", "hi"), "sudo -k /usr/bin/printf hi"),
+        ):
+            with self.subTest(args=args):
+                (self.state / "calls").unlink(missing_ok=True)
+                p = self.run_client(*args)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(len(self.dialogs()), 1)
+                calls = self.calls()
+                self.assertIn(want_sudo, calls)
+                self.assertFalse([c for c in calls if c.startswith(("gate check", "gate ask", "ran:"))], calls)
+                self.assertFalse([c for c in calls if "--no-window" in c], calls)
+                self.assertNotIn("GRANTED-WINDOW", self.log())
+
+    def test_no_window_rejects_missing_command_or_subcommands(self) -> None:
+        self.open_window()
+        for args in (("--no-window",), ("--no-window", "-k"), ("--no-window", "-k", "-k"),
+                     ("--no-window", "--grant", "1h"), ("--no-window", "--revoke"), ("--no-window", "--status")):
+            with self.subTest(args=args):
+                (self.state / "calls").unlink(missing_ok=True)
+                p = self.run_client(*args)
+                self.assertEqual(p.returncode, 64, p.stdout + p.stderr)
+                self.assertEqual(self.calls(), [])
 
     def test_window_is_decided_by_the_gate_not_reimplemented(self) -> None:
         src = CLIENT.read_text()

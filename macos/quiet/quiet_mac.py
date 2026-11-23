@@ -1664,10 +1664,9 @@ def bootout_agent(label: str) -> None:
 
 
 def _sudo_prefix(fresh: bool = False) -> list[str]:
-    cmd = ["sudo-ask"] if shutil.which("sudo-ask") else ["sudo"]
-    if fresh:
-        cmd.append("-k")
-    return cmd
+    if shutil.which("sudo-ask"):
+        return ["sudo-ask", "--no-window", "-k"] if fresh else ["sudo-ask"]
+    return ["sudo", "-k"] if fresh else ["sudo"]
 
 
 def install_root_as_root(user: str) -> int:

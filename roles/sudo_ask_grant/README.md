@@ -22,7 +22,7 @@ sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_Y
 | `/var/db/sudo-ask/grant` | root:wheel 0644 in a root:wheel 0755 dir | `{expires_utc, granted_utc, granted_by_uid, duration_s, nonce}`; written only by `grant`. |
 | `/var/db/sudo-ask/audit-stamp` | root:wheel 0644, same dir | The epoch at which the last `status --audit` sweep started (see "Persistence is not bounded by the window"); written only by that sweep. |
 | `/var/log/sudo-ask-grant.log` | root:wheel 0600 | one line per grant, revoke, refusal, denylist hit and run (UTC); command text capped at 4096 characters (a refused call, which anyone may make, at 256); rotated through `.log.1` ... `.log.5` above 8 MiB; every record except a refusal is also sent to the unified log (`logger`), which the user cannot rewrite. The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
-| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. Every sudo the client runs is `sudo -k CMD` (never leaves a ticket), except two `sudo -n HELPER ...` calls on NOPASSWD lines that only lower privilege or read: `--revoke`'s `revoke` and `--status --audit`'s `status --audit`. |
+| `bin/sudo-ask` | unchanged install (`~/.local/bin/sudo-ask`) | New subcommands and the window path; with no helper or no window the old dialog path runs unchanged. `sudo-ask -k CMD...` (the approval-probe form bgrun and load-watch use) runs with no dialog and no fresh authentication inside a window, `-k` dropped; outside one it is the normal dialog + `sudo -k`. `sudo-ask --no-window [-k] CMD...` bypasses any open approval window unconditionally and always runs the Allow/Deny dialog + fresh `sudo -k` Touch ID (for always-prompt boundaries such as sudoers installers and PR-merge sign-off). Every sudo the client runs is `sudo -k CMD` (never leaves a ticket), except two `sudo -n HELPER ...` calls on NOPASSWD lines that only lower privilege or read: `--revoke`'s `revoke` and `--status --audit`'s `status --audit`. |
 | `bin/approval-gate` | `~/.local/bin/approval-gate` (symlink, like `sudo-ask`) | The ONE place that decides whether a window covers a gate: `status`, `check --gate NAME [--max-ttl S] [-- CMD...]` (exit 0 covered, 1 must prompt), `ask --gate NAME --reason TEXT -- CMD...`. `sudo-ask` and `bgrun` call it and reimplement nothing. |
 | `config/approval-gates.toml` | the repo | The registry of gates, see below. |
 
@@ -45,7 +45,9 @@ parses the file with a small built-in reader for exactly this subset.
 
 bgrun: `approve-local` (one-shot token) and tickets ask `~/.local/bin/approval-gate` first. Covered: no dialog, no Touch ID, no
 sudo (the plain `sudo -k /usr/bin/true` fallback included), a token or ticket never outlives the window, and `--ask` skips the
-duration chooser (a ticket until the window's end). `bin/tired` and `sudo-askpass-osascript` are not changed yet (follow-up).
+duration chooser (a ticket until the window's end). `bin/tired` and `macos/neofinder/neofinder-spotlight-batch.sh` route
+through `sudo-ask` (`macos/quiet/quiet_mac.py` uses `sudo-ask --no-window -k` for sudoers changes); legacy
+`sudo-askpass-osascript` stays `always-prompt`.
 
 ## Why an agent cannot open or extend a window
 
