@@ -39,7 +39,7 @@ render_sudoers() {
   cat <<SUDO
 # Managed by site-djbclark roles/sudo_ask_grant (installed by \`just sudo-ask-grant-setup\`).
 # The approval window: $operator may use an OPEN window (exec), read its state (status) and END it (revoke, with
-# no arguments: the "" matches only an empty argument list) without a password. OPENING one (grant) matches no
+# no wildcard so it matches only revoke with no extra arguments) without a password. OPENING one (grant) matches no
 # NOPASSWD line, so it needs a fresh password / Touch ID; timestamp_timeout=0 stops a cached ticket for this
 # program from standing in for one (the helper also checks that sudo ran with -k).
 Defaults!$BIN env_reset, timestamp_timeout=0
@@ -47,7 +47,7 @@ Defaults!$BIN env_reset, timestamp_timeout=0
 # a single Touch ID would let any agent run plain sudo. A later drop-in wins over an earlier one; removing this file
 # (rollback) restores the exact prior state, and 10-timestamp-global is never touched.
 Defaults:$operator timestamp_timeout=0
-$operator ALL=(root) NOPASSWD: $BIN exec *, $BIN status, $BIN status *, $BIN revoke ""
+$operator ALL=(root) NOPASSWD: $BIN exec *, $BIN status, $BIN status *, $BIN revoke
 SUDO
 }
 

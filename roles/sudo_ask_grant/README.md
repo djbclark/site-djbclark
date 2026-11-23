@@ -18,7 +18,7 @@ sudo-ask --status             # exit 0 open / 1 not; time shown in America/New_Y
 |---|---|---|
 | `files/sudo-ask-granted` | `/usr/local/libexec/sudo-ask-granted`, root:wheel 0755 | The root side: `exec -- CMD` (checks the grant file and the denylist itself, logs, execs), `status [--check -- CMD]`, `grant DURATION` (runs only from the installed path, only when it can prove a fresh authentication, see below), `revoke` (no arguments). `exec` resolves the program once, judges it, and runs exactly that file, with `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`, no user-owned directory) and `HOME` fixed (never the caller's). Python 3 run as `-IS` (isolated, no site); every path is hard-coded, no env var or argument moves one. |
 | `files/sudo-ask-grant-setup.sh` | run by hand | `--print`, `--check [--diff]` (read-only); install, `--verify`, `--rollback` refuse unless given `--live` (see the guard below). |
-| drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` and `revoke ""` only** (`""` = no arguments, never a wildcard; the helper also refuses extra arguments to `revoke`); `Defaults!helper env_reset, timestamp_timeout=0`; and `Defaults:OPERATOR timestamp_timeout=0` (the shared sudo ticket is off, see below). `grant` matches no NOPASSWD line. |
+| drop-in `/etc/sudoers.d/sudo-ask-grant` | root:wheel 0440 | NOPASSWD for **`exec *`, `status`, `status *` and `revoke` only** (no wildcard on `revoke`, so sudo matches only `revoke` with no extra arguments; the helper also refuses extra arguments to `revoke`); `Defaults!helper env_reset, timestamp_timeout=0`; and `Defaults:OPERATOR timestamp_timeout=0` (the shared sudo ticket is off, see below). `grant` matches no NOPASSWD line. |
 | `/var/db/sudo-ask/grant` | root:wheel 0644 in a root:wheel 0755 dir | `{expires_utc, granted_utc, granted_by_uid, duration_s, nonce}`; written only by `grant`. |
 | `/var/db/sudo-ask/audit-stamp` | root:wheel 0644, same dir | The epoch at which the last `status --audit` sweep started (see "Persistence is not bounded by the window"); written only by that sweep. |
 | `/var/log/sudo-ask-grant.log` | root:wheel 0600 | one line per grant, revoke, refusal, denylist hit and run (UTC); command text capped at 4096 characters (a refused call, which anyone may make, at 256); rotated through `.log.1` ... `.log.5` above 8 MiB; every record except a refusal is also sent to the unified log (`logger`), which the user cannot rewrite. The client logs `GRANTED-WINDOW` etc. to `~/.local/state/sudo-ask/log`. |
@@ -102,7 +102,7 @@ when it is later than the expiry recorded when the window was granted (that reco
 it is a hint, not a proof); `revoke` prints the expiry the file really had.
 
 `revoke` needs no authentication on purpose: it only lowers privilege, so an agent or the operator can end a window
-from a panic button without a sensor. It takes no arguments (the sudoers line is `revoke ""`, the helper also refuses
+from a panic button without a sensor. It takes no arguments (the sudoers line is `revoke` with no wildcard, matching no extra arguments; the helper also refuses
 extras).
 
 `--verify` checks this on the installed system: it runs the ticket check above, and it FAILS if a plain `sudo -n /usr/bin/true` succeeds (with the ticket off no cached ticket is honoured, so a success means a live ticket or a NOPASSWD rule for `true`); then, with the ticket dropped,
@@ -284,7 +284,7 @@ after approval cannot be installed. Rollback leaves `sudo-ask` prompting as befo
 sweep-root and sweep-limit rules of the follow-up have their own tests, each checked with a mutant): duration grammar, every grant-file failure (expired,
 future-dated, >24h, wrong owner, writable, symlink, damaged), each denylist class, wrapper unwrapping and
 unparseable wrappers, case-insensitive paths, `main()` modes against a temp boundary (the installed helper
-has no test hook: the test patches module constants in-process), the sudoers rule shape (`revoke ""`, no `grant`), ruling 1 (agent-writable code prompts, the MED-3 copy of the helper), the fresh-authentication proof (sudo with and without `-k`, nearest sudo decides), `revoke` with and without arguments, and the
+has no test hook: the test patches module constants in-process), the sudoers rule shape (`revoke` with no wildcard or trailing `""`, no `grant`), ruling 1 (agent-writable code prompts, the MED-3 copy of the helper), the fresh-authentication proof (sudo with and without `-k`, nearest sudo decides), `revoke` with and without arguments, and the
 client as a patched copy driven by absolute-path fakes (including a fake `approval-gate` and the `-k` probe form), the
 setup script's `--live` guard (refusals, and a temp-dir fake that only logs). `tests/test_approval_gate.py`: the registry,
 the ttl caps, the denylist through the gate, a missing or untrusted helper, the CLI exit codes, `ask`'s two exec targets.
