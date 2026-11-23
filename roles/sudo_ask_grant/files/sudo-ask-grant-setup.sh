@@ -137,9 +137,10 @@ rollback_body="PATH=/usr/bin:/bin:/usr/sbin:/sbin; rm -f $SUDOERS $STATE_DIR/gra
 # again before they are judged. Therefore:
 #   1. the user section must exist and its last timestamp_timeout must be 0 (a bare `!timestamp_timeout` counts as 0);
 #      a value is read only in sudo's own number grammar ([+-]digits[.digits]): anything else is unreadable. The line is
-#      split on commas OUTSIDE quotes (macOS lists env_keep+="COLORFGBG COLORTERM" and the like in the same line): a
-#      quoted token that does not mention timestamp_timeout is ignored, one that does (a list value can hide a
-#      `,timestamp_timeout=0,`) is unreadable;
+#      split on commas OUTSIDE double quotes using sudo's output grammar (only `"` quotes; `\` escapes outside quotes and
+#      `\"` inside double quotes; macOS lists env_keep+="COLORFGBG COLORTERM" and the like in the same line): a quoted
+#      token that does not mention timestamp_timeout is ignored, while any line mentioning timestamp_timeout that contains
+#      a backslash or a quoted timestamp_timeout token is unreadable;
 #   2. no Defaults> entry may mention timestamp_timeout (it applies after the user entries to every command run as that user);
 #   3. no Defaults! entry may carry a non-zero or unreadable timestamp_timeout (it would give a ticket to that command);
 #   4. the Runas section must exist exactly once and hold the helper's own Defaults! line, and after the user section
@@ -170,18 +171,23 @@ for line in sys.stdin.read().splitlines():
         fail("an unrecognised line follows the defaults in the listing: %s" % hdr)
     sections.append((hdr, []))
 def tokens(text):
-    toks, cur, q, i = [], [], None, 0
+    toks, cur, in_q, i = [], [], False, 0
     while i < len(text):
         c = text[i]
-        if q:
+        if in_q:
             cur.append(c)
-            if c == "\\" and i + 1 < len(text):
+            if c == "\\" and i + 1 < len(text) and text[i + 1] == "\"":
                 i += 1
                 cur.append(text[i])
-            elif c == q:
-                q = None
-        elif c in "\"\x27":
-            q = c
+            elif c == "\"":
+                in_q = False
+        elif c == "\\":
+            cur.append(c)
+            if i + 1 < len(text):
+                i += 1
+                cur.append(text[i])
+        elif c == "\"":
+            in_q = True
             cur.append(c)
         elif c == ",":
             toks.append("".join(cur))
@@ -192,6 +198,8 @@ def tokens(text):
     toks.append("".join(cur))
     return toks
 def values(text):
+    if "timestamp_timeout" in text and "\\" in text:
+        return [None]
     out = []
     for tok in tokens(text):
         if "timestamp_timeout" not in tok:
@@ -267,35 +275,50 @@ ticket_checks() {   # $1: the sudo to ask. The listing check, then the plain-sud
 ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 # `sudo -n -l CMD` only asks whether CMD is allowed AT ALL: an admin with a password is allowed everything, so it says
-# nothing about NOPASSWD. These checks run the commands. sudo_try $1=sudo, then its arguments after -n; sets try_rc and
-# try_err (stderr, C locale). sudo_refused: sudo itself said no (for a password, or not allowed), as opposed to the
-# command having run (and maybe failed on its own). status and exec exit 1 and 75 themselves, so the exit code alone cannot tell.
-sudo_try() { local s=$1; shift; try_rc=0; try_err=$(LC_ALL=C LANG=C "$s" -n "$@" 2>&1 >/dev/null) || try_rc=$?; }
-sudo_refused() { [ "$try_rc" -ne 0 ] && printf '%s' "$try_err" | /usr/bin/grep -Eq 'a password is required|is not allowed to (execute|run)|may not run sudo'; }
+# nothing about NOPASSWD. These checks run the commands. sudo_try $1=sudo, then its arguments after -n; sets try_rc,
+# try_out (stdout) and try_err (stderr, C locale). sudo_refused: sudo itself said no (for a password, or not allowed),
+# anchored to sudo's line prefix so a helper message cannot mimic it. status and exec exit 1 and 75 themselves, so the
+# exit code alone cannot tell; status also requires the helper's `open=0`/`open=1` line on stdout.
+sudo_try() {
+  local s=$1; shift; try_rc=0; try_out=; try_err=
+  LC_ALL=C LANG=C "$s" -n "$@" >"$tmp/out" 2>"$tmp/err" || try_rc=$?
+  try_out=$(cat "$tmp/out"); try_err=$(cat "$tmp/err")
+}
+sudo_refused() { [ "$try_rc" -ne 0 ] && printf '%s\n' "$try_err" | /usr/bin/grep -Eq '^sudo: a password is required$|^Sorry, user .+ (is not allowed to (execute|run)|may not run sudo)'; }
 behaviour_checks() {   # $1: the sudo to ask. Sets fail=1 on any failure.
-  local s e
+  local s e status_ok=0 window_open=0
   # grant must NOT be reachable without a password, and the refusal must be sudo's. If it ran, a 60 s window just opened: roll back.
   sudo_try "$1" "$BIN" grant 60s
   if [ "$try_rc" -eq 0 ]; then bad "grant ran WITHOUT a password: run --rollback now"
   elif sudo_refused; then ok "grant needs authentication"
   else bad "grant failed, but not because sudo wanted a password: $try_err"; fi
-  # revoke only lowers privilege and needs none (at install time no window exists, so it changes nothing) but takes no arguments.
-  sudo_try "$1" "$BIN" revoke
-  if [ "$try_rc" -eq 0 ]; then ok "revoke needs no password"
-  elif sudo_refused; then bad "revoke needs a password, sudo refused it: $try_err"
-  else bad "revoke failed (exit $try_rc): $try_err"; fi
+  # status runs BEFORE revoke so --verify / --behaviour-checks never revokes an active window.
+  sudo_try "$1" "$BIN" status; s=$try_rc
+  if sudo_refused; then bad "status needs a password: $try_err"
+  elif [ "$s" -eq 0 ] && printf '%s\n' "$try_out" | /usr/bin/grep -Eq '^open=1$'; then
+    ok "status works without a password (exit 0)"
+    status_ok=1; window_open=1
+  elif [ "$s" -eq 1 ] && printf '%s\n' "$try_out" | /usr/bin/grep -Eq '^open=0$'; then
+    ok "status works without a password (exit 1)"
+    status_ok=1
+  else bad "status failed (exit $s): ${try_err:-$try_out}"; fi
+  # revoke only lowers privilege and needs none, but takes no arguments; skip when a window is open so we never end it.
+  if [ "$window_open" -eq 1 ]; then
+    ok "a window is open; revoke check skipped (would end the active window)"
+  elif [ "$status_ok" -eq 1 ]; then
+    sudo_try "$1" "$BIN" revoke
+    if [ "$try_rc" -eq 0 ]; then ok "revoke needs no password"
+    elif sudo_refused; then bad "revoke needs a password, sudo refused it: $try_err"
+    else bad "revoke failed (exit $try_rc): $try_err"; fi
+  fi
   sudo_try "$1" "$BIN" revoke extra
   if [ "$try_rc" -eq 0 ]; then bad "revoke with extra arguments was let through"
   elif sudo_refused; then ok "revoke with extra arguments is refused by sudo"
   else bad "revoke with extra arguments failed, but not because sudo refused it: $try_err"; fi
-  sudo_try "$1" "$BIN" status; s=$try_rc
-  if sudo_refused; then bad "status needs a password: $try_err"
-  elif [ "$s" -le 1 ]; then ok "status works without a password (exit $s)"
-  else bad "status failed (exit $s): $try_err"; fi
   sudo_try "$1" "$BIN" exec -- /usr/bin/true; e=$try_rc
   if sudo_refused; then bad "exec needs a password: $try_err"
-  elif [ "$s" -eq 1 ] && [ "$e" -eq 75 ]; then ok "exec refuses with no window (75)"
-  elif [ "$s" -eq 0 ]; then ok "a window is open; exec check skipped"
+  elif [ "$status_ok" -eq 1 ] && [ "$window_open" -eq 0 ] && [ "$e" -eq 75 ]; then ok "exec refuses with no window (75)"
+  elif [ "$window_open" -eq 1 ]; then ok "a window is open; exec check skipped"
   else bad "exec with no window exited $e (want 75)"; fi
 }
 

@@ -68,7 +68,9 @@ GRANTED_EPOCH = None   # when the open window was granted (set by main/approval-
 CHECKED_ARGS = {}      # script argument as typed -> the realpath that was judged; exec runs the realpath
 LAUNCH_DIRS = ("/Library/LaunchDaemons", "/Library/LaunchAgents")   # their Program/ProgramArguments targets are protected
 AUDIT_ROOTS = ("/usr/local", "/opt", "/Applications", "/Library", "/private/etc", "/private/var/db", "/private/var/root",
-               "/private/tmp", "/private/var/tmp", "/Users/Shared")   # plus each volume directly under AUDIT_VOLUMES and the user's home
+               "/private/tmp", "/private/var/tmp", "/Users/Shared")   # plus /Volumes/*, top-level $HOME (-maxdepth 1), and AUDIT_HOME_SUBDIRS
+AUDIT_HOME_SUBDIRS = ("bin", ".local/bin", ".local/libexec", ".ssh", ".gnupg", ".config",
+                      ".claude", ".codex", ".paseo", "Library/LaunchAgents", "Applications")
 AUDIT_VOLUMES = "/Volumes"
 AUDIT_TIMEOUT = 60     # per root
 AUDIT_TOTAL = 120      # all roots together: a root not reached by then is reported as skipped
@@ -1268,9 +1270,10 @@ def last_granted_epoch():
     for f in (LOG_FILE, LOG_FILE + ".1"):
         try:
             with open(f, errors="replace") as fh:
-                rows = [ln.split("\t") for ln in fh if "\tGRANT(" in ln]
-            if rows:
-                return parse_iso(rows[-1][0])
+                rows = [ln.rstrip("\n").split("\t") for ln in fh]
+            grants = [c for c in rows if len(c) >= 3 and c[2].startswith("GRANT(")]
+            if grants:
+                return parse_iso(grants[-1][0])
         except (OSError, ValueError, IndexError):
             continue
     return None
@@ -1282,53 +1285,74 @@ def unrevoked_grant_epoch():
     for f in (LOG_FILE, LOG_FILE + ".1"):
         try:
             with open(f, errors="replace") as fh:
-                rows = [ln.split("\t") for ln in fh if "\tGRANT(" in ln or "\tREVOKE" in ln]
+                rows = [ln.rstrip("\n").split("\t") for ln in fh]
         except OSError:
             continue
-        if not rows:
-            continue
-        for ln in reversed(rows):
-            if any(c.startswith("REVOKE") for c in ln[1:]):
+        for c in reversed(rows):
+            if len(c) < 3:
+                continue
+            if c[2] == "REVOKE":
                 return None
-            if any(c.startswith("GRANT(") for c in ln[1:]):
+            if c[2].startswith("GRANT("):
                 try:
-                    return parse_iso(ln[0])
+                    return parse_iso(c[0])
                 except (ValueError, IndexError):
                     return None
     return None
+
+
+def _home_audit_roots(home):
+    """Scoped home-directory roots: top-level $HOME (-maxdepth 1) plus each real (non-symlink) subdirectory in
+    AUDIT_HOME_SUBDIRS. Walking all of $HOME times out on large source, cache, media, and cloud-storage trees."""
+    if not home or os.path.islink(home) or not os.path.isdir(home):
+        return []
+    out = [(home, 1)]
+    for rel in AUDIT_HOME_SUBDIRS:
+        cur = home
+        ok = True
+        for part in rel.split("/"):
+            cur = os.path.join(cur, part)
+            if os.path.islink(cur) or not os.path.isdir(cur):
+                ok = False
+                break
+        if ok:
+            out.append((cur, None))
+    return out
 
 
 def audit(since):
     """Lines describing setuid/setgid files and root launchd targets (plus their plists) that changed at or after
     SINCE (epoch seconds): persistence a window can leave behind, which `revoke` does not undo."""
     found, ref = [], None
-    roots = [r for r in AUDIT_ROOTS if os.path.isdir(r)]
+    roots = [(r, None) for r in AUDIT_ROOTS if os.path.isdir(r)]
     try:
         for n in sorted(os.listdir(AUDIT_VOLUMES)):   # each mounted volume (a link such as the boot volume's is skipped)
             p = os.path.join(AUDIT_VOLUMES, n)
             if os.path.isdir(p) and not os.path.islink(p):
-                roots.append(p)
+                roots.append((p, None))
     except OSError:
         pass
     try:
         home = pwd.getpwuid(INVOKER_UID).pw_dir if INVOKER_UID else None
     except KeyError:
         home = None
-    if home and os.path.isdir(home):
-        roots.append(home)   # last: the largest tree, so a timeout still reports the rest
+    roots.extend(_home_audit_roots(home))   # last: scoped home paths, so a timeout still reports the system roots
     try:
         fd, ref = tempfile.mkstemp(prefix=".audit.", dir=GRANT_DIR)
         os.close(fd)
         os.utime(ref, (since, since))
         deadline = time.monotonic() + AUDIT_TOTAL
-        for root in roots:
+        for root, maxdepth in roots:
             left = deadline - time.monotonic()
             if left <= 0:
                 found.append("audit of %s skipped: the total time limit was reached (incomplete)" % root)
                 continue
+            cmd = ["/usr/bin/find", root, "-xdev"]
+            if maxdepth is not None:
+                cmd += ["-maxdepth", str(maxdepth)]
+            cmd += ["-type", "f", "(", "-perm", "-4000", "-o", "-perm", "-2000", ")", "-cnewer", ref, "-print"]
             try:
-                r = subprocess.run(["/usr/bin/find", root, "-xdev", "-type", "f", "(", "-perm", "-4000", "-o", "-perm", "-2000", ")",
-                                    "-cnewer", ref, "-print"], capture_output=True, text=True, timeout=min(AUDIT_TIMEOUT, left),
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=min(AUDIT_TIMEOUT, left),
                                    env={}, check=False)
             except subprocess.TimeoutExpired:
                 found.append("audit of %s timed out (incomplete)" % root)
@@ -1507,8 +1531,8 @@ def main(argv):
         if len(argv) != 2:
             die("usage: revoke", EX_USAGE)
         since = last_granted_epoch()   # before the file goes
-        had_file = os.path.lexists(GRANT_FILE)
-        lost = None if had_file else unrevoked_grant_epoch()   # granted, never revoked, and the file is gone   # revoke needs no password: with no grant file there is nothing to sweep for
+        had_file = os.path.lexists(GRANT_FILE)   # revoke needs no password: with no grant file there is nothing to sweep for
+        lost = None if had_file else unrevoked_grant_epoch()   # granted, never revoked, and the file is gone
         was_open, why, d = read_grant(now)
         print("revoking: the grant file said expires_utc=%s granted_utc=%s%s" % (
             clean(str(d.get("expires_utc", "?"))), clean(str(d.get("granted_utc", "?"))),
