@@ -28,7 +28,7 @@ TUI links it through `skill-everywhere`; edit only here.
    `~/Library/LaunchAgents/`, secrets in the LaunchAgent's `EnvironmentVariables`
    (0600). site-djbclark `roles/shared_mcp` applies them; `just
    shared-mcp-apply-secrets` rebuilds the plist when the keys rotate.
-2. **Self-hosted Firecrawl 2.11.519** on SIPB Hyades (`https://djbclark-firecrawl.sipb.cloud`,
+2. **Self-hosted Firecrawl 2.11.731** on SIPB Hyades (`https://djbclark-firecrawl.sipb.cloud`,
    `FIRECRAWL_SELFHOST_API_KEY`) — no rate limit, no credits, renders JavaScript,
    fetches Reddit, searches through SearXNG. Seven microVMs on one shared
    network: Redis, RabbitMQ, NuQ Postgres, Playwright, the API+workers, Caddy
@@ -60,21 +60,40 @@ TUI links it through `skill-everywhere`; edit only here.
 6. **MIT Libraries Mac bridge (`bin/firecrawl_mit_bridge.py`, 2026-11-22):**
    Hyades-first, fail-closed fallback inside `firecrawl-router` for `POST /v1/scrape`
    and `POST /v2/scrape` on exact hosts present in a fresh (`<= 7d`, `0600`)
-   enrollment snapshot (`FIRECRAWL_ROUTER_MIT_SNAPSHOT`). Mode `"pdf"` runs
+   enrollment snapshot (`FIRECRAWL_ROUTER_MIT_SNAPSHOT`, auto-refreshed every 3 days
+   by `com.djbclark.mitnet-snapshot-refresh`). Mode `"pdf"` runs
    `fetch.py --artifact --enrolled-only` + `pdftotext`/`pdfinfo` (`X-Firecrawl-Backend:
-   mit-fetch`); mode `"all"` adds `browserfetch.py` over `127.0.0.1:18830` +
+   mit-fetch`); mode `"all"` (live) adds `browserfetch.py` over `127.0.0.1:18830` +
    `pandoc --sandbox` (with `page.txt` fallback, `X-Firecrawl-Backend: mit-browser`).
    Non-enrolled hosts, non-scrape routes, stale/invalid snapshots, and any bridge
    error fail closed to the untouched Hyades reply (`X-Firecrawl-MIT-Bridge: skipped:<reason>`).
-   Instant rollback: set `FIRECRAWL_ROUTER_MIT_BRIDGE=off` + `launchctl kickstart -k`.
+   Instant rollback: `cd ~/ops/site-public-djbclark && just shared-mcp-apply-secrets -e shared_mcp_firecrawl_mit_bridge=off`.
+7. **OpenAlex + Crossref Free-OA fallback (`bin/firecrawl_oa_fallback.py`, 2026-11-23):**
+   Hyades-first, fail-closed fallback inside `firecrawl-router` for `POST /v1/scrape`
+   and `POST /v2/scrape`, sitting **after** Hyades and `mit-bridge` and **before** the
+   enrolled-host commercial guard. When a scholarly publisher scrape fails (Cloudflare,
+   Fastly, Turnstile, 403/429/5xx, PDF mismatch), it extracts the DOI / ScienceDirect PII
+   (resolved 1-to-1 via Crossref Polite Pool) / arXiv / PMID / PMCID, queries OpenAlex
+   (`$0` singleton lookups), excludes the failed publisher domain and `doi.org`, and
+   fetches a legal Open Access repository copy (`allowlist` mode live: arXiv, PMC,
+   Europe PMC, DSpace@MIT, Zenodo, HAL, major university repos, plus opt-in
+   `content.openalex.org` when `OPENALEX_API_KEY` is configured via `sudo-secretspec` —
+   never rendered into the plist) over local SSRF-pinned HTTPS + `pdftotext`/`pandoc --sandbox`.
+   Every OA reply sets `X-Firecrawl-Backend: oa-fallback`, `X-Firecrawl-OA-Source`,
+   `metadata.sourceURL` (requested publisher URL) distinct from `metadata.url` (fetched OA
+   URL), and a mandatory `data.warning` naming `oaVersion`, `oaLicense`, and `oaSource`
+   (flagging `"content may differ from the Version of Record"` for preprints/non-VoR).
+   Closed-access works fail closed cleanly (`X-Firecrawl-OA-Fallback: skipped:not-oa`).
+   Instant rollback: `cd ~/ops/site-public-djbclark && just shared-mcp-apply-secrets -e shared_mcp_firecrawl_oa_fallback=off`.
 
 ## `query` and `json` formats (LLM extraction, router-side)
 
 Self-hosted Firecrawl has no LLM, so `formats: ["query"|"json"]` is answered by the
-router on this Mac (2026-10-18): it asks the primary for markdown only, then runs
-SIPB LLMs (`qwen3.6:35b-a3b-q4_K_M` via the local `sipb-llms-proxy`), chunked
-map-reduce when the page is over ~24k tokens, then the free LiteLLM pool
-(`gemini-free`, `gemini-free-lite`). The answer is `data.answer` (query) or
+router on this Mac (2026-10-18; live order `FIRECRAWL_ROUTER_LLM_ORDER=oneshot-first`):
+it asks the primary (or `mit-bridge` / `oa-fallback`) for markdown only, then runs
+SIPB LLMs (`qwen3.6:35b-a3b-q4_K_M` via the local `sipb-llms-proxy`) for short/medium
+pages (`<= ~24k` tokens) and the 1M-context free LiteLLM pool (`gemini-free`,
+`gemini-free-lite`) one-shot for long papers before falling back to chunked map-reduce. The answer is `data.answer` (query) or
 `data.json`; response header `X-Firecrawl-LLM` names the rung (`sipb`, `sipbx4` =
 4 chunks, `gemini-free`, `none`). **The SIPB server silently keeps only the last
 16k tokens of a prompt over ~32k**, so the router never sends a page that big and
@@ -191,8 +210,9 @@ working around it. The usual failures, in the order to check:
    `success: true`.
 3. Self-hosted health: `curl -i https://djbclark-firecrawl.sipb.cloud/health`
    → 401.
-4. Router tests: `/opt/homebrew/bin/pytest
-   ~/src/djbclark-ade/tests/test_firecrawl_router.py -x` → all pass (39 on 2026-10-18).
+4. Router tests: `/Users/djbclark/ops/site-private-djbclark/bin/bgrun pytest
+   ~/src/djbclark-ade/tests/test_firecrawl_router.py
+   ~/src/djbclark-ade/tests/test_firecrawl_oa_fallback.py -x` → all pass (101 on 2026-11-23).
 
 ## Testing the router live (2026-10-18)
 
