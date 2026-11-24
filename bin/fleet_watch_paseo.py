@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -198,13 +199,104 @@ def _identity_to_paseo_host(ident):
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
-def _bind_send_env(pc, client, env):
-    """Ensure CLI `paseo send` targets the exact same daemon as `client`.
+def _read_bounded_regular(path, max_bytes=65536):
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(str(path), flags)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ValueError(f"unreadable Paseo PID lock {path}: {type(error).__name__}") from error
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > max_bytes:
+            raise ValueError(f"invalid Paseo PID lock {path}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, max_bytes + 1 - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"oversized Paseo PID lock {path}")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
-    Returns an env dict for `paseo send` (binding PASEO_HOST and clearing
-    PASEO_HOME when an explicit endpoint is active), or None to inherit env
-    when both inspect and send use the same PASEO_HOME instance. Raises
-    ValueError if PASEO_HOST/ADE_PASEO_URL cannot be proven to agree.
+
+def _is_pid_running(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def _current_linux_boot_id():
+    try:
+        text = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        return text or None
+    except OSError:
+        return None
+
+
+def _identity_to_daemon_url(ident):
+    if ident[0] == "unix":
+        return f"unix://{ident[1]}"
+    _, host, port = ident
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def _resolve_runtime_url_from_pid_lock(paseo_home):
+    """Read live runtime listen endpoint from <PASEO_HOME>/paseo.pid (matching Paseo CLI).
+
+    Returns None only when paseo.pid does not exist; fails closed on malformed,
+    stale (dead PID / previous boot), not-ready (listen=null), or non-local locks.
+    """
+    pid_path = Path(paseo_home) / "paseo.pid"
+    raw = _read_bounded_regular(pid_path)
+    if raw is None:
+        return None
+    try:
+        lock = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ValueError("malformed Paseo PID lock") from error
+    if not isinstance(lock, dict):
+        raise ValueError("invalid Paseo PID lock")
+    pid = lock.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise ValueError("invalid PID in Paseo PID lock")
+    lock_boot = lock.get("bootId")
+    cur_boot = _current_linux_boot_id()
+    if isinstance(lock_boot, str) and lock_boot and cur_boot and lock_boot != cur_boot:
+        raise ValueError(f"Paseo daemon PID lock in {paseo_home} is from a previous boot")
+    if not _is_pid_running(pid):
+        raise ValueError(f"Paseo daemon PID lock in {paseo_home} is stale (PID {pid} not running)")
+    listen = lock.get("listen")
+    if not isinstance(listen, str) or not listen.strip():
+        raise ValueError(f"Paseo daemon PID {pid} has not published a listen address yet")
+    ident = _parse_local_paseo_host(listen)
+    if ident is None:
+        raise ValueError(f"Paseo PID lock listen address is not a local loopback/unix target: {listen!r}")
+    return _identity_to_daemon_url(ident)
+
+
+def _resolve_paseo_home(env):
+    raw = (env.get("PASEO_HOME") or "").strip()
+    return Path(raw).expanduser() if raw else Path.home() / ".paseo"
+
+
+def _resolve_send_host(pc, client, env):
+    """Return the exact CLI `--host` endpoint matching `client.target`, or fail closed.
+
+    Always binds CLI `paseo send` to the exact inspected endpoint — including on
+    default and `PASEO_HOME`-only paths — while retaining `PASEO_HOME` in the
+    subprocess environment so Paseo CLI's `readLocalCredentialForTarget(home, host)`
+    can load local-credential auth for custom homes.
     """
     ade_url = (env.get("ADE_PASEO_URL") or "").strip()
     paseo_host = (env.get("PASEO_HOST") or "").strip()
@@ -223,25 +315,15 @@ def _bind_send_env(pc, client, env):
             except pc.DaemonError as error:
                 raise ValueError(f"invalid ADE_PASEO_URL: {error}") from error
             ident = _target_identity(target_obj)
+    if ident is None:
+        raise ValueError("unable to determine daemon endpoint to bind CLI send")
 
     if paseo_host:
         parsed_host = _parse_local_paseo_host(paseo_host)
-        if ident is None or parsed_host is None or parsed_host != ident:
+        if parsed_host is None or parsed_host != ident:
             raise ValueError("PASEO_HOST disagrees with daemon target; refusing split inspect/send")
-        bound = dict(env)
-        bound.pop("PASEO_HOME", None)
-        bound["PASEO_HOST"] = _identity_to_paseo_host(ident)
-        return bound
 
-    if ade_url:
-        if ident is None:
-            raise ValueError("unable to bind CLI send target to ADE_PASEO_URL")
-        bound = dict(env)
-        bound.pop("PASEO_HOME", None)
-        bound["PASEO_HOST"] = _identity_to_paseo_host(ident)
-        return bound
-
-    return None
+    return _identity_to_paseo_host(ident)
 
 
 def _resolve_target_from_rows(target, rows):
@@ -258,7 +340,7 @@ def _resolve_target_from_rows(target, rows):
 
 
 def _resolve_and_inspect(target, cli):
-    """Resolve TARGET to (aid, inspect_dict, send_env) via PaseoClient or CLI."""
+    """Resolve TARGET to (aid, inspect_dict, bound_host) via PaseoClient or CLI."""
     env = os.environ
     if (env.get("PASEO_HOME") or "").strip() and (env.get("PASEO_HOST") or "").strip():
         raise ValueError("PASEO_HOME and PASEO_HOST cannot both be set")
@@ -277,11 +359,18 @@ def _resolve_and_inspect(target, cli):
     )
     if use_daemon:
         not_found_err = getattr(pc, "AgentNotFoundError", ())
+        ade_url = (env.get("ADE_PASEO_URL") or "").strip()
+        client_kwargs = {"timeout": 20}
+        if not ade_url:
+            paseo_home = _resolve_paseo_home(env)
+            runtime_url = _resolve_runtime_url_from_pid_lock(paseo_home)
+            if runtime_url is not None:
+                client_kwargs["url"] = runtime_url
         try:
-            client = pc.PaseoClient(timeout=20)
+            client = pc.PaseoClient(**client_kwargs)
         except pc.DaemonError as error:
             raise ValueError(f"Paseo daemon unavailable: {error}") from error
-        send_env = _bind_send_env(pc, client, env)
+        bound_host = _resolve_send_host(pc, client, env)
         if UUID_RE.fullmatch(target):
             try:
                 info = client.inspect_agent(target, cli_shape=True)
@@ -289,7 +378,7 @@ def _resolve_and_inspect(target, cli):
                 raise ValueError("target did not resolve to exactly one agent") from error
             except pc.DaemonError as error:
                 raise ValueError(f"Paseo daemon inspect failed: {error}") from error
-            return target, info, send_env
+            return target, info, bound_host
         if getattr(getattr(client, "target", None), "mcp_only", False) is True:
             raise ValueError("MCP-only daemon URL cannot safely resolve shortId prefixes")
         try:
@@ -303,7 +392,7 @@ def _resolve_and_inspect(target, cli):
             raise ValueError("target is unavailable, archived, or awaiting permission/question") from error
         except pc.DaemonError as error:
             raise ValueError(f"Paseo daemon inspect failed: {error}") from error
-        return aid, info, send_env
+        return aid, info, bound_host
 
     rows = call(cli, "ls", "-a", "-g", "--json")
     aid = _resolve_target_from_rows(target, rows)
@@ -331,7 +420,7 @@ def send(target, text, label="fleet-watch", receipt_file=None):
     if not TARGET.fullmatch(target):
         raise ValueError("target must be a Paseo id or unique shortId prefix")
     cli = _resolve_cli_bin()
-    aid, info, send_env = _resolve_and_inspect(target, cli)
+    aid, info, bound_host = _resolve_and_inspect(target, cli)
     if (not isinstance(info, dict) or info.get("Id") != aid
             or info.get("Archived") is not False or info.get("PendingPermissions") != []
             or info.get("Status") not in {"idle", "running", "closed"}):
@@ -353,12 +442,11 @@ def send(target, text, label="fleet-watch", receipt_file=None):
         # which requires manual receipt/ack reconciliation and is never replayed.
         save_receipt(receipt_file, "sending")
         try:
-            if send_env is None:
-                receipt = call(cli, "send", aid, "--prompt-file", str(prompt), "--behavior", "steer",
-                               "--no-wait", "--json", timeout=60)
-            else:
-                receipt = call(cli, "send", aid, "--prompt-file", str(prompt), "--behavior", "steer",
-                               "--no-wait", "--json", timeout=60, env=send_env)
+            send_args = ["send", aid]
+            if bound_host is not None:
+                send_args.extend(["--host", bound_host])
+            send_args.extend(["--prompt-file", str(prompt), "--behavior", "steer", "--no-wait", "--json"])
+            receipt = call(cli, *send_args, timeout=60)
         except (subprocess.TimeoutExpired, OSError, ValueError) as error:
             raise PendingDelivery(f"send outcome unknown: {error}") from error
     status = receipt.get("status") if isinstance(receipt, dict) else None

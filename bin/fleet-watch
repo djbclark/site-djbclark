@@ -1394,15 +1394,18 @@ phantom_watch() {
   "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$FLEET_PASEO_SEND" <<'PY' || true
 import datetime
 import fcntl
+import http.client
 import importlib.util
 import json
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from base64 import b64encode
 from pathlib import Path
@@ -1432,6 +1435,8 @@ REFUSAL = (b"reported running but no active run was cancelled", b"cancellation w
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STEERED = ("claude",)    # providers the phantom monitor holds back from while they work (fleet.PASEO_STEER_DEFAULT): a steer replaces the running turn
 SOURCE = re.compile(r'source-agent-id=\\?"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\?"')
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_PASEO_BIND = {"host": None}
 
 
 def clean(text, limit):
@@ -1459,12 +1464,145 @@ def _remaining_timeout():
     return min(CMD_TIMEOUT, left)
 
 
-def run(args):
+def run(args, env=None):
     timeout = _remaining_timeout()
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    kwargs = {"capture_output": True, "text": True, "timeout": timeout}
+    if env is not None:
+        kwargs["env"] = env
+    result = subprocess.run(args, **kwargs)
     if result.returncode:
         raise RuntimeError(f"{Path(args[0]).name} {args[1]} exited {result.returncode}: {clean(result.stderr, 200)}")
     return result.stdout
+
+
+def _child_paseo_env():
+    """Propagate phantom_watch's resolved PASEO_DIR to child CLI reads and fleet_watch_paseo.py."""
+    env = dict(os.environ)
+    env["PASEO_HOME"] = str(PASEO_DIR)
+    env.pop("PASEO_HOST", None)
+    return env
+
+
+def _parse_local_paseo_host(raw):
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("unix://") or text.startswith("/") or text.startswith("~"):
+        sock = text[len("unix://"):].strip() if text.startswith("unix://") else text
+        if not sock or "\x00" in sock:
+            return None
+        resolved = os.path.realpath(os.path.expanduser(sock))
+        return ("unix", resolved) if resolved.startswith("/") else None
+    if text.isdigit():
+        port = int(text)
+        return ("tcp", "127.0.0.1", port) if 1 <= port <= 65535 else None
+    if "://" in text:
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme not in ("tcp", "http", "ws"):
+            return None
+        if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+            return None
+        if parsed.path not in ("", "/", "/ws", "/mcp/agents"):
+            return None
+    else:
+        if "/" in text or "?" in text or "#" in text or "@" in text:
+            return None
+        parsed = urllib.parse.urlsplit(f"tcp://{text}")
+    host = (parsed.hostname or "").strip().lower()
+    if host not in LOOPBACK_HOSTS:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None or not (1 <= port <= 65535):
+        return None
+    return ("tcp", host, port)
+
+
+def _target_identity(target):
+    kind = getattr(target, "kind", None)
+    if kind == "unix":
+        sock = getattr(target, "socket_path", "")
+        return ("unix", os.path.realpath(sock)) if isinstance(sock, str) and sock.strip() else None
+    if kind == "tcp":
+        host = getattr(target, "host", "")
+        port = getattr(target, "port", None)
+        if isinstance(host, str) and isinstance(port, int):
+            return ("tcp", host.strip().lower(), port)
+    return None
+
+
+def _identity_to_paseo_host(ident):
+    if ident[0] == "unix":
+        return f"unix://{ident[1]}"
+    _, host, port = ident
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
+def _identity_to_daemon_url(ident):
+    if ident[0] == "unix":
+        return f"unix://{ident[1]}"
+    _, host, port = ident
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def _resolve_runtime_url_from_pid_lock(paseo_home):
+    """Read live runtime listen endpoint from <PASEO_DIR>/paseo.pid; None only when file absent."""
+    pid_path = Path(paseo_home) / "paseo.pid"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(str(pid_path), flags)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise RuntimeError(f"unreadable Paseo PID lock {pid_path}: {type(error).__name__}") from error
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 65536:
+            raise RuntimeError(f"invalid Paseo PID lock {pid_path}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, 65537 - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > 65536:
+                raise RuntimeError(f"oversized Paseo PID lock {pid_path}")
+        raw = b"".join(chunks)
+    finally:
+        os.close(fd)
+    try:
+        lock = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise RuntimeError("malformed Paseo PID lock") from error
+    if not isinstance(lock, dict):
+        raise RuntimeError("invalid Paseo PID lock")
+    pid = lock.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise RuntimeError("invalid PID in Paseo PID lock")
+    lock_boot = lock.get("bootId")
+    try:
+        cur_boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        cur_boot = None
+    if isinstance(lock_boot, str) and lock_boot and cur_boot and lock_boot != cur_boot:
+        raise RuntimeError(f"Paseo daemon PID lock in {paseo_home} is from a previous boot")
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except ProcessLookupError as error:
+        raise RuntimeError(f"Paseo daemon PID lock in {paseo_home} is stale (PID {pid} not running)") from error
+    listen = lock.get("listen")
+    if not isinstance(listen, str) or not listen.strip():
+        raise RuntimeError(f"Paseo daemon PID {pid} has not published a listen address yet")
+    ident = _parse_local_paseo_host(listen)
+    if ident is None:
+        raise RuntimeError(f"Paseo PID lock listen address is not a local loopback/unix target: {listen!r}")
+    return _identity_to_daemon_url(ident)
 
 
 def _want_daemon_transport(env=None):
@@ -1565,11 +1703,69 @@ def _make_operation_budget(daemon_error_cls):
 
 
 def _make_budgeted_opener(pc, budget):
-    base_opener = pc.urllib_opener
+    """Loopback HTTP/Unix POST opener enforcing one monotonic deadline across connect, headers, and chunked body reads."""
+    max_http_bytes = getattr(pc, "MAX_HTTP_BYTES", 8_000_000)
+    max_error_bytes = getattr(pc, "MAX_ERROR_BYTES", 65_536)
+    unix_conn_cls = getattr(pc, "_UnixHTTPConnection", None)
 
     def opener(url, body, headers, timeout):
-        rem = budget["remaining"]()
-        return base_opener(url, body, headers, min(timeout, rem))
+        rem = min(timeout, budget["remaining"]())
+        if url.startswith("unix://"):
+            if unix_conn_cls is None:
+                raise pc.DaemonError("unix HTTP transport unavailable")
+            sock_path = url[len("unix://"):].split("#", 1)[0]
+            conn = unix_conn_cls(sock_path, timeout=rem)
+            req_path = "/mcp/agents"
+        else:
+            target = pc.parse_daemon_url(url)
+            if target.kind != "tcp" or target.ws_only:
+                raise pc.DaemonError("invalid HTTP daemon URL")
+            conn = http.client.HTTPConnection(target.host, target.port, timeout=rem)
+            req_path = "/mcp/agents"
+        raw_sock = None
+        resp = None
+        try:
+            conn.timeout = budget["remaining"]()
+            conn.connect()
+            raw_sock = conn.sock
+            rem = budget["remaining"]()
+            if raw_sock is not None:
+                raw_sock.settimeout(rem)
+            conn.request("POST", req_path, body=body, headers=headers)
+            rem = budget["remaining"]()
+            if raw_sock is not None:
+                raw_sock.settimeout(rem)
+            resp = conn.getresponse()
+            if resp.status in (301, 302, 303, 307, 308):
+                raise pc.DaemonError(f"daemon redirected (HTTP {resp.status})")
+            max_bytes = max_http_bytes if resp.status == 200 else max_error_bytes
+            chunks = []
+            total = 0
+            while True:
+                rem = budget["remaining"]()
+                if raw_sock is not None:
+                    raw_sock.settimeout(rem)
+                to_read = max_bytes + 1 - total
+                if to_read <= 0:
+                    break
+                chunk = resp.read1(min(65_536, to_read))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if resp.status == 200 and total > max_bytes:
+                    raise pc.DaemonError("daemon HTTP response exceeded size limit")
+                if resp.status != 200 and total >= max_bytes:
+                    break
+            budget["remaining"]()
+            return resp.status, resp.getheader("Content-Type", "") or "", b"".join(chunks)
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+            conn.close()
 
     return opener
 
@@ -1612,6 +1808,10 @@ def _make_budgeted_ws_factory(pc, budget):
 
 def make_paseo_client():
     """Return (pc_module, PaseoClient) when daemon transport is active, else (None, None)."""
+    _PASEO_BIND["host"] = None
+    paseo_host = (os.environ.get("PASEO_HOST") or "").strip()
+    if paseo_host:
+        raise RuntimeError("PASEO_HOST is not supported for local phantom_watch")
     want_daemon, forced_daemon = _want_daemon_transport()
     if not want_daemon:
         return None, None
@@ -1624,6 +1824,10 @@ def make_paseo_client():
         return None, None
     budget = _make_operation_budget(pc.DaemonError)
     kwargs = {"paseo_home": PASEO_DIR, "timeout": _remaining_timeout()}
+    if not (os.environ.get("ADE_PASEO_URL") or "").strip():
+        runtime_url = _resolve_runtime_url_from_pid_lock(PASEO_DIR)
+        if runtime_url is not None:
+            kwargs["url"] = runtime_url
     if hasattr(pc, "urllib_opener") and hasattr(pc, "_StdlibWebSocket"):
         kwargs["opener"] = _make_budgeted_opener(pc, budget)
         kwargs["ws_factory"] = _make_budgeted_ws_factory(pc, budget)
@@ -1631,6 +1835,9 @@ def make_paseo_client():
         client = pc.PaseoClient(**kwargs)
     except pc.DaemonError as error:
         raise RuntimeError(f"paseo daemon unavailable: {error}") from error
+    ident = _target_identity(getattr(client, "target", None))
+    if ident is not None:
+        _PASEO_BIND["host"] = _identity_to_paseo_host(ident)
     client._fw_budget = budget
     return pc, client
 
@@ -1649,13 +1856,15 @@ def list_agents(pc, client):
                 active_only=True,
                 cli_rows=True,
             )
+            if budget is not None:
+                budget["remaining"]()
         except pc.DaemonError as error:
             raise RuntimeError(f"paseo daemon ls failed: {error}") from error
         finally:
             if budget is not None:
                 budget["finish"]()
     else:
-        listing = json.loads(run([PASEO, "ls", "--json"]))
+        listing = json.loads(run([PASEO, "ls", "--json"], env=_child_paseo_env()))
     if not isinstance(listing, list):
         raise ValueError("invalid Paseo agent listing")
     return listing
@@ -1668,13 +1877,15 @@ def inspect_agent(pc, client, agent_id):
         _set_client_timeout(client, timeout)
         try:
             info = client.inspect_agent(agent_id, cli_shape=True)
+            if budget is not None:
+                budget["remaining"]()
         except pc.DaemonError as error:
             raise RuntimeError(f"paseo daemon inspect failed: {error}") from error
         finally:
             if budget is not None:
                 budget["finish"]()
     else:
-        info = json.loads(run([PASEO, "inspect", agent_id, "--json"]))
+        info = json.loads(run([PASEO, "inspect", agent_id, "--json"], env=_child_paseo_env()))
     if not isinstance(info, dict):
         raise ValueError("invalid Paseo agent inspect")
     return info
@@ -1813,8 +2024,12 @@ def refusals_since(agent_id, since):
 
 def log_owner(agent_id):
     """Owner from `paseo logs` text for a provider with no sqlite to read: the last source-agent-id seen."""
+    cmd = [PASEO, "logs", agent_id, "--tail", "200", "--json"]
+    bound_host = _PASEO_BIND.get("host")
+    if bound_host:
+        cmd.extend(["--host", bound_host])
     try:
-        found = SOURCE.findall(run([PASEO, "logs", agent_id, "--tail", "200", "--json"]))
+        found = SOURCE.findall(run(cmd, env=_child_paseo_env()))
     except (OSError, RuntimeError, subprocess.TimeoutExpired):
         return None
     return found[-1] if found else None
@@ -1880,8 +2095,11 @@ def send_ping(text, limit):
 
 def send_relay(seat, text, limit):
     """Only sent/completed receipts count; keep the episode retry bookkeeping."""
-    result = subprocess.run([sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"],
-                            capture_output=True, text=True, timeout=limit)
+    env_fn = globals().get("_child_paseo_env")
+    kwargs = {"capture_output": True, "text": True, "timeout": limit}
+    if callable(env_fn):
+        kwargs["env"] = env_fn()
+    result = subprocess.run([sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"], **kwargs)
     if result.returncode == 5:
         return "pending"
     return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
