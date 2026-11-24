@@ -21,10 +21,20 @@
       - shared_mcp_firecrawl_oa_fallback in ['off', 'allowlist', 'pinned']
       - shared_mcp_firecrawl_oa_versions in ['all', 'peer-reviewed']
       - shared_mcp_firecrawl_oa_content_api in ['off', 'on']
+      - shared_mcp_firecrawl_oa_core in ['off', 'auto', 'on']
+      - shared_mcp_firecrawl_oa_springer in ['off', 'auto', 'on']
       - shared_mcp_firecrawl_oa_enrolled in ['off', 'on']
+      - shared_mcp_firecrawl_wiley_tdm in ['off', 'auto', 'on']
+      - shared_mcp_firecrawl_wiley_allow_cloud_llm in ['off', 'on']
       - "'OPENALEX_API_KEY' not in (item.env | default({}))"
       - "'FIRECRAWL_ROUTER_OPENALEX_KEY' not in (item.env | default({}))"
-    fail_msg: Invalid OpenAlex OA fallback setting or forbidden OPENALEX_API_KEY in LaunchAgent plist env.
+      - "'CORE_API_KEY' not in (item.env | default({}))"
+      - "'FIRECRAWL_ROUTER_CORE_KEY' not in (item.env | default({}))"
+      - "'SPRINGER_NATURE_API_KEY' not in (item.env | default({}))"
+      - "'FIRECRAWL_ROUTER_SPRINGER_KEY' not in (item.env | default({}))"
+      - "'WILEY_TDM_TOKEN' not in (item.env | default({}))"
+      - "'FIRECRAWL_ROUTER_WILEY_TDM_TOKEN' not in (item.env | default({}))"
+    fail_msg: Invalid OA/Wiley TDM setting or forbidden API key in LaunchAgent plist env.
   loop: "{{ shared_mcp_servers | selectattr('name', 'equalto', 'firecrawl') | list }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
