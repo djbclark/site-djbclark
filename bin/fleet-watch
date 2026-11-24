@@ -1364,8 +1364,9 @@ upstream_watch() {
 
 # Phantom "running" Paseo agents (2026-11-02, RCA ~/.local/state/bigteam/lead-2026-11-02/phantom-running-rca.md E):
 # Paseo can keep an agent "running" for good after a cancel it never settled (agent 428f5f02, 17:55Z). Alert only:
-# this never stops, archives, reloads, restarts or prompts the agent. Each run lists `paseo ls` running agents and
-# `paseo inspect`s them. A signal set holds when (2a) Status is running and UpdatedAt is FLEET_WATCH_PHANTOM_SILENT
+# this never stops, archives, reloads, restarts or prompts the agent. Each run lists running agents and inspects them
+# via ~/src/djbclark-ade/bin/ade_paseo_client.py (loopback daemon, zero Node.js CLI spawns; falls back to `paseo` CLI
+# only when FLEET_WATCH_PASEO or ADE_PASEO_TRANSPORT=cli is set or ade_paseo_client cannot be imported). A signal set holds when (2a) Status is running and UpdatedAt is FLEET_WATCH_PHANTOM_SILENT
 # seconds (default 900) or more old, and then, by provider:
 #   opencode (2b)  its session is absent from GET /api/session/active (basic auth from
 #                  ~/.local/state/opencode/service.json, never printed) AND the newest session_message row (opencode.db,
@@ -1391,16 +1392,24 @@ phantom_watch() {
   local mode=${1:-check}
   [[ "$PHANTOM" == on || "$mode" != check ]] || return 0
   "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$FLEET_PASEO_SEND" <<'PY' || true
+import ctypes
 import datetime
 import fcntl
+import http.client
+import importlib.util
 import json
 import os
 import re
+import socket
 import sqlite3
+import stat
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.parse
 import urllib.request
 from base64 import b64encode
 from pathlib import Path
@@ -1411,7 +1420,7 @@ home = Path.home()
 dry = mode == "dry"
 quiet = mode == "check"
 state_file = root / "phantom.json"
-PASEO = os.environ.get("FLEET_WATCH_PASEO", "paseo")
+PASEO = (os.environ.get("FLEET_WATCH_PASEO") or "").strip() or "paseo"
 HERMES_PING = os.environ.get("FLEET_WATCH_HERMES_PING", str(home / ".local/bin/hermes-ping"))
 LEAD = os.environ.get("FLEET_WATCH_PHANTOM_LEAD", "7c58015b")
 SILENT = float(os.environ.get("FLEET_WATCH_PHANTOM_SILENT", "900"))
@@ -1419,7 +1428,10 @@ GAP = float(os.environ.get("FLEET_WATCH_PHANTOM_GAP", "270"))
 DEADLINE = time.monotonic() + float(os.environ.get("FLEET_WATCH_PHANTOM_TIMEOUT", "120"))
 CMD_TIMEOUT = float(os.environ.get("FLEET_WATCH_PHANTOM_CMD_TIMEOUT", "30"))
 NOW = float(os.environ.get("FLEET_WATCH_PHANTOM_NOW") or time.time())
-PASEO_DIR = Path(os.environ.get("FLEET_WATCH_PHANTOM_PASEO_DIR", str(home / ".paseo")))
+# Align evidence reads and daemon discovery/auth on one expanded directory
+# (FLEET_WATCH_PHANTOM_PASEO_DIR -> PASEO_HOME -> ~/.paseo); ADE_PASEO_URL still wins for the endpoint.
+_paseo_dir_raw = (os.environ.get("FLEET_WATCH_PHANTOM_PASEO_DIR") or os.environ.get("PASEO_HOME") or "").strip()
+PASEO_DIR = Path(_paseo_dir_raw).expanduser() if _paseo_dir_raw else home / ".paseo"
 OC_DB = os.environ.get("FLEET_WATCH_PHANTOM_OC_DB", str(home / ".local/share/opencode/opencode.db"))
 OC_SERVICE = os.environ.get("FLEET_WATCH_PHANTOM_OC_SERVICE", str(home / ".local/state/opencode/service.json"))
 MAX_TRIES = 3
@@ -1427,6 +1439,9 @@ REFUSAL = (b"reported running but no active run was cancelled", b"cancellation w
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STEERED = ("claude",)    # providers the phantom monitor holds back from while they work (fleet.PASEO_STEER_DEFAULT): a steer replaces the running turn
 SOURCE = re.compile(r'source-agent-id=\\?"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\?"')
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+BOOT_TOLERANCE_S = 5.0
+_PASEO_BIND = {"host": None}
 
 
 def clean(text, limit):
@@ -1447,14 +1462,523 @@ def say(line):
         print(line)
 
 
-def run(args):
+def _remaining_timeout():
     left = DEADLINE - time.monotonic()
     if left <= 0:
         raise RuntimeError("step deadline reached")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=min(CMD_TIMEOUT, left))
+    return min(CMD_TIMEOUT, left)
+
+
+def run(args, env=None):
+    timeout = _remaining_timeout()
+    kwargs = {"capture_output": True, "text": True, "timeout": timeout}
+    if env is not None:
+        kwargs["env"] = env
+    result = subprocess.run(args, **kwargs)
     if result.returncode:
         raise RuntimeError(f"{Path(args[0]).name} {args[1]} exited {result.returncode}: {clean(result.stderr, 200)}")
     return result.stdout
+
+
+def _child_paseo_env():
+    """Propagate phantom_watch's resolved PASEO_DIR to child CLI reads and fleet_watch_paseo.py."""
+    env = dict(os.environ)
+    env["PASEO_HOME"] = str(PASEO_DIR)
+    env.pop("PASEO_HOST", None)
+    return env
+
+
+def _parse_local_endpoint(raw):
+    """Parse a local-only endpoint into (canonical_ident, cli_spelling, daemon_url); else None."""
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("unix://") or text.startswith("/") or text.startswith("~"):
+        sock = text[len("unix://"):].strip() if text.startswith("unix://") else text
+        if not sock or "\x00" in sock:
+            return None
+        expanded = os.path.expanduser(sock)
+        if not expanded.startswith("/") or ".." in Path(expanded).parts:
+            return None
+        resolved = os.path.realpath(expanded)
+        if not resolved.startswith("/"):
+            return None
+        spelling = f"unix://{expanded}"
+        return (("unix", resolved), spelling, spelling)
+    if text.isdigit():
+        port = int(text)
+        if not (1 <= port <= 65535):
+            return None
+        return (("tcp", "127.0.0.1", port), f"127.0.0.1:{port}", f"http://127.0.0.1:{port}")
+    if "://" in text:
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme not in ("tcp", "http", "ws"):
+            return None
+        if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+            return None
+        if parsed.path not in ("", "/", "/ws", "/mcp/agents"):
+            return None
+    else:
+        if "/" in text or "?" in text or "#" in text or "@" in text:
+            return None
+        parsed = urllib.parse.urlsplit(f"tcp://{text}")
+    host = (parsed.hostname or "").strip().lower()
+    if host not in LOOPBACK_HOSTS:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None or not (1 <= port <= 65535):
+        return None
+    spelling = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    return (("tcp", host, port), spelling, f"http://{spelling}")
+
+
+def _target_identity(target):
+    kind = getattr(target, "kind", None)
+    if kind == "unix":
+        sock = getattr(target, "socket_path", "")
+        return ("unix", os.path.realpath(sock)) if isinstance(sock, str) and sock.strip() else None
+    if kind == "tcp":
+        host = getattr(target, "host", "")
+        port = getattr(target, "port", None)
+        if isinstance(host, str) and isinstance(port, int):
+            return ("tcp", host.strip().lower(), port)
+    return None
+
+
+def _target_cli_spelling(target):
+    kind = getattr(target, "kind", None)
+    if kind == "unix":
+        sock = getattr(target, "socket_path", "")
+        return f"unix://{sock.strip()}" if isinstance(sock, str) and sock.strip() else None
+    if kind == "tcp":
+        host = getattr(target, "host", "")
+        port = getattr(target, "port", None)
+        if isinstance(host, str) and isinstance(port, int):
+            h = host.strip().lower()
+            return f"[{h}]:{port}" if ":" in h else f"{h}:{port}"
+    return None
+
+
+def _host_boot_epoch():
+    """Return host boot time in epoch seconds (macOS kern.boottime or Linux /proc/uptime), or None."""
+    if sys.platform == "darwin":
+        try:
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            buf = ctypes.create_string_buffer(16)
+            size = ctypes.c_size_t(16)
+            if libc.sysctlbyname(b"kern.boottime", buf, ctypes.byref(size), None, 0) == 0 and size.value >= 12:
+                sec, usec = struct.unpack("qi", buf.raw[:12])
+                return sec + usec / 1_000_000.0
+        except OSError:
+            pass
+    try:
+        uptime_s = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+        return time.time() - uptime_s
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _parse_iso_epoch(stamp):
+    if not isinstance(stamp, str) or not stamp.strip():
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.timestamp()
+
+
+def _resolve_runtime_endpoint_from_pid_lock(paseo_home):
+    """Read live runtime listen endpoint from <PASEO_DIR>/paseo.pid; None only when file absent."""
+    pid_path = Path(paseo_home) / "paseo.pid"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(str(pid_path), flags)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise RuntimeError(f"unreadable Paseo PID lock {pid_path}: {type(error).__name__}") from error
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 65536:
+            raise RuntimeError(f"invalid Paseo PID lock {pid_path}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, 65537 - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > 65536:
+                raise RuntimeError(f"oversized Paseo PID lock {pid_path}")
+        raw = b"".join(chunks)
+    finally:
+        os.close(fd)
+    try:
+        lock = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise RuntimeError("malformed Paseo PID lock") from error
+    if not isinstance(lock, dict):
+        raise RuntimeError("invalid Paseo PID lock")
+    pid = lock.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise RuntimeError("invalid PID in Paseo PID lock")
+    lock_boot = lock.get("bootId")
+    try:
+        cur_boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        cur_boot = None
+    if isinstance(lock_boot, str) and lock_boot and cur_boot:
+        if lock_boot != cur_boot:
+            raise RuntimeError(f"Paseo daemon PID lock in {paseo_home} is from a previous boot")
+    else:
+        started_ts = _parse_iso_epoch(lock.get("startedAt"))
+        boot_epoch = _host_boot_epoch() if started_ts is not None else None
+        if started_ts is not None and boot_epoch is not None and started_ts < boot_epoch - BOOT_TOLERANCE_S:
+            raise RuntimeError(f"Paseo daemon PID lock in {paseo_home} predates current host boot")
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except ProcessLookupError as error:
+        raise RuntimeError(f"Paseo daemon PID lock in {paseo_home} is stale (PID {pid} not running)") from error
+    listen = lock.get("listen")
+    if not isinstance(listen, str) or not listen.strip():
+        raise RuntimeError(f"Paseo daemon PID {pid} has not published a listen address yet")
+    parsed = _parse_local_endpoint(listen)
+    if parsed is None:
+        raise RuntimeError("Paseo PID lock listen address is not a valid local loopback or unix target")
+    return parsed
+
+
+def _want_daemon_transport(env=None):
+    """Mirror ade_paseo_client.transport_mode() before import.
+
+    Returns (use_daemon: bool, forced_daemon: bool). Explicit CLI opt-in skips
+    importing ade_paseo_client.py so CLI stays an escape hatch if the module is
+    broken on disk.
+    """
+    e = os.environ if env is None else env
+    if (e.get("ADE_PASEO_URL") or "").strip():
+        return True, True
+    explicit = (e.get("ADE_PASEO_TRANSPORT") or "").strip().lower()
+    if explicit in ("daemon", "http", "ws"):
+        return True, True
+    if explicit == "cli":
+        return False, False
+    val = (e.get("FLEET_WATCH_PASEO") or "").strip()
+    if val and val != "paseo":
+        return False, False
+    return True, False
+
+
+def _load_paseo_client():
+    """Load ade_paseo_client from ~/src/djbclark-ade/bin; None only if absent.
+
+    Raises RuntimeError when the file exists on disk but fails to load.
+    """
+    path = home / "src/djbclark-ade/bin/ade_paseo_client.py"
+    if "ade_paseo_client" in sys.modules:
+        existing = sys.modules["ade_paseo_client"]
+        if existing is None:
+            return None
+        existing_file = getattr(existing, "__file__", None)
+        if existing_file is None:
+            return existing
+        try:
+            if path.is_file() and Path(existing_file).resolve() == path.resolve():
+                return existing
+        except OSError:
+            pass
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise RuntimeError(f"ade_paseo_client path is not a regular file: {path}")
+    spec = importlib.util.spec_from_file_location("ade_paseo_client", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not create module spec for {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ade_paseo_client"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop("ade_paseo_client", None)
+        raise RuntimeError(f"failed to load ade_paseo_client: {type(error).__name__}: {error}") from error
+    return module
+
+
+def _set_client_timeout(client, timeout):
+    client.timeout = timeout
+    mcp = getattr(client, "_mcp", None)
+    if mcp is not None:
+        mcp.timeout = timeout
+
+
+def _make_operation_budget(daemon_error_cls):
+    """Single wall-clock deadline shared across connect, hello, multi-page WS, and MCP->WS fallback."""
+    state = {"deadline": None}
+
+    def start():
+        now = time.monotonic()
+        tick_left = DEADLINE - now
+        if tick_left <= 0:
+            raise RuntimeError("step deadline reached")
+        budget = min(CMD_TIMEOUT, tick_left)
+        state["deadline"] = now + budget
+        return budget
+
+    def finish():
+        state["deadline"] = None
+
+    def remaining():
+        cap = DEADLINE if state["deadline"] is None else min(state["deadline"], DEADLINE)
+        rem = cap - time.monotonic()
+        if rem <= 0:
+            raise daemon_error_cls("operation deadline exceeded")
+        return rem
+
+    def clamp_deadline(deadline=None):
+        cap = DEADLINE if state["deadline"] is None else min(state["deadline"], DEADLINE)
+        if deadline is not None:
+            cap = min(cap, deadline)
+        if cap - time.monotonic() <= 0:
+            raise daemon_error_cls("operation deadline exceeded")
+        return cap
+
+    return {"start": start, "finish": finish, "remaining": remaining, "clamp_deadline": clamp_deadline}
+
+
+def _make_budgeted_opener(pc, budget):
+    """Loopback HTTP/Unix POST opener enforcing one hard monotonic deadline across connect, status/headers, and body reads."""
+    max_http_bytes = getattr(pc, "MAX_HTTP_BYTES", 8_000_000)
+    max_error_bytes = getattr(pc, "MAX_ERROR_BYTES", 65_536)
+    unix_conn_cls = getattr(pc, "_UnixHTTPConnection", None)
+
+    def opener(url, body, headers, timeout):
+        rem = min(timeout, budget["remaining"]())
+        if url.startswith("unix://"):
+            if unix_conn_cls is None:
+                raise pc.DaemonError("unix HTTP transport unavailable")
+            sock_path = url[len("unix://"):].split("#", 1)[0]
+            conn = unix_conn_cls(sock_path, timeout=rem)
+            req_path = "/mcp/agents"
+        else:
+            target = pc.parse_daemon_url(url)
+            if target.kind != "tcp" or target.ws_only:
+                raise pc.DaemonError("invalid HTTP daemon URL")
+            conn = http.client.HTTPConnection(target.host, target.port, timeout=rem)
+            req_path = "/mcp/agents"
+        raw_sock = None
+        resp = None
+        timer = None
+        timed_out = [False]
+
+        def _abort_sock():
+            timed_out[0] = True
+            sock = raw_sock
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+        try:
+            conn.timeout = budget["remaining"]()
+            conn.connect()
+            raw_sock = conn.sock
+            rem = budget["remaining"]()
+            timer = threading.Timer(rem, _abort_sock)
+            timer.daemon = True
+            timer.start()
+            if raw_sock is not None:
+                raw_sock.settimeout(rem)
+            conn.request("POST", req_path, body=body, headers=headers)
+            rem = budget["remaining"]()
+            if raw_sock is not None:
+                raw_sock.settimeout(rem)
+            resp = conn.getresponse()
+            if timed_out[0]:
+                raise pc.DaemonError("operation deadline exceeded")
+            if resp.status in (301, 302, 303, 307, 308):
+                raise pc.DaemonError(f"daemon redirected (HTTP {resp.status})")
+            max_bytes = max_http_bytes if resp.status == 200 else max_error_bytes
+            chunks = []
+            total = 0
+            while True:
+                if timed_out[0]:
+                    raise pc.DaemonError("operation deadline exceeded")
+                rem = budget["remaining"]()
+                if raw_sock is not None:
+                    raw_sock.settimeout(rem)
+                to_read = max_bytes + 1 - total
+                if to_read <= 0:
+                    break
+                chunk = resp.read1(min(65_536, to_read))
+                if timed_out[0]:
+                    raise pc.DaemonError("operation deadline exceeded")
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if resp.status == 200 and total > max_bytes:
+                    raise pc.DaemonError("daemon HTTP response exceeded size limit")
+                if resp.status != 200 and total >= max_bytes:
+                    break
+            if timed_out[0]:
+                raise pc.DaemonError("operation deadline exceeded")
+            budget["remaining"]()
+            return resp.status, resp.getheader("Content-Type", "") or "", b"".join(chunks)
+        except Exception as error:
+            if timed_out[0]:
+                raise pc.DaemonError("operation deadline exceeded") from error
+            raise
+        finally:
+            if timer is not None:
+                timer.cancel()
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+            conn.close()
+
+    return opener
+
+
+def _make_budgeted_ws_factory(pc, budget):
+    base_ws_cls = pc._StdlibWebSocket
+
+    class _BudgetedWebSocket:
+        def __init__(self, target, timeout):
+            rem = budget["remaining"]()
+            self._inner = base_ws_cls(target, min(timeout, rem))
+
+        def connect(self):
+            self._inner.timeout = budget["remaining"]()
+            self._inner.connect()
+            try:
+                budget["remaining"]()
+            except Exception:
+                self._inner.close()
+                raise
+
+        def send_json(self, obj):
+            rem = budget["remaining"]()
+            self._inner.timeout = rem
+            sock = getattr(self._inner, "_sock", None)
+            if sock is not None:
+                sock.settimeout(rem)
+            self._inner.send_json(obj)
+
+        def recv_json(self, deadline=None):
+            eff = budget["clamp_deadline"](deadline)
+            self._inner.timeout = max(0.001, eff - time.monotonic())
+            return self._inner.recv_json(deadline=eff)
+
+        def close(self):
+            self._inner.close()
+
+    return _BudgetedWebSocket
+
+
+def make_paseo_client():
+    """Return (pc_module, PaseoClient) when daemon transport is active, else (None, None)."""
+    _PASEO_BIND["host"] = None
+    paseo_host = (os.environ.get("PASEO_HOST") or "").strip()
+    if paseo_host:
+        raise RuntimeError("PASEO_HOST is not supported for local phantom_watch")
+    want_daemon, forced_daemon = _want_daemon_transport()
+    if not want_daemon:
+        return None, None
+    pc = _load_paseo_client()
+    if pc is None:
+        if forced_daemon:
+            raise RuntimeError("ade_paseo_client unavailable under forced daemon transport")
+        return None, None
+    if pc.transport_mode(cli_env_vars=("FLEET_WATCH_PASEO",)) != "daemon":
+        return None, None
+    budget = _make_operation_budget(pc.DaemonError)
+    kwargs = {"paseo_home": PASEO_DIR, "timeout": _remaining_timeout()}
+    preferred_host = None
+    if not (os.environ.get("ADE_PASEO_URL") or "").strip():
+        runtime = _resolve_runtime_endpoint_from_pid_lock(PASEO_DIR)
+        if runtime is not None:
+            _, runtime_spelling, runtime_url = runtime
+            kwargs["url"] = runtime_url
+            preferred_host = runtime_spelling
+    if hasattr(pc, "urllib_opener") and hasattr(pc, "_StdlibWebSocket"):
+        kwargs["opener"] = _make_budgeted_opener(pc, budget)
+        kwargs["ws_factory"] = _make_budgeted_ws_factory(pc, budget)
+    try:
+        client = pc.PaseoClient(**kwargs)
+    except pc.DaemonError as error:
+        raise RuntimeError(f"paseo daemon unavailable: {error}") from error
+    target_obj = getattr(client, "target", None)
+    if preferred_host is not None:
+        _PASEO_BIND["host"] = preferred_host
+    else:
+        _PASEO_BIND["host"] = _target_cli_spelling(target_obj)
+    client._fw_budget = budget
+    return pc, client
+
+
+def list_agents(pc, client):
+    if client is not None:
+        if getattr(getattr(client, "target", None), "mcp_only", False) is True:
+            raise RuntimeError("MCP-only daemon URL does not support active-scoped agent listing")
+        budget = getattr(client, "_fw_budget", None)
+        timeout = budget["start"]() if budget is not None else _remaining_timeout()
+        _set_client_timeout(client, timeout)
+        try:
+            listing = client.list_agents(
+                include_background=False,
+                include_archived=False,
+                active_only=True,
+                cli_rows=True,
+            )
+            if budget is not None:
+                budget["remaining"]()
+        except pc.DaemonError as error:
+            raise RuntimeError(f"paseo daemon ls failed: {error}") from error
+        finally:
+            if budget is not None:
+                budget["finish"]()
+    else:
+        listing = json.loads(run([PASEO, "ls", "--json"], env=_child_paseo_env()))
+    if not isinstance(listing, list):
+        raise ValueError("invalid Paseo agent listing")
+    return listing
+
+
+def inspect_agent(pc, client, agent_id):
+    if client is not None:
+        budget = getattr(client, "_fw_budget", None)
+        timeout = budget["start"]() if budget is not None else _remaining_timeout()
+        _set_client_timeout(client, timeout)
+        try:
+            info = client.inspect_agent(agent_id, cli_shape=True)
+            if budget is not None:
+                budget["remaining"]()
+        except pc.DaemonError as error:
+            raise RuntimeError(f"paseo daemon inspect failed: {error}") from error
+        finally:
+            if budget is not None:
+                budget["finish"]()
+    else:
+        info = json.loads(run([PASEO, "inspect", agent_id, "--json"], env=_child_paseo_env()))
+    if not isinstance(info, dict):
+        raise ValueError("invalid Paseo agent inspect")
+    return info
 
 
 def epoch(stamp):
@@ -1590,8 +2114,12 @@ def refusals_since(agent_id, since):
 
 def log_owner(agent_id):
     """Owner from `paseo logs` text for a provider with no sqlite to read: the last source-agent-id seen."""
+    cmd = [PASEO, "logs", agent_id, "--tail", "200", "--json"]
+    bound_host = _PASEO_BIND.get("host")
+    if bound_host:
+        cmd.extend(["--host", bound_host])
     try:
-        found = SOURCE.findall(run([PASEO, "logs", agent_id, "--tail", "200", "--json"]))
+        found = SOURCE.findall(run(cmd, env=_child_paseo_env()))
     except (OSError, RuntimeError, subprocess.TimeoutExpired):
         return None
     return found[-1] if found else None
@@ -1657,8 +2185,16 @@ def send_ping(text, limit):
 
 def send_relay(seat, text, limit):
     """Only sent/completed receipts count; keep the episode retry bookkeeping."""
-    result = subprocess.run([sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"],
-                            capture_output=True, text=True, timeout=limit)
+    cmd = [sys.executable, relay, seat, text, "--label", "fleet-watch-phantom"]
+    bind = globals().get("_PASEO_BIND")
+    bound_host = bind.get("host") if isinstance(bind, dict) else None
+    if bound_host:
+        cmd.extend(["--host", bound_host])
+    env_fn = globals().get("_child_paseo_env")
+    kwargs = {"capture_output": True, "text": True, "timeout": limit}
+    if callable(env_fn):
+        kwargs["env"] = env_fn()
+    result = subprocess.run(cmd, **kwargs)
     if result.returncode == 5:
         return "pending"
     return f"exit {result.returncode}: {clean(result.stderr or result.stdout, 120)}" if result.returncode else None
@@ -1750,7 +2286,8 @@ def main():
             log("already running")
             return
         state = load()
-        listing = json.loads(run([PASEO, "ls", "--json"]))
+        pc, client = make_paseo_client()
+        listing = list_agents(pc, client)
         by_id = {a["id"]: a for a in listing if isinstance(a, dict) and isinstance(a.get("id"), str)}
         running = [a for a in by_id.values() if a.get("status") == "running"]
         rows = []
@@ -1759,7 +2296,7 @@ def main():
             if not UUID.match(agent_id):
                 continue
             try:
-                info = json.loads(run([PASEO, "inspect", agent_id, "--json"]))
+                info = inspect_agent(pc, client, agent_id)
                 holds, signals, sid, basis = evaluate(agent_id, info)
             except (OSError, ValueError, KeyError, RuntimeError, sqlite3.Error, subprocess.TimeoutExpired) as error:
                 log(f"{agent_id[:8]}: no verdict: {clean(error, 200)}")
