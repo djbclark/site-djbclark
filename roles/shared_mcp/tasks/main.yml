@@ -26,6 +26,8 @@
       - shared_mcp_firecrawl_oa_enrolled in ['off', 'on']
       - shared_mcp_firecrawl_wiley_tdm in ['off', 'auto', 'on']
       - shared_mcp_firecrawl_wiley_allow_cloud_llm in ['off', 'on']
+      - shared_mcp_firecrawl_sanitize in ['on', 'off']
+      - shared_mcp_firecrawl_mit_allowlist is string
       - "'OPENALEX_API_KEY' not in (item.env | default({}))"
       - "'FIRECRAWL_ROUTER_OPENALEX_KEY' not in (item.env | default({}))"
       - "'CORE_API_KEY' not in (item.env | default({}))"

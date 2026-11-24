@@ -120,9 +120,12 @@ shared_mcp_servers:
       # MIT Libraries Mac bridge (2026-11-22): Hyades-first, fail-closed, exact enrolled hosts only.
       # Instant rollback: set shared_mcp_firecrawl_mit_bridge to "off" (or override in plist) + kickstart.
       FIRECRAWL_ROUTER_MIT_BRIDGE: "{{ shared_mcp_firecrawl_mit_bridge }}"
+      FIRECRAWL_ROUTER_MIT_ALLOWLIST: "{{ shared_mcp_firecrawl_mit_allowlist }}"
       FIRECRAWL_ROUTER_MIT_SNAPSHOT: "{{ shared_mcp_firecrawl_mit_snapshot }}"
       FIRECRAWL_ROUTER_MIT_FETCH_BIN: "{{ shared_mcp_firecrawl_mit_fetch_bin }}"
       FIRECRAWL_ROUTER_MIT_BROWSER_BIN: "{{ shared_mcp_firecrawl_mit_browser_bin }}"
+      # BarnOwl-parity anti-prompt-injection sanitizer (2026-11-24; PR djbclark-ade#978).
+      FIRECRAWL_ROUTER_SANITIZE: "{{ shared_mcp_firecrawl_sanitize }}"
       # OpenAlex + Crossref Free-OA fallback (2026-11-23): Hyades-first, fail-closed.
       # OPENALEX_API_KEY is NEVER rendered into the plist (loaded lazily in memory via sudo-secretspec).
       # Instant rollback: set shared_mcp_firecrawl_oa_fallback to "off" + kickstart.
@@ -171,6 +174,9 @@ shared_mcp_firecrawl_fallback_api_key: "{{ (lookup('env', 'FIRECRAWL_API_KEY') |
 # Modes: "off" (default in router), "pdf" (fetch.py + pdftotext), "all" (adds browserfetch.py + pandoc --sandbox).
 # Requires a fresh (<= 7d), mode-0600, user-owned snapshot at shared_mcp_firecrawl_mit_snapshot.
 shared_mcp_firecrawl_mit_bridge: "all"
+# Pin automated MIT bridge to explicit hosts, separate from the 30-host interactive Chrome PAC.
+shared_mcp_firecrawl_mit_allowlist: "www.cambridge.org,www.nature.com"
+shared_mcp_firecrawl_sanitize: "on"
 shared_mcp_firecrawl_mit_snapshot: "{{ shared_mcp_home }}/.local/state/mitnet-routing/enrolled-snapshot.json"
 shared_mcp_firecrawl_mit_fetch_bin: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/fetch.py"
 shared_mcp_firecrawl_mit_browser_bin: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/browserfetch.py"
