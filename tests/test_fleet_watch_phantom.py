@@ -1,4 +1,4 @@
-"""Transport, fail-closed, and CLI-fallback contracts for fleet-watch phantom_watch."""
+"""Transport, active-scope, deadline-budget, fail-closed, and CLI-fallback contracts for phantom_watch."""
 import ast
 import base64
 import datetime
@@ -33,16 +33,28 @@ CLEAN_TRANSPORT_ENV = {
     "ADE_PASEO_TRANSPORT": "",
     "FLEET_WATCH_PASEO": "",
     "PASEO_CLI": "",
+    "PASEO_HOME": "",
+    "FLEET_WATCH_PHANTOM_PASEO_DIR": "",
 }
 
 
-def _load_phantom_namespace(state_dir, home_dir, *, mode="manual", now=1_800_000_000.0, paseo_bin="paseo"):
+def _load_phantom_namespace(
+    state_dir,
+    home_dir,
+    *,
+    mode="manual",
+    now=1_800_000_000.0,
+    paseo_bin="paseo",
+    paseo_dir=None,
+    cmd_timeout=30.0,
+    deadline_offset=120.0,
+):
     """Load all function definitions from phantom_watch's embedded Python block without executing top-level main()."""
     script = FLEET_WATCH.read_text(encoding="utf-8")
     embedded = script.split("<<'PY' || true", 1)[1].split("\nPY\n", 1)[0]
     tree = ast.parse(embedded)
     definitions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    paseo_dir = Path(home_dir) / ".paseo"
+    resolved_paseo_dir = Path(paseo_dir) if paseo_dir is not None else Path(home_dir) / ".paseo"
     messages = []
     logs = []
     namespace = {
@@ -72,10 +84,10 @@ def _load_phantom_namespace(state_dir, home_dir, *, mode="manual", now=1_800_000
         "LEAD": "7c58015b",
         "SILENT": 900.0,
         "GAP": 270.0,
-        "DEADLINE": time.monotonic() + 120.0,
-        "CMD_TIMEOUT": 30.0,
+        "DEADLINE": time.monotonic() + deadline_offset,
+        "CMD_TIMEOUT": cmd_timeout,
         "NOW": now,
-        "PASEO_DIR": paseo_dir,
+        "PASEO_DIR": resolved_paseo_dir,
         "OC_DB": str(Path(state_dir) / "opencode.db"),
         "OC_SERVICE": str(Path(state_dir) / "service.json"),
         "MAX_TRIES": 3,
@@ -148,8 +160,9 @@ class PhantomWatchTransport(unittest.TestCase):
             "PendingPermissions": [],
         }
 
-    def test_daemon_transport_lists_and_inspects_with_zero_subprocess_spawns(self):
+    def test_daemon_transport_preserves_active_scope_with_zero_subprocess_spawns(self):
         client = MagicMock()
+        client.target = types.SimpleNamespace(mcp_only=False)
         client.list_agents.return_value = self.listing
         client.inspect_agent.return_value = self.inspect_1
         client_cls = MagicMock(return_value=client)
@@ -164,13 +177,37 @@ class PhantomWatchTransport(unittest.TestCase):
                 run_mock.assert_not_called()
 
         client_cls.assert_called_once()
-        client.list_agents.assert_called_once_with(include_background=False, include_archived=False, cli_rows=True)
+        self.assertEqual(client_cls.call_args.kwargs["paseo_home"], Path(tmp) / ".paseo")
+        client.list_agents.assert_called_once_with(
+            include_background=False,
+            include_archived=False,
+            active_only=True,
+            cli_rows=True,
+        )
         client.inspect_agent.assert_called_once_with(AID_RUN_1, cli_shape=True)
         self.assertTrue(any("ok:" in line for line in ns["_said"]))
         self.assertIn("phantom: checked 1 running agent(s)", ns["_said"])
 
+    def test_mcp_only_url_fails_closed_for_active_scope(self):
+        client = MagicMock()
+        client.target = types.SimpleNamespace(mcp_only=True)
+        client_cls = MagicMock(return_value=client)
+        fake_pc = _make_fake_paseo_client_module(client_cls)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ns = _load_phantom_namespace(tmp, tmp, mode="manual", now=self.now)
+            env = dict(CLEAN_TRANSPORT_ENV, ADE_PASEO_URL="http://127.0.0.1:7263/mcp/agents")
+            with patch.dict(os.environ, env), \
+                    patch.dict(sys.modules, {"ade_paseo_client": fake_pc}), \
+                    patch.object(subprocess, "run") as run_mock:
+                with self.assertRaisesRegex(RuntimeError, "MCP-only"):
+                    ns["main"]()
+                client.list_agents.assert_not_called()
+                run_mock.assert_not_called()
+
     def test_daemon_list_error_fails_closed_without_cli_fallback(self):
         client = MagicMock()
+        client.target = types.SimpleNamespace(mcp_only=False)
         client_cls = MagicMock(return_value=client)
         fake_pc = _make_fake_paseo_client_module(client_cls)
         client.list_agents.side_effect = fake_pc.DaemonError("daemon down")
@@ -213,6 +250,7 @@ class PhantomWatchTransport(unittest.TestCase):
             "PendingPermissions": [],
         }
         client = MagicMock()
+        client.target = types.SimpleNamespace(mcp_only=False)
         client_cls = MagicMock(return_value=client)
         fake_pc = _make_fake_paseo_client_module(client_cls)
         client.list_agents.return_value = listing
@@ -240,8 +278,8 @@ class PhantomWatchTransport(unittest.TestCase):
                 fake_pc = _make_fake_paseo_client_module(client_cls)
                 calls = []
 
-                def fake_run(argv, **kwargs):
-                    calls.append(argv)
+                def fake_run(argv, recorded=calls, **kwargs):
+                    recorded.append(argv)
                     if argv[1] == "ls":
                         return subprocess.CompletedProcess(argv, 0, json.dumps(self.listing), "")
                     if argv[1] == "inspect":
@@ -257,6 +295,69 @@ class PhantomWatchTransport(unittest.TestCase):
 
                 client_cls.assert_not_called()
                 self.assertEqual(calls, [[paseo_bin, "ls", "--json"], [paseo_bin, "inspect", AID_RUN_1, "--json"]])
+
+    def test_present_broken_ade_paseo_client_fails_closed_unless_cli_explicit(self):
+        saved = sys.modules.pop("ade_paseo_client", None)
+        try:
+            for broken_src in ("def broken(:\n", "raise RuntimeError('module boom')\n"):
+                with tempfile.TemporaryDirectory() as tmp:
+                    ade_bin = Path(tmp) / "src/djbclark-ade/bin"
+                    ade_bin.mkdir(parents=True)
+                    (ade_bin / "ade_paseo_client.py").write_text(broken_src, encoding="utf-8")
+
+                    for label, extra_env in (
+                        ("default_daemon", {}),
+                        ("forced_daemon", {"ADE_PASEO_TRANSPORT": "daemon"}),
+                        ("forced_url", {"ADE_PASEO_URL": "unix:///tmp/nonexistent.sock"}),
+                    ):
+                        with self.subTest(src=broken_src.strip(), mode=label):
+                            sys.modules.pop("ade_paseo_client", None)
+                            ns = _load_phantom_namespace(tmp, tmp, mode="manual", now=self.now)
+                            env = dict(CLEAN_TRANSPORT_ENV, **extra_env)
+                            with patch.dict(os.environ, env), patch.object(subprocess, "run") as run_mock:
+                                with self.assertRaisesRegex(RuntimeError, "failed to load ade_paseo_client"):
+                                    ns["main"]()
+                                run_mock.assert_not_called()
+
+                    for label, extra_env, expected_bin in (
+                        ("explicit_cli", {"ADE_PASEO_TRANSPORT": "cli"}, "paseo"),
+                        ("custom_cli_bin", {"FLEET_WATCH_PASEO": "/custom/paseo"}, "/custom/paseo"),
+                    ):
+                        with self.subTest(src=broken_src.strip(), escape=label):
+                            sys.modules.pop("ade_paseo_client", None)
+                            calls = []
+
+                            def fake_run(argv, recorded=calls, **kwargs):
+                                recorded.append(argv)
+                                if argv[1] == "ls":
+                                    return subprocess.CompletedProcess(argv, 0, json.dumps(self.listing), "")
+                                return subprocess.CompletedProcess(argv, 0, json.dumps(self.inspect_1), "")
+
+                            ns = _load_phantom_namespace(tmp, tmp, mode="manual", now=self.now, paseo_bin=expected_bin)
+                            env = dict(CLEAN_TRANSPORT_ENV, **extra_env)
+                            with patch.dict(os.environ, env), patch.object(subprocess, "run", side_effect=fake_run):
+                                ns["main"]()
+                            self.assertEqual(calls, [[expected_bin, "ls", "--json"], [expected_bin, "inspect", AID_RUN_1, "--json"]])
+        finally:
+            sys.modules.pop("ade_paseo_client", None)
+            if saved is not None:
+                sys.modules["ade_paseo_client"] = saved
+
+    def test_absent_ade_paseo_client_under_forced_daemon_fails_closed(self):
+        saved = sys.modules.pop("ade_paseo_client", None)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                for extra_env in ({"ADE_PASEO_TRANSPORT": "daemon"}, {"ADE_PASEO_URL": "http://127.0.0.1:7263"}):
+                    with self.subTest(extra_env=extra_env):
+                        ns = _load_phantom_namespace(tmp, tmp, mode="manual", now=self.now)
+                        env = dict(CLEAN_TRANSPORT_ENV, **extra_env)
+                        with patch.dict(os.environ, env), patch.object(subprocess, "run") as run_mock:
+                            with self.assertRaisesRegex(RuntimeError, "ade_paseo_client unavailable"):
+                                ns["main"]()
+                            run_mock.assert_not_called()
+        finally:
+            if saved is not None:
+                sys.modules["ade_paseo_client"] = saved
 
     def test_missing_ade_paseo_client_falls_back_to_cli(self):
         calls = []
@@ -297,6 +398,31 @@ class PhantomWatchTransport(unittest.TestCase):
                 sys.modules["ade_paseo_client"] = saved
 
         self.assertEqual(calls, [["paseo", "ls", "--json"], ["paseo", "inspect", AID_RUN_1, "--json"]])
+
+    def test_paseo_dir_honors_paseo_home_and_expands_tilde(self):
+        script = FLEET_WATCH.read_text(encoding="utf-8")
+        embedded = script.split("<<'PY' || true", 1)[1].split("\nPY\n", 1)[0]
+        header_lines = []
+        for line in embedded.splitlines():
+            if line.startswith("def "):
+                break
+            header_lines.append(line)
+        header_src = "\n".join(header_lines)
+
+        with tempfile.TemporaryDirectory() as fake_home:
+            cases = [
+                ("default", {}, Path(fake_home) / ".paseo"),
+                ("paseo_home_tilde", {"PASEO_HOME": "~/custom-paseo"}, Path(fake_home) / "custom-paseo"),
+                ("phantom_dir_tilde_beats_paseo_home", {"PASEO_HOME": "~/other", "FLEET_WATCH_PHANTOM_PASEO_DIR": "~/phantom-paseo"}, Path(fake_home) / "phantom-paseo"),
+            ]
+            for label, extra_env, expected in cases:
+                with self.subTest(label=label):
+                    env = dict(CLEAN_TRANSPORT_ENV, HOME=fake_home, **extra_env)
+                    ns = {}
+                    with patch.dict(os.environ, env), \
+                            patch.object(sys, "argv", ["phantom", "dry", fake_home, "/bin/h", "t", "/bin/r"]):
+                        exec(compile(header_src, "phantom_header", "exec"), ns)
+                    self.assertEqual(ns["PASEO_DIR"], expected)
 
 
 def _ws_recv_frame(conn):
@@ -339,18 +465,35 @@ def _ws_send_json(conn, obj):
 
 
 class _UnixMockPaseoDaemon:
-    """Minimal AF_UNIX server handling /ws (fetch_agents_request) and POST /mcp/agents (get_agent_status)."""
+    """Minimal AF_UNIX server handling /ws (multi-page fetch_agents + fetch_agent) and POST /mcp/agents."""
 
-    def __init__(self, sock_path, snapshot):
+    def __init__(
+        self,
+        sock_path,
+        pages,
+        agents_by_id,
+        *,
+        mcp_status=200,
+        page_delay_s=0.0,
+        mcp_delay_s=0.0,
+        ws_agent_delay_s=0.0,
+    ):
         self.sock_path = sock_path
-        self.snapshot = snapshot
+        self.pages = pages
+        self.agents_by_id = agents_by_id
+        self.mcp_status = mcp_status
+        self.page_delay_s = page_delay_s
+        self.mcp_delay_s = mcp_delay_s
+        self.ws_agent_delay_s = ws_agent_delay_s
         self.ws_calls = 0
         self.mcp_calls = 0
+        self.fetch_agent_ws_calls = 0
+        self.fetch_agents_requests = []
         self._stop = threading.Event()
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(sock_path)
-        self._sock.listen(8)
-        self._sock.settimeout(0.2)
+        self._sock.listen(16)
+        self._sock.settimeout(0.1)
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 
@@ -364,6 +507,8 @@ class _UnixMockPaseoDaemon:
                 break
             try:
                 self._handle(conn)
+            except (EOFError, OSError):
+                pass
             finally:
                 try:
                     conn.close()
@@ -403,11 +548,24 @@ class _UnixMockPaseoDaemon:
             )
             _ws_recv_frame(conn)  # hello
             _ws_send_json(conn, {"type": "session", "message": {"type": "status", "payload": {"status": "server_info"}}})
-            opcode, payload = _ws_recv_frame(conn)
-            if opcode == 0x1:
+            while not self._stop.is_set():
+                opcode, payload = _ws_recv_frame(conn)
+                if opcode == 0x8:
+                    return
+                if opcode != 0x1:
+                    continue
                 req = json.loads(payload.decode("utf-8"))
                 inner = req.get("message") or {}
-                if inner.get("type") == "fetch_agents_request":
+                mtype = inner.get("type")
+                if mtype == "fetch_agents_request":
+                    self.fetch_agents_requests.append(inner)
+                    cursor = (inner.get("page") or {}).get("cursor")
+                    idx = int(cursor) if cursor is not None else 0
+                    if self.page_delay_s > 0:
+                        time.sleep(self.page_delay_s)
+                    entries = [{"agent": snap} for snap in self.pages[idx]]
+                    next_cursor = str(idx + 1) if idx + 1 < len(self.pages) else None
+                    page_info = {"nextCursor": next_cursor} if next_cursor is not None else {}
                     _ws_send_json(
                         conn,
                         {
@@ -416,8 +574,26 @@ class _UnixMockPaseoDaemon:
                                 "type": "fetch_agents_response",
                                 "payload": {
                                     "requestId": inner.get("requestId"),
-                                    "entries": [{"agent": self.snapshot}],
-                                    "pageInfo": {},
+                                    "entries": entries,
+                                    "pageInfo": page_info,
+                                },
+                            },
+                        },
+                    )
+                elif mtype == "fetch_agent_request":
+                    self.fetch_agent_ws_calls += 1
+                    if self.ws_agent_delay_s > 0:
+                        time.sleep(self.ws_agent_delay_s)
+                    snap = self.agents_by_id.get(inner.get("agentId"))
+                    _ws_send_json(
+                        conn,
+                        {
+                            "type": "session",
+                            "message": {
+                                "type": "fetch_agent_response",
+                                "payload": {
+                                    "requestId": inner.get("requestId"),
+                                    "agent": snap,
                                 },
                             },
                         },
@@ -432,11 +608,26 @@ class _UnixMockPaseoDaemon:
                 if not chunk:
                     break
                 body += chunk
+            if self.mcp_delay_s > 0:
+                time.sleep(self.mcp_delay_s)
+            if self.mcp_status != 200:
+                resp_bytes = b'{"error":"unauthorized"}'
+                conn.sendall(
+                    (
+                        f"HTTP/1.1 {self.mcp_status} Unauthorized\r\n"
+                        "Content-Type: application/json\r\n"
+                        f"Content-Length: {len(resp_bytes)}\r\n"
+                        "Connection: close\r\n\r\n"
+                    ).encode("ascii")
+                    + resp_bytes
+                )
+                return
             rpc = json.loads(body.decode("utf-8"))
+            agent_id = (rpc.get("params") or {}).get("arguments", {}).get("agentId")
             resp_obj = {
                 "jsonrpc": "2.0",
                 "id": rpc["id"],
-                "result": {"structuredContent": {"snapshot": self.snapshot}},
+                "result": {"structuredContent": {"snapshot": self.agents_by_id.get(agent_id)}},
             }
             resp_bytes = json.dumps(resp_obj).encode("utf-8")
             conn.sendall(
@@ -460,27 +651,36 @@ class _UnixMockPaseoDaemon:
             os.unlink(self.sock_path)
 
 
+def _snapshot(aid, title, provider, now):
+    return {
+        "id": aid,
+        "title": title,
+        "provider": provider,
+        "model": "sonnet",
+        "status": "running",
+        "cwd": "/tmp",
+        "createdAt": _iso_utc(now - 300),
+        "updatedAt": _iso_utc(now - 60),
+        "archivedAt": None,
+        "background": False,
+        "pendingPermissions": [],
+        "labels": {},
+    }
+
+
 class PhantomWatchUnixEndToEnd(unittest.TestCase):
-    def test_fleet_watch_phantom_dry_run_over_unix_daemon_zero_cli_spawns(self):
+    def _require_real_client(self):
         real_client = Path.home() / "src/djbclark-ade/bin/ade_paseo_client.py"
         if not real_client.is_file():
             self.skipTest("~/src/djbclark-ade/bin/ade_paseo_client.py not present")
+        return real_client
 
+    def test_fleet_watch_phantom_multipage_active_scope_and_zero_cli_spawns(self):
+        real_client = self._require_real_client()
         now = 1_800_000_000.0
-        snapshot = {
-            "id": AID_RUN_1,
-            "title": "unix-e2e-agent",
-            "provider": "claude",
-            "model": "sonnet",
-            "status": "running",
-            "cwd": "/tmp",
-            "createdAt": _iso_utc(now - 300),
-            "updatedAt": _iso_utc(now - 60),
-            "archivedAt": None,
-            "background": False,
-            "pendingPermissions": [],
-            "labels": {},
-        }
+        s1 = _snapshot(AID_RUN_1, "unix-page-1", "claude", now)
+        s2 = _snapshot(AID_RUN_2, "unix-page-2", "codex", now)
+
         with tempfile.TemporaryDirectory(prefix="fw-", dir="/tmp") as short_tmp:
             sock_path = os.path.join(short_tmp, "p.sock")
             fake_home = Path(short_tmp) / "home"
@@ -488,7 +688,7 @@ class PhantomWatchUnixEndToEnd(unittest.TestCase):
             ade_bin.mkdir(parents=True)
             (ade_bin / "ade_paseo_client.py").symlink_to(real_client)
 
-            daemon = _UnixMockPaseoDaemon(sock_path, snapshot)
+            daemon = _UnixMockPaseoDaemon(sock_path, [[s1], [s2]], {AID_RUN_1: s1, AID_RUN_2: s2})
             try:
                 env = dict(os.environ)
                 env["HOME"] = str(fake_home)
@@ -498,6 +698,7 @@ class PhantomWatchUnixEndToEnd(unittest.TestCase):
                 env.pop("ADE_PASEO_TRANSPORT", None)
                 proc = subprocess.run(
                     ["bash", str(FLEET_WATCH), "phantom", "--dry-run"],
+                    check=False,
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -508,9 +709,149 @@ class PhantomWatchUnixEndToEnd(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertEqual(daemon.ws_calls, 1)
+        self.assertEqual(len(daemon.fetch_agents_requests), 2)
+        for req in daemon.fetch_agents_requests:
+            self.assertEqual(req.get("scope"), "active")
+            self.assertNotIn("filter", req)
+        self.assertEqual(daemon.mcp_calls, 2)
+        self.assertIn("phantom: unix-page-1 11111111 (claude) ok:", proc.stdout)
+        self.assertIn("phantom: unix-page-2 66666666 (codex) ok:", proc.stdout)
+        self.assertIn("phantom: checked 2 running agent(s)", proc.stdout)
+
+    def test_mcp_401_to_ws_fallback_with_local_credential(self):
+        real_client = self._require_real_client()
+        now = 1_800_000_000.0
+        s1 = _snapshot(AID_RUN_1, "mcp-401-agent", "claude", now)
+
+        with tempfile.TemporaryDirectory(prefix="fw-", dir="/tmp") as short_tmp:
+            sock_path = os.path.join(short_tmp, "p.sock")
+            fake_home = Path(short_tmp) / "home"
+            ade_bin = fake_home / "src/djbclark-ade/bin"
+            ade_bin.mkdir(parents=True)
+            (ade_bin / "ade_paseo_client.py").symlink_to(real_client)
+            paseo_home = fake_home / ".paseo"
+            paseo_home.mkdir(parents=True)
+            (paseo_home / "local-credential").write_text("secret-local-token\n", encoding="utf-8")
+
+            daemon = _UnixMockPaseoDaemon(sock_path, [[s1]], {AID_RUN_1: s1}, mcp_status=401)
+            try:
+                env = dict(os.environ)
+                env["HOME"] = str(fake_home)
+                env["ADE_PASEO_URL"] = f"unix://{sock_path}"
+                env["FLEET_WATCH_PASEO"] = "/nonexistent/paseo-must-not-run"
+                env["FLEET_WATCH_PHANTOM_NOW"] = str(now)
+                env.pop("ADE_PASEO_TRANSPORT", None)
+                proc = subprocess.run(
+                    ["bash", str(FLEET_WATCH), "phantom", "--dry-run"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
+            finally:
+                daemon.close()
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertEqual(daemon.mcp_calls, 1)
-        self.assertIn("phantom: unix-e2e-agent 11111111 (claude) ok:", proc.stdout)
-        self.assertIn("phantom: checked 1 running agent(s)", proc.stdout)
+        self.assertEqual(daemon.fetch_agent_ws_calls, 1)
+        self.assertIn("phantom: mcp-401-agent 11111111 (claude) ok:", proc.stdout)
+
+    def test_single_wall_clock_budget_enforced_across_multipage_ws_list(self):
+        real_client = self._require_real_client()
+        now = 1_800_000_000.0
+        s1 = _snapshot(AID_RUN_1, "slow-p1", "claude", now)
+        s2 = _snapshot(AID_RUN_2, "slow-p2", "codex", now)
+        s3 = _snapshot(AID_IDLE, "slow-p3", "claude", now)
+
+        with tempfile.TemporaryDirectory(prefix="fw-", dir="/tmp") as short_tmp:
+            sock_path = os.path.join(short_tmp, "p.sock")
+            fake_home = Path(short_tmp) / "home"
+            ade_bin = fake_home / "src/djbclark-ade/bin"
+            ade_bin.mkdir(parents=True)
+            (ade_bin / "ade_paseo_client.py").symlink_to(real_client)
+
+            # 3 pages * 0.20s = 0.60s total, exceeding the 0.30s per-command budget.
+            # Without a single shared deadline, each page would reset the 0.30s clock and succeed.
+            daemon = _UnixMockPaseoDaemon(
+                sock_path,
+                [[s1], [s2], [s3]],
+                {AID_RUN_1: s1, AID_RUN_2: s2, AID_IDLE: s3},
+                page_delay_s=0.20,
+            )
+            try:
+                env = dict(os.environ)
+                env["HOME"] = str(fake_home)
+                env["ADE_PASEO_URL"] = f"unix://{sock_path}"
+                env["FLEET_WATCH_PASEO"] = "/nonexistent/paseo-must-not-run"
+                env["FLEET_WATCH_PHANTOM_NOW"] = str(now)
+                env["FLEET_WATCH_PHANTOM_CMD_TIMEOUT"] = "0.30"
+                env.pop("ADE_PASEO_TRANSPORT", None)
+                t0 = time.monotonic()
+                proc = subprocess.run(
+                    ["bash", str(FLEET_WATCH), "phantom", "--dry-run"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
+                elapsed = time.monotonic() - t0
+            finally:
+                daemon.close()
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("phantom: unavailable: paseo daemon ls failed:", proc.stdout)
+        self.assertLess(len(daemon.fetch_agents_requests), 3)
+        self.assertLess(elapsed, 1.5)
+
+    def test_single_wall_clock_budget_enforced_across_mcp_401_to_ws_fallback(self):
+        real_client = self._require_real_client()
+        now = 1_800_000_000.0
+        s1 = _snapshot(AID_RUN_1, "slow-fallback", "claude", now)
+
+        with tempfile.TemporaryDirectory(prefix="fw-", dir="/tmp") as short_tmp:
+            sock_path = os.path.join(short_tmp, "p.sock")
+            fake_home = Path(short_tmp) / "home"
+            ade_bin = fake_home / "src/djbclark-ade/bin"
+            ade_bin.mkdir(parents=True)
+            (ade_bin / "ade_paseo_client.py").symlink_to(real_client)
+            paseo_home = fake_home / ".paseo"
+            paseo_home.mkdir(parents=True)
+            (paseo_home / "local-credential").write_text("secret-local-token\n", encoding="utf-8")
+
+            # MCP 401 takes 0.20s + WS fetch_agent takes 0.20s = 0.40s > 0.28s single budget.
+            # Without a shared deadline, MCP (0.20 < 0.28) and WS (0.20 < 0.28) would both succeed.
+            daemon = _UnixMockPaseoDaemon(
+                sock_path,
+                [[s1]],
+                {AID_RUN_1: s1},
+                mcp_status=401,
+                mcp_delay_s=0.20,
+                ws_agent_delay_s=0.20,
+            )
+            try:
+                env = dict(os.environ)
+                env["HOME"] = str(fake_home)
+                env["ADE_PASEO_URL"] = f"unix://{sock_path}"
+                env["FLEET_WATCH_PASEO"] = "/nonexistent/paseo-must-not-run"
+                env["FLEET_WATCH_PHANTOM_NOW"] = str(now)
+                env["FLEET_WATCH_PHANTOM_CMD_TIMEOUT"] = "0.28"
+                env.pop("ADE_PASEO_TRANSPORT", None)
+                proc = subprocess.run(
+                    ["bash", str(FLEET_WATCH), "phantom", "--dry-run"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
+            finally:
+                daemon.close()
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertEqual(daemon.mcp_calls, 1)
+        self.assertIn("phantom: 11111111 no verdict: paseo daemon inspect failed:", proc.stdout)
 
 
 if __name__ == "__main__":
