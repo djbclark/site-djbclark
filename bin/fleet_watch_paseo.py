@@ -11,20 +11,25 @@ the same resolved daemon target; conflicting target configurations fail closed.
 """
 
 import argparse
+import ctypes
+import datetime
 import importlib.util
 import json
 import os
 import re
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 from pathlib import Path
 
 TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{4,32})\Z")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+BOOT_TOLERANCE_S = 5.0
 
 
 class PendingDelivery(ValueError):
@@ -135,8 +140,14 @@ def _load_paseo_client():
     return module
 
 
-def _parse_local_paseo_host(raw):
-    """Parse a local-only PASEO_HOST value into ('tcp', host, port) or ('unix', realpath); else None."""
+def _parse_local_endpoint(raw):
+    """Parse a local-only endpoint into (canonical_ident, cli_spelling, daemon_url); else None.
+
+    Uses canonical identity (`realpath` for Unix sockets) for security/equality
+    comparisons while preserving the verified Unix path spelling (without
+    `realpath` rewriting `/tmp` -> `/private/tmp`) for CLI `--host` so Paseo's
+    `readLocalCredentialForTarget` matches `paseo.pid.listen`.
+    """
     text = raw.strip()
     if not text:
         return None
@@ -144,13 +155,19 @@ def _parse_local_paseo_host(raw):
         sock = text[len("unix://"):].strip() if text.startswith("unix://") else text
         if not sock or "\x00" in sock:
             return None
-        resolved = os.path.realpath(os.path.expanduser(sock))
+        expanded = os.path.expanduser(sock)
+        if not expanded.startswith("/") or ".." in Path(expanded).parts:
+            return None
+        resolved = os.path.realpath(expanded)
         if not resolved.startswith("/"):
             return None
-        return ("unix", resolved)
+        spelling = f"unix://{expanded}"
+        return (("unix", resolved), spelling, spelling)
     if text.isdigit():
         port = int(text)
-        return ("tcp", "127.0.0.1", port) if 1 <= port <= 65535 else None
+        if not (1 <= port <= 65535):
+            return None
+        return (("tcp", "127.0.0.1", port), f"127.0.0.1:{port}", f"http://127.0.0.1:{port}")
     if "://" in text:
         parsed = urllib.parse.urlsplit(text)
         if parsed.scheme not in ("tcp", "http", "ws"):
@@ -172,7 +189,13 @@ def _parse_local_paseo_host(raw):
         return None
     if port is None or not (1 <= port <= 65535):
         return None
-    return ("tcp", host, port)
+    spelling = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    return (("tcp", host, port), spelling, f"http://{spelling}")
+
+
+def _parse_local_paseo_host(raw):
+    parsed = _parse_local_endpoint(raw)
+    return parsed[0] if parsed is not None else None
 
 
 def _target_identity(target):
@@ -189,6 +212,23 @@ def _target_identity(target):
         if not isinstance(host, str) or not isinstance(port, int):
             return None
         return ("tcp", host.strip().lower(), port)
+    return None
+
+
+def _target_cli_spelling(target):
+    """Preserve PaseoClient.target's un-canonicalized spelling for CLI `--host`."""
+    kind = getattr(target, "kind", None)
+    if kind == "unix":
+        sock = getattr(target, "socket_path", "")
+        if isinstance(sock, str) and sock.strip():
+            return f"unix://{sock.strip()}"
+        return None
+    if kind == "tcp":
+        host = getattr(target, "host", "")
+        port = getattr(target, "port", None)
+        if isinstance(host, str) and isinstance(port, int):
+            h = host.strip().lower()
+            return f"[{h}]:{port}" if ":" in h else f"{h}:{port}"
     return None
 
 
@@ -244,18 +284,44 @@ def _current_linux_boot_id():
         return None
 
 
-def _identity_to_daemon_url(ident):
-    if ident[0] == "unix":
-        return f"unix://{ident[1]}"
-    _, host, port = ident
-    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+def _host_boot_epoch():
+    """Return host boot time in epoch seconds (macOS kern.boottime or Linux /proc/uptime), or None."""
+    if sys.platform == "darwin":
+        try:
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            buf = ctypes.create_string_buffer(16)
+            size = ctypes.c_size_t(16)
+            if libc.sysctlbyname(b"kern.boottime", buf, ctypes.byref(size), None, 0) == 0 and size.value >= 12:
+                sec, usec = struct.unpack("qi", buf.raw[:12])
+                return sec + usec / 1_000_000.0
+        except OSError:
+            pass
+    try:
+        uptime_s = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+        return time.time() - uptime_s
+    except (OSError, ValueError, IndexError):
+        return None
 
 
-def _resolve_runtime_url_from_pid_lock(paseo_home):
+def _parse_iso_epoch(stamp):
+    if not isinstance(stamp, str) or not stamp.strip():
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.timestamp()
+
+
+def _resolve_runtime_endpoint_from_pid_lock(paseo_home):
     """Read live runtime listen endpoint from <PASEO_HOME>/paseo.pid (matching Paseo CLI).
 
-    Returns None only when paseo.pid does not exist; fails closed on malformed,
-    stale (dead PID / previous boot), not-ready (listen=null), or non-local locks.
+    Returns (canonical_ident, cli_spelling, daemon_url) or None when paseo.pid
+    does not exist. Fails closed on malformed, stale (dead PID or predating
+    current host boot), not-ready (listen=null), or non-local locks without
+    echoing raw rejected listen text.
     """
     pid_path = Path(paseo_home) / "paseo.pid"
     raw = _read_bounded_regular(pid_path)
@@ -272,17 +338,23 @@ def _resolve_runtime_url_from_pid_lock(paseo_home):
         raise ValueError("invalid PID in Paseo PID lock")
     lock_boot = lock.get("bootId")
     cur_boot = _current_linux_boot_id()
-    if isinstance(lock_boot, str) and lock_boot and cur_boot and lock_boot != cur_boot:
-        raise ValueError(f"Paseo daemon PID lock in {paseo_home} is from a previous boot")
+    if isinstance(lock_boot, str) and lock_boot and cur_boot:
+        if lock_boot != cur_boot:
+            raise ValueError(f"Paseo daemon PID lock in {paseo_home} is from a previous boot")
+    else:
+        started_ts = _parse_iso_epoch(lock.get("startedAt"))
+        boot_epoch = _host_boot_epoch() if started_ts is not None else None
+        if started_ts is not None and boot_epoch is not None and started_ts < boot_epoch - BOOT_TOLERANCE_S:
+            raise ValueError(f"Paseo daemon PID lock in {paseo_home} predates current host boot")
     if not _is_pid_running(pid):
         raise ValueError(f"Paseo daemon PID lock in {paseo_home} is stale (PID {pid} not running)")
     listen = lock.get("listen")
     if not isinstance(listen, str) or not listen.strip():
         raise ValueError(f"Paseo daemon PID {pid} has not published a listen address yet")
-    ident = _parse_local_paseo_host(listen)
-    if ident is None:
-        raise ValueError(f"Paseo PID lock listen address is not a local loopback/unix target: {listen!r}")
-    return _identity_to_daemon_url(ident)
+    parsed = _parse_local_endpoint(listen)
+    if parsed is None:
+        raise ValueError("Paseo PID lock listen address is not a valid local loopback or unix target")
+    return parsed
 
 
 def _resolve_paseo_home(env):
@@ -290,13 +362,12 @@ def _resolve_paseo_home(env):
     return Path(raw).expanduser() if raw else Path.home() / ".paseo"
 
 
-def _resolve_send_host(pc, client, env):
+def _resolve_send_host(pc, client, env, *, preferred_host=None):
     """Return the exact CLI `--host` endpoint matching `client.target`, or fail closed.
 
-    Always binds CLI `paseo send` to the exact inspected endpoint — including on
-    default and `PASEO_HOME`-only paths — while retaining `PASEO_HOME` in the
-    subprocess environment so Paseo CLI's `readLocalCredentialForTarget(home, host)`
-    can load local-credential auth for custom homes.
+    Preserves the verified un-canonicalized Unix path spelling (so Paseo CLI's
+    `readLocalCredentialForTarget(home, host)` matches `paseo.pid.listen`) while
+    using canonical identity for target-agreement checks.
     """
     ade_url = (env.get("ADE_PASEO_URL") or "").strip()
     paseo_host = (env.get("PASEO_HOST") or "").strip()
@@ -323,6 +394,14 @@ def _resolve_send_host(pc, client, env):
         if parsed_host is None or parsed_host != ident:
             raise ValueError("PASEO_HOST disagrees with daemon target; refusing split inspect/send")
 
+    if preferred_host:
+        pref_parsed = _parse_local_endpoint(preferred_host)
+        if pref_parsed is not None and pref_parsed[0] == ident:
+            return pref_parsed[1]
+
+    spelling = _target_cli_spelling(target_obj)
+    if spelling is not None:
+        return spelling
     return _identity_to_paseo_host(ident)
 
 
@@ -339,11 +418,17 @@ def _resolve_target_from_rows(target, rows):
     return hits[0]["id"]
 
 
-def _resolve_and_inspect(target, cli):
+def _resolve_and_inspect(target, cli, *, expected_host=None):
     """Resolve TARGET to (aid, inspect_dict, bound_host) via PaseoClient or CLI."""
     env = os.environ
     if (env.get("PASEO_HOME") or "").strip() and (env.get("PASEO_HOST") or "").strip():
         raise ValueError("PASEO_HOME and PASEO_HOST cannot both be set")
+
+    expected = None
+    if expected_host is not None:
+        expected = _parse_local_endpoint(expected_host)
+        if expected is None:
+            raise ValueError("bound --host is not a valid local loopback or unix target")
 
     want_daemon, forced_daemon = _want_daemon_transport(env)
     pc = None
@@ -361,16 +446,33 @@ def _resolve_and_inspect(target, cli):
         not_found_err = getattr(pc, "AgentNotFoundError", ())
         ade_url = (env.get("ADE_PASEO_URL") or "").strip()
         client_kwargs = {"timeout": 20}
+        preferred_host = None
         if not ade_url:
             paseo_home = _resolve_paseo_home(env)
-            runtime_url = _resolve_runtime_url_from_pid_lock(paseo_home)
-            if runtime_url is not None:
+            runtime = _resolve_runtime_endpoint_from_pid_lock(paseo_home)
+            if runtime is not None:
+                runtime_ident, runtime_spelling, runtime_url = runtime
+                if expected is not None and runtime_ident != expected[0]:
+                    raise ValueError("bound --host disagrees with live Paseo daemon endpoint")
                 client_kwargs["url"] = runtime_url
+                preferred_host = runtime_spelling
+            elif expected is not None:
+                client_kwargs["url"] = expected[2]
+                preferred_host = expected[1]
+        elif expected is not None:
+            ade_parsed = _parse_local_endpoint(ade_url)
+            if ade_parsed is None or ade_parsed[0] != expected[0]:
+                raise ValueError("bound --host disagrees with ADE_PASEO_URL")
+            preferred_host = expected[1]
         try:
             client = pc.PaseoClient(**client_kwargs)
         except pc.DaemonError as error:
             raise ValueError(f"Paseo daemon unavailable: {error}") from error
-        bound_host = _resolve_send_host(pc, client, env)
+        bound_host = _resolve_send_host(pc, client, env, preferred_host=preferred_host)
+        if expected is not None:
+            bound_ident = _parse_local_paseo_host(bound_host)
+            if bound_ident != expected[0]:
+                raise ValueError("bound --host disagrees with resolved Paseo daemon target")
         if UUID_RE.fullmatch(target):
             try:
                 info = client.inspect_agent(target, cli_shape=True)
@@ -394,13 +496,14 @@ def _resolve_and_inspect(target, cli):
             raise ValueError(f"Paseo daemon inspect failed: {error}") from error
         return aid, info, bound_host
 
-    rows = call(cli, "ls", "-a", "-g", "--json")
+    host_flags = ["--host", expected[1]] if expected is not None else []
+    rows = call(cli, "ls", "-a", "-g", "--json", *host_flags)
     aid = _resolve_target_from_rows(target, rows)
-    info = call(cli, "agent", "inspect", aid, "--json")
-    return aid, info, None
+    info = call(cli, "agent", "inspect", aid, "--json", *host_flags)
+    return aid, info, (expected[1] if expected is not None else None)
 
 
-def send(target, text, label="fleet-watch", receipt_file=None):
+def send(target, text, label="fleet-watch", receipt_file=None, host=None):
     """Return zero only for a successful CLI call with a sent/completed receipt.
 
     Keep agent identity when called manually: queued agent sends require a peer
@@ -420,7 +523,7 @@ def send(target, text, label="fleet-watch", receipt_file=None):
     if not TARGET.fullmatch(target):
         raise ValueError("target must be a Paseo id or unique shortId prefix")
     cli = _resolve_cli_bin()
-    aid, info, bound_host = _resolve_and_inspect(target, cli)
+    aid, info, bound_host = _resolve_and_inspect(target, cli, expected_host=host)
     if (not isinstance(info, dict) or info.get("Id") != aid
             or info.get("Archived") is not False or info.get("PendingPermissions") != []
             or info.get("Status") not in {"idle", "running", "closed"}):
@@ -472,9 +575,10 @@ def main():
     parser.add_argument("text")
     parser.add_argument("--label", default="fleet-watch", choices=("fleet-watch", "fleet-watch-phantom"))
     parser.add_argument("--receipt-file", help="per-event write-ahead record; pending outcomes require manual reconciliation")
+    parser.add_argument("--host", help="optional expected local daemon endpoint (fail closed if live endpoint differs)")
     args = parser.parse_args()
     try:
-        return send(args.target, args.text, args.label, args.receipt_file)
+        return send(args.target, args.text, args.label, args.receipt_file, host=args.host)
     except PendingDelivery as error:
         print(f"fleet-watch Paseo send pending: {error}", file=sys.stderr)
         return 5

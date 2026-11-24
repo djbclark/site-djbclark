@@ -238,12 +238,14 @@ class DaemonTransportSend(unittest.TestCase):
         self.assertEqual(calls[0][0][:5], ["paseo", "send", AID, "--host", "127.0.0.1:9123"])
         self.assertEqual(calls[0][1].get("PASEO_HOME"), paseo_home)
 
-    def test_stale_not_ready_or_invalid_pid_lock_fails_closed(self):
+    def test_stale_not_ready_prior_boot_or_invalid_pid_lock_fails_closed_without_leaking_listen(self):
         cases = [
             ("stale_pid", json.dumps({"pid": 99_999_999, "listen": "127.0.0.1:9123"}), "stale"),
+            ("prior_boot_started_at", json.dumps({"pid": os.getpid(), "startedAt": "2020-01-01T00:00:00Z", "listen": "127.0.0.1:9123"}), "predates current host boot"),
             ("not_ready_null_listen", json.dumps({"pid": os.getpid(), "listen": None}), "not published"),
             ("malformed_json", "{not-json", "malformed"),
-            ("non_loopback_listen", json.dumps({"pid": os.getpid(), "listen": "10.0.0.5:7263"}), "not a local loopback"),
+            ("non_loopback_listen", json.dumps({"pid": os.getpid(), "listen": "10.0.0.5:7263"}), "not a valid local loopback or unix target"),
+            ("secret_bearing_listen", json.dumps({"pid": os.getpid(), "listen": "http://user:SUPERSECRET@127.0.0.1:7263/?token=LEAKME"}), "not a valid local loopback or unix target"),
         ]
         for label, body, pattern in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as paseo_home:
@@ -254,16 +256,101 @@ class DaemonTransportSend(unittest.TestCase):
                 with patch.dict(os.environ, env), \
                         patch.dict(sys.modules, {"ade_paseo_client": fake_pc}), \
                         patch.object(SENDER.subprocess, "run") as run_mock:
-                    with self.assertRaisesRegex(ValueError, pattern):
+                    with self.assertRaisesRegex(ValueError, pattern) as ctx:
                         SENDER.send(AID, "notice")
+                    msg = str(ctx.exception)
+                    self.assertNotIn("SUPERSECRET", msg)
+                    self.assertNotIn("LEAKME", msg)
+                    self.assertNotIn("10.0.0.5", msg)
                     client_cls.assert_not_called()
                     run_mock.assert_not_called()
+
+    def test_symlinked_parent_unix_socket_preserves_lock_spelling_for_cli_credential_auth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real_dir = Path(tmp) / "real-sock-dir"
+            real_dir.mkdir()
+            alias_dir = Path(tmp) / "alias-sock-dir"
+            alias_dir.symlink_to(real_dir)
+            alias_sock = f"{alias_dir}/p.sock"
+            expected_spelling = f"unix://{alias_sock}"
+            self.assertNotEqual(os.path.realpath(alias_sock), alias_sock)
+
+            paseo_home = Path(tmp) / "paseo-home"
+            paseo_home.mkdir()
+            token = "C" * 43
+            (paseo_home / "paseo.pid").write_text(
+                json.dumps({"pid": os.getpid(), "listen": expected_spelling}),
+                encoding="utf-8",
+            )
+            (paseo_home / "local-credential").write_text(f"{token}\n", encoding="utf-8")
+
+            # Verify both PID-lock resolution and ADE_PASEO_URL keep the exact symlinked spelling.
+            for mode_label, extra_env in (
+                ("pid_lock_path", {"PASEO_HOME": str(paseo_home)}),
+                ("ade_paseo_url_path", {"PASEO_HOME": str(paseo_home), "ADE_PASEO_URL": expected_spelling}),
+            ):
+                with self.subTest(mode=mode_label):
+                    client = self._new_client(target=_unix_target(alias_sock))
+                    client_cls = MagicMock(return_value=client)
+                    fake_pc = _make_fake_paseo_client_module(client_cls)
+                    seen_hosts = []
+
+                    def run(argv, recorded=seen_hosts, home_dir=str(paseo_home), expected_tok=token, **kwargs):
+                        host_arg = argv[argv.index("--host") + 1]
+                        recorded.append(host_arg)
+                        # Exact Paseo readLocalCredentialForTarget string equality (no realpath)
+                        lock = json.loads(Path(home_dir, "paseo.pid").read_text(encoding="utf-8"))
+                        self.assertEqual(host_arg, lock["listen"])
+                        self.assertEqual(os.environ.get("PASEO_HOME"), home_dir)
+                        self.assertEqual(Path(home_dir, "local-credential").read_text(encoding="utf-8").strip(), expected_tok)
+                        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "sent"}), "")
+
+                    env = dict(CLEAN_TRANSPORT_ENV, **extra_env)
+                    with patch.dict(os.environ, env), \
+                            patch.dict(sys.modules, {"ade_paseo_client": fake_pc}), \
+                            patch.object(SENDER.subprocess, "run", side_effect=run):
+                        rc = SENDER.send(AID, "unix alias notice")
+                    self.assertEqual(rc, 0)
+                    self.assertEqual(seen_hosts, [expected_spelling])
+
+    def test_bound_host_param_matches_or_fails_closed_when_live_endpoint_changed(self):
+        with tempfile.TemporaryDirectory() as paseo_home:
+            Path(paseo_home, "paseo.pid").write_text(
+                json.dumps({"pid": os.getpid(), "listen": "127.0.0.1:9123"}),
+                encoding="utf-8",
+            )
+            client = self._new_client(target=_tcp_target("127.0.0.1", 9123))
+            client_cls = MagicMock(return_value=client)
+            fake_pc = _make_fake_paseo_client_module(client_cls)
+
+            def run(argv, **kwargs):
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "sent"}), "")
+
+            env = dict(CLEAN_TRANSPORT_ENV, PASEO_HOME=paseo_home)
+            with patch.dict(os.environ, env), \
+                    patch.dict(sys.modules, {"ade_paseo_client": fake_pc}), \
+                    patch.object(SENDER.subprocess, "run", side_effect=run):
+                self.assertEqual(SENDER.send(AID, "notice", host="127.0.0.1:9123"), 0)
+
+            # Simulate daemon restarting onto a different port between scan and relay -> fail closed.
+            Path(paseo_home, "paseo.pid").write_text(
+                json.dumps({"pid": os.getpid(), "listen": "127.0.0.1:9999"}),
+                encoding="utf-8",
+            )
+            client_cls.reset_mock()
+            with patch.dict(os.environ, env), \
+                    patch.dict(sys.modules, {"ade_paseo_client": fake_pc}), \
+                    patch.object(SENDER.subprocess, "run") as run_mock:
+                with self.assertRaisesRegex(ValueError, "disagrees with live Paseo daemon endpoint"):
+                    SENDER.send(AID, "notice", host="127.0.0.1:9123")
+                client_cls.assert_not_called()
+                run_mock.assert_not_called()
 
     def test_ade_paseo_url_binds_send_via_host_flag_and_retains_paseo_home_for_local_credential(self):
         cases = [
             ("tcp_with_custom_credential_home", _tcp_target("127.0.0.1", 9999), "http://127.0.0.1:9999", "127.0.0.1:9999"),
             ("ipv6", _tcp_target("::1", 9999), "http://[::1]:9999", "[::1]:9999"),
-            ("unix", _unix_target("/tmp/alt-paseo.sock"), "unix:///tmp/alt-paseo.sock", f"unix://{os.path.realpath('/tmp/alt-paseo.sock')}"),
+            ("unix", _unix_target("/tmp/alt-paseo.sock"), "unix:///tmp/alt-paseo.sock", "unix:///tmp/alt-paseo.sock"),
         ]
         for label, target_obj, ade_url, expected_host in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as custom_home:
