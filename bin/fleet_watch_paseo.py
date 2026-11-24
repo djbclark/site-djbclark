@@ -418,6 +418,35 @@ def _resolve_target_from_rows(target, rows):
     return hits[0]["id"]
 
 
+def _parse_ade_url_identity(pc, ade_url):
+    """Parse ADE_PASEO_URL via ade_paseo_client.parse_daemon_url so transport selectors (#ws/#mcp) strip cleanly."""
+    parse_url = getattr(pc, "parse_daemon_url", None)
+    if callable(parse_url):
+        try:
+            target_obj = parse_url(ade_url)
+        except pc.DaemonError:
+            return None
+        return _target_identity(target_obj)
+    raw = ade_url.strip()
+    if raw.startswith("unix://"):
+        for suffix in ("#ws", "#mcp"):
+            if raw.endswith(suffix):
+                raw = raw[:-len(suffix)]
+                break
+    return _parse_local_paseo_host(raw)
+
+
+def _matching_pid_lock_spelling(paseo_home, target_ident):
+    """Return <paseo_home>/paseo.pid's exact listen spelling when live and canonically matching target_ident."""
+    try:
+        runtime = _resolve_runtime_endpoint_from_pid_lock(paseo_home)
+    except ValueError:
+        return None
+    if runtime is not None and runtime[0] == target_ident:
+        return runtime[1]
+    return None
+
+
 def _resolve_and_inspect(target, cli, *, expected_host=None):
     """Resolve TARGET to (aid, inspect_dict, bound_host) via PaseoClient or CLI."""
     env = os.environ
@@ -445,10 +474,10 @@ def _resolve_and_inspect(target, cli, *, expected_host=None):
     if use_daemon:
         not_found_err = getattr(pc, "AgentNotFoundError", ())
         ade_url = (env.get("ADE_PASEO_URL") or "").strip()
+        paseo_home = _resolve_paseo_home(env)
         client_kwargs = {"timeout": 20}
         preferred_host = None
         if not ade_url:
-            paseo_home = _resolve_paseo_home(env)
             runtime = _resolve_runtime_endpoint_from_pid_lock(paseo_home)
             if runtime is not None:
                 runtime_ident, runtime_spelling, runtime_url = runtime
@@ -460,14 +489,20 @@ def _resolve_and_inspect(target, cli, *, expected_host=None):
                 client_kwargs["url"] = expected[2]
                 preferred_host = expected[1]
         elif expected is not None:
-            ade_parsed = _parse_local_endpoint(ade_url)
-            if ade_parsed is None or ade_parsed[0] != expected[0]:
+            ade_ident = _parse_ade_url_identity(pc, ade_url)
+            if ade_ident is None or ade_ident != expected[0]:
                 raise ValueError("bound --host disagrees with ADE_PASEO_URL")
             preferred_host = expected[1]
         try:
             client = pc.PaseoClient(**client_kwargs)
         except pc.DaemonError as error:
             raise ValueError(f"Paseo daemon unavailable: {error}") from error
+        if ade_url:
+            client_ident = _target_identity(getattr(client, "target", None)) or _parse_ade_url_identity(pc, ade_url)
+            if client_ident is not None:
+                lock_spelling = _matching_pid_lock_spelling(paseo_home, client_ident)
+                if lock_spelling is not None:
+                    preferred_host = lock_spelling
         bound_host = _resolve_send_host(pc, client, env, preferred_host=preferred_host)
         if expected is not None:
             bound_ident = _parse_local_paseo_host(bound_host)

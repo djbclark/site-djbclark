@@ -313,6 +313,82 @@ class DaemonTransportSend(unittest.TestCase):
                     self.assertEqual(rc, 0)
                     self.assertEqual(seen_hosts, [expected_spelling])
 
+    def test_explicit_ade_paseo_url_with_unix_ws_selector_and_symlink_alias_uses_lock_spelling(self):
+        real_path = Path.home() / "src/djbclark-ade/bin/ade_paseo_client.py"
+        if not real_path.is_file():
+            self.skipTest("~/src/djbclark-ade/bin/ade_paseo_client.py not present")
+        spec = importlib.util.spec_from_file_location("_real_ade_paseo_client_r5", real_path)
+        real_pc = importlib.util.module_from_spec(spec)
+        sys.modules["_real_ade_paseo_client_r5"] = real_pc
+        spec.loader.exec_module(real_pc)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                real_dir = Path(tmp) / "real-sock-dir"
+                real_dir.mkdir()
+                alias_dir = Path(tmp) / "alias-sock-dir"
+                alias_dir.symlink_to(real_dir)
+                alias_sock = f"{alias_dir}/p.sock"
+                real_sock = os.path.realpath(alias_sock)
+                self.assertNotEqual(real_sock, alias_sock)
+
+                paseo_home = Path(tmp) / "paseo-home"
+                paseo_home.mkdir()
+                token = "D" * 43
+                lock_spelling = f"unix://{alias_sock}"
+                (paseo_home / "paseo.pid").write_text(
+                    json.dumps({"pid": os.getpid(), "listen": lock_spelling}),
+                    encoding="utf-8",
+                )
+                (paseo_home / "local-credential").write_text(f"{token}\n", encoding="utf-8")
+
+                # Explicit ADE_PASEO_URL uses the canonical path + #ws transport selector, while
+                # paseo.pid records the symlinked alias spelling, and phantom passes the bare
+                # scan-bound host as --host. Both A1 (#ws selector) and A2 (lock spelling) must hold.
+                ade_ws_url = f"unix://{real_sock}#ws"
+                parsed_target = real_pc.parse_daemon_url(ade_ws_url)
+                self.assertTrue(parsed_target.ws_only)
+                self.assertEqual(parsed_target.socket_path, real_sock)
+
+                client = self._new_client(target=parsed_target)
+                client_cls = MagicMock(return_value=client)
+                proxy_pc = types.SimpleNamespace(
+                    DaemonError=real_pc.DaemonError,
+                    AgentNotFoundError=real_pc.AgentNotFoundError,
+                    PaseoClient=client_cls,
+                    transport_mode=real_pc.transport_mode,
+                    parse_daemon_url=real_pc.parse_daemon_url,
+                )
+
+                for case_label, bound_host_arg in (
+                    ("relay_with_scan_bound_host_and_ws_selector", f"unix://{real_sock}"),
+                    ("direct_explicit_url_alias_without_host_arg", None),
+                ):
+                    with self.subTest(case=case_label):
+                        client_cls.reset_mock()
+                        seen_hosts = []
+
+                        def run(argv, recorded=seen_hosts, home_dir=str(paseo_home), expected_tok=token, **kwargs):
+                            host_arg = argv[argv.index("--host") + 1]
+                            recorded.append(host_arg)
+                            lock = json.loads(Path(home_dir, "paseo.pid").read_text(encoding="utf-8"))
+                            self.assertEqual(host_arg, lock["listen"])
+                            self.assertEqual(os.environ.get("PASEO_HOME"), home_dir)
+                            self.assertEqual(Path(home_dir, "local-credential").read_text(encoding="utf-8").strip(), expected_tok)
+                            return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "sent"}), "")
+
+                        env = dict(CLEAN_TRANSPORT_ENV, PASEO_HOME=str(paseo_home), ADE_PASEO_URL=ade_ws_url)
+                        with patch.dict(os.environ, env), \
+                                patch.dict(sys.modules, {"ade_paseo_client": proxy_pc}), \
+                                patch.object(SENDER.subprocess, "run", side_effect=run):
+                            rc = SENDER.send(AID, "unix ws relay notice", host=bound_host_arg)
+                        self.assertEqual(rc, 0)
+                        # Client constructed without overriding ADE_PASEO_URL (preserves #ws selector)
+                        client_cls.assert_called_once_with(timeout=20)
+                        # CLI --host receives exact lock spelling (no #ws, no realpath mismatch)
+                        self.assertEqual(seen_hosts, [lock_spelling])
+        finally:
+            sys.modules.pop("_real_ade_paseo_client_r5", None)
+
     def test_bound_host_param_matches_or_fails_closed_when_live_endpoint_changed(self):
         with tempfile.TemporaryDirectory() as paseo_home:
             Path(paseo_home, "paseo.pid").write_text(
