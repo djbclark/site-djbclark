@@ -209,6 +209,8 @@ All edits in a claimed workspace, small commits, `git-commit-own`:
 
 **Next for m11 (0° only):** record the four commands as the `model_idea_tab_11` desired state; add a healing-registry ID; decide whether to remove the third-party rotation apps' write access.
 
+**Update 2026-11-24 (Quick Settings rotation control restored):** `wm fixed-to-user-rotation enabled` turns the system Auto-rotate Quick Settings tile (and floating rotate suggestion) into a no-op because AOSP `DisplayRotation.needSensorRunning()` returns `false` and `rotationForOrientation()` pins to `mUserRotation` even when `wm user-rotation free`. Separately, ZUI's `TileQueryHelper.queryTiles()` used raw `sysui_qs_tiles.contains("rotation")`, so the uninstalled `custom(dev.caceresenzo.rotationcontrol/.tile.RotationTileService)` tombstone hid the stock `rotation` tile from the Quick Settings editor. Reverted m11 and `model_idea_tab_11.yml` to `wm fixed-to-user-rotation default` (keeping `camera_autorotate=0`), dropped deploy-time overwrites of `accelerometer_rotation`/`user_rotation`, and added `rotation` back to `sysui_qs_tiles`.
+
 **Later: 180° on power, 0° otherwise.** Not designed yet. Options: (a) a Mac-side adb watcher (`dumpsys battery` AC/USB powered → `wm user-rotation lock 2`, else `lock 0`) while USB-attached; (b) on-device Tasker/Key Mapper profile on the power-connected event with `WRITE_SECURE_SETTINGS` granted by `pm grant`; (c) Android 16 docked/charging-state rotation setting if ZUI has one (unknown). Note that `fixed-to-user-rotation` keeps the angle stable, so changing the user rotation is enough; the event source is the open piece.
 
 ## XI. kob alternative: Android e-ink (research, 2026-11-20)
