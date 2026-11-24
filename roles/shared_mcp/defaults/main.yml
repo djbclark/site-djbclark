@@ -186,6 +186,12 @@ shared_mcp_firecrawl_mit_tailnet: "{{ tailnet_magicdns_suffix }}"
 # Periodic LaunchAgent keeping enrolled-snapshot.json inside its 7-day freshness window (3-day interval).
 shared_mcp_firecrawl_mit_snapshot_refresh_enabled: "{{ shared_mcp_firecrawl_mit_bridge != 'off' }}"
 shared_mcp_firecrawl_mit_snapshot_refresh_interval: 259200
+# Weekly MIT Libraries resource-freshness & drift-monitoring LaunchAgent (zero secrets, zero auto-edits).
+shared_mcp_firecrawl_mit_freshness_enabled: true
+shared_mcp_firecrawl_mit_freshness_interval: 604800
+shared_mcp_firecrawl_mit_freshness_bin: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/freshness_check.py"
+shared_mcp_firecrawl_mit_browser_hosts: "{{ shared_mcp_home }}/src/xvm-debian-howto/scripts/mitnet-routing/browser-hosts.txt"
+shared_mcp_firecrawl_mit_freshness_dir: "{{ shared_mcp_home }}/.local/state/mitnet-routing/freshness"
 # LLM extractor order for query/json formats: "oneshot-first" keeps SIPB for short/medium pages
 # (<= ~24k tokens) and uses 1M-context LiteLLM (gemini-free, gemini-free-lite) one-shot for long papers.
 shared_mcp_firecrawl_llm_order: "oneshot-first"

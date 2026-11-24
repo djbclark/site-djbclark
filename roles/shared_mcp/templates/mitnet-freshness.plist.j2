@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.{{ site_ns }}.mitnet-freshness</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>out=$("$1" -I "$2" --browser-hosts "$3" --baseline "$4/baseline.json" --report-json "$4/latest-report.json" --report-md "$4/latest-report.md" --update-baseline); rc=$?; printf '%s\n' "$out"; if [ "$rc" -ne 0 ]; then "$5" "xvm-debian-howto: ${out:-mitnet-freshness exited $rc} (see ~/.local/state/mitnet-routing/freshness/latest-report.md)" || true; fi; if [ "$rc" -eq 10 ]; then exit 0; fi; exit "$rc"</string>
+        <string>mitnet-freshness</string>
+        <string>{{ shared_mcp_firecrawl_mit_python }}</string>
+        <string>{{ shared_mcp_firecrawl_mit_freshness_bin }}</string>
+        <string>{{ shared_mcp_firecrawl_mit_browser_hosts }}</string>
+        <string>{{ shared_mcp_firecrawl_mit_freshness_dir }}</string>
+        <string>{{ shared_mcp_bin_dir }}/hermes-ping</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{ shared_mcp_home }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ shared_mcp_home }}</string>
+        <key>PATH</key>
+        <string>{{ shared_mcp_service_path }}</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>{{ shared_mcp_firecrawl_mit_freshness_interval | int }}</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{ shared_mcp_logs_dir }}/mitnet-freshness.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ shared_mcp_logs_dir }}/mitnet-freshness.log</string>
+</dict>
+</plist>

@@ -190,3 +190,56 @@
     - not ansible_check_mode
     - shared_mcp_firecrawl_mit_snapshot_refresh_enabled | bool
     - _mitnet_snap_loaded.rc != 0 or (_mitnet_snap_plist is changed)
+
+# Weekly MIT Libraries resource-freshness & drift-monitoring LaunchAgent (zero secrets, zero auto-edits).
+- name: Ensure MITnet freshness state directory exists
+  ansible.builtin.file:
+    path: "{{ shared_mcp_firecrawl_mit_freshness_dir }}"
+    state: directory
+    mode: "0700"
+  when: shared_mcp_firecrawl_mit_freshness_enabled | bool
+
+- name: Render MITnet freshness LaunchAgent
+  ansible.builtin.template:
+    src: mitnet-freshness.plist.j2
+    dest: "{{ shared_mcp_plist_dir }}/com.{{ site_ns }}.mitnet-freshness.plist"
+    mode: "0600"
+  register: _mitnet_fresh_plist
+  when: shared_mcp_firecrawl_mit_freshness_enabled | bool
+
+- name: Probe MITnet freshness LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, print, "gui/{{ ansible_facts.user_uid }}/com.{{ site_ns }}.mitnet-freshness"]
+  register: _mitnet_fresh_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Boot out MITnet freshness LaunchAgent on change or disable
+  ansible.builtin.command:
+    argv: [launchctl, bootout, "gui/{{ ansible_facts.user_uid }}/com.{{ site_ns }}.mitnet-freshness"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _mitnet_fresh_loaded.rc == 0
+    - (not (shared_mcp_firecrawl_mit_freshness_enabled | bool)) or (_mitnet_fresh_plist is changed)
+
+- name: Remove MITnet freshness LaunchAgent plist when disabled
+  ansible.builtin.file:
+    path: "{{ shared_mcp_plist_dir }}/com.{{ site_ns }}.mitnet-freshness.plist"
+    state: absent
+  when: not (shared_mcp_firecrawl_mit_freshness_enabled | bool)
+
+- name: Bootstrap MITnet freshness LaunchAgent
+  ansible.builtin.command:
+    argv: [launchctl, bootstrap, "gui/{{ ansible_facts.user_uid }}", "{{ shared_mcp_plist_dir }}/com.{{ site_ns }}.mitnet-freshness.plist"]
+  register: _mitnet_fresh_bootstrap
+  changed_when: _mitnet_fresh_bootstrap.rc == 0
+  failed_when: _mitnet_fresh_bootstrap.rc != 0
+  until: _mitnet_fresh_bootstrap.rc == 0
+  retries: 10
+  delay: 3
+  when:
+    - not ansible_check_mode
+    - shared_mcp_firecrawl_mit_freshness_enabled | bool
+    - _mitnet_fresh_loaded.rc != 0 or (_mitnet_fresh_plist is changed)
