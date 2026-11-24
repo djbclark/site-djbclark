@@ -10,7 +10,7 @@
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>out=$("$1" -I "$2" --browser-hosts "$3" --baseline "$4/baseline.json" --report-json "$4/latest-report.json" --report-md "$4/latest-report.md" --update-baseline); rc=$?; printf '%s\n' "$out"; if [ "$rc" -ne 0 ]; then "$5" "xvm-debian-howto: ${out:-mitnet-freshness exited $rc} (see ~/.local/state/mitnet-routing/freshness/latest-report.md)" || true; fi; if [ "$rc" -eq 10 ]; then exit 0; fi; exit "$rc"</string>
+        <string>out=$("$1" -I "$2" --browser-hosts "$3" --baseline "$4/baseline.json" --report-json "$4/latest-report.json" --report-md "$4/latest-report.md" --update-baseline); rc=$?; printf '%s\n' "$out"; if [ "$rc" -ne 0 ]; then "$5" "mitnet-journals-proxy: ${out:-mitnet-freshness exited $rc} (see ~/.local/state/mitnet-routing/freshness/latest-report.md)" || true; fi; if [ "$rc" -eq 10 ]; then exit 0; fi; exit "$rc"</string>
         <string>mitnet-freshness</string>
         <string>{{ shared_mcp_firecrawl_mit_python }}</string>
         <string>{{ shared_mcp_firecrawl_mit_freshness_bin }}</string>
