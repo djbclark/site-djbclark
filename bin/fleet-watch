@@ -1364,8 +1364,9 @@ upstream_watch() {
 
 # Phantom "running" Paseo agents (2026-11-02, RCA ~/.local/state/bigteam/lead-2026-11-02/phantom-running-rca.md E):
 # Paseo can keep an agent "running" for good after a cancel it never settled (agent 428f5f02, 17:55Z). Alert only:
-# this never stops, archives, reloads, restarts or prompts the agent. Each run lists `paseo ls` running agents and
-# `paseo inspect`s them. A signal set holds when (2a) Status is running and UpdatedAt is FLEET_WATCH_PHANTOM_SILENT
+# this never stops, archives, reloads, restarts or prompts the agent. Each run lists running agents and inspects them
+# via ~/src/djbclark-ade/bin/ade_paseo_client.py (loopback daemon, zero Node.js CLI spawns; falls back to `paseo` CLI
+# only when FLEET_WATCH_PASEO or ADE_PASEO_TRANSPORT=cli is set or ade_paseo_client cannot be imported). A signal set holds when (2a) Status is running and UpdatedAt is FLEET_WATCH_PHANTOM_SILENT
 # seconds (default 900) or more old, and then, by provider:
 #   opencode (2b)  its session is absent from GET /api/session/active (basic auth from
 #                  ~/.local/state/opencode/service.json, never printed) AND the newest session_message row (opencode.db,
@@ -1393,6 +1394,7 @@ phantom_watch() {
   "$PY3" - "$mode" "$STATE_DIR" "$HERMES" "$HERMES_TO" "$FLEET_PASEO_SEND" <<'PY' || true
 import datetime
 import fcntl
+import importlib.util
 import json
 import os
 import re
@@ -1411,7 +1413,7 @@ home = Path.home()
 dry = mode == "dry"
 quiet = mode == "check"
 state_file = root / "phantom.json"
-PASEO = os.environ.get("FLEET_WATCH_PASEO", "paseo")
+PASEO = os.environ.get("FLEET_WATCH_PASEO") or "paseo"
 HERMES_PING = os.environ.get("FLEET_WATCH_HERMES_PING", str(home / ".local/bin/hermes-ping"))
 LEAD = os.environ.get("FLEET_WATCH_PHANTOM_LEAD", "7c58015b")
 SILENT = float(os.environ.get("FLEET_WATCH_PHANTOM_SILENT", "900"))
@@ -1447,14 +1449,96 @@ def say(line):
         print(line)
 
 
-def run(args):
+def _remaining_timeout():
     left = DEADLINE - time.monotonic()
     if left <= 0:
         raise RuntimeError("step deadline reached")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=min(CMD_TIMEOUT, left))
+    return min(CMD_TIMEOUT, left)
+
+
+def run(args):
+    timeout = _remaining_timeout()
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
         raise RuntimeError(f"{Path(args[0]).name} {args[1]} exited {result.returncode}: {clean(result.stderr, 200)}")
     return result.stdout
+
+
+def _load_paseo_client():
+    """Load ade_paseo_client from ~/src/djbclark-ade/bin; None if unavailable."""
+    path = home / "src/djbclark-ade/bin/ade_paseo_client.py"
+    if "ade_paseo_client" in sys.modules:
+        existing = sys.modules["ade_paseo_client"]
+        if existing is None:
+            return None
+        existing_file = getattr(existing, "__file__", None)
+        if existing_file is None:
+            return existing
+        try:
+            if path.is_file() and Path(existing_file).resolve() == path.resolve():
+                return existing
+        except OSError:
+            pass
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("ade_paseo_client", path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ade_paseo_client"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop("ade_paseo_client", None)
+        return None
+    return module
+
+
+def _set_client_timeout(client, timeout):
+    client.timeout = timeout
+    mcp = getattr(client, "_mcp", None)
+    if mcp is not None:
+        mcp.timeout = timeout
+
+
+def make_paseo_client():
+    """Return (pc_module, PaseoClient) when daemon transport is active, else (None, None)."""
+    pc = _load_paseo_client()
+    if pc is None or pc.transport_mode(cli_env_vars=("FLEET_WATCH_PASEO",)) != "daemon":
+        return None, None
+    paseo_home = PASEO_DIR if "FLEET_WATCH_PHANTOM_PASEO_DIR" in os.environ else None
+    try:
+        return pc, pc.PaseoClient(paseo_home=paseo_home, timeout=_remaining_timeout())
+    except pc.DaemonError as error:
+        raise RuntimeError(f"paseo daemon unavailable: {error}") from error
+
+
+def list_agents(pc, client):
+    if client is not None:
+        _set_client_timeout(client, _remaining_timeout())
+        try:
+            listing = client.list_agents(include_background=False, include_archived=False, cli_rows=True)
+        except pc.DaemonError as error:
+            raise RuntimeError(f"paseo daemon ls failed: {error}") from error
+    else:
+        listing = json.loads(run([PASEO, "ls", "--json"]))
+    if not isinstance(listing, list):
+        raise ValueError("invalid Paseo agent listing")
+    return listing
+
+
+def inspect_agent(pc, client, agent_id):
+    if client is not None:
+        _set_client_timeout(client, _remaining_timeout())
+        try:
+            info = client.inspect_agent(agent_id, cli_shape=True)
+        except pc.DaemonError as error:
+            raise RuntimeError(f"paseo daemon inspect failed: {error}") from error
+    else:
+        info = json.loads(run([PASEO, "inspect", agent_id, "--json"]))
+    if not isinstance(info, dict):
+        raise ValueError("invalid Paseo agent inspect")
+    return info
 
 
 def epoch(stamp):
@@ -1750,7 +1834,8 @@ def main():
             log("already running")
             return
         state = load()
-        listing = json.loads(run([PASEO, "ls", "--json"]))
+        pc, client = make_paseo_client()
+        listing = list_agents(pc, client)
         by_id = {a["id"]: a for a in listing if isinstance(a, dict) and isinstance(a.get("id"), str)}
         running = [a for a in by_id.values() if a.get("status") == "running"]
         rows = []
@@ -1759,7 +1844,7 @@ def main():
             if not UUID.match(agent_id):
                 continue
             try:
-                info = json.loads(run([PASEO, "inspect", agent_id, "--json"]))
+                info = inspect_agent(pc, client, agent_id)
                 holds, signals, sid, basis = evaluate(agent_id, info)
             except (OSError, ValueError, KeyError, RuntimeError, sqlite3.Error, subprocess.TimeoutExpired) as error:
                 log(f"{agent_id[:8]}: no verdict: {clean(error, 200)}")

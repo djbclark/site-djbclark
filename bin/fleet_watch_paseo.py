@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""Native Paseo delivery for fleet-watch's notices; no ADE relay dependency."""
+"""Native Paseo delivery for fleet-watch's notices.
+
+Read queries (agent listing and inspect) use the shared zero-subprocess loopback
+daemon client (`~/src/djbclark-ade/bin/ade_paseo_client.py`) by default and fail
+closed on daemon errors; CLI fallback is used only when `FLEET_WATCH_PASEO`,
+`PASEO_CLI`, or `ADE_PASEO_TRANSPORT=cli` is set or `ade_paseo_client` cannot be
+imported. Mutations keep `paseo send --prompt-file` with write-ahead receipts.
+"""
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -11,6 +19,7 @@ import tempfile
 from pathlib import Path
 
 TARGET = re.compile(r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{4,32})\Z")
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 class PendingDelivery(ValueError):
     """Send was accepted or its outcome is unknown; never automatically resend."""
 
@@ -34,6 +43,89 @@ def call(cli, *args, timeout=20):
     return json.loads(result.stdout)
 
 
+def _load_paseo_client():
+    """Load ade_paseo_client from ~/src/djbclark-ade/bin; None if unavailable."""
+    path = Path.home() / "src/djbclark-ade/bin/ade_paseo_client.py"
+    if "ade_paseo_client" in sys.modules:
+        existing = sys.modules["ade_paseo_client"]
+        if existing is None:
+            return None
+        existing_file = getattr(existing, "__file__", None)
+        if existing_file is None:
+            return existing
+        try:
+            if path.is_file() and Path(existing_file).resolve() == path.resolve():
+                return existing
+        except OSError:
+            pass
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("ade_paseo_client", path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ade_paseo_client"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop("ade_paseo_client", None)
+        return None
+    return module
+
+
+def _resolve_target_from_rows(target, rows):
+    if isinstance(rows, dict):
+        rows = rows.get("agents")
+    if not isinstance(rows, list):
+        raise ValueError("invalid Paseo agent listing")
+    hits = [r for r in rows if isinstance(r, dict) and r.get("id") == target]
+    if not hits:
+        hits = [r for r in rows if isinstance(r, dict) and str(r.get("shortId") or "").startswith(target)]
+    if len(hits) != 1 or not isinstance(hits[0].get("id"), str):
+        raise ValueError("target did not resolve to exactly one agent")
+    return hits[0]["id"]
+
+
+def _resolve_and_inspect(target, cli):
+    """Resolve TARGET to (aid, inspect_dict) via PaseoClient by default, or CLI when opted in/unavailable."""
+    pc = _load_paseo_client()
+    use_daemon = (
+        pc is not None
+        and pc.transport_mode(cli_env_vars=("FLEET_WATCH_PASEO", "PASEO_CLI")) == "daemon"
+    )
+    if use_daemon:
+        not_found_err = getattr(pc, "AgentNotFoundError", ())
+        try:
+            client = pc.PaseoClient(timeout=20)
+        except pc.DaemonError as error:
+            raise ValueError(f"Paseo daemon unavailable: {error}") from error
+        if UUID_RE.fullmatch(target):
+            try:
+                info = client.inspect_agent(target, cli_shape=True)
+            except not_found_err as error:
+                raise ValueError("target did not resolve to exactly one agent") from error
+            except pc.DaemonError as error:
+                raise ValueError(f"Paseo daemon inspect failed: {error}") from error
+            return target, info
+        try:
+            rows = client.list_agents(include_background=True, include_archived=True, cli_rows=True)
+        except pc.DaemonError as error:
+            raise ValueError(f"Paseo daemon ls failed: {error}") from error
+        aid = _resolve_target_from_rows(target, rows)
+        try:
+            info = client.inspect_agent(aid, cli_shape=True)
+        except not_found_err as error:
+            raise ValueError("target is unavailable, archived, or awaiting permission/question") from error
+        except pc.DaemonError as error:
+            raise ValueError(f"Paseo daemon inspect failed: {error}") from error
+        return aid, info
+
+    rows = call(cli, "ls", "-a", "-g", "--json")
+    aid = _resolve_target_from_rows(target, rows)
+    info = call(cli, "agent", "inspect", aid, "--json")
+    return aid, info
+
+
 def send(target, text, label="fleet-watch", receipt_file=None):
     """Return zero only for a successful CLI call with a sent/completed receipt.
 
@@ -54,18 +146,7 @@ def send(target, text, label="fleet-watch", receipt_file=None):
     if not TARGET.fullmatch(target):
         raise ValueError("target must be a Paseo id or unique shortId prefix")
     cli = os.environ.get("FLEET_WATCH_PASEO") or os.environ.get("PASEO_CLI") or "paseo"
-    rows = call(cli, "ls", "-a", "-g", "--json")
-    if isinstance(rows, dict):
-        rows = rows.get("agents")
-    if not isinstance(rows, list):
-        raise ValueError("invalid Paseo agent listing")
-    hits = [r for r in rows if isinstance(r, dict) and r.get("id") == target]
-    if not hits:
-        hits = [r for r in rows if isinstance(r, dict) and str(r.get("shortId") or "").startswith(target)]
-    if len(hits) != 1 or not isinstance(hits[0].get("id"), str):
-        raise ValueError("target did not resolve to exactly one agent")
-    aid = hits[0]["id"]
-    info = call(cli, "agent", "inspect", aid, "--json")
+    aid, info = _resolve_and_inspect(target, cli)
     if (not isinstance(info, dict) or info.get("Id") != aid
             or info.get("Archived") is not False or info.get("PendingPermissions") != []
             or info.get("Status") not in {"idle", "running", "closed"}):
