@@ -26,6 +26,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Without this, GITHUB_TOKEN search returns pull requests only
+      # (175 PRs and 0 issues in the 2026-11-25 dry runs).
+      issues: read
     steps:
       - uses: actions/checkout@v7
 

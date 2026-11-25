@@ -490,3 +490,11 @@ def test_search_drops_pull_requests_and_warns():
     stream = io.StringIO()
     sti.warn_search_limits(stats, file=stream)
     assert "dropped 1 pull request" in stream.getvalue()
+
+
+def test_workflow_grants_issues_read_so_search_is_not_prs_only():
+    text = WORKFLOW.read_text()
+    # A permissions block with pull-requests but not issues made
+    # GITHUB_TOKEN issue search return only pull requests.
+    assert "issues: read" in text
+    assert "pull-requests: write" in text
