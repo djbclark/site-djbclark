@@ -14,6 +14,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 DEFAULT_TRACKED = Path(".github/tracked-issues.json")
 DEFAULT_DISCOVERED = Path("/tmp/discovered-issues.txt")
@@ -83,6 +84,26 @@ def normalize_search_item(item: dict) -> dict:
     }
 
 
+def search_issues_path(query: str, page: int, per_page: int = SEARCH_PAGE_SIZE) -> str:
+    """Build a URL-encoded /search/issues path.
+
+    Encoding the query in the path avoids `gh api -f q=...` splitting on
+    spaces or treating `-user:`/`-org:` terms as flags (that is what let
+    pull requests into the Actions run on 2026-11-25).
+    """
+    return "search/issues?" + urlencode(
+        {"q": query, "per_page": per_page, "page": page}
+    )
+
+
+def is_pull_request(item: dict) -> bool:
+    """True when a Search API or gh-search item is a pull request."""
+    if item.get("pull_request"):
+        return True
+    url = str(item.get("html_url") or item.get("url") or "")
+    return "/pull/" in url
+
+
 def fetch_search_page(query: str, page: int, per_page: int = SEARCH_PAGE_SIZE) -> dict:
     """Fetch one Search API page via `gh api`. Does not print the token."""
     proc = subprocess.run(
@@ -91,13 +112,7 @@ def fetch_search_page(query: str, page: int, per_page: int = SEARCH_PAGE_SIZE) -
             "api",
             "--method",
             "GET",
-            "search/issues",
-            "-f",
-            f"q={query}",
-            "-F",
-            f"per_page={per_page}",
-            "-F",
-            f"page={page}",
+            search_issues_path(query, page, per_page),
         ],
         capture_output=True,
         text=True,
@@ -153,7 +168,11 @@ def search_all_issue_pages(
         "hit_ceiling": total_count > ceiling,
         "incomplete_results": incomplete,
     }
-    return [normalize_search_item(item) for item in items], stats
+    dropped_prs = sum(1 for item in items if is_pull_request(item))
+    issues = [normalize_search_item(item) for item in items if not is_pull_request(item)]
+    stats["fetched"] = len(issues)
+    stats["dropped_prs"] = dropped_prs
+    return issues, stats
 
 
 def warn_search_limits(stats: dict, file=None) -> None:
@@ -173,6 +192,13 @@ def warn_search_limits(stats: dict, file=None) -> None:
             "some matches may be missing",
             file=out,
         )
+    dropped = stats.get("dropped_prs") or 0
+    if dropped:
+        print(
+            f"warning: dropped {dropped} pull request(s) from search results "
+            "(query should have been issues only)",
+            file=out,
+        )
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -181,7 +207,8 @@ def cmd_search(args: argparse.Namespace) -> int:
     warn_search_limits(stats)
     print(
         f"Fetched {stats['fetched']} issues "
-        f"(total_count={stats['total_count']}, pages={stats['pages']})"
+        f"(total_count={stats['total_count']}, pages={stats['pages']}, "
+        f"dropped_prs={stats.get('dropped_prs', 0)})"
     )
     return 0
 

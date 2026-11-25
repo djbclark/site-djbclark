@@ -450,3 +450,43 @@ def test_cmd_search_writes_raw_and_prints_counts(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Fetched 1 issues" in out
     assert "total_count=1" in out
+
+
+def test_search_issues_path_urlencodes_query():
+    path = sti.search_issues_path(sti.search_query(), 2, 100)
+    assert path.startswith("search/issues?")
+    assert "q=is%3Aissue+author%3Adjbclark" in path
+    assert "-user%3Adjbclark" in path
+    assert "-org%3Afrdminc" in path
+    assert "per_page=100" in path
+    assert "page=2" in path
+
+
+def test_search_drops_pull_requests_and_warns():
+    def fetch(query, page, per_page):
+        return {
+            "total_count": 3,
+            "incomplete_results": False,
+            "items": [
+                _rest_item("acme/one", 1, "issue"),
+                {
+                    "repository_url": "https://api.github.com/repos/acme/one",
+                    "html_url": "https://github.com/acme/one/pull/2",
+                    "number": 2,
+                    "title": "pr",
+                    "state": "open",
+                    "pull_request": {
+                        "url": "https://api.github.com/repos/acme/one/pulls/2"
+                    },
+                },
+                _rest_item("acme/one", 3, "issue2"),
+            ],
+        }
+
+    issues, stats = sti.search_all_issue_pages("q", fetch_page=fetch)
+    assert [i["number"] for i in issues] == [1, 3]
+    assert stats["fetched"] == 2
+    assert stats["dropped_prs"] == 1
+    stream = io.StringIO()
+    sti.warn_search_limits(stats, file=stream)
+    assert "dropped 1 pull request" in stream.getvalue()

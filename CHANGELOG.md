@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- ci(sync-tracked-issues): pass the Search API query as a URL-encoded path and drop any pull requests that still appear, so `is:issue` cannot be lost the way `gh api -f q=...` did in the first Actions dry run. (2026-11-25)
 - ci(sync-tracked-issues): paginate GitHub issue search (100 results per page) up to the Search API's 1,000-result ceiling, and log a warning if that ceiling is hit, so the nightly job no longer silently drops matches past the first 100. (2026-11-25)
 - ci(sync-tracked-issues): skip every repo owned by Daniel's GitHub user (`djbclark`) or orgs (`Bcfg2`, `Maynard-Daycare`, `djbcsipb`, `frdminc`, `pikans`, `pkb-rocks` — from `gh api user/orgs` on 2026-11-23) using `-user:`/`-org:` search qualifiers and an owner-level filter, while keeping the existing exact-repo exclusions. (2026-11-23)
 - ci(sync-tracked-issues): write the auto-track commit message to a file and pass only `git commit -F`. Git 2.55+ on GitHub-hosted runners rejects `-m` together with `--file` (`fatal: options '-m' and '-F' cannot be used together`), which is why the nightly job has been failing on the Create pull request step. (2026-11-23)
