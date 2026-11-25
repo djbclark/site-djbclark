@@ -112,7 +112,7 @@ FREEZE_LABELS=(
   # forever in a Biome stream XPC while it is SIGSTOPped, so a cold sudo -i
   # (pam_tid password sheet, no Touch ID templates after migration) never
   # prompts. See macos/sip-doit-with-sudo.sh.
-  "com.apple.chronod"        # widgets; KeepAlive only on crash (2026-10-15)
+  # Notification Center makes a synchronous XPC call to chronod. Keep it runnable.
   "com.apple.homeenergyd"    # Home energy/grid-forecast sync (HomeEnergyDaemon.framework); operator: disable (2026-11-02)
   "com.apple.geoanalyticsd"   # Maps/geo usage analytics (2026-11-02)
   "com.apple.analyticsagent"   # Mac Analytics collector (2026-11-02)

@@ -18,7 +18,7 @@ freeze	gui	com.apple.campo	Siri AI.app; KeepAlive; wakes generativeexperiencesd
 freeze	gui	com.apple.visualintelligenced	Visual Intelligence
 freeze	gui	com.apple.siriknowledged	Siri knowledge
 freeze	gui	com.apple.intelligenceplatformd	On-device knowledge platform
-freeze	gui	com.apple.chronod	Desktop and Notification Center widgets
+# Keep chronod runnable. Notification Center waits synchronously for its widget service.
 freeze	gui	com.apple.homeenergyd	Home energy and grid-forecast sync
 freeze	gui	com.apple.geoanalyticsd	Maps and geo analytics
 freeze	gui	com.apple.analyticsagent	Mac Analytics collector

@@ -128,6 +128,9 @@
 #     knowledge and people stores, proactive SuggestionRequest endpoints; no
 #     KeepAlive) is TERMed by the root helper like triald.system. Expect
 #     widgets to stop updating. BiomeAgent was put back 2026-11-08 (below).
+#   - 2026-11-25: chronod was removed from the disable and freeze lists. On
+#     macOS 27.2, Notification Center hangs on a synchronous widget-service
+#     XPC call when chronod is suspended.
 #   - 2026-11-08: BiomeAgent removed from GUI_DAEMONS and from the ban script's
 #     freeze list (operator: re-enable whatever fixes sudo). After migration
 #     this Mac has 0 Touch ID templates, so a cold sudo cannot succeed at the
@@ -243,7 +246,6 @@ GUI_DAEMONS=(
   "com.apple.visualintelligenced"
   "com.apple.siriknowledged"
   "com.apple.intelligenceplatformd"
-  "com.apple.chronod"
   "com.apple.homeenergyd"
   "com.apple.geoanalyticsd"
   "com.apple.analyticsagent"

@@ -58,18 +58,20 @@ The full list, with the reason on each line, is
 
 | Action | Meaning | Examples |
 | --- | --- | --- |
-| `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `chronod`, `weatherd`, `contactsd` |
+| `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `weatherd`, `contactsd` |
 | `term` | `SIGTERM`, then `SIGKILL`. RAM is released. Used for short jobs. | `triald`, `helpd`, `sirittsd`, `knowledgeconstructiond`, and the root jobs `cloudd`, `spindump`, `tailspind` |
 | `flag` | Disable flag only. Killing them comes back within about a second, or `SIGSTOP` is refused. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `coreduetd`, `modelmanagerd`, `modelcatalogd`, `UsageTrackingAgent` |
 
 Root jobs are never frozen. A stopped root process stalls shutdown, and the
 thaw agent only sees this user's processes.
 
-Two jobs are deliberately absent from the freeze list:
+These jobs are deliberately absent from the freeze list:
 
 - **`BiomeAgent`.** A stopped `BiomeAgent` keeps the Mach port and never
   answers. The sudo password sheet waits forever on that XPC, so a cold
   `sudo` never prompts. Put back 2026-11-08.
+- **`chronod`.** Notification Center waits synchronously for the widget service.
+  Suspending it prevents Notification Center from opening on macOS 27.2.
 - **`intelligenceflowd`.** Same class of bug: a stopped XPC service hangs
   its clients. It is flag-only.
 - **`UsageTrackingAgent`.** `kill -STOP` returns "operation not permitted"
@@ -317,7 +319,6 @@ stops with it. `SIGSTOP` does not free RAM the process already holds.
 | `com.apple.visualintelligenced` | freeze gui | Stops Visual Intelligence from staying resident. | Visual Intelligence stops. |
 | `com.apple.siriknowledged` | freeze gui | Stops the Siri knowledge store growing. | Siri answers that need that store stop. |
 | `com.apple.intelligenceplatformd` | freeze gui | Stops the on-device knowledge platform growing. | On-device knowledge features that use it stop updating. |
-| `com.apple.chronod` | freeze gui | Widget refresh is a steady background cost. | Desktop and Notification Center widgets stop refreshing. |
 | `com.apple.homeenergyd` | freeze gui | Stops grid-forecast sync. | Home energy suggestions stop. Home control itself is a different daemon. |
 | `com.apple.geoanalyticsd` | freeze gui | Stops Maps analytics. | Apple gets fewer Maps analytics. Maps still opens. |
 | `com.apple.analyticsagent` | freeze gui | Stops the Mac Analytics collector. | Sharing analytics with Apple from this agent stops. |
