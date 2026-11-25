@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,6 +19,10 @@ DEFAULT_TRACKED = Path(".github/tracked-issues.json")
 DEFAULT_DISCOVERED = Path("/tmp/discovered-issues.txt")
 DEFAULT_NEW = Path("/tmp/new-issues.json")
 DEFAULT_RAW = Path("/tmp/raw-issues.json")
+
+# GitHub Search API returns at most 1,000 results (10 pages of 100).
+SEARCH_PAGE_SIZE = 100
+SEARCH_RESULT_CEILING = 1000
 
 # Daniel's GitHub login, plus every org from `gh api user/orgs` on 2026-11-23
 # (America/New_York). The workflow's GITHUB_TOKEN cannot list those orgs as
@@ -47,6 +52,138 @@ EXCLUDED_REPOS = frozenset(
 def search_qualifiers() -> list[str]:
     """GitHub search qualifiers that skip Daniel's user and orgs."""
     return [f"-user:{DANIEL_USER}", *(f"-org:{org}" for org in DANIEL_ORGS)]
+
+
+def search_query(author: str = DANIEL_USER) -> str:
+    """Lexical issue search matching the old `gh search issues --author` call."""
+    return " ".join(["is:issue", f"author:{author}", *search_qualifiers()])
+
+
+def normalize_search_item(item: dict) -> dict:
+    """Map a Search API or `gh search` item to the discover script's raw shape."""
+    nwo = ""
+    repo = item.get("repository")
+    if isinstance(repo, dict):
+        nwo = str(repo.get("nameWithOwner") or "")
+    if not nwo:
+        repo_url = str(item.get("repository_url") or "")
+        marker = "/repos/"
+        if marker in repo_url:
+            nwo = repo_url.split(marker, 1)[1].strip("/")
+    number = item.get("number")
+    url = item.get("url") or item.get("html_url") or ""
+    if not url and nwo and number is not None:
+        url = f"https://github.com/{nwo}/issues/{number}"
+    return {
+        "repository": {"nameWithOwner": nwo},
+        "number": number,
+        "title": item.get("title", ""),
+        "state": item.get("state", "open"),
+        "url": url,
+    }
+
+
+def fetch_search_page(query: str, page: int, per_page: int = SEARCH_PAGE_SIZE) -> dict:
+    """Fetch one Search API page via `gh api`. Does not print the token."""
+    proc = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--method",
+            "GET",
+            "search/issues",
+            "-f",
+            f"q={query}",
+            "-F",
+            f"per_page={per_page}",
+            "-F",
+            f"page={page}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(f"gh api search/issues failed (page {page}): {err}")
+    data = json.loads(proc.stdout or "{}")
+    if not isinstance(data, dict):
+        raise ValueError("search/issues response must be an object")
+    return data
+
+
+def search_all_issue_pages(
+    query: str,
+    *,
+    fetch_page=None,
+    page_size: int = SEARCH_PAGE_SIZE,
+    ceiling: int = SEARCH_RESULT_CEILING,
+) -> tuple[list[dict], dict]:
+    """Walk every Search API page up to GitHub's 1,000-result ceiling.
+
+    fetch_page(query, page, per_page) must return a Search API payload
+    ({total_count, items, incomplete_results}). Tests inject a fake.
+    """
+    fetch = fetch_page or fetch_search_page
+    if page_size < 1 or ceiling < 1:
+        raise ValueError("page_size and ceiling must be positive")
+    items: list[dict] = []
+    total_count = 0
+    incomplete = False
+    page = 1
+    max_pages = (ceiling + page_size - 1) // page_size
+    while page <= max_pages and len(items) < ceiling:
+        payload = fetch(query, page, page_size)
+        total_count = int(payload.get("total_count") or 0)
+        if payload.get("incomplete_results"):
+            incomplete = True
+        raw_items = payload.get("items") or []
+        if not isinstance(raw_items, list):
+            raise ValueError(f"search/issues page {page} items must be a list")
+        if not raw_items:
+            break
+        remaining = ceiling - len(items)
+        items.extend(raw_items[:remaining])
+        if len(raw_items) < page_size or len(items) >= ceiling:
+            break
+        page += 1
+    stats = {
+        "total_count": total_count,
+        "fetched": len(items),
+        "pages": page,
+        "hit_ceiling": total_count > ceiling,
+        "incomplete_results": incomplete,
+    }
+    return [normalize_search_item(item) for item in items], stats
+
+
+def warn_search_limits(stats: dict, file=None) -> None:
+    """Log when the 1,000-result ceiling or incomplete_results was hit."""
+    out = sys.stderr if file is None else file
+    if stats.get("hit_ceiling"):
+        print(
+            "warning: GitHub issue search reported "
+            f"total_count={stats['total_count']} but only the first "
+            f"{SEARCH_RESULT_CEILING} results are available; later matches "
+            "were skipped",
+            file=out,
+        )
+    if stats.get("incomplete_results"):
+        print(
+            "warning: GitHub issue search returned incomplete_results=true; "
+            "some matches may be missing",
+            file=out,
+        )
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    issues, stats = search_all_issue_pages(search_query(), fetch_page=getattr(args, "fetch_page", None))
+    args.raw.write_text(json.dumps(issues, indent=2) + "\n")
+    warn_search_limits(stats)
+    print(
+        f"Fetched {stats['fetched']} issues "
+        f"(total_count={stats['total_count']}, pages={stats['pages']})"
+    )
+    return 0
 
 
 def repo_owner(name_with_owner: str) -> str:
@@ -214,6 +351,9 @@ def main(argv: list[str] | None = None) -> int:
         "--discovered-json", type=Path, default=Path("/tmp/discovered-issues.json")
     )
     p_disc.set_defaults(func=cmd_discover)
+    p_search = sub.add_parser("search")
+    p_search.add_argument("--raw", type=Path, default=DEFAULT_RAW)
+    p_search.set_defaults(func=cmd_search)
     p_qual = sub.add_parser("search-qualifiers")
     p_qual.set_defaults(func=cmd_search_qualifiers)
     args = parser.parse_args(argv)

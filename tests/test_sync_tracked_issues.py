@@ -1,5 +1,6 @@
 """Guards for Sync tracked issues and .github/tracked-issues.json."""
 
+import io
 import json
 import pathlib
 import re
@@ -270,9 +271,182 @@ def test_discover_filters_own_owners_and_keeps_third_party(tmp_path):
 
 def test_workflow_uses_owner_qualifiers_and_discover_script():
     text = WORKFLOW.read_text()
-    assert "sync_tracked_issues.py search-qualifiers" in text
+    assert "sync_tracked_issues.py search" in text
     assert "sync_tracked_issues.py discover" in text
     assert "OWNED = ['djbclark/stayturgid'" not in text
     assert "djbclark/stayturgid" in sti.EXCLUDED_REPOS
     assert "djbclark/site-djbclark" in sti.EXCLUDED_REPOS
     assert "djbclark/site-private" in sti.EXCLUDED_REPOS
+
+
+def test_workflow_paginates_search_instead_of_capping_at_100():
+    text = WORKFLOW.read_text()
+    assert "sync_tracked_issues.py search" in text
+    assert "--limit 100" not in text
+    assert "gh search issues" not in text
+    assert "1,000-result" in text or "1000-result" in text
+
+
+def _rest_item(nwo, number, title="t"):
+    return {
+        "repository_url": f"https://api.github.com/repos/{nwo}",
+        "html_url": f"https://github.com/{nwo}/issues/{number}",
+        "number": number,
+        "title": title,
+        "state": "open",
+    }
+
+
+def test_search_query_is_issue_author_and_owner_qualifiers():
+    query = sti.search_query()
+    assert query.startswith("is:issue author:djbclark ")
+    for qualifier in sti.search_qualifiers():
+        assert qualifier in query.split()
+
+
+def test_normalize_search_item_accepts_rest_and_gh_search_shapes():
+    rest = sti.normalize_search_item(_rest_item("getpaseo/paseo", 10543, "third"))
+    assert rest == {
+        "repository": {"nameWithOwner": "getpaseo/paseo"},
+        "number": 10543,
+        "title": "third",
+        "state": "open",
+        "url": "https://github.com/getpaseo/paseo/issues/10543",
+    }
+    already = sti.normalize_search_item(
+        {
+            "repository": {"nameWithOwner": "omercnet/paseo-plugins"},
+            "number": 673,
+            "title": "also",
+            "state": "open",
+            "url": "https://github.com/omercnet/paseo-plugins/issues/673",
+        }
+    )
+    assert already["repository"]["nameWithOwner"] == "omercnet/paseo-plugins"
+    assert already["number"] == 673
+
+
+def test_search_all_issue_pages_concatenates_every_page():
+    pages = {
+        1: {"total_count": 5, "incomplete_results": False, "items": [_rest_item("acme/one", n) for n in (1, 2)]},
+        2: {"total_count": 5, "incomplete_results": False, "items": [_rest_item("acme/one", n) for n in (3, 4)]},
+        3: {"total_count": 5, "incomplete_results": False, "items": [_rest_item("acme/one", 5)]},
+    }
+    called = []
+
+    def fetch(query, page, per_page):
+        called.append((query, page, per_page))
+        return pages[page]
+
+    issues, stats = sti.search_all_issue_pages(
+        "is:issue author:djbclark", fetch_page=fetch, page_size=2, ceiling=1000
+    )
+    assert [i["number"] for i in issues] == [1, 2, 3, 4, 5]
+    assert all(i["repository"]["nameWithOwner"] == "acme/one" for i in issues)
+    assert stats["total_count"] == 5
+    assert stats["fetched"] == 5
+    assert stats["pages"] == 3
+    assert stats["hit_ceiling"] is False
+    assert called == [
+        ("is:issue author:djbclark", 1, 2),
+        ("is:issue author:djbclark", 2, 2),
+        ("is:issue author:djbclark", 3, 2),
+    ]
+
+
+def test_search_all_issue_pages_stops_and_warns_at_1000_ceiling():
+    def fetch(query, page, per_page):
+        assert per_page == 100
+        assert 1 <= page <= 10
+        start = (page - 1) * 100 + 1
+        items = [_rest_item("acme/big", n) for n in range(start, start + 100)]
+        return {"total_count": 1420, "incomplete_results": False, "items": items}
+
+    issues, stats = sti.search_all_issue_pages("q", fetch_page=fetch)
+    assert len(issues) == 1000
+    assert issues[0]["number"] == 1
+    assert issues[-1]["number"] == 1000
+    assert stats["total_count"] == 1420
+    assert stats["fetched"] == 1000
+    assert stats["pages"] == 10
+    assert stats["hit_ceiling"] is True
+
+    # A leftover 11th page must never be requested (API will not return it).
+    def fetch_too_far(query, page, per_page):
+        if page > 10:
+            raise AssertionError(f"requested page {page} past the 1000-result ceiling")
+        return fetch(query, page, per_page)
+
+    sti.search_all_issue_pages("q", fetch_page=fetch_too_far)
+
+    stream = io.StringIO()
+    sti.warn_search_limits(stats, file=stream)
+    warning = stream.getvalue()
+    assert "total_count=1420" in warning
+    assert "1000" in warning
+    assert "later matches were skipped" in warning
+
+
+def test_search_all_issue_pages_does_not_warn_when_under_ceiling():
+    def fetch(query, page, per_page):
+        return {
+            "total_count": 2,
+            "incomplete_results": False,
+            "items": [_rest_item("acme/one", 1), _rest_item("acme/two", 2)],
+        }
+
+    issues, stats = sti.search_all_issue_pages("q", fetch_page=fetch)
+    assert [i["number"] for i in issues] == [1, 2]
+    assert stats["hit_ceiling"] is False
+    stream = io.StringIO()
+    sti.warn_search_limits(stats, file=stream)
+    assert stream.getvalue() == ""
+
+
+def test_search_all_issue_pages_empty_and_incomplete_warning():
+    def fetch_empty(query, page, per_page):
+        return {"total_count": 0, "incomplete_results": False, "items": []}
+
+    issues, stats = sti.search_all_issue_pages("q", fetch_page=fetch_empty)
+    assert issues == []
+    assert stats["fetched"] == 0
+    assert stats["pages"] == 1
+    assert stats["hit_ceiling"] is False
+
+    def fetch_incomplete(query, page, per_page):
+        return {
+            "total_count": 1,
+            "incomplete_results": True,
+            "items": [_rest_item("acme/one", 1)],
+        }
+
+    _, stats = sti.search_all_issue_pages("q", fetch_page=fetch_incomplete)
+    stream = io.StringIO()
+    sti.warn_search_limits(stats, file=stream)
+    assert "incomplete_results=true" in stream.getvalue()
+
+
+def test_cmd_search_writes_raw_and_prints_counts(tmp_path, capsys):
+    raw = tmp_path / "raw.json"
+
+    def fetch(query, page, per_page):
+        return {
+            "total_count": 1,
+            "incomplete_results": False,
+            "items": [_rest_item("getpaseo/paseo", 10846, "discussion follow-up")],
+        }
+
+    import argparse
+
+    original = sti.fetch_search_page
+    sti.fetch_search_page = fetch
+    try:
+        assert sti.cmd_search(argparse.Namespace(raw=raw)) == 0
+    finally:
+        sti.fetch_search_page = original
+    written = json.loads(raw.read_text())
+    assert written[0]["repository"]["nameWithOwner"] == "getpaseo/paseo"
+    assert written[0]["number"] == 10846
+    out = capsys.readouterr().out
+    assert "Fetched 1 issues" in out
+    assert "total_count=1" in out
