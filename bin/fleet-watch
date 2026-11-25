@@ -2407,8 +2407,7 @@ check() {
   for p in $UPSTREAM_PROFILES; do upr_profile "$p" && upstream_watch check; done
   "$PY3" "$REPO_ROOT/bin/fleet_watch_upstream_release.py" --scheduled || echo "upstream-release: check failed" >&2
   HERMES_BIN="$HERMES" HERMES_PING_TARGET="$HERMES_TO" "$PY3" "$REPO_ROOT/bin/fleet_watch_prs.py" --scheduled || echo "prs/issues/advisories: check failed" >&2
-  # Agent-tool sub-agents that died mid-run (djbclark-ade docs/subagent-stalls.md; operator yes 2026-11-22). Exit 1 = stalls exist.
-  "$HOME/src/djbclark-ade/bin/ade-subagent-stalls" --notify >>"$HOME/.local/state/djbclark-ade/subagent-stalls.log" 2>&1 || true
+  # ade-subagent-stalls --notify moved to djbclark-ade com.djbclark.ade-agent-sweep (djbclark-ade#988; operator /steps 2026-11-25).
   [[ "$VPS_STATE" == off ]] || parts+=("vps=$VPS_STATE")
   [[ "$DANN_STATE" == off ]] || parts+=("dann=$DANN_STATE")
   [[ "$GETBACKUP_STATE" == off ]] || parts+=("getbackup=$GETBACKUP_STATE")
