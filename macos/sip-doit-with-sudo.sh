@@ -130,7 +130,9 @@
 #     widgets to stop updating. BiomeAgent was put back 2026-11-08 (below).
 #   - 2026-11-25: chronod was removed from the disable and freeze lists. On
 #     macOS 27.2, Notification Center hangs on a synchronous widget-service
-#     XPC call when chronod is suspended.
+#     XPC call when chronod is suspended. contactsd was also removed:
+#     usernoted blocks on the Contacts store while resolving senders, which
+#     prevents the Notifications settings pane from loading.
 #   - 2026-11-08: BiomeAgent removed from GUI_DAEMONS and from the ban script's
 #     freeze list (operator: re-enable whatever fixes sudo). After migration
 #     this Mac has 0 Touch ID templates, so a cold sudo cannot succeed at the
@@ -275,14 +277,14 @@ GUI_DAEMONS=(
 # Treated exactly like the gui list (flag, kill, freeze, check, revert).
 USER_DOMAIN="user/$CONSOLE_UID"
 USER_DAEMONS=(
-  "com.apple.contactsd"
+  # usernoted needs contactsd to resolve senders of communication notifications.
 )
 
 # gui_like_jobs: prints "<domain> <label>" for every gui- and user-domain job.
 gui_like_jobs() {
   local d
   for d in "${GUI_DAEMONS[@]}"; do echo "$GUI_DOMAIN $d"; done
-  for d in "${USER_DAEMONS[@]}"; do echo "$USER_DOMAIN $d"; done
+  for d in ${USER_DAEMONS[@]+"${USER_DAEMONS[@]}"}; do echo "$USER_DOMAIN $d"; done
 }
 
 SYSTEM_DAEMONS=(

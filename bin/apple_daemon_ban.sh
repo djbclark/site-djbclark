@@ -132,7 +132,7 @@ FREEZE_LABELS=(
 )
 # Per-user background domain (user/<uid>), where launchd keeps these; gui/<uid> cannot see them.
 USER_FREEZE_LABELS=(
-  "com.apple.contactsd"      # Contacts store; the operator does not use Contacts (2026-10-15)
+  # usernoted needs contactsd to resolve senders of communication notifications.
 )
 TERM_LABELS=(
   "com.apple.triald"
@@ -146,7 +146,7 @@ KILLED=""
 for label in "${FREEZE_LABELS[@]}"; do
   freeze "gui/$CONSOLE_UID" "$label"
 done
-for label in "${USER_FREEZE_LABELS[@]}"; do
+for label in ${USER_FREEZE_LABELS[@]+"${USER_FREEZE_LABELS[@]}"}; do
   freeze "user/$CONSOLE_UID" "$label"
 done
 for label in "${TERM_LABELS[@]}"; do

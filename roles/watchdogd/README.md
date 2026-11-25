@@ -56,7 +56,8 @@ siriactionsd (the Shortcuts / App Intents backend) joined the frozen set
 2026-10-15; App Tamer had been stopping it with no visible side effect. Later that day
 sharingd (AirDrop/Handoff; KeepAlive, so only a freeze sticks) and contactsd (in the
 per-user `user/<uid>` domain, the ban script's `USER_FREEZE_LABELS`) were frozen at the
-operator's request, and knowledgeconstructiond (nightly Apple Intelligence pipeline,
+operator's request. contactsd was restored 2026-11-25 so usernoted could resolve
+senders and serve requests from Notifications settings. knowledgeconstructiond (nightly Apple Intelligence pipeline,
 four CPU-limit diagnostics Oct 9-12) joined the TERM set, and duetexpertd, mediaanalysisd,
 campo (Siri AI.app), visualintelligenced, siriknowledged and intelligenceplatformd joined
 the frozen set (operator: disable everything in that family; header of the sip script);

@@ -45,7 +45,7 @@ term	gui	com.apple.knowledgeconstructiond	Nightly on-device knowledge pipeline; 
 flag	gui	com.apple.generativeexperiencesd	Writing Tools runtime; clients respawn it immediately
 flag	gui	com.apple.intelligencecontextd	Apple Intelligence context; clients respawn it immediately
 flag	gui	com.apple.intelligenceflowd	Left running: a freeze hangs clients such as sudo's password sheet
-freeze	user	com.apple.contactsd	Contacts store; lives in the user domain, not gui
+# Keep contactsd runnable. usernoted waits for the Contacts store when resolving senders.
 term	system	com.apple.cloudd	System iCloud daemon
 term	system	com.apple.triald.system	System half of experiment treatments
 flag	system	com.apple.coreduetd	Root half of CoreDuet; Mach IPC clients respawn a kill

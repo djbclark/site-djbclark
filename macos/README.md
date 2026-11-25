@@ -58,7 +58,7 @@ The full list, with the reason on each line, is
 
 | Action | Meaning | Examples |
 | --- | --- | --- |
-| `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `weatherd`, `contactsd` |
+| `freeze` | `SIGSTOP`. No CPU, no respawn, RAM stays at the size it had. | `suggestd`, `photoanalysisd`, `mediaanalysisd`, `sharingd`, `spotlightknowledged`, `weatherd` |
 | `term` | `SIGTERM`, then `SIGKILL`. RAM is released. Used for short jobs. | `triald`, `helpd`, `sirittsd`, `knowledgeconstructiond`, and the root jobs `cloudd`, `spindump`, `tailspind` |
 | `flag` | Disable flag only. Killing them comes back within about a second, or `SIGSTOP` is refused. | `generativeexperiencesd`, `intelligencecontextd`, `intelligenceflowd`, `coreduetd`, `modelmanagerd`, `modelcatalogd`, `UsageTrackingAgent` |
 
@@ -72,6 +72,8 @@ These jobs are deliberately absent from the freeze list:
   `sudo` never prompts. Put back 2026-11-08.
 - **`chronod`.** Notification Center waits synchronously for the widget service.
   Suspending it prevents Notification Center from opening on macOS 27.2.
+- **`contactsd`.** The notifications daemon waits for the Contacts store
+  when resolving senders. Suspending it blocks Notifications settings.
 - **`intelligenceflowd`.** Same class of bug: a stopped XPC service hangs
   its clients. It is flag-only.
 - **`UsageTrackingAgent`.** `kill -STOP` returns "operation not permitted"
@@ -89,15 +91,13 @@ tune-up. The table further down is one row per daemon.
 - Spotlight's semantic and "related content" results stop. Filename search
   does not use Spotlight. It uses `plocate`, and NeoFinder if you install it.
   See [File search](#file-search).
-- Siri, Shortcuts automations, App Shortcuts, widgets, Weather, Stocks,
-  Tips, Screen Time stats, AirDrop, Handoff, Universal Clipboard, and
-  Contacts stop.
+- Siri, Shortcuts automations, App Shortcuts, Weather, Stocks, Tips, Screen
+  Time stats, AirDrop, Handoff, and Universal Clipboard stop.
 - Writing Tools and on-device Apple Intelligence stay off. Xcode's code
   completion, Photos Clean Up, and inline text predictions are not in the
   profile and are not in the freeze list.
-- A frozen XPC service makes its callers wait. A share sheet or a Mail
-  address lookup that hangs is the symptom. `just revert` continues the
-  process.
+- A frozen XPC service makes its callers wait. A stuck share sheet is one
+  symptom. `just revert` continues the process.
 
 ## Shutdown thaw
 
@@ -345,7 +345,6 @@ stops with it. `SIGSTOP` does not free RAM the process already holds.
 | `com.apple.generativeexperiencesd` | flag gui | Clients respawn a kill within about a second, so a kill saves nothing. | Writing Tools stop when the flag is honored. |
 | `com.apple.intelligencecontextd` | flag gui | Clients respawn a kill within about a second. | Apple Intelligence context features stop when the flag is honored. |
 | `com.apple.intelligenceflowd` | flag gui | Left running on purpose. A freeze hangs clients, including sudo's password sheet. | The live process stays, so the memory win is the flag, not a freeze. Do not SIGSTOP it. |
-| `com.apple.contactsd` | freeze user | The Contacts store lives in the user domain and stays resident. | Contacts, and Mail address lookup, stop. A lookup that hangs is this freeze. |
 | `com.apple.cloudd` | term system | The system iCloud daemon is TERM'd, which releases its RAM. It is never frozen: a stopped root process stalls shutdown. | System-side iCloud sync stops, on top of the user `cloudd` freeze. |
 | `com.apple.triald.system` | term system | System half of experiment treatments. TERM releases its RAM. | System-side experiment treatments stop. |
 | `com.apple.coreduetd` | flag system | Root half of CoreDuet; Mach IPC clients respawn a kill, so killing it only churns. | Root-side CoreDuet stays disabled at boot, but runs (~12 MB) when poked by XPC. |
