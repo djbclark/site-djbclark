@@ -34,8 +34,8 @@ stayturgid_local_rsync_path: "{{ lookup('pipe', 'brew --prefix --installed rsync
 
 # Caddy front door (Tailscale MagicDNS). Used by serverapp_caddy own-mode base
 # config; product reverse-proxy routes live in generated fragments.
-caddy_public_hostname: mac.greyhound-sidemirror.ts.net
-caddy_short_hostname: mac
+caddy_public_hostname: bigmac.greyhound-sidemirror.ts.net
+caddy_short_hostname: bigmac
 
 # OpenObserve root email for vector→openobserve sink (password via env
 # OPENOBSERVE_ROOT_PASSWORD only — never commit secrets). Matches live OO.
@@ -82,9 +82,9 @@ serverapp_victoriametrics_blackbox_targets:
     - target: "127.0.0.1:8080"
       labels:
         machine_name: localhost
-    - target: "https://mac.greyhound-sidemirror.ts.net"
+    - target: "https://bigmac.greyhound-sidemirror.ts.net"
       labels:
-        machine_name: mac
+        machine_name: bigmac
   # Cheap "did the daemon silently die between deploys" check for the other
   # locally-managed serverapps (redundant with their own health checks at
   # deploy time, but those don't run continuously between deploys).

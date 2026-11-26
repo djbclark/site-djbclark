@@ -36,7 +36,11 @@ hosts:
       - {port: 80,    bind: "*",         owner: site, service: caddy-http-redirect, status: active,
          note: "Phase D1: com.djbclark.caddy; legacy plist archived and removed in D7"}
       - {port: 443,   bind: "*",         owner: site, service: caddy-https,         status: active,
-         note: "Phase D1: site-owned Tailscale TLS front door mac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
+         note: "Site-owned Tailscale TLS front door bigmac.greyhound-sidemirror.ts.net via com.djbclark.caddy"}
+      - {port: 4432,  bind: "*",         owner: unmanaged, service: kiri-domains-https, status: active,
+         note: "Kiri container-domain TLS, loopback clients only. Persisted in Kiri Settings → Domains."}
+      - {port: 8180,  bind: "*",         owner: unmanaged, service: kiri-domains-http, status: active,
+         note: "Kiri container-domain plain HTTP, loopback clients only. Use HTTPS on 4432 where possible."}
       - {port: 2022,  bind: "*",         owner: stayturgid, service: eternal-terminal,    status: active,
          note: "stayturgid_control_et_port; homebrew.mxcl.et daemon"}
       - {port: 4096,  bind: "127.0.0.1", owner: stayturgid, service: opencode-web,        status: active,
