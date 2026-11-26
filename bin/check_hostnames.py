@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-TARGET_MAC_NAME = "mac"
+TARGET_MAC_NAME = "bigmac"
 ANDROID_TARGETS = {
     "100.123.218.30:5555": "s24",
     "100.65.230.108:5555": "p7a",
@@ -28,48 +28,34 @@ def is_linux() -> bool:
 
 
 def audit_mac_hostname() -> bool:
-    if is_darwin():
-        print("=== macOS Hostname Audit ===")
+    if not is_darwin():
+        return True
+
+    print("=== macOS Hostname Audit ===")
+    names = {}
+    for key in ("ComputerName", "LocalHostName", "HostName"):
         try:
-            r = subprocess.run(
-                ["scutil", "--get", "LocalHostName"],
+            result = subprocess.run(
+                ["scutil", "--get", key],
                 capture_output=True,
                 text=True,
                 timeout=5,
                 check=False,
             )
-            local_name = r.stdout.strip()
+            names[key] = result.stdout.strip() or "unknown"
         except (OSError, subprocess.TimeoutExpired):
-            local_name = "unknown"
+            names[key] = "unknown"
+        print(f"Current {key}: {names[key]}")
 
-        try:
-            r = subprocess.run(
-                ["scutil", "--get", "ComputerName"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            comp_name = r.stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            comp_name = "unknown"
+    if all(name == TARGET_MAC_NAME for name in names.values()):
+        print(f"✓ macOS names match '{TARGET_MAC_NAME}'.")
+        return True
 
-        print(f"Current LocalHostName: {local_name}")
-        print(f"Current ComputerName:  {comp_name}")
-
-        if local_name == TARGET_MAC_NAME and comp_name == TARGET_MAC_NAME:
-            print("✓ macOS hostname is fully aligned with canonical name 'mac'.")
-            return True
-
-        print("\n⚠️ WARNING: macOS hostname differs from canonical name 'mac'!")
-        print("To align your macOS system hostname with Tailscale 'mac', please run:")
-        print(
-            f"  sudo scutil --set ComputerName '{TARGET_MAC_NAME}' && "
-            f"sudo scutil --set LocalHostName '{TARGET_MAC_NAME}' && "
-            f"sudo scutil --set HostName '{TARGET_MAC_NAME}'\n"
-        )
-        return False
-    return True
+    print(f"\n⚠️ WARNING: macOS names should match '{TARGET_MAC_NAME}'.")
+    for key, name in names.items():
+        if name != TARGET_MAC_NAME:
+            print(f"  sudo scutil --set {key} '{TARGET_MAC_NAME}'")
+    return False
 
 
 def audit_local_linux_hostname(expected_name: str) -> bool:
