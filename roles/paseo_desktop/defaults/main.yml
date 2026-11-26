@@ -3,6 +3,7 @@
 # own daemon; this role only sets that daemon's config.json and publishes it on the tailnet. The Linux
 # hosts run the daemon from forgejo.mit.edu/djbclark/paseo-nix instead (docs/paseo.md).
 paseo_desktop_cli: /opt/homebrew/bin/paseo
+paseo_desktop_tailnet_hostname: bigmac.greyhound-sidemirror.ts.net
 paseo_desktop_app: /Applications/Paseo.app
 paseo_desktop_label: com.djbclark.paseo-desktop
 paseo_desktop_plist_path: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ paseo_desktop_label }}.plist"
@@ -18,7 +19,7 @@ paseo_desktop_serve_ports: "{{ [paseo_desktop_serve_port | int, 3333] | unique }
 # the tailnet is the boundary (djbclark, 2026-10-18).
 paseo_desktop_config:
   daemon.listen: '"127.0.0.1:{{ paseo_desktop_port }}"'
-  daemon.hostnames: '["{{ caddy_public_hostname }}"]'
+  daemon.hostnames: '["{{ paseo_desktop_tailnet_hostname }}"]'
   daemon.relay.enabled: "false"
   features.webUi.enabled: "true"
   # Archive a clean, fully pushed Paseo-owned worktree workspace once its PR merges (djbclark, 2026-10-23).

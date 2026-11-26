@@ -21,7 +21,7 @@ more, each in its own worktree) and desktop, web, Android/iOS and CLI clients co
 
 | Host | Daemon | Runs as | URL (tailnet only) | Config |
 | --- | --- | --- | --- | --- |
-| mac | Paseo.app (`brew install --cask paseo`) starts and owns it; LaunchAgent `com.djbclark.paseo-desktop` opens the app hidden at login and `keepRunningAfterQuit` keeps the daemon up after quitting (djbclark, 2026-10-18) | djbclark | https://mac.greyhound-sidemirror.ts.net:7263 and (alias, same daemon) https://mac.greyhound-sidemirror.ts.net:3333 | `roles/paseo_desktop` (`just paseo-desktop-apply`; `just paseo-desktop-check` first): `~/.paseo/config.json` keys, one serve per `paseo_desktop_serve_ports` entry (7263, 3333) and the LaunchAgent |
+| bigmac | Paseo.app (`brew install --cask paseo`) starts and owns it; LaunchAgent `com.djbclark.paseo-desktop` opens the app hidden at login and `keepRunningAfterQuit` keeps the daemon up after quitting (djbclark, 2026-10-18) | djbclark | https://bigmac.greyhound-sidemirror.ts.net:7263 and (alias, same daemon) https://bigmac.greyhound-sidemirror.ts.net:3333 | `roles/paseo_desktop` (`just paseo-desktop-apply`; `just paseo-desktop-check` first): `~/.paseo/config.json` keys, one serve per `paseo_desktop_serve_ports` entry (7263, 3333) and the LaunchAgent |
 | vps-primary | `services.paseo` (systemd `paseo.service`) | djbclark, using the agent logins in `/home/djbclark` ([agents-vps-primary.md](agents-vps-primary.md)); state `/home/djbclark/.paseo` | https://vps-primary.greyhound-sidemirror.ts.net:7263 | `nixos/vps-primary/configuration.nix`; Paseo and its agents run in `agents.slice` (MemoryMax 3G) |
 | get.sipb.cloud | `services.paseo` in the image (`hostName = "get"`: clients would show the container ID) | djbclark; state `~/.paseo` on `/persist` | https://get.greyhound-sidemirror.ts.net:7263 | `~/src/get` `nixos/paseo.nix`; the TSI port shim is preloaded; get's Tailscale shields are down for this (get `docs/runbook.md` 8.4) |
 
@@ -29,7 +29,7 @@ Clients: the Mac app adds the other two as hosts (Settings, Add host, Direct con
 port 7263, SSL on); the Android app on the stayturgid phones the same way over Tailscale; any tailnet browser
 opens the URLs above (the bundled web UI); the CLI takes `--host wss://<name>.greyhound-sidemirror.ts.net:7263` (the bare `<name>…:7263` form fails with HTTP 400; checked 2026-10-30)
 (the local daemon needs no `--host`). For the Mac, `:3333` works anywhere `:7263` does (same daemon, same
-`daemon.hostnames` entry; `--host wss://mac.greyhound-sidemirror.ts.net:3333`). Remove the alias with
+`daemon.hostnames` entry; `--host wss://bigmac.greyhound-sidemirror.ts.net:3333`). Remove the alias with
 `tailscale serve --https=3333 off` and drop 3333 from `paseo_desktop_serve_ports`.
 
 Status 2026-10-18: all three daemons answer `/api/health` and the web UI over the tailnet (vps-primary at

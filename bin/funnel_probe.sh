@@ -27,7 +27,7 @@
 # Exit 75 (EX_TEMPFAIL): this Mac cannot reach the internet, so a Funnel
 # failure would mean nothing; watchdogd counts it as a skip.
 set -uo pipefail
-HOST="${FUNNEL_HOST:-mac.greyhound-sidemirror.ts.net}"
+HOST="${FUNNEL_HOST:-bigmac.greyhound-sidemirror.ts.net}"
 INGRESS_IPS=(209.177.145.97 209.177.145.192)
 # label|port|path|expected-code-regex|mode
 ENDPOINTS=(

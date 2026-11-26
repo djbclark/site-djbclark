@@ -292,7 +292,7 @@ mac-dns-status:
     @for f in /etc/resolver/*; do [ -e "$f" ] && echo "resolver: $f -> $(gtr '\n' ' ' < "$f")"; done; true
     @echo "Wi-Fi search domains: $(networksetup -getsearchdomains Wi-Fi | gtr '\n' ' ')"
     @echo "tailscale: $(tailscale dns status 2>/dev/null | ggrep -m1 '^Tailscale DNS:' || echo unknown)"
-    @echo "probe mac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name mac.greyhound-sidemirror.ts.net | ggrep ip_address || echo 'NO ANSWER')"
+    @echo "probe bigmac.greyhound-sidemirror.ts.net: $(dscacheutil -q host -a name bigmac.greyhound-sidemirror.ts.net | ggrep ip_address || echo 'NO ANSWER')"
     @echo "probe example.com: $(dscacheutil -q host -a name example.com | ggrep -m1 ip_address || echo 'NO ANSWER')"
 
 # The sudo-ask approval window (roles/sudo_ask_grant): print/check are read-only; setup, verify

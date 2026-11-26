@@ -50,7 +50,7 @@
       - "http://127.0.0.1:{{ paseo_desktop_port }}"
   loop: "{{ (paseo_desktop_serve_ports | default([paseo_desktop_serve_port], true)) | map('int') | list }}"
   vars:
-    _key: "{{ caddy_public_hostname }}:{{ item }}"
+    _key: "{{ paseo_desktop_tailnet_hostname }}:{{ item }}"
     _doc: "{{ (_paseo_desktop_serve_status.stdout | from_json) | default({}, true) }}"
   when: >-
     (_doc.get('Web', {}).get(_key, {}).get('Handlers', {}).get('/', {}).get('Proxy', ''))
