@@ -63,7 +63,7 @@ Site actions in [`olivetin/user-actions.yaml`](../../olivetin/user-actions.yaml)
 | `user_herdr_restart` | Herdr — brew services restart |
 | `user_herdr_reload_config` | Herdr — reload config |
 
-UI: https://mac.greyhound-sidemirror.ts.net/olivetin/ (or loopback
+UI: https://bigmac.greyhound-sidemirror.ts.net/olivetin/ (or loopback
 `http://127.0.0.1:1337`).
 
 After editing user actions:
