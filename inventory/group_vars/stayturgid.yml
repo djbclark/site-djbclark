@@ -32,6 +32,8 @@ stayturgid_control_ssh_user: "djbclark"
 stayturgid_control_tailscale_ip: "{{ stayturgid_mac_peer.tailscale }}"
 stayturgid_control_lan_ip: "{{ stayturgid_mac_peer.lan }}"
 stayturgid_control_ssh_aliases:
+  - bigmac
+  - bigmac.greyhound-sidemirror.ts.net
   - mac
   - macbook
   - mac.greyhound-sidemirror.ts.net
