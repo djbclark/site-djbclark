@@ -28,9 +28,13 @@ python3 ~/.hermes/gmail_search_engine.py search --query "<terms>" --limit 5
 - `--query` accepts FTS5 syntax: `"exact phrase"`, `term1 AND term2`,
   `term*` prefix matching.
 - ~100ms per query (verified 83ms). Prefer this over the claude.ai Gmail
-  connector for *finding* mail; use the connector when you need to act on
-  mail (send, label, thread state) or need messages newer than the last
-  incremental sync (≤5 min old).
+  connector for *finding* mail; when you need to act on mail (send, reply,
+  label, thread state) or need messages newer than the last incremental sync
+  (≤5 min old), use the claude.ai Gmail connector if present, or otherwise
+  Hermes's authenticated Google Workspace CLI
+  (`PYTHONPATH=~/.hermes/hermes-agent ~/.hermes/hermes-agent/.venv/bin/python ~/.hermes/hermes-agent/skills/productivity/google-workspace/scripts/google_api.py gmail send|reply|search|get|modify`,
+  check auth first with `setup.py --check`; always confirm with the operator
+  before sending).
 - Freshness/stats: `python3 ~/.hermes/gmail_search_engine.py stats` →
   message/thread counts + Gmail `history_id`.
 - **The index can go stale, even while the sync job below is scheduled.** From
