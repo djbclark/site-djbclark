@@ -3,20 +3,13 @@
 
 Dry-run by default. `--apply` acts, `--rollback` restores the previous app.
 
-Gate (never overridden; fails closed): refuses while any agent from `paseo ls -g -a --json` has a status other
-than idle, error or closed (so running, initializing and any unknown status all refuse), any permission from
-`paseo permit ls --json` is pending, or any terminal from `paseo terminal ls --all --json` exists (stopping the
-daemon kills them; `--allow-terminals` accepts that), and prints who. A cleanly stopped daemon cannot be asked and
-cannot be running agents, so rollback skips the gate then (that is the state a failed upgrade leaves); "stopped"
-also needs the pid-lock owner in <home>/paseo.pid to be dead. An upgrade (not a rollback) refuses when there is
-no daemon to ask. It is checked again after the confirmation prompt, right before the app is quit, and before an
-automatic rollback. Every `paseo` call runs the CLI of the UPSTREAM bundle by absolute path (the installed app
-before the swap, the backup while swapped), never the build under test, so a fork with a broken CLI cannot
-block a rollback. The script refuses to run inside a Paseo terminal (env var or ancestor process), always. The script never kills an agent: it quits the app and
-runs `paseo daemon stop` (no --force), which is safe only once the gate is clear. A short window between the
-last check and the stop remains: the daemon has no drain mode. Known limit: `paseo permit ls` reads one page
-of agents, so a permission wait on an agent far down the list can be missed. The only process this script
-kills is one of its own child CLI calls that times out.
+Managed fork activation requires the protected real-account controller policy, exact bundle identities,
+CI managed marker and native maintenance reservation. No CLI flag is qualification authority. Missing,
+revoked or changed authorization holds; recovery needs its own grant and a newer generation. Existing
+swap journal, codesign, session/plugin checks and absolute previous-bundle CLI remain in use.
+The maintenance API needs independently verifiable durable status while the daemon is stopped.
+Until native support (including offline status) is implemented, automated apply holds. No bootstrap bypass.
+No writable state is restored. Retained prior bundles are recovery artifacts, never automatic authority.
 
 Exit codes: 0 ok, 1 verification failed and rolled back (or failed before the swap, app untouched),
 2 usage or preflight error (nothing changed), 3 failed and left in place (--want-broken, or rollback failed),
@@ -28,19 +21,25 @@ and last-attempt.json (every apply).
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import hashlib
 import json
 import os
 import plistlib
+import pwd
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paseo_upgrade_policy import Hold, bundle_sha256, grant, marker, read_policy, runtime_plugins
 
 DEFAULT_INSTALLED = "/Applications/Paseo.app"
 DEFAULT_STAGED = "/Applications/Paseo-local-beta2.app"
@@ -71,13 +70,55 @@ class Result:
     err: str = ""
 
 
-def run(argv: list[str], timeout: float = 60) -> Result:
+def run(argv: list[str], timeout: float = 60, input_text=None) -> Result:
     """Run ARGV (a list, never a shell string); never raises on non-zero exit."""
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, start_new_session=True)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, start_new_session=True, input=input_text)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return Result(127, "", f"{argv[0]}: {exc}")
     return Result(p.returncode, p.stdout, p.stderr)
+
+
+def process_executable(pid):
+    """Kernel executable vnode path and process start identity, never argv/first mapped image.
+
+    ABI: macOS SDK libproc.h / sys/proc_info.h, PROC_PIDTBSDINFO (3),
+    proc_bsdinfo (136 bytes), PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN).
+    Loaded lazily; Linux fixtures inject this reader only in process.
+    """
+    if sys.platform != "darwin" or type(pid) is not int or not 0 < pid <= 2147483647:
+        raise Hold("native process executable observation unsupported")
+    class BsdInfo(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_uint32) for name in (
+            "flags", "status", "xstatus", "pid", "ppid", "uid", "gid", "ruid", "rgid", "svuid", "svgid", "reserved")] + [
+            ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
+            ("nfiles", ctypes.c_uint32), ("pgid", ctypes.c_uint32), ("jobc", ctypes.c_uint32),
+            ("tdev", ctypes.c_uint32), ("tpgid", ctypes.c_uint32), ("nice", ctypes.c_int32),
+            ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
+    try:
+        if ctypes.sizeof(BsdInfo) != 136:
+            raise Hold("native process ABI uncertain")
+        lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidinfo.restype = ctypes.c_int
+        lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        lib.proc_pidpath.restype = ctypes.c_int
+        def identity():
+            info = BsdInfo()
+            if lib.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info) or info.pid != pid or info.start_sec <= 0 or info.start_usec >= 1000000:
+                raise Hold("kernel process start identity unavailable")
+            return (info.start_sec, info.start_usec)
+        before = identity()
+        buffer = ctypes.create_string_buffer(4096)
+        count = lib.proc_pidpath(pid, buffer, len(buffer))
+        if not 0 < count < len(buffer) or not buffer.value:
+            raise Hold("kernel executable path unavailable or truncated")
+        path = buffer.value.decode("utf-8", errors="strict")
+        if identity() != before:
+            raise Hold("process changed while reading executable path")
+        return {"pid": pid, "path": path, "start": before}
+    except (OSError, UnicodeError, AttributeError) as exc:
+        raise Hold("kernel executable identity unavailable") from exc
 
 
 @dataclass
@@ -101,6 +142,14 @@ class Ctx:
     sleep: object = time.sleep
     log_path: Path | None = None
     baseline: dict = field(default_factory=dict)
+    policy_reader: object = read_policy
+    authorization: dict = field(default_factory=dict)
+    operation: str = "activate"
+    reservation: dict = field(default_factory=dict)
+    executable_reader: object = process_executable
+    verified_executable: dict = field(default_factory=dict)
+    runtime_observations: list = field(default_factory=list)
+    native_home: object = lambda: str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".paseo")
 
     def log(self, msg: str) -> None:
         line = f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}"
@@ -139,6 +188,106 @@ class Ctx:
 
     def agents(self) -> list[dict]:
         return self.paseo_list("ls", "-g", "-a")
+
+
+def authorize(ctx, operation=None, capture=False):
+    """Fresh controller grant and exact artifact identity at every mutation boundary."""
+    operation = operation or ctx.operation
+    policy = ctx.policy_reader()
+    op = grant(policy, operation)
+    if capture:
+        if operation == "recover" and ctx.authorization and ctx.operation != "recover" and policy["generation"] <= ctx.authorization["generation"]:
+            raise Hold("recovery requires a new generation")
+        ctx.authorization = json.loads(json.dumps(policy))
+        ctx.operation = operation
+        ctx.verified_executable = {}
+    elif policy != ctx.authorization:
+        raise Hold("controller authorization changed or revoked")
+    target = (ctx.installed if ctx.swapped and not ctx.swapped_back else ctx.staged) if operation == "activate" else (ctx.installed if ctx.swapped_back else ctx.backup)
+    previous = (ctx.backup if ctx.swapped else ctx.installed) if operation == "activate" else (ctx.staged if ctx.swapped_back else ctx.installed)
+    if bundle_sha256(target) != op["bundleSha256"] or bundle_sha256(previous) != op["previousBundleSha256"]:
+        raise Hold("qualified target/previous bundle identity mismatch")
+    if bundle_info(target).get("CFBundleShortVersionString") != op["version"]:
+        raise Hold("qualified target version mismatch")
+    if operation == "activate":
+        marker(target)
+    return op
+
+
+def maintenance(ctx, action):
+    """Native drain only; unknown/unsupported/busy is a hold, never a lock substitute."""
+    op = authorize(ctx)
+    generation = ctx.authorization["generation"]
+    if Path(ctx.home).resolve() != Path(ctx.native_home()).resolve():
+        raise Hold("native maintenance requires canonical real-account daemon home")
+    args = ["daemon", "maintenance", action, "--json"]
+    if action != "verify-offline":
+        args += ["--home", ctx.home]
+    if action == "begin":
+        args += ["--generation", str(generation), "--transaction-id", op["transactionId"]]
+    elif action == "verify-offline":
+        args += ["--generation", str(ctx.reservation["generation"]), "--transaction-id", ctx.reservation["transactionId"]]
+    elif action == "end":
+        args += ["--generation", str(ctx.reservation["generation"]), "--owner-token-fd", "0"]
+    # Do not send the token through cmd(), which logs argv.
+    res = (ctx.runner(ctx.paseo(*args), 60, input_text=ctx.reservation["ownerToken"] + "\n")
+           if action == "end" else ctx.runner(ctx.paseo(*args), 60))
+    ctx.log(f"native maintenance {action}: exit {res.code}")
+    try:
+        data = json.loads(res.out)
+        if res.code or not isinstance(data, dict) or type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or type(data.get("recoveryRequired")) is not bool:
+            raise Hold("native maintenance unsupported or failed")
+        if action == "end":
+            if data["recoveryRequired"] is not False or data.get("state") != "idle" or data.get("generation") != ctx.reservation["generation"]:
+                raise Hold("native maintenance release uncertain")
+            ctx.reservation = {}
+            authorize(ctx)  # END may have committed even if this fresh check now holds
+            return
+        if action == "verify-offline" and (data.get("state") != "recovery-required" or data["recoveryRequired"] is not True):
+            raise Hold("offline reservation proof uncertain")
+        expected = ctx.reservation or {"generation": generation, "transactionId": op["transactionId"]}
+        if type(data.get("generation")) is not int or data.get("state") not in ("held", "recovery-required") or any(data.get(k) != expected[k] for k in ("generation", "transactionId")):
+            raise Hold("native maintenance not held by this transaction")
+        if action == "begin":
+            if data.get("state") != "held" or data["recoveryRequired"] is not False or not isinstance(data.get("ownerToken"), str) or not re.fullmatch("[A-Za-z0-9_-]{43}", data["ownerToken"]):
+                raise Hold("native reservation grant uncertain")
+            ctx.reservation = data
+        authorize(ctx)  # policy/artifacts may change while the native command waits
+    except (ValueError, TypeError, KeyError) as exc:
+        raise Hold("native maintenance response uncertain") from exc
+
+
+def boundary(ctx):
+    authorize(ctx)
+    if not ctx.reservation:
+        raise Hold("native maintenance reservation required")
+    # Never use an offline file as a fallback for an unknown/running daemon.
+    # Live status methods in the qualified native CLI require server_info's
+    # maintenanceReservationV1=true; unsupported old daemons fail closed there.
+    maintenance(ctx, "verify-offline" if daemon_is_stopped(ctx) else "status")
+
+
+def release_verified(ctx, phase, error=None):
+    """END's durable idle tombstone is commit; a lost response is never rollback permission."""
+    release_attempted = False
+    try:
+        boundary(ctx)
+        verify_executable(ctx, daemon_status(ctx))
+        verify_runtime_plugins(ctx)
+        save_state(ctx, phase="verified-held", error=error)
+        authorize(ctx)
+        save_state(ctx, phase="release-intent", error=error)
+        release_attempted = True
+        maintenance(ctx, "end")
+        save_state(ctx, phase=phase, error=error)
+        return True
+    except (Exception, KeyboardInterrupt) as exc:
+        ctx.log("release uncertain; no automatic retry, rollback or restart" if release_attempted else "verified release held; no END sent")
+        try:
+            save_state(ctx, phase="release-uncertain" if release_attempted else "recovery-required", error=type(exc).__name__)
+        except OSError:
+            ctx.log("release uncertainty record could not be persisted; inspect release-intent")
+        return False
 
 
 def bundle_info(app: Path) -> dict:
@@ -255,7 +404,9 @@ def shipit_running(ctx: Ctx) -> bool:
 def quit_app_and_daemon(ctx: Ctx, check_update: bool = True) -> None:
     """Quit the app, then stop the daemon. Re-checks the gate once the app is gone while a daemon still runs
     (it may outlive the app). Raises Gate then; the caller relaunches the app."""
+    boundary(ctx)
     if app_running(ctx):  # a quit sent to a closed app may launch it first, and fails on some macOS versions
+        boundary(ctx)  # app_running waited on an external process
         quit_res = ctx.cmd(["osascript", "-e", f'tell application id "{BUNDLE_ID}" to quit'], timeout=30)
         if quit_res.code != 0:
             raise Fail(f"the quit request failed (Automation permission?): "
@@ -268,6 +419,7 @@ def quit_app_and_daemon(ctx: Ctx, check_update: bool = True) -> None:
         ctx.log("daemon already stopped with the app; no agent can be running under this home")
         return
     gate(ctx)  # Gate, or Fail when the daemon cannot be asked: both leave the daemon alone
+    boundary(ctx)
     stop = ctx.cmd(ctx.paseo("daemon", "stop", "--home", ctx.home), timeout=60)
     if stop.code != 0:
         raise Fail(f"paseo daemon stop failed: {stop.err.strip() or stop.out.strip()}")
@@ -275,6 +427,7 @@ def quit_app_and_daemon(ctx: Ctx, check_update: bool = True) -> None:
 
 
 def start_app_and_wait(ctx: Ctx, old_pid) -> dict:
+    boundary(ctx)
     res = ctx.cmd(["open", "-a", str(ctx.installed)], timeout=30)
     if res.code != 0:
         raise Fail(f"open -a failed: {res.err.strip()}")
@@ -282,30 +435,151 @@ def start_app_and_wait(ctx: Ctx, old_pid) -> dict:
     return daemon_status(ctx) or {}
 
 
+def verify_runtime_plugins(ctx, plugins=None):
+    """Exact managed cohort from protected consent, never from candidate/CLI flags."""
+    expected = runtime_plugins(grant(ctx.authorization, ctx.operation))
+    try:
+        entries = ctx.paseo_list("plugin", "ls") if plugins is None else plugins
+    except Fail as exc:
+        raise Hold("runtime plugin receipt schema unavailable") from exc
+    observations = []
+    for row in expected:
+        matches = [p for p in entries if p.get("id") == row["pluginId"]]
+        if len(matches) != 1:
+            raise Hold("enrolled runtime plugin missing or duplicated")
+        entry = matches[0]
+        loaded = entry.get("loaded")
+        if entry.get("enabled") is not True or entry.get("status") != "running" or entry.get("path") != row["sourcePath"] or not isinstance(loaded, dict):
+            raise Hold("enrolled runtime plugin has no running loaded receipt")
+        if any(type(loaded.get(key)) is not type(value) or loaded.get(key) != value for key, value in row.items()):
+            raise Hold("loaded runtime plugin identity differs from protected cohort")
+        pid, token, started = loaded.get("pid"), loaded.get("processStartToken"), loaded.get("startedAt")
+        if type(pid) is not int or not 0 < pid <= 2147483647 or not isinstance(token, str) or not token or len(token) > 1024 or any(ord(c) < 33 or ord(c) > 126 for c in token):
+            raise Hold("loaded runtime plugin process observation unavailable")
+        try:
+            if not isinstance(started, str) or "T" not in started:
+                raise ValueError("invalid start time")
+            stamp = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            if stamp.tzinfo is None or stamp.timestamp() <= 0:
+                raise ValueError("invalid start time")
+        except (ValueError, OverflowError) as exc:
+            raise Hold("loaded runtime plugin start time unavailable") from exc
+        observations.append({**row, "pid": pid, "startedAt": started,
+            "processStartTokenSha256": hashlib.sha256(token.encode("ascii")).hexdigest()})
+    ctx.runtime_observations = observations
+    authorize(ctx)  # the plugin listing is an external wait too
+    return entries
+
+
+def executable_path(raw):
+    """Reject deleted/escaped/noncanonical or unrepresentable path evidence."""
+    if not isinstance(raw, str) or not raw.startswith("/") or raw.startswith("//") or any(ord(c) < 32 or ord(c) == 127 for c in raw) or "(deleted)" in raw:
+        raise Hold("executable path is deleted, relative or ambiguous")
+    try:
+        raw.encode("utf-8", errors="strict")
+        path = Path(raw)
+        if str(path) != raw or ".." in path.parts or str(path.resolve(strict=True)) != raw:
+            raise Hold("executable path is not exact canonical evidence")
+        return path
+    except (OSError, UnicodeError, RuntimeError) as exc:
+        raise Hold("executable path unavailable or escaped") from exc
+
+
+def text_vnodes(output, pid):
+    """lsof NUL field output; never infer an executable from mapped-library ordering."""
+    if not isinstance(output, str) or "\0" not in output:
+        raise Hold("executable vnode records unavailable")
+    process, rows, row = None, [], None
+    for token in output.split("\0"):
+        token = token.lstrip("\n")  # lsof terminates process/file field sets with LF
+        if not token:
+            continue
+        key, value = token[0], token[1:]
+        if key == "p":
+            if process is not None or rows or row is not None or value != str(pid):
+                raise Hold("ambiguous executable process records")
+            process = pid
+        elif key == "f":
+            if process != pid or value != "txt":
+                raise Hold("ambiguous executable descriptor records")
+            if row is not None:
+                rows.append(row)
+            row = {}
+        elif key in ("D", "i", "n"):
+            if row is None or key in row:
+                raise Hold("ambiguous executable vnode fields")
+            row[key] = value
+        else:
+            raise Hold("unexpected executable vnode field")
+    if row is not None:
+        rows.append(row)
+    if process != pid or not rows:
+        raise Hold("executable vnode process missing")
+    return rows
+
+
+def verify_executable(ctx, status):
+    pid = status.get("pid") if isinstance(status, dict) else None
+    if type(pid) is not int or not 0 < pid <= 2147483647 or status.get("localDaemon") != "running":
+        raise Hold("daemon process identity unavailable")
+    try:
+        before = ctx.executable_reader(pid)
+        if not isinstance(before, dict) or type(before.get("pid")) is not int or before.get("pid") != pid or not isinstance(before.get("start"), tuple) or len(before["start"]) != 2 or any(type(n) is not int for n in before["start"]) or before["start"][0] <= 0 or not 0 <= before["start"][1] < 1000000:
+            raise Hold("kernel executable start observation malformed")
+        actual = executable_path(before.get("path"))
+        root = ctx.installed.resolve(strict=True)
+        if not root.is_dir() or ctx.installed.is_symlink() or not actual.is_relative_to(root / "Contents"):
+            raise Hold("kernel executable is outside exact installed bundle ancestry")
+        disk = actual.stat()
+        if not stat.S_ISREG(disk.st_mode) or not disk.st_mode & 0o111:
+            raise Hold("kernel executable is not a regular executable artifact")
+        txt = ctx.cmd(["lsof", "-a", "-p", str(pid), "-d", "txt", "-F0pfinD"])
+        if txt.code:
+            raise Hold("executable vnode observation unavailable")
+        rows = text_vnodes(txt.out, pid)
+        matching = [row for row in rows if row.get("n") == str(actual)]
+        if len(matching) != 1:
+            raise Hold("actual executable vnode missing or ambiguous")
+        row = matching[0]
+        if not re.fullmatch(r"0x[0-9a-fA-F]+", row.get("D", "")) or not re.fullmatch(r"[0-9]+", row.get("i", "")) or int(row["D"], 16) != disk.st_dev or int(row["i"]) != disk.st_ino:
+            raise Hold("loaded executable vnode differs from qualified disk artifact")
+        after = ctx.executable_reader(pid)
+        current = actual.stat()
+        stamp = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        if after != before or stamp(current) != stamp(disk) or (ctx.verified_executable and ctx.verified_executable != before):
+            raise Hold("executable or process start identity changed")
+        fresh = daemon_status(ctx)
+        if not fresh or any(fresh.get(key) != status.get(key) for key in ("pid", "localDaemon", "daemonVersion")):
+            raise Hold("daemon identity changed during executable verification")
+        authorize(ctx)  # re-hash exact installed/retained bundles after external observation waits
+        ctx.verified_executable = before.copy()
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        raise Hold("executable vnode identity uncertain") from exc
+
+
 def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
     status = daemon_status(ctx)
     if not status or status.get("localDaemon") != "running":
         raise Fail(f"daemon not running: {status}")
+    if type(status.get("pid")) is not int or status["pid"] <= 0:
+        raise Fail("daemon PID identity unavailable")
     if status.get("pid") == old_pid:
         raise Fail("daemon pid unchanged: the new app did not start a new daemon")
+    expected = grant(ctx.authorization, ctx.operation)["version"]
+    if status.get("daemonVersion") != expected:
+        raise Fail("loaded daemon version does not match qualified bundle")
+    signature = ctx.cmd(["codesign", "--verify", "--deep", "--strict", str(ctx.installed)])
+    if signature.code:
+        raise Fail("installed bundle signature verification failed")
     if expect_fork:
         sig = ctx.cmd(["codesign", "-dv", str(ctx.installed)])
         if "Signature=adhoc" not in sig.err + sig.out:
             raise Fail("installed app is not the ad-hoc signed fork build")
         if (ctx.installed / "Contents/Resources/app-update.yml").exists():
             raise Fail("installed app still has app-update.yml (upstream updater config)")
-        # The daemon's executable path comes from its vnode, which follows a bundle rename (ps argv does not).
-        # If it lives in some .app, that must be the installed one. A daemon outside any bundle cannot be judged.
-        txt = ctx.cmd(["lsof", "-a", "-p", str(status.get("pid")), "-d", "txt", "-Fn"])
-        in_bundles = [ln[1:] for ln in txt.out.splitlines() if ln.startswith("n") and ".app/Contents/" in ln]
-        if any(str(ctx.backup) in p for p in in_bundles) or (
-            in_bundles and not any(str(ctx.installed) in p for p in in_bundles)
-        ):
-            raise Fail(f"the running daemon does not come from the installed app: {in_bundles[:2]}")
-        if txt.code != 0 or not in_bundles:  # Paseo's daemon always runs from a bundle's Helper app
-            raise Fail("could not tie the running daemon to an app bundle (lsof failed or showed none)")
-    plugins = {p["id"]: p for p in ctx.paseo_list("plugin", "ls")}
-    need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins))
+    verify_executable(ctx, status)
+    plugins = {p["id"]: p for p in verify_runtime_plugins(ctx)}
+    need = sorted(set(ctx.baseline.get("plugins_running", [])) | set(ctx.require_plugins if expect_fork else []))
     missing = [pid for pid in need if not (pid in plugins and plugins[pid].get("status") == "running")]
     if missing:
         raise Fail(f"plugins not running: {', '.join(missing)}")
@@ -320,12 +594,25 @@ def verify(ctx: Ctx, old_pid, expect_fork: bool) -> None:
 def save_state(ctx: Ctx, name: str = "last-run.json", **kw) -> None:
     ctx.state_dir.mkdir(parents=True, exist_ok=True)
     data = {
+        "runtimePluginObservations": ctx.runtime_observations,
+        "qualification": {"generation": ctx.authorization.get("generation"), "operation": ctx.operation,
+            "grant": ctx.authorization.get("operations", {}).get(ctx.operation),
+            "reservationHeld": bool(ctx.reservation)},
         "installed": str(ctx.installed), "staged": str(ctx.staged), "backup": str(ctx.backup), "home": ctx.home,
         "when": datetime.now(timezone.utc).isoformat(), **kw,
     }
     tmp = ctx.state_dir / f"{name}.tmp"
-    tmp.write_text(json.dumps(data, indent=2))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, ctx.state_dir / name)
+    fd = os.open(ctx.state_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def swap(first_from: Path, first_to: Path, second_from: Path, second_to: Path, done=None) -> None:
@@ -366,20 +653,26 @@ def swap(first_from: Path, first_to: Path, second_from: Path, second_to: Path, d
 
 
 def swap_in(ctx: Ctx) -> None:
+    boundary(ctx)
     def done() -> None:
         ctx.swapped = True
         ctx.upstream_bundle = ctx.backup  # the upstream app is the backup now
         save_state(ctx, phase="swapped", old_pid=ctx.old_pid)
 
+    save_state(ctx, phase="swap-intent", old_pid=ctx.old_pid)
+    boundary(ctx)  # journal fsync may have waited
     swap(ctx.installed, ctx.backup, ctx.staged, ctx.installed, done)
     ctx.log(f"swapped: {ctx.installed} is now the staged build; previous app at {ctx.backup}")
 
 
 def swap_back(ctx: Ctx) -> None:
+    boundary(ctx)
     def done() -> None:
         ctx.swapped_back = True
         ctx.upstream_bundle = ctx.installed  # the upstream app is installed again
 
+    save_state(ctx, phase="recovery-swap-intent", old_pid=ctx.old_pid)
+    boundary(ctx)
     swap(ctx.installed, ctx.staged, ctx.backup, ctx.installed, done)
     ctx.log(f"restored previous app to {ctx.installed}; fork build back at {ctx.staged}")
 
@@ -452,6 +745,7 @@ def update_errors(ctx: Ctx) -> list[str]:
         errs.append("the installed app has no version, so a pending update cannot be compared")
     if ctx.updater_cache.is_dir():
         for z in sorted(ctx.updater_cache.glob("*.zip")):
+            errs.append("staged updater archive present; cache identity/activation is not owned by this transaction")
             m = UPDATE_ZIP.match(z.name)
             if not m:
                 errs.append(f"cannot read the version of the pending update {z.name} in {ctx.updater_cache}")
@@ -498,6 +792,7 @@ def run_gate(ctx: Ctx, post_swap: bool = False, skip_if_stopped: bool = False) -
 
 
 def relaunch(ctx: Ctx) -> None:
+    boundary(ctx)
     ctx.log("relaunching the app that is installed now")
     ctx.cmd(["open", "-a", str(ctx.installed)])
 
@@ -508,6 +803,11 @@ def do_apply(ctx: Ctx, args) -> int:
         for e in errs:
             ctx.log(f"preflight: {e}")
         return 2
+    try:
+        authorize(ctx, "activate", capture=True)
+    except (Hold, OSError, ValueError) as exc:
+        ctx.log(f"HOLD: {exc}")
+        return 4
     if (code := run_gate(ctx)) is not None:
         return code
     try:
@@ -517,12 +817,12 @@ def do_apply(ctx: Ctx, args) -> int:
         return 2
     ctx.log(f"baseline: {json.dumps(ctx.baseline)}")
     if not args.apply:
-        ctx.log(f"dry run: would quit Paseo, stop the daemon, move {ctx.installed} to {ctx.backup}, "
-                f"move {ctx.staged} to {ctx.installed}, open it and verify. Pass --apply to do it.")
-        return 0
+        ctx.log("dry run: policy and bundle gates checked; native reservation/offline continuity unproven; HOLD")
+        return 4
     try:
         confirm(args.yes)
-    except Fail as exc:
+        authorize(ctx)
+    except (Fail, Hold) as exc:
         ctx.log(str(exc))
         return 2
     old_pid = ctx.old_pid = ctx.baseline.get("daemon_pid")
@@ -533,6 +833,14 @@ def do_apply(ctx: Ctx, args) -> int:
         return 2
     if (code := run_gate(ctx)) is not None:  # again right before the quit: the prompt may have waited
         return code
+    try:
+        maintenance(ctx, "begin")
+        save_state(ctx, "last-attempt.json", phase="reserved")
+        boundary(ctx)
+    except (Exception, KeyboardInterrupt) as exc:
+        ctx.log(f"HOLD: {exc}")
+        save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
+        return 4
     installed_before = (bundle_info(ctx.installed).get("CFBundleVersion"), ctx.installed.stat().st_ino)
     try:
         quit_app_and_daemon(ctx)  # gates again once the app is gone, while a daemon still runs
@@ -544,13 +852,19 @@ def do_apply(ctx: Ctx, args) -> int:
         ctx.log(f"settling {ctx.settle:.0f}s")
         ctx.sleep(ctx.settle)
         verify(ctx, old_pid, expect_fork=True)
+    except Hold as exc:
+        ctx.log(f"HOLD: {exc}")
+        save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
+        if ctx.swapped:
+            save_state(ctx, phase="recovery-required", error=str(exc))
+        return 4
     except Stuck as exc:
         ctx.log(f"STUCK: {exc}")
         save_state(ctx, "last-attempt.json", phase="stuck", error=str(exc))
         return 3
     except Gate as exc:  # the post-quit gate refused: nothing was swapped or stopped
         ctx.log(f"GATE: refused after the app quit: {exc}")
-        relaunch(ctx)
+        ctx.log("relaunch held: independent recovery authorization required")
         save_state(ctx, "last-attempt.json", phase="gated-after-quit", error=str(exc))
         return 4
     except (Exception, KeyboardInterrupt) as exc:
@@ -558,7 +872,7 @@ def do_apply(ctx: Ctx, args) -> int:
         if not ctx.swapped:
             # Quit or stop failed before the swap: the old app is still installed. Bring it back up.
             ctx.log("failed before the swap: old app untouched")
-            relaunch(ctx)
+            ctx.log("relaunch held: independent recovery authorization required")
             save_state(ctx, "last-attempt.json", phase="failed-before-swap", error=str(exc))
             return 1
         if args.want_broken:
@@ -567,13 +881,24 @@ def do_apply(ctx: Ctx, args) -> int:
             return 3
         code = rollback_core(ctx, str(exc), skip_if_stopped=True)
         return 1 if code == 0 else code
-    save_state(ctx, phase="done")
+    if not release_verified(ctx, "done"):
+        return 4
     ctx.log("done: the staged build is installed and verified")
     return 0
 
 
 def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
     """Gate, quit, swap back, relaunch. Returns 0 ok, 3 failed, 4 refused by the gate."""
+    try:
+        authorize(ctx, "recover", capture=True)
+        if not ctx.reservation:
+            maintenance(ctx, "begin")
+        save_state(ctx, "last-attempt.json", phase="reserved")
+        boundary(ctx)
+    except (Hold, OSError, ValueError) as exc:
+        ctx.log(f"HOLD recovery: {exc}")
+        save_state(ctx, phase="recovery-required", error=str(exc))
+        return 4
     after_upgrade_failure = error is not None
     if (code := run_gate(ctx, post_swap=True, skip_if_stopped=skip_if_stopped)) is not None:
         ctx.log("the rollback was not done, so the installed build stays; run `paseo-local-upgrade --rollback "
@@ -584,22 +909,30 @@ def rollback_core(ctx: Ctx, error: str | None, skip_if_stopped: bool) -> int:
         quit_app_and_daemon(ctx, check_update=False)  # restoring the old build must not wait on an update
         swap_back(ctx)
         start_app_and_wait(ctx, None)
+        verify(ctx, None, expect_fork=False)
+    except Hold as exc:
+        ctx.log(f"HOLD: {exc}")
+        save_state(ctx, "last-attempt.json", phase="recovery-required", error=str(exc))
+        if ctx.swapped:
+            save_state(ctx, phase="recovery-required", error=str(exc))
+        return 4
     except Stuck as exc:
         ctx.log(f"STUCK: {exc}")
         save_state(ctx, phase="rollback-failed", error=f"{error}; {exc}")
         return 3
     except Gate as exc:
         ctx.log(f"GATE: refused after the app quit: {exc}")
-        relaunch(ctx)
+        ctx.log("relaunch held: independent recovery authorization required")
         save_state(ctx, phase="failed-gated", error=error)
         return 4
     except (Exception, KeyboardInterrupt) as exc:
         ctx.log(f"ROLLBACK FAILED: {type(exc).__name__}: {exc}. "
                 f"Previous app: {ctx.installed if ctx.swapped_back else ctx.backup}")
-        relaunch(ctx)  # whichever app is installed now is the right one to have running
+        ctx.log("relaunch held: recovery uncertain")
         save_state(ctx, phase="rollback-failed", error=f"{error}; rollback: {exc}")
         return 3
-    save_state(ctx, phase="rolled-back" if after_upgrade_failure else "rolled-back-manually", error=error)
+    if not release_verified(ctx, "rolled-back" if after_upgrade_failure else "rolled-back-manually", error):
+        return 4
     ctx.log("rolled back to the previous app; it is running")
     return 0
 
@@ -610,15 +943,20 @@ def do_rollback(ctx: Ctx, args) -> int:
         for e in errs:
             ctx.log(f"preflight: {e}")
         return 2
+    try:
+        authorize(ctx, "recover", capture=True)
+    except (Hold, OSError, ValueError) as exc:
+        ctx.log(f"HOLD recovery: {exc}")
+        return 4
     if (code := run_gate(ctx, skip_if_stopped=True)) is not None:
         return code
     if not args.apply:
-        ctx.log(f"dry run: would quit Paseo, stop the daemon, move {ctx.installed} to {ctx.staged}, "
-                f"restore {ctx.backup} to {ctx.installed}, open it. Pass --apply to do it.")
-        return 0
+        ctx.log("dry run: policy and bundle gates checked; native reservation/offline continuity unproven; HOLD")
+        return 4
     try:
         confirm(args.yes)
-    except Fail as exc:
+        authorize(ctx)
+    except (Fail, Hold) as exc:
         ctx.log(str(exc))
         return 2
     return rollback_core(ctx, None, skip_if_stopped=True)
@@ -656,7 +994,8 @@ def _abs(path: str) -> str:
 
 def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
     state_dir = Path(args.state_dir).expanduser()
-    state_dir.mkdir(parents=True, exist_ok=True)
+    if args.apply:
+        state_dir.mkdir(parents=True, exist_ok=True)
     installed, staged, backup, home = args.installed, args.staged, args.backup, args.home
     notes: list[str] = []
     if args.rollback:
@@ -701,7 +1040,7 @@ def build_ctx(args, runner=run, sleep=time.sleep) -> Ctx:
         home=_abs(home or "~/.paseo"), settle=args.settle, timeout=args.timeout,
         require_plugins=args.require_plugin,
         allow_terminals=args.allow_terminals, updater_cache=Path(args.updater_cache).expanduser(),
-        runner=runner, sleep=sleep, log_path=state_dir / f"{stamp}-{mode}.log",
+        runner=runner, sleep=sleep, log_path=(state_dir / f"{stamp}-{mode}.log") if args.apply else None,
         shipit_cache=Path(args.shipit_cache).expanduser(),
     )
     # The CLI to trust is the upstream app's: the backup for a rollback (installed is then the fork), else installed.
@@ -757,6 +1096,8 @@ def main(argv: list[str] | None = None, runner=run, sleep=time.sleep) -> int:
     except SystemExit as exc:
         print(exc, file=sys.stderr)
         return 2
+    if not args.apply:
+        return do_rollback(ctx, args) if args.rollback else do_apply(ctx, args)
     try:
         fd = open_lock()
     except OSError as exc:

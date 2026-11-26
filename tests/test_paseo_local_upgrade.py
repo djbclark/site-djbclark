@@ -1,6 +1,7 @@
 """bin/paseo-local-upgrade: gate, swap, verify, rollback (2026-11-14). A fake runner models paseo and the app."""
 
 import fcntl
+import copy
 import importlib.machinery
 import importlib.util
 import json
@@ -24,12 +25,40 @@ UNSET = object()
 IDLE = {"id": "a" * 32, "shortId": "aaaaaaa", "status": "idle", "name": "x", "cwd": "/w"}
 
 
+def expected_managed_plugins():
+    return [{"pluginId": plugin_id, "sourcePath": f"/immutable/ade/{plugin_id}",
+        "snapshotRoot": "/immutable/ade", "snapshotSha256": "c" * 64,
+        "serverBundleSha256": "d" * 64, "activationGeneration": 7}
+        for plugin_id in ("ade-yolo", "ade-claim", "baton")]
+
+
+HELPER_REL = "Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+
+
+def fake_process_observation(ctx, pid):
+    return {"pid": pid, "path": str((ctx.installed / HELPER_REL).resolve()), "start": (1000000 + pid, 0)}
+
+
+def vnode_output(pid, paths):
+    result = f"p{pid}\0\n"
+    for path in paths:
+        path = Path(path)
+        value = path.stat()
+        result += f"ftxt\0D{value.st_dev:#x}\0i{value.st_ino}\0n{path.resolve()}\0\n"
+    return result
+
+
 def make_app(path: Path, version="0.16.0-beta.2", updater=False):
     (path / "Contents" / "Resources").mkdir(parents=True)
     with (path / "Contents" / "Info.plist").open("wb") as fh:
         plistlib.dump({"CFBundleIdentifier": "sh.paseo.desktop", "CFBundleShortVersionString": version}, fh)
     (path / "Contents/Resources/bin").mkdir()
     (path / "Contents/Resources/bin/paseo").write_text("#!/bin/sh\n")
+    (path / "Contents/Resources/managed-release.json").write_text(json.dumps({"schemaVersion": 1, "component": "paseo-desktop"}))
+    helper = path / HELPER_REL
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes(b"qualified fake helper executable")
+    helper.chmod(0o755)
     if updater:
         (path / "Contents/Resources/app-update.yml").write_text("provider: github\n")
 
@@ -42,7 +71,7 @@ class Fake:
                  busy_after_swap=False, ls_shape=UNSET, terminals=None, keeps_daemon_on_quit=False,
                  busy_after_quit=False, interrupt_on_open=False, plugin_item_without_id_always=False,
                  osascript_running_errors=False, fork_cli_broken=False, lsof_fails=False,
-                 quit_request_fails=False, shipit_stays=False,
+                 quit_request_fails=False, shipit_stays=False, bad_signature_after_swap=False,
                  quit_needs_running=False):
         self.agents = agents if agents is not None else [dict(IDLE)]
         self.perms = perms or []
@@ -61,6 +90,7 @@ class Fake:
         self.osascript_running_errors = osascript_running_errors
         self.fork_cli_broken = fork_cli_broken  # the staged build's own CLI (and daemon start) does not work
         self.lsof_fails = lsof_fails
+        self.bad_signature_after_swap = bad_signature_after_swap
         self.quit_request_fails = quit_request_fails
         self.shipit_stays = shipit_stays
         self.quit_needs_running = quit_needs_running  # a quit sent to a closed app errors (-600)
@@ -93,13 +123,15 @@ class Fake:
                 return plu.Result(0, "  77 /Users/x/Library/Caches/sh.paseo.desktop.ShipIt/ShipIt\n" if self.shipit_stays else "  1 /sbin/launchd\n")
             return plu.Result(0, "")
         if head == "codesign":
+            if self.bad_signature_after_swap and self.fork_installed() and argv[1] == "--verify":
+                return plu.Result(1, "", "invalid candidate signature")
             if argv[1] == "-dv":
                 return plu.Result(0, "", "Signature=adhoc\n" if self.fork_installed() else "Authority=Developer ID\n")
             return plu.Result(0)
         if head == "lsof":
             if self.lsof_fails:
                 return plu.Result(1, "", "lsof: boom")
-            return plu.Result(0, f"p{self.pid}\nn{self.installed}/Contents/MacOS/Paseo\n")
+            return plu.Result(0, vnode_output(self.pid, [self.installed / HELPER_REL]))
         if head == "osascript":
             if "is running" in argv[2]:
                 if self.osascript_running_errors:
@@ -150,7 +182,9 @@ class Fake:
             return plu.Result(0, json.dumps(self.perms))
         if sub[:2] == ["plugin", "ls"]:
             ids = ["ade-yolo", "ade-claim", "baton"]
-            plugins = [{"id": i, "enabled": True, "status": "running"} for i in ids]
+            plugins = [{"id": i, "enabled": True, "status": "running", "path": f"/immutable/ade/{i}",
+                "loaded": {**next(row for row in expected_managed_plugins() if row["pluginId"] == i),
+                    "pid": 501, "processStartToken": f"process-{i}", "startedAt": "2026-11-18T12:00:00.000Z"}} for i in ids]
             plugins.append({"id": "paseo-screen", "enabled": False, "status": "disabled"})
             if self.fork_installed() and self.bad_plugin:
                 plugins = [p for p in plugins if p["id"] != self.bad_plugin]
@@ -167,6 +201,76 @@ def env(tmp_path, monkeypatch):
         monkeypatch.delenv(var, raising=False)
     make_app(tmp_path / "Paseo.app", updater=True)
     make_app(tmp_path / "Paseo-local.app", updater=False)
+    # Explicit in-process controller and native adapters for the legacy swap matrix.
+    # No production default is patched to accept a flag, candidate claim or bypass.
+    controller = {"generation": 0, "policy": {}}
+    native = {"held": None, "generation": 0}
+    real_build, real_authorize = plu.build_ctx, plu.authorize
+
+    def approve(ctx, operation):
+        controller["generation"] += 1
+        target = ctx.staged if operation == "activate" else ctx.backup
+        previous = ctx.installed
+        def identity(path):
+            try:
+                return plu.bundle_sha256(path)
+            except plu.Hold:
+                return "0" * 64  # invalid paths are still rejected by real preflight
+        try:
+            version = plu.bundle_info(target).get("CFBundleShortVersionString", "invalid")
+        except (OSError, ValueError):
+            version = "invalid"
+        controller["policy"] = {"schemaVersion": 1, "component": "paseo-desktop",
+            "generation": controller["generation"], "stateCompatibility": "binary-only",
+            "operations": {operation: {"allowed": True, "transactionId": "legacy-controller",
+                "receiptSha256": "a" * 64, "archiveSha256": "b" * 64, "version": version,
+                "bundleSha256": identity(target), "previousBundleSha256": identity(previous),
+                "runtimePlugins": expected_managed_plugins()}}}
+
+    def authorized(ctx, operation=None, capture=False):
+        if capture and operation == "recover" and ctx.operation != "recover" and ctx.authorization:
+            approve(ctx, "recover")
+        return real_authorize(ctx, operation, capture)
+
+    def build(args, runner=plu.run, sleep=plu.time.sleep):
+        ctx = real_build(args, runner, sleep)
+        # The controller independently approves the specific fake artifact for this invocation.
+        approve(ctx, "recover" if args.rollback else "activate")
+        ctx.policy_reader = lambda: copy.deepcopy(controller["policy"])
+        ctx.native_home = lambda: ctx.home
+        ctx.executable_reader = lambda pid: fake_process_observation(ctx, pid)
+        def native_runner(argv, timeout=60, input_text=None):
+            if "maintenance" not in argv:
+                return runner(argv, timeout)
+            action = argv[argv.index("maintenance") + 1]
+            if action == "begin":
+                if native["held"]:
+                    return plu.Result(1, "", "already held; explicit native recovery required")
+                terminals = runner(ctx.paseo("terminal", "ls", "--all", "--json", "--home", ctx.home), timeout)
+                if terminals.code or json.loads(terminals.out):
+                    return plu.Result(1, "", "native terminal drain busy")
+                generation = int(argv[argv.index("--generation") + 1])
+                native["held"] = {"schemaVersion": 1, "state": "held", "generation": generation,
+                    "transactionId": "legacy-controller", "recoveryRequired": False, "ownerToken": "T" * 43}
+                return plu.Result(0, json.dumps(native["held"]))
+            if action == "end":
+                assert input_text == "T" * 43 + "\n"
+                assert "--owner-token-fd" in argv and "T" * 43 not in argv
+                generation = native["held"]["generation"]
+                native["held"] = None
+                native["generation"] = generation
+                return plu.Result(0, json.dumps({"schemaVersion": 1, "state": "idle", "generation": generation, "recoveryRequired": False}))
+            if not native["held"]:
+                return plu.Result(1, "", "not reserved")
+            data = {k: v for k, v in native["held"].items() if k != "ownerToken"}
+            if action == "verify-offline":
+                assert "--home" not in argv
+                data.update(state="recovery-required", recoveryRequired=True)
+            return plu.Result(0, json.dumps(data))
+        ctx.runner = native_runner
+        return ctx
+    monkeypatch.setattr(plu, "build_ctx", build)
+    monkeypatch.setattr(plu, "authorize", authorized)
     return tmp_path
 
 
@@ -193,7 +297,8 @@ def upstream_in_place(env):
 
 def test_dry_run_changes_nothing(env):
     fake = Fake(env)
-    assert run_main(env, fake) == 0
+    assert run_main(env, fake) == 4
+    assert not (env / "state").exists() and not (env / "locks").exists()
     assert not touched(fake)
     assert upstream_in_place(env) and (env / "Paseo-local.app").exists() and not (env / "Paseo-prev.app").exists()
 
@@ -265,16 +370,16 @@ def test_disabled_plugin_is_not_a_failure(env):
     assert run_main(env, fake, "--apply") == 0  # paseo-screen is disabled before and after
 
 
-def test_missing_plugin_rolls_back(env):
+def test_missing_managed_plugin_holds_for_recovery(env):
     fake = Fake(env, bad_plugin="ade-yolo")
-    assert run_main(env, fake, "--apply") == 1
-    assert upstream_in_place(env) and (env / "Paseo-local.app").exists() and not (env / "Paseo-prev.app").exists()
-    assert json.loads((env / "state/last-run.json").read_text())["phase"] == "rolled-back"
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env) and (env / "Paseo-prev.app").exists()
+    assert json.loads((env / "state/last-attempt.json").read_text())["phase"] == "recovery-required"
 
 
 def test_want_broken_keeps_new_build(env):
     fake = Fake(env, bad_plugin="ade-yolo")
-    assert run_main(env, fake, "--apply", "--want-broken") == 3
+    assert run_main(env, fake, "--apply", "--want-broken") == 4
     assert not upstream_in_place(env) and (env / "Paseo-prev.app").exists()
 
 
@@ -290,14 +395,14 @@ def test_open_failure_rolls_back(env):
     assert upstream_in_place(env)
 
 
-def test_unexpected_json_after_swap_rolls_back(env):
+def test_unexpected_receipt_schema_after_swap_holds(env):
     fake = Fake(env, plugin_item_without_id=True)
-    assert run_main(env, fake, "--apply") == 1
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 def test_auto_rollback_is_gated(env):
-    fake = Fake(env, busy_after_swap=True, bad_plugin="ade-yolo")
+    fake = Fake(env, busy_after_swap=True, bad_signature_after_swap=True)
     assert run_main(env, fake, "--apply") == 4  # a gate refusal is 4, even for the automatic rollback
     stops = [c for c in fake.calls if c[:3] == ["paseo", "daemon", "stop"]]
     assert len(stops) <= 1  # the rollback never stopped the busy daemon
@@ -315,7 +420,7 @@ def test_app_that_will_not_quit_blocks_the_swap(env):
     fake = Fake(env, app_never_quits=True)
     assert run_main(env, fake, "--apply", "--want-broken") == 1  # before the swap, want-broken does not apply
     assert upstream_in_place(env) and (env / "Paseo-local.app").exists()
-    assert fake.calls[-1][0] == "open"  # the old app is relaunched
+    assert not any(c[0] == "open" for c in fake.calls)  # no independent baseline restart grant
 
 
 def test_non_interactive_without_yes_refuses(env, monkeypatch):
@@ -420,8 +525,8 @@ def test_manual_rollback_with_daemon_down_skips_the_gate(env):
     run_main(env, fake, "--apply", "--want-broken")
     fake.daemon_up = False
     fake.open_fails_after_swap = False
-    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 4
+    assert not upstream_in_place(env)
 
 
 def test_terminals_refuse_and_are_named(env, capsys):
@@ -430,9 +535,10 @@ def test_terminals_refuse_and_are_named(env, capsys):
     assert "claude-tui" in capsys.readouterr().out and not touched(fake)
 
 
-def test_allow_terminals_lets_it_proceed(env):
+def test_allow_terminals_does_not_bypass_native_drain(env):
     fake = Fake(env, terminals=[{"id": "t" * 32, "name": "sh", "cwd": "/w"}])
-    assert run_main(env, fake, "--apply", "--allow-terminals") == 0
+    assert run_main(env, fake, "--apply", "--allow-terminals") == 4
+    assert not touched(fake)
 
 
 def test_refuses_inside_a_paseo_terminal_even_with_allow_terminals(env, monkeypatch):
@@ -461,7 +567,7 @@ def test_gate_runs_again_after_the_app_quits(env):
     fake = Fake(env, keeps_daemon_on_quit=True, busy_after_quit=True)
     assert run_main(env, fake, "--apply") == 4
     assert not any(c[:3] == ["paseo", "daemon", "stop"] for c in fake.calls)
-    assert upstream_in_place(env) and fake.calls[-1][0] == "open"  # the app is relaunched
+    assert upstream_in_place(env) and not any(c[0] == "open" for c in fake.calls)  # the app is relaunched
 
 
 def _pending(env, name):
@@ -478,9 +584,9 @@ def test_pending_update_for_another_or_unreadable_version_refuses(env, name):
     assert not touched(fake)
 
 
-def test_pending_update_for_the_installed_version_is_fine(env):
+def test_pending_update_for_the_installed_version_still_requires_cache_identity(env):
     _pending(env, "Paseo-0.16.0-beta.2-arm64.zip")
-    assert run_main(env, Fake(env), "--apply") == 0
+    assert run_main(env, Fake(env), "--apply") == 2
 
 
 def test_installed_app_without_a_version_refuses_when_an_update_is_pending(env):
@@ -544,12 +650,12 @@ def test_daemon_from_the_backup_bundle_fails_verification(env):
     real = fake.__call__
 
     def lsof_from_backup(argv, timeout=60):
-        if argv[0] == "lsof":
+        if argv[0] == "lsof" and fake.fork_installed():
             return plu.Result(0, f"p1\nn{env}/Paseo-prev.app/Contents/MacOS/Paseo\n")
         return real(argv, timeout)
 
-    assert run_main(env, lsof_from_backup, "--apply") == 1
-    assert upstream_in_place(env)
+    assert run_main(env, lsof_from_backup, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 # --- third adversary check (ef3d042) -------------------------------------------------------------------------
@@ -569,8 +675,8 @@ def test_a_broken_fork_cli_cannot_block_the_manual_rollback(env):
     fake = Fake(env, fork_cli_broken=True)
     assert run_main(env, fake, "--apply", "--want-broken") == 3
     assert not upstream_in_place(env)
-    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
-    assert upstream_in_place(env) and fake.fork_cli_calls == 0
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 4
+    assert not upstream_in_place(env) and fake.fork_cli_calls == 0
 
 
 def test_a_fork_without_a_cli_shim_does_not_stop_the_manual_rollback(env):
@@ -579,8 +685,8 @@ def test_a_fork_without_a_cli_shim_does_not_stop_the_manual_rollback(env):
     fake = Fake(env)
     assert run_main(env, fake, "--apply", "--want-broken", "--require-plugin", "nope") == 3
     assert not upstream_in_place(env)
-    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 0
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--rollback", "--apply", "--yes", with_backup=False) == 4
+    assert not upstream_in_place(env)
     assert all(c[0].endswith("/Contents/Resources/bin/paseo") for c in fake.raw_calls if c[0].endswith("paseo"))
     assert not any("Paseo-local" in c[0] for c in fake.raw_calls)  # never the fork's shim, never bare `paseo`
 
@@ -700,8 +806,8 @@ def test_a_keyboard_interrupt_in_the_gate_is_a_refusal(env, monkeypatch):
 def test_lsof_failure_fails_verification(env):
     """F9"""
     fake = Fake(env, lsof_fails=True)
-    assert run_main(env, fake, "--apply") == 1
-    assert upstream_in_place(env)
+    assert run_main(env, fake, "--apply") == 4
+    assert not upstream_in_place(env)
 
 
 def test_a_denied_quit_request_fails_at_once(env):
@@ -786,7 +892,7 @@ def test_rollback_logs_the_home_fallback_for_old_state_files(env, capsys):
     saved = json.loads((env / "state/last-run.json").read_text())
     saved.pop("home")
     (env / "state/last-run.json").write_text(json.dumps(saved))
-    ctx = plu.build_ctx(plu.parse(["--rollback", "--state-dir", str(env / "state")]))
+    ctx = plu.build_ctx(plu.parse(["--rollback", "--apply", "--state-dir", str(env / "state")]))
     assert ctx.home.endswith("/.paseo")
     assert "no saved home" in ctx.log_path.read_text()
 
