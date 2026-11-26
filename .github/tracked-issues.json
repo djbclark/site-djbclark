@@ -86,6 +86,506 @@
       "repo": "charmbracelet/crush",
       "number": "3909",
       "slug": "crush-3909"
+    },
+    {
+      "repo": "cfengine/core",
+      "number": "6526",
+      "slug": "cfengine-core-6526"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10637",
+      "slug": "getpaseo-paseo-10637"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10636",
+      "slug": "getpaseo-paseo-10636"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10635",
+      "slug": "getpaseo-paseo-10635"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10613",
+      "slug": "getpaseo-paseo-10613"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10534",
+      "slug": "getpaseo-paseo-10534"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10531",
+      "slug": "getpaseo-paseo-10531"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "684",
+      "slug": "omercnet-paseo-plugins-684"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "677",
+      "slug": "omercnet-paseo-plugins-677"
+    },
+    {
+      "repo": "libkrun/libkrun",
+      "number": "1026",
+      "slug": "libkrun-libkrun-1026"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5146",
+      "slug": "steipete-codexbar-5146"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5142",
+      "slug": "steipete-codexbar-5142"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "676",
+      "slug": "omercnet-paseo-plugins-676"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "675",
+      "slug": "omercnet-paseo-plugins-675"
+    },
+    {
+      "repo": "prabhatCH/herdr-park",
+      "number": "5",
+      "slug": "prabhatch-herdr-park-5"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "672",
+      "slug": "omercnet-paseo-plugins-672"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "670",
+      "slug": "omercnet-paseo-plugins-670"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "669",
+      "slug": "omercnet-paseo-plugins-669"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "662",
+      "slug": "omercnet-paseo-plugins-662"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10122",
+      "slug": "getpaseo-paseo-10122"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "841",
+      "slug": "trailhq-trail-code-841"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5099",
+      "slug": "steipete-codexbar-5099"
+    },
+    {
+      "repo": "stanczykwyatt/right-folder",
+      "number": "6",
+      "slug": "stanczykwyatt-right-folder-6"
+    },
+    {
+      "repo": "dennyferra/paseo-baton",
+      "number": "5",
+      "slug": "dennyferra-paseo-baton-5"
+    },
+    {
+      "repo": "cfengine/core",
+      "number": "6507",
+      "slug": "cfengine-core-6507"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "618",
+      "slug": "omercnet-paseo-plugins-618"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9665",
+      "slug": "getpaseo-paseo-9665"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5076",
+      "slug": "steipete-codexbar-5076"
+    },
+    {
+      "repo": "sm1ee/paseo-session-recovery",
+      "number": "14",
+      "slug": "sm1ee-paseo-session-recovery-14"
+    },
+    {
+      "repo": "tomgrin10/paseo-vitals",
+      "number": "11",
+      "slug": "tomgrin10-paseo-vitals-11"
+    },
+    {
+      "repo": "dennyferra/paseo-baton",
+      "number": "4",
+      "slug": "dennyferra-paseo-baton-4"
+    },
+    {
+      "repo": "stnly/pi-grok",
+      "number": "13",
+      "slug": "stnly-pi-grok-13"
+    },
+    {
+      "repo": "dennyferra/paseo-baton",
+      "number": "3",
+      "slug": "dennyferra-paseo-baton-3"
+    },
+    {
+      "repo": "dennyferra/paseo-baton",
+      "number": "2",
+      "slug": "dennyferra-paseo-baton-2"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "200",
+      "slug": "barnowl-barnowl-200"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "199",
+      "slug": "barnowl-barnowl-199"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "198",
+      "slug": "barnowl-barnowl-198"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "197",
+      "slug": "barnowl-barnowl-197"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "196",
+      "slug": "barnowl-barnowl-196"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "195",
+      "slug": "barnowl-barnowl-195"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "194",
+      "slug": "barnowl-barnowl-194"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "193",
+      "slug": "barnowl-barnowl-193"
+    },
+    {
+      "repo": "asedeno/snipe",
+      "number": "3",
+      "slug": "asedeno-snipe-3"
+    },
+    {
+      "repo": "asedeno/snipe",
+      "number": "2",
+      "slug": "asedeno-snipe-2"
+    },
+    {
+      "repo": "ClementTsang/bottom",
+      "number": "2298",
+      "slug": "clementtsang-bottom-2298"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "8542",
+      "slug": "getpaseo-paseo-8542"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "192",
+      "slug": "barnowl-barnowl-192"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "8500",
+      "slug": "getpaseo-paseo-8500"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "191",
+      "slug": "barnowl-barnowl-191"
+    },
+    {
+      "repo": "barnowl/barnowl",
+      "number": "190",
+      "slug": "barnowl-barnowl-190"
+    },
+    {
+      "repo": "gpambrozio/paseo-plugins",
+      "number": "106",
+      "slug": "gpambrozio-paseo-plugins-106"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4874",
+      "slug": "steipete-codexbar-4874"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "8160",
+      "slug": "getpaseo-paseo-8160"
+    },
+    {
+      "repo": "cline/cline",
+      "number": "15348",
+      "slug": "cline-cline-15348"
+    },
+    {
+      "repo": "cline/cline",
+      "number": "15345",
+      "slug": "cline-cline-15345"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "596",
+      "slug": "altans-collie-596"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "593",
+      "slug": "altans-collie-593"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "7817",
+      "slug": "getpaseo-paseo-7817"
+    },
+    {
+      "repo": "cfengine/core",
+      "number": "6424",
+      "slug": "cfengine-core-6424"
+    },
+    {
+      "repo": "termux/termux-packages",
+      "number": "32701",
+      "slug": "termux-termux-packages-32701"
+    },
+    {
+      "repo": "hamzafer/claude-code-mods",
+      "number": "129",
+      "slug": "hamzafer-claude-code-mods-129"
+    },
+    {
+      "repo": "get-bb/bb",
+      "number": "5711",
+      "slug": "get-bb-bb-5711"
+    },
+    {
+      "repo": "libkrun/libkrunfw",
+      "number": "153",
+      "slug": "libkrun-libkrunfw-153"
+    },
+    {
+      "repo": "cfengine/core",
+      "number": "6412",
+      "slug": "cfengine-core-6412"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "622",
+      "slug": "trailhq-trail-code-622"
+    },
+    {
+      "repo": "firecrawl/firecrawl",
+      "number": "5135",
+      "slug": "firecrawl-firecrawl-5135"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4529",
+      "slug": "steipete-codexbar-4529"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4501",
+      "slug": "steipete-codexbar-4501"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "603",
+      "slug": "thejaustin-shizukuplus-603"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "601",
+      "slug": "thejaustin-shizukuplus-601"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "599",
+      "slug": "thejaustin-shizukuplus-599"
+    },
+    {
+      "repo": "janekbaraniewski/openusage",
+      "number": "421",
+      "slug": "janekbaraniewski-openusage-421"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "595",
+      "slug": "thejaustin-shizukuplus-595"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "594",
+      "slug": "thejaustin-shizukuplus-594"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "593",
+      "slug": "thejaustin-shizukuplus-593"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "592",
+      "slug": "thejaustin-shizukuplus-592"
+    },
+    {
+      "repo": "simonepri/refined-antigravity-acp",
+      "number": "49",
+      "slug": "simonepri-refined-antigravity-acp-49"
+    },
+    {
+      "repo": "Dicklesworthstone/coding_agent_account_manager",
+      "number": "124",
+      "slug": "dicklesworthstone-coding-agent-account-manager-124"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "136197",
+      "slug": "nousresearch-hermes-agent-136197"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "487",
+      "slug": "cachix-secretspec-487"
+    },
+    {
+      "repo": "cfengine/core",
+      "number": "6389",
+      "slug": "cfengine-core-6389"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4383",
+      "slug": "steipete-codexbar-4383"
+    },
+    {
+      "repo": "stablyai/orca",
+      "number": "26681",
+      "slug": "stablyai-orca-26681"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "135195",
+      "slug": "nousresearch-hermes-agent-135195"
+    },
+    {
+      "repo": "palsoftware/pastiera",
+      "number": "324",
+      "slug": "palsoftware-pastiera-324"
+    },
+    {
+      "repo": "palsoftware/pastiera",
+      "number": "323",
+      "slug": "palsoftware-pastiera-323"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "582",
+      "slug": "thejaustin-shizukuplus-582"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "581",
+      "slug": "thejaustin-shizukuplus-581"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "578",
+      "slug": "thejaustin-shizukuplus-578"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "576",
+      "slug": "thejaustin-shizukuplus-576"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "575",
+      "slug": "thejaustin-shizukuplus-575"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "574",
+      "slug": "thejaustin-shizukuplus-574"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "573",
+      "slug": "thejaustin-shizukuplus-573"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "572",
+      "slug": "thejaustin-shizukuplus-572"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4254",
+      "slug": "steipete-codexbar-4254"
+    },
+    {
+      "repo": "BerriAI/litellm-docs",
+      "number": "2049",
+      "slug": "berriai-litellm-docs-2049"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "132279",
+      "slug": "nousresearch-hermes-agent-132279"
+    },
+    {
+      "repo": "BerriAI/litellm",
+      "number": "44379",
+      "slug": "berriai-litellm-44379"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "519",
+      "slug": "trailhq-trail-code-519"
+    },
+    {
+      "repo": "ylluminate/plocate-macos",
+      "number": "5",
+      "slug": "ylluminate-plocate-macos-5"
     }
   ]
 }
