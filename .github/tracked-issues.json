@@ -86,6 +86,1236 @@
       "repo": "charmbracelet/crush",
       "number": "3909",
       "slug": "crush-3909"
+    },
+    {
+      "repo": "saratscheff/paseo-reopen-archived",
+      "number": "2",
+      "slug": "saratscheff-paseo-reopen-archived-2"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "861",
+      "slug": "altans-collie-861"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10543",
+      "slug": "getpaseo-paseo-10543"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10539",
+      "slug": "getpaseo-paseo-10539"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10536",
+      "slug": "getpaseo-paseo-10536"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "896",
+      "slug": "trailhq-trail-code-896"
+    },
+    {
+      "repo": "modelstudioai/cli",
+      "number": "330",
+      "slug": "modelstudioai-cli-330"
+    },
+    {
+      "repo": "anthropics/skills",
+      "number": "2256",
+      "slug": "anthropics-skills-2256"
+    },
+    {
+      "repo": "aws/agent-toolkit-for-aws",
+      "number": "746",
+      "slug": "aws-agent-toolkit-for-aws-746"
+    },
+    {
+      "repo": "leeguooooo/chrome-use",
+      "number": "909",
+      "slug": "leeguooooo-chrome-use-909"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5145",
+      "slug": "steipete-codexbar-5145"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5144",
+      "slug": "steipete-codexbar-5144"
+    },
+    {
+      "repo": "prabhatCH/herdr-park",
+      "number": "6",
+      "slug": "prabhatch-herdr-park-6"
+    },
+    {
+      "repo": "tailscale/tailscale",
+      "number": "22540",
+      "slug": "tailscale-tailscale-22540"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "673",
+      "slug": "omercnet-paseo-plugins-673"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10353",
+      "slug": "getpaseo-paseo-10353"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10352",
+      "slug": "getpaseo-paseo-10352"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10248",
+      "slug": "getpaseo-paseo-10248"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "866",
+      "slug": "trailhq-trail-code-866"
+    },
+    {
+      "repo": "cachix/devenv",
+      "number": "3384",
+      "slug": "cachix-devenv-3384"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10218",
+      "slug": "getpaseo-paseo-10218"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10217",
+      "slug": "getpaseo-paseo-10217"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10210",
+      "slug": "getpaseo-paseo-10210"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "554",
+      "slug": "cachix-secretspec-554"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "10118",
+      "slug": "getpaseo-paseo-10118"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5098",
+      "slug": "steipete-codexbar-5098"
+    },
+    {
+      "repo": "cline/cline",
+      "number": "15737",
+      "slug": "cline-cline-15737"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "619",
+      "slug": "omercnet-paseo-plugins-619"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9699",
+      "slug": "getpaseo-paseo-9699"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9684",
+      "slug": "getpaseo-paseo-9684"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9668",
+      "slug": "getpaseo-paseo-9668"
+    },
+    {
+      "repo": "paseo-cafe/paseo-cafe",
+      "number": "455",
+      "slug": "paseo-cafe-paseo-cafe-455"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9663",
+      "slug": "getpaseo-paseo-9663"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "830",
+      "slug": "trailhq-trail-code-830"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9610",
+      "slug": "getpaseo-paseo-9610"
+    },
+    {
+      "repo": "saratscheff/paseo-reopen-archived",
+      "number": "1",
+      "slug": "saratscheff-paseo-reopen-archived-1"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9599",
+      "slug": "getpaseo-paseo-9599"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9591",
+      "slug": "getpaseo-paseo-9591"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "827",
+      "slug": "trailhq-trail-code-827"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9498",
+      "slug": "getpaseo-paseo-9498"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "9496",
+      "slug": "getpaseo-paseo-9496"
+    },
+    {
+      "repo": "apple/container",
+      "number": "2489",
+      "slug": "apple-container-2489"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "5048",
+      "slug": "steipete-codexbar-5048"
+    },
+    {
+      "repo": "ClementTsang/bottom",
+      "number": "2309",
+      "slug": "clementtsang-bottom-2309"
+    },
+    {
+      "repo": "tomgrin10/paseo-vitals",
+      "number": "10",
+      "slug": "tomgrin10-paseo-vitals-10"
+    },
+    {
+      "repo": "anomalyco/opencode",
+      "number": "62640",
+      "slug": "anomalyco-opencode-62640"
+    },
+    {
+      "repo": "can1357/oh-my-pi",
+      "number": "18438",
+      "slug": "can1357-oh-my-pi-18438"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "8780",
+      "slug": "getpaseo-paseo-8780"
+    },
+    {
+      "repo": "zephyr-im/zephyr",
+      "number": "144",
+      "slug": "zephyr-im-zephyr-144"
+    },
+    {
+      "repo": "ClementTsang/bottom",
+      "number": "2297",
+      "slug": "clementtsang-bottom-2297"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "8572",
+      "slug": "getpaseo-paseo-8572"
+    },
+    {
+      "repo": "quicksilver/Quicksilver",
+      "number": "3145",
+      "slug": "quicksilver-quicksilver-3145"
+    },
+    {
+      "repo": "getpaseo/plugins",
+      "number": "1648",
+      "slug": "getpaseo-plugins-1648"
+    },
+    {
+      "repo": "paseo-cafe/paseo-cafe",
+      "number": "443",
+      "slug": "paseo-cafe-paseo-cafe-443"
+    },
+    {
+      "repo": "gpambrozio/paseo-plugins",
+      "number": "105",
+      "slug": "gpambrozio-paseo-plugins-105"
+    },
+    {
+      "repo": "ruittenb/Spaceman",
+      "number": "52",
+      "slug": "ruittenb-spaceman-52"
+    },
+    {
+      "repo": "getpaseo/plugins",
+      "number": "1621",
+      "slug": "getpaseo-plugins-1621"
+    },
+    {
+      "repo": "getpaseo/plugins",
+      "number": "1619",
+      "slug": "getpaseo-plugins-1619"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4851",
+      "slug": "steipete-codexbar-4851"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "520",
+      "slug": "cachix-secretspec-520"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "519",
+      "slug": "cachix-secretspec-519"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4846",
+      "slug": "steipete-codexbar-4846"
+    },
+    {
+      "repo": "sdananjay/paseo-herdr",
+      "number": "2",
+      "slug": "sdananjay-paseo-herdr-2"
+    },
+    {
+      "repo": "sdananjay/paseo-herdr",
+      "number": "1",
+      "slug": "sdananjay-paseo-herdr-1"
+    },
+    {
+      "repo": "kirodotdev/Kiro",
+      "number": "12166",
+      "slug": "kirodotdev-kiro-12166"
+    },
+    {
+      "repo": "herdrdev/herdr",
+      "number": "5644",
+      "slug": "herdrdev-herdr-5644"
+    },
+    {
+      "repo": "dalogax/herdr-agent-hibernate",
+      "number": "4",
+      "slug": "dalogax-herdr-agent-hibernate-4"
+    },
+    {
+      "repo": "prabhatCH/herdr-park",
+      "number": "4",
+      "slug": "prabhatch-herdr-park-4"
+    },
+    {
+      "repo": "herdrdev/herdr",
+      "number": "5570",
+      "slug": "herdrdev-herdr-5570"
+    },
+    {
+      "repo": "cline/cline",
+      "number": "15344",
+      "slug": "cline-cline-15344"
+    },
+    {
+      "repo": "kirodotdev/Kiro",
+      "number": "12118",
+      "slug": "kirodotdev-kiro-12118"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "595",
+      "slug": "altans-collie-595"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "592",
+      "slug": "altans-collie-592"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "7853",
+      "slug": "getpaseo-paseo-7853"
+    },
+    {
+      "repo": "william0wang/zcode-acp",
+      "number": "340",
+      "slug": "william0wang-zcode-acp-340"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "7834",
+      "slug": "getpaseo-paseo-7834"
+    },
+    {
+      "repo": "getpaseo/paseo",
+      "number": "7700",
+      "slug": "getpaseo-paseo-7700"
+    },
+    {
+      "repo": "realiti4/claude-swap",
+      "number": "491",
+      "slug": "realiti4-claude-swap-491"
+    },
+    {
+      "repo": "Daaaaave/paseo-telegram",
+      "number": "1",
+      "slug": "daaaaave-paseo-telegram-1"
+    },
+    {
+      "repo": "omercnet/paseo-plugins",
+      "number": "361",
+      "slug": "omercnet-paseo-plugins-361"
+    },
+    {
+      "repo": "panrafal/paseo-plugins",
+      "number": "13",
+      "slug": "panrafal-paseo-plugins-13"
+    },
+    {
+      "repo": "keefeere/paseo-continuity",
+      "number": "2",
+      "slug": "keefeere-paseo-continuity-2"
+    },
+    {
+      "repo": "anthropics/claude-code",
+      "number": "103330",
+      "slug": "anthropics-claude-code-103330"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "636",
+      "slug": "trailhq-trail-code-636"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "635",
+      "slug": "trailhq-trail-code-635"
+    },
+    {
+      "repo": "google-antigravity/antigravity-cli",
+      "number": "1281",
+      "slug": "google-antigravity-antigravity-cli-1281"
+    },
+    {
+      "repo": "yuezk/GlobalProtect-openconnect",
+      "number": "680",
+      "slug": "yuezk-globalprotect-openconnect-680"
+    },
+    {
+      "repo": "get-bb/bb",
+      "number": "5708",
+      "slug": "get-bb-bb-5708"
+    },
+    {
+      "repo": "get-bb/bb",
+      "number": "5707",
+      "slug": "get-bb-bb-5707"
+    },
+    {
+      "repo": "get-bb/bb",
+      "number": "5706",
+      "slug": "get-bb-bb-5706"
+    },
+    {
+      "repo": "get-bb/bb",
+      "number": "5705",
+      "slug": "get-bb-bb-5705"
+    },
+    {
+      "repo": "Owloops/claude-powerline",
+      "number": "138",
+      "slug": "owloops-claude-powerline-138"
+    },
+    {
+      "repo": "davidondrej/cloudroom",
+      "number": "74",
+      "slug": "davidondrej-cloudroom-74"
+    },
+    {
+      "repo": "davidondrej/cloudroom",
+      "number": "73",
+      "slug": "davidondrej-cloudroom-73"
+    },
+    {
+      "repo": "davidondrej/cloudroom",
+      "number": "72",
+      "slug": "davidondrej-cloudroom-72"
+    },
+    {
+      "repo": "davidondrej/cloudroom-gui",
+      "number": "6",
+      "slug": "davidondrej-cloudroom-gui-6"
+    },
+    {
+      "repo": "william0wang/zcode-acp",
+      "number": "332",
+      "slug": "william0wang-zcode-acp-332"
+    },
+    {
+      "repo": "zai-org/feedback",
+      "number": "1067",
+      "slug": "zai-org-feedback-1067"
+    },
+    {
+      "repo": "davidondrej/cloudroom",
+      "number": "26",
+      "slug": "davidondrej-cloudroom-26"
+    },
+    {
+      "repo": "libkrun/libkrun",
+      "number": "934",
+      "slug": "libkrun-libkrun-934"
+    },
+    {
+      "repo": "fosterstack/cache",
+      "number": "367",
+      "slug": "fosterstack-cache-367"
+    },
+    {
+      "repo": "davidondrej/cloudroom",
+      "number": "21",
+      "slug": "davidondrej-cloudroom-21"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4546",
+      "slug": "steipete-codexbar-4546"
+    },
+    {
+      "repo": "searxng/searxng",
+      "number": "6840",
+      "slug": "searxng-searxng-6840"
+    },
+    {
+      "repo": "charmbracelet/crush",
+      "number": "4070",
+      "slug": "charmbracelet-crush-4070"
+    },
+    {
+      "repo": "libkrun/libkrun",
+      "number": "929",
+      "slug": "libkrun-libkrun-929"
+    },
+    {
+      "repo": "libkrun/libkrun",
+      "number": "926",
+      "slug": "libkrun-libkrun-926"
+    },
+    {
+      "repo": "libkrun/libkrun",
+      "number": "924",
+      "slug": "libkrun-libkrun-924"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "605",
+      "slug": "thejaustin-shizukuplus-605"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "604",
+      "slug": "thejaustin-shizukuplus-604"
+    },
+    {
+      "repo": "anthropics/claude-code",
+      "number": "101798",
+      "slug": "anthropics-claude-code-101798"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "602",
+      "slug": "thejaustin-shizukuplus-602"
+    },
+    {
+      "repo": "zhiluop/siyuan-skills",
+      "number": "3",
+      "slug": "zhiluop-siyuan-skills-3"
+    },
+    {
+      "repo": "microsoft/SkillOpt",
+      "number": "314",
+      "slug": "microsoft-skillopt-314"
+    },
+    {
+      "repo": "microsoft/SkillOpt",
+      "number": "313",
+      "slug": "microsoft-skillopt-313"
+    },
+    {
+      "repo": "microsoft/SkillOpt",
+      "number": "312",
+      "slug": "microsoft-skillopt-312"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "584",
+      "slug": "trailhq-trail-code-584"
+    },
+    {
+      "repo": "Mibayy/token-savior",
+      "number": "123",
+      "slug": "mibayy-token-savior-123"
+    },
+    {
+      "repo": "ghostwright/ghost-os",
+      "number": "23",
+      "slug": "ghostwright-ghost-os-23"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "582",
+      "slug": "trailhq-trail-code-582"
+    },
+    {
+      "repo": "anthropics/claude-code",
+      "number": "101139",
+      "slug": "anthropics-claude-code-101139"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4410",
+      "slug": "steipete-codexbar-4410"
+    },
+    {
+      "repo": "Dicklesworthstone/coding_agent_account_manager",
+      "number": "123",
+      "slug": "dicklesworthstone-coding-agent-account-manager-123"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "400",
+      "slug": "altans-collie-400"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "393",
+      "slug": "altans-collie-393"
+    },
+    {
+      "repo": "AltanS/collie",
+      "number": "392",
+      "slug": "altans-collie-392"
+    },
+    {
+      "repo": "openags/paper-search-mcp",
+      "number": "152",
+      "slug": "openags-paper-search-mcp-152"
+    },
+    {
+      "repo": "william0wang/zcode-acp",
+      "number": "312",
+      "slug": "william0wang-zcode-acp-312"
+    },
+    {
+      "repo": "william0wang/zcode-acp",
+      "number": "311",
+      "slug": "william0wang-zcode-acp-311"
+    },
+    {
+      "repo": "janekbaraniewski/openusage",
+      "number": "405",
+      "slug": "janekbaraniewski-openusage-405"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "135122",
+      "slug": "nousresearch-hermes-agent-135122"
+    },
+    {
+      "repo": "github/github-mcp-server",
+      "number": "3452",
+      "slug": "github-github-mcp-server-3452"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "583",
+      "slug": "thejaustin-shizukuplus-583"
+    },
+    {
+      "repo": "openclaw/acpx",
+      "number": "861",
+      "slug": "openclaw-acpx-861"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "577",
+      "slug": "thejaustin-shizukuplus-577"
+    },
+    {
+      "repo": "lidge-jun/opencodex",
+      "number": "6575",
+      "slug": "lidge-jun-opencodex-6575"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "4239",
+      "slug": "steipete-codexbar-4239"
+    },
+    {
+      "repo": "docling-project/docling",
+      "number": "4549",
+      "slug": "docling-project-docling-4549"
+    },
+    {
+      "repo": "google-antigravity/antigravity-cli",
+      "number": "1152",
+      "slug": "google-antigravity-antigravity-cli-1152"
+    },
+    {
+      "repo": "thejaustin/ShizukuPlus",
+      "number": "562",
+      "slug": "thejaustin-shizukuplus-562"
+    },
+    {
+      "repo": "modelcontextprotocol/python-sdk",
+      "number": "3641",
+      "slug": "modelcontextprotocol-python-sdk-3641"
+    },
+    {
+      "repo": "basicmachines-co/basic-memory",
+      "number": "1650",
+      "slug": "basicmachines-co-basic-memory-1650"
+    },
+    {
+      "repo": "basicmachines-co/basic-memory",
+      "number": "1649",
+      "slug": "basicmachines-co-basic-memory-1649"
+    },
+    {
+      "repo": "basicmachines-co/basic-memory",
+      "number": "1648",
+      "slug": "basicmachines-co-basic-memory-1648"
+    },
+    {
+      "repo": "Mibayy/token-savior",
+      "number": "122",
+      "slug": "mibayy-token-savior-122"
+    },
+    {
+      "repo": "kingsword09/zcode-cli",
+      "number": "188",
+      "slug": "kingsword09-zcode-cli-188"
+    },
+    {
+      "repo": "Mibayy/token-savior",
+      "number": "121",
+      "slug": "mibayy-token-savior-121"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "129294",
+      "slug": "nousresearch-hermes-agent-129294"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "129293",
+      "slug": "nousresearch-hermes-agent-129293"
+    },
+    {
+      "repo": "Hy4ri/hermes-mobile",
+      "number": "1402",
+      "slug": "hy4ri-hermes-mobile-1402"
+    },
+    {
+      "repo": "sane-apps/SaneBar",
+      "number": "183",
+      "slug": "sane-apps-sanebar-183"
+    },
+    {
+      "repo": "anomalyco/opencode",
+      "number": "51600",
+      "slug": "anomalyco-opencode-51600"
+    },
+    {
+      "repo": "stablyai/orca",
+      "number": "23302",
+      "slug": "stablyai-orca-23302"
+    },
+    {
+      "repo": "anomalyco/opencode",
+      "number": "51560",
+      "slug": "anomalyco-opencode-51560"
+    },
+    {
+      "repo": "stablyai/orca",
+      "number": "23272",
+      "slug": "stablyai-orca-23272"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "482",
+      "slug": "trailhq-trail-code-482"
+    },
+    {
+      "repo": "brobata/physiboard",
+      "number": "14",
+      "slug": "brobata-physiboard-14"
+    },
+    {
+      "repo": "brobata/physiboard",
+      "number": "11",
+      "slug": "brobata-physiboard-11"
+    },
+    {
+      "repo": "thaw-app/Thaw",
+      "number": "1166",
+      "slug": "thaw-app-thaw-1166"
+    },
+    {
+      "repo": "brobata/physiboard",
+      "number": "9",
+      "slug": "brobata-physiboard-9"
+    },
+    {
+      "repo": "palsoftware/pastiera",
+      "number": "317",
+      "slug": "palsoftware-pastiera-317"
+    },
+    {
+      "repo": "vectorize-io/hindsight",
+      "number": "3735",
+      "slug": "vectorize-io-hindsight-3735"
+    },
+    {
+      "repo": "trailhq/Trail-Code",
+      "number": "185",
+      "slug": "trailhq-trail-code-185"
+    },
+    {
+      "repo": "stablyai/orca",
+      "number": "15830",
+      "slug": "stablyai-orca-15830"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "372",
+      "slug": "cachix-secretspec-372"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "371",
+      "slug": "cachix-secretspec-371"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "370",
+      "slug": "cachix-secretspec-370"
+    },
+    {
+      "repo": "cachix/secretspec",
+      "number": "345",
+      "slug": "cachix-secretspec-345"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "2889",
+      "slug": "steipete-codexbar-2889"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "83910",
+      "slug": "nousresearch-hermes-agent-83910"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "83714",
+      "slug": "nousresearch-hermes-agent-83714"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "82764",
+      "slug": "nousresearch-hermes-agent-82764"
+    },
+    {
+      "repo": "agentplugins/agent-plugins-site",
+      "number": "45",
+      "slug": "agentplugins-agent-plugins-site-45"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "number": "79331",
+      "slug": "nousresearch-hermes-agent-79331"
+    },
+    {
+      "repo": "steipete/CodexBar",
+      "number": "2581",
+      "slug": "steipete-codexbar-2581"
+    },
+    {
+      "repo": "janekbaraniewski/openusage",
+      "number": "293",
+      "slug": "janekbaraniewski-openusage-293"
+    },
+    {
+      "repo": "subsy/ralph-tui",
+      "number": "402",
+      "slug": "subsy-ralph-tui-402"
+    },
+    {
+      "repo": "subsy/ralph-tui",
+      "number": "401",
+      "slug": "subsy-ralph-tui-401"
+    },
+    {
+      "repo": "sidinsearch/superbrain",
+      "number": "6",
+      "slug": "sidinsearch-superbrain-6"
+    },
+    {
+      "repo": "SuperMonster003/AutoJs6",
+      "number": "565",
+      "slug": "supermonster003-autojs6-565"
+    },
+    {
+      "repo": "firerpa/lamda",
+      "number": "147",
+      "slug": "firerpa-lamda-147"
+    },
+    {
+      "repo": "nodyn/jvm-npm",
+      "number": "43",
+      "slug": "nodyn-jvm-npm-43"
+    },
+    {
+      "repo": "SuperMonster003/AutoJs6",
+      "number": "564",
+      "slug": "supermonster003-autojs6-564"
+    },
+    {
+      "repo": "SuperMonster003/AutoJs6",
+      "number": "563",
+      "slug": "supermonster003-autojs6-563"
+    },
+    {
+      "repo": "realiti4/claude-swap",
+      "number": "161",
+      "slug": "realiti4-claude-swap-161"
+    },
+    {
+      "repo": "firerpa/lamda",
+      "number": "145",
+      "slug": "firerpa-lamda-145"
+    },
+    {
+      "repo": "ImranR98/Obtainium",
+      "number": "3050",
+      "slug": "imranr98-obtainium-3050"
+    },
+    {
+      "repo": "thedjchi/Shizuku",
+      "number": "252",
+      "slug": "thedjchi-shizuku-252"
+    },
+    {
+      "repo": "SuperMonster003/AutoJs6",
+      "number": "554",
+      "slug": "supermonster003-autojs6-554"
+    },
+    {
+      "repo": "SuperMonster003/AutoJs6",
+      "number": "553",
+      "slug": "supermonster003-autojs6-553"
+    },
+    {
+      "repo": "sameerasw/airsync-mac",
+      "number": "263",
+      "slug": "sameerasw-airsync-mac-263"
+    },
+    {
+      "repo": "sameerasw/airsync-android",
+      "number": "126",
+      "slug": "sameerasw-airsync-android-126"
+    },
+    {
+      "repo": "sameerasw/airsync-android",
+      "number": "125",
+      "slug": "sameerasw-airsync-android-125"
+    },
+    {
+      "repo": "T8RIN/ImageToolbox",
+      "number": "2904",
+      "slug": "t8rin-imagetoolbox-2904"
+    },
+    {
+      "repo": "tuya-cloudcutter/tuya-cloudcutter",
+      "number": "901",
+      "slug": "tuya-cloudcutter-tuya-cloudcutter-901"
+    },
+    {
+      "repo": "sameerasw/airsync-mac",
+      "number": "260",
+      "slug": "sameerasw-airsync-mac-260"
+    },
+    {
+      "repo": "jujinkim/Frequaw-legacy",
+      "number": "6",
+      "slug": "jujinkim-frequaw-legacy-6"
+    },
+    {
+      "repo": "teja2495/quick-search",
+      "number": "225",
+      "slug": "teja2495-quick-search-225"
+    },
+    {
+      "repo": "teja2495/quick-search",
+      "number": "220",
+      "slug": "teja2495-quick-search-220"
+    },
+    {
+      "repo": "roundcube/roundcubemail",
+      "number": "10232",
+      "slug": "roundcube-roundcubemail-10232"
+    },
+    {
+      "repo": "mailpile/moggie",
+      "number": "21",
+      "slug": "mailpile-moggie-21"
+    },
+    {
+      "repo": "Neamar/KISS",
+      "number": "2625",
+      "slug": "neamar-kiss-2625"
+    },
+    {
+      "repo": "Neamar/KISS",
+      "number": "2624",
+      "slug": "neamar-kiss-2624"
+    },
+    {
+      "repo": "Neamar/KISS",
+      "number": "2623",
+      "slug": "neamar-kiss-2623"
+    },
+    {
+      "repo": "Neamar/KISS",
+      "number": "2622",
+      "slug": "neamar-kiss-2622"
+    },
+    {
+      "repo": "DvilSpawn/Re-TUI",
+      "number": "4",
+      "slug": "dvilspawn-re-tui-4"
+    },
+    {
+      "repo": "DvilSpawn/Re-TUI",
+      "number": "3",
+      "slug": "dvilspawn-re-tui-3"
+    },
+    {
+      "repo": "DvilSpawn/Re-TUI",
+      "number": "2",
+      "slug": "dvilspawn-re-tui-2"
+    },
+    {
+      "repo": "cymian/mouseless",
+      "number": "537",
+      "slug": "cymian-mouseless-537"
+    },
+    {
+      "repo": "BasedHardware/omi",
+      "number": "4458",
+      "slug": "basedhardware-omi-4458"
+    },
+    {
+      "repo": "BasedHardware/omi",
+      "number": "3539",
+      "slug": "basedhardware-omi-3539"
+    },
+    {
+      "repo": "fairy-stockfish/Fairy-Stockfish",
+      "number": "826",
+      "slug": "fairy-stockfish-fairy-stockfish-826"
+    },
+    {
+      "repo": "logseq/logseq",
+      "number": "11413",
+      "slug": "logseq-logseq-11413"
+    },
+    {
+      "repo": "samolego/Canta",
+      "number": "71",
+      "slug": "samolego-canta-71"
+    },
+    {
+      "repo": "limyz/DTXmaniaNX",
+      "number": "154",
+      "slug": "limyz-dtxmanianx-154"
+    },
+    {
+      "repo": "0i0/nonky",
+      "number": "3",
+      "slug": "0i0-nonky-3"
+    },
+    {
+      "repo": "toneiv/UbikiTouch",
+      "number": "108",
+      "slug": "toneiv-ubikitouch-108"
+    },
+    {
+      "repo": "humdrum-tools/humdrum-tools",
+      "number": "6",
+      "slug": "humdrum-tools-humdrum-tools-6"
+    },
+    {
+      "repo": "paulrosen/abcjs",
+      "number": "700",
+      "slug": "paulrosen-abcjs-700"
+    },
+    {
+      "repo": "jocelyn-stericker/hacklily",
+      "number": "29",
+      "slug": "jocelyn-stericker-hacklily-29"
+    },
+    {
+      "repo": "jocelyn-stericker/hacklily",
+      "number": "28",
+      "slug": "jocelyn-stericker-hacklily-28"
+    },
+    {
+      "repo": "zeta12ti/transcriptions",
+      "number": "3",
+      "slug": "zeta12ti-transcriptions-3"
+    },
+    {
+      "repo": "google/extra-keyboards-for-chrome-os",
+      "number": "107",
+      "slug": "google-extra-keyboards-for-chrome-os-107"
+    },
+    {
+      "repo": "google/extra-keyboards-for-chrome-os",
+      "number": "106",
+      "slug": "google-extra-keyboards-for-chrome-os-106"
+    },
+    {
+      "repo": "oakleyaidan21/kalimba-tabs",
+      "number": "15",
+      "slug": "oakleyaidan21-kalimba-tabs-15"
+    },
+    {
+      "repo": "lrq3000/starchord",
+      "number": "3",
+      "slug": "lrq3000-starchord-3"
+    },
+    {
+      "repo": "amowry/warbl",
+      "number": "1",
+      "slug": "amowry-warbl-1"
+    },
+    {
+      "repo": "lichess-org/lila",
+      "number": "5154",
+      "slug": "lichess-org-lila-5154"
+    },
+    {
+      "repo": "NMMES/nmmes-cli",
+      "number": "1",
+      "slug": "nmmes-nmmes-cli-1"
+    },
+    {
+      "repo": "FallingSnow/h265ize",
+      "number": "105",
+      "slug": "fallingsnow-h265ize-105"
+    },
+    {
+      "repo": "Minds/minds",
+      "number": "34",
+      "slug": "minds-minds-34"
+    },
+    {
+      "repo": "Minds/front",
+      "number": "24",
+      "slug": "minds-front-24"
+    },
+    {
+      "repo": "welbornprod/phonewords",
+      "number": "3",
+      "slug": "welbornprod-phonewords-3"
+    },
+    {
+      "repo": "alexmarandon/picasa",
+      "number": "1",
+      "slug": "alexmarandon-picasa-1"
+    },
+    {
+      "repo": "danny0838/firefox-scrapbook-autosave",
+      "number": "2",
+      "slug": "danny0838-firefox-scrapbook-autosave-2"
+    },
+    {
+      "repo": "jackaudio/jack2",
+      "number": "137",
+      "slug": "jackaudio-jack2-137"
+    },
+    {
+      "repo": "sveinbjornt/osxiconutils",
+      "number": "2",
+      "slug": "sveinbjornt-osxiconutils-2"
+    },
+    {
+      "repo": "getnikola/nikola",
+      "number": "1654",
+      "slug": "getnikola-nikola-1654"
+    },
+    {
+      "repo": "lhl/chrome-ssb-osx",
+      "number": "31",
+      "slug": "lhl-chrome-ssb-osx-31"
+    },
+    {
+      "repo": "blackberry/SDL",
+      "number": "50",
+      "slug": "blackberry-sdl-50"
+    },
+    {
+      "repo": "glowing-bear/glowing-bear",
+      "number": "544",
+      "slug": "glowing-bear-glowing-bear-544"
+    },
+    {
+      "repo": "virtphp/virtphp",
+      "number": "60",
+      "slug": "virtphp-virtphp-60"
+    },
+    {
+      "repo": "dimitri/pgloader",
+      "number": "160",
+      "slug": "dimitri-pgloader-160"
+    },
+    {
+      "repo": "zigotica/tumblr-full-backup",
+      "number": "1",
+      "slug": "zigotica-tumblr-full-backup-1"
+    },
+    {
+      "repo": "cantora/aug",
+      "number": "1",
+      "slug": "cantora-aug-1"
+    },
+    {
+      "repo": "mailpile/Mailpile",
+      "number": "71",
+      "slug": "mailpile-mailpile-71"
     }
   ]
 }
